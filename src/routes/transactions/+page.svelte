@@ -1,6 +1,5 @@
 <script lang="ts">
   import { Skeleton } from '$lib/components/ui/skeleton';
-  import { ArrowLeftRight } from '@lucide/svelte';
   import {
     fetchTransactions,
     fetchAllTransactions,
@@ -9,7 +8,7 @@
   import { dbSession } from '$lib/stores/db.svelte';
   import { formatNumber } from '$lib/format.svelte';
   import { appSettings } from '$lib/stores/settings.svelte';
-  import EmptyState from '$lib/components/empty-state.svelte';
+  import { goto } from '$app/navigation';
   import TransactionFilters from '$lib/components/transactions/transaction-filters.svelte';
   import TransactionTable from '$lib/components/transactions/transaction-table.svelte';
   import Pagination from '$lib/components/transactions/pagination.svelte';
@@ -40,18 +39,17 @@
     ...(accountName ? { accountName } : {})
   });
 
-  let token = $derived(dbSession.value?.token ?? '');
   let currency = $derived(dbSession.value?.summary.currency ?? 'EUR');
 
   let accounts = $state<AccountInfo[]>([]);
 
   $effect(() => {
-    if (!token) {
+    if (!dbSession.value) {
       accounts = [];
       return;
     }
     let cancelled = false;
-    fetchAccountNames({ token }).then(
+    fetchAccountNames({}).then(
       (r) => {
         if (cancelled) return;
         accounts = r;
@@ -70,7 +68,7 @@
   let prevKey = '';
 
   $effect(() => {
-    if (!token) {
+    if (!dbSession.value) {
       data = null;
       loading = false;
       fetchError = false;
@@ -93,7 +91,7 @@
     data = null;
     fetchError = false;
 
-    fetchTransactions({ token, page, pageSize, filters }).then(
+    fetchTransactions({ page, pageSize, filters }).then(
       (r) => {
         if (cancelled) return;
         data = r;
@@ -119,7 +117,7 @@
   }
 
   async function downloadCSV() {
-    const transactions = await fetchAllTransactions({ token, filters });
+    const transactions = await fetchAllTransactions({ filters });
 
     const delimiter = ',';
     const header = ['Date', 'Description', 'Account', 'Type', 'Amount'].join(delimiter);
@@ -144,74 +142,70 @@
     a.click();
     URL.revokeObjectURL(url);
   }
+
+  $effect(() => {
+    if (!dbSession.value) goto('/');
+  });
 </script>
 
 <svelte:head>
   <title>Transactions - Spendo</title>
 </svelte:head>
 
-{#if !token}
-  <EmptyState title="No Data" description="Upload a GnuCash file to see your transactions.">
-    {#snippet icon()}
-      <ArrowLeftRight aria-hidden="true" class="size-12 text-muted-foreground" />
-    {/snippet}
-  </EmptyState>
-{:else}
-  <div class="flex flex-col gap-4">
-    <div class="flex items-center justify-between">
-      <div class="flex flex-col gap-1">
-        <h2 class="text-3xl font-bold tracking-tight">Transactions</h2>
-        <p class="text-sm text-muted-foreground">
-          {data
-            ? `${formatNumber(data.total)} transaction${data.total === 1 ? '' : 's'}`
-            : 'Loading...'}
-        </p>
-      </div>
+<div class="flex flex-col gap-4">
+  <div class="flex items-center justify-between">
+    <div class="flex flex-col gap-1">
+      <h2 class="text-3xl font-bold tracking-tight">Transactions</h2>
+      <p class="text-sm text-muted-foreground">
+        {data
+          ? `${formatNumber(data.total)} transaction${data.total === 1 ? '' : 's'}`
+          : 'Loading...'}
+      </p>
     </div>
-
-    <TransactionFilters
-      bind:search={searchInput}
-      bind:dateFrom
-      bind:dateTo
-      bind:accountName
-      {accounts}
-      showExport={!!data}
-      onExport={downloadCSV}
-    />
-
-    {#if loading}
-      <div class="overflow-x-auto rounded-lg border">
-        <table class="w-full min-w-150">
-          <thead>
-            <tr class="bg-muted/50 text-left text-sm text-muted-foreground">
-              <th class="px-4 py-3 font-medium">Date</th>
-              <th class="px-4 py-3 font-medium">Description</th>
-              <th class="px-4 py-3 font-medium">Debit</th>
-              <th class="px-4 py-3 font-medium">Credit</th>
-              <th class="px-4 py-3 text-right font-medium">Amount</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr><td class="px-4 py-3" colspan="5"><Skeleton class="h-5 w-full" /></td></tr>
-            <tr><td class="px-4 py-3" colspan="5"><Skeleton class="h-5 w-full" /></td></tr>
-            <tr><td class="px-4 py-3" colspan="5"><Skeleton class="h-5 w-full" /></td></tr>
-            <tr><td class="px-4 py-3" colspan="5"><Skeleton class="h-5 w-full" /></td></tr>
-            <tr><td class="px-4 py-3" colspan="5"><Skeleton class="h-5 w-full" /></td></tr>
-            <tr><td class="px-4 py-3" colspan="5"><Skeleton class="h-5 w-full" /></td></tr>
-            <tr><td class="px-4 py-3" colspan="5"><Skeleton class="h-5 w-full" /></td></tr>
-            <tr><td class="px-4 py-3" colspan="5"><Skeleton class="h-5 w-full" /></td></tr>
-          </tbody>
-        </table>
-      </div>
-    {:else if fetchError}
-      <div
-        class="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-8 text-center text-sm text-destructive"
-      >
-        Failed to load transactions. Your session may have expired.
-      </div>
-    {:else if data}
-      <TransactionTable transactions={data.transactions} {currency} />
-      <Pagination bind:page totalPages={data.totalPages} />
-    {/if}
   </div>
-{/if}
+
+  <TransactionFilters
+    bind:search={searchInput}
+    bind:dateFrom
+    bind:dateTo
+    bind:accountName
+    {accounts}
+    showExport={!!data}
+    onExport={downloadCSV}
+  />
+
+  {#if loading}
+    <div class="overflow-x-auto rounded-lg border">
+      <table class="w-full min-w-150">
+        <thead>
+          <tr class="bg-muted/50 text-left text-sm text-muted-foreground">
+            <th class="px-4 py-3 font-medium">Date</th>
+            <th class="px-4 py-3 font-medium">Description</th>
+            <th class="px-4 py-3 font-medium">Debit</th>
+            <th class="px-4 py-3 font-medium">Credit</th>
+            <th class="px-4 py-3 text-right font-medium">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td class="px-4 py-3" colspan="5"><Skeleton class="h-5 w-full" /></td></tr>
+          <tr><td class="px-4 py-3" colspan="5"><Skeleton class="h-5 w-full" /></td></tr>
+          <tr><td class="px-4 py-3" colspan="5"><Skeleton class="h-5 w-full" /></td></tr>
+          <tr><td class="px-4 py-3" colspan="5"><Skeleton class="h-5 w-full" /></td></tr>
+          <tr><td class="px-4 py-3" colspan="5"><Skeleton class="h-5 w-full" /></td></tr>
+          <tr><td class="px-4 py-3" colspan="5"><Skeleton class="h-5 w-full" /></td></tr>
+          <tr><td class="px-4 py-3" colspan="5"><Skeleton class="h-5 w-full" /></td></tr>
+          <tr><td class="px-4 py-3" colspan="5"><Skeleton class="h-5 w-full" /></td></tr>
+        </tbody>
+      </table>
+    </div>
+  {:else if fetchError}
+    <div
+      class="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-8 text-center text-sm text-destructive"
+    >
+      Failed to load transactions. Your session may have expired.
+    </div>
+  {:else if data}
+    <TransactionTable transactions={data.transactions} {currency} />
+    <Pagination bind:page totalPages={data.totalPages} />
+  {/if}
+</div>

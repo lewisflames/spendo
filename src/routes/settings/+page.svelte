@@ -16,11 +16,15 @@
   } from '$lib/stores/settings.svelte';
   import { dbSession } from '$lib/stores/db.svelte';
   import { getCommodities } from '$lib/prices.remote';
-  import { SunMoon, Languages, ListOrdered, LayoutDashboard, Tag, X } from '@lucide/svelte';
+  import { SunMoon, Languages, ListOrdered, LayoutDashboard, Tag, X, Trash2 } from '@lucide/svelte';
+  import * as Dialog from '$lib/components/ui/dialog';
+  import { clearAppDb } from '$lib/db.remote';
+  import { clearSession } from '$lib/stores/db.svelte';
   import type { CommodityInfo } from '$lib/server/prices';
 
   const locales: { value: Locale; label: string }[] = [
     { value: 'en-US', label: 'English (US)' },
+    { value: 'en-GB', label: 'English (GB)' },
     { value: 'de-DE', label: 'Deutsch (DE)' },
     { value: 'fr-FR', label: 'Français (FR)' },
     { value: 'ja-JP', label: '日本語 (JP)' },
@@ -51,6 +55,24 @@
   let commoditiesLoading = $state(false);
   let commoditiesError = $state<string | null>(null);
 
+  let clearDialogOpen = $state(false);
+  let clearing = $state(false);
+
+  async function handleClearDb() {
+    clearing = true;
+    try {
+      await clearAppDb({});
+      clearSession();
+      commodities = [];
+      overrideSymbols = {};
+      clearDialogOpen = false;
+    } catch {
+      // ignore
+    } finally {
+      clearing = false;
+    }
+  }
+
   $effect(() => {
     if (!dbSession.value) {
       commodities = [];
@@ -59,7 +81,7 @@
     }
     commoditiesLoading = true;
     commoditiesError = null;
-    getCommodities({ token: dbSession.value.token })
+    getCommodities({})
       .then((comms) => {
         commodities = comms;
       })
@@ -339,6 +361,44 @@
           {/each}
         </div>
       {/if}
+    </Card.Content>
+  </Card.Root>
+
+  <!-- Clear database -->
+  <Card.Root class="border-destructive/30">
+    <Card.Header>
+      <div class="flex items-center gap-2">
+        <Trash2 aria-hidden="true" class="size-4 text-destructive" />
+        <Card.Title>Clear database</Card.Title>
+      </div>
+      <Card.Description>
+        Permanently delete all imported data. This action cannot be undone.
+      </Card.Description>
+    </Card.Header>
+    <Card.Content>
+      <Dialog.Root bind:open={clearDialogOpen}>
+        <Button
+          variant="destructive"
+          disabled={!dbSession.value || clearing}
+          onclick={() => (clearDialogOpen = true)}
+        >
+          Clear all data
+        </Button>
+        <Dialog.Content>
+          <Dialog.Header>
+            <Dialog.Title>Clear all data?</Dialog.Title>
+            <Dialog.Description>
+              This will permanently delete all imported accounts, transactions, prices, and import
+              history. Your settings will be preserved.
+            </Dialog.Description>
+          </Dialog.Header>
+          <Dialog.Footer>
+            <Button variant="destructive" onclick={handleClearDb} disabled={clearing}>
+              {clearing ? 'Clearing...' : 'Yes, clear everything'}
+            </Button>
+          </Dialog.Footer>
+        </Dialog.Content>
+      </Dialog.Root>
     </Card.Content>
   </Card.Root>
 

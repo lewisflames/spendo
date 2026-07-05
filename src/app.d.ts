@@ -3,9 +3,8 @@ declare global {
     interface Error {
       message: string;
     }
-    interface Locals {
-      dbToken?: string;
-    }
+    // eslint-disable-next-line @typescript-eslint/no-empty-object-type
+    interface Locals {}
     // interface PageData {}
     // interface PageState {}
     // interface Platform {}

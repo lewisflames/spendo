@@ -1,7 +1,6 @@
 import type { GnucashSummary } from '$lib/server/gnucash-parser';
 
 interface DbSession {
-  token: string;
   summary: GnucashSummary;
   filename: string | null;
 }

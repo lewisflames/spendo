@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { getDbPath } from './uploaded-db';
+import { getAppDbPath } from './app-db';
 import { getUnifiedPricesMap } from './prices';
 import { CREDIT_NORMAL, TYPE_CATEGORY } from '$lib/account-types';
 
@@ -33,9 +33,9 @@ export interface AccountsResult {
   totalAccounts: number;
 }
 
-export function getAccounts(token: string): AccountsResult {
-  const path = getDbPath(token);
-  const db = new Database(path, { readonly: true });
+export function getAccounts(): AccountsResult {
+  const path = getAppDbPath();
+  const db = new Database(path);
 
   try {
     const rows = db
@@ -71,7 +71,7 @@ export function getAccounts(token: string): AccountsResult {
     const rootNodes: AccountNode[] = [];
     const byType: Record<string, { count: number; totalBalance: number }> = {};
 
-    const unifiedPrices = getUnifiedPricesMap(token);
+    const unifiedPrices = getUnifiedPricesMap();
 
     for (const row of rows) {
       let balance = CREDIT_NORMAL.has(row.account_type) ? -row.balance : row.balance;
@@ -110,9 +110,15 @@ export function getAccounts(token: string): AccountsResult {
     }
 
     for (const row of rows) {
-      const node = nodeMap.get(row.guid)!;
-      if (row.parent_guid && nodeMap.has(row.parent_guid)) {
-        nodeMap.get(row.parent_guid)!.children.push(node);
+      const node = nodeMap.get(row.guid);
+      if (!node) continue;
+      if (row.parent_guid) {
+        const parent = nodeMap.get(row.parent_guid);
+        if (parent) {
+          parent.children.push(node);
+        } else {
+          rootNodes.push(node);
+        }
       } else {
         rootNodes.push(node);
       }

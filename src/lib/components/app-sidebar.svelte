@@ -13,6 +13,7 @@
     TrendingUp
   } from '@lucide/svelte';
   import * as Sidebar from '$lib/components/ui/sidebar/index.js';
+  import { dbSession } from '$lib/stores/db.svelte';
 </script>
 
 <Sidebar.Root collapsible="icon">
@@ -45,10 +46,11 @@
           <Sidebar.MenuItem>
             <Sidebar.MenuButton
               isActive={page.url.pathname === '/dashboard'}
+              aria-disabled={!dbSession.value || undefined}
               tooltipContent="Dashboard"
             >
               {#snippet child({ props })}
-                <a href={resolve('/dashboard')} {...props}>
+                <a href={dbSession.value ? resolve('/dashboard') : undefined} {...props}>
                   <LayoutDashboard aria-hidden="true" />
                   <span>Dashboard</span>
                 </a>
@@ -59,10 +61,11 @@
             <Sidebar.MenuButton
               isActive={page.url.pathname === '/accounts' ||
                 page.url.pathname.startsWith('/accounts/')}
+              aria-disabled={!dbSession.value || undefined}
               tooltipContent="Accounts"
             >
               {#snippet child({ props })}
-                <a href={resolve('/accounts')} {...props}>
+                <a href={dbSession.value ? resolve('/accounts') : undefined} {...props}>
                   <Database aria-hidden="true" />
                   <span>Accounts</span>
                 </a>
@@ -72,10 +75,11 @@
           <Sidebar.MenuItem>
             <Sidebar.MenuButton
               isActive={page.url.pathname === '/transactions'}
+              aria-disabled={!dbSession.value || undefined}
               tooltipContent="Transactions"
             >
               {#snippet child({ props })}
-                <a href={resolve('/transactions')} {...props}>
+                <a href={dbSession.value ? resolve('/transactions') : undefined} {...props}>
                   <ArrowLeftRight aria-hidden="true" />
                   <span>Transactions</span>
                 </a>
@@ -83,9 +87,13 @@
             </Sidebar.MenuButton>
           </Sidebar.MenuItem>
           <Sidebar.MenuItem>
-            <Sidebar.MenuButton isActive={page.url.pathname === '/prices'} tooltipContent="Prices">
+            <Sidebar.MenuButton
+              isActive={page.url.pathname === '/prices'}
+              aria-disabled={!dbSession.value || undefined}
+              tooltipContent="Prices"
+            >
               {#snippet child({ props })}
-                <a href={resolve('/prices')} {...props}>
+                <a href={dbSession.value ? resolve('/prices') : undefined} {...props}>
                   <TrendingUp aria-hidden="true" />
                   <span>Prices</span>
                 </a>
