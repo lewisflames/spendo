@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { getDbPath } from './uploaded-db';
+import { getAppDbPath } from './app-db';
 
 export interface SplitInfo {
   guid: string;
@@ -44,9 +44,9 @@ export interface TransactionsResult {
   totalPages: number;
 }
 
-export function getAccounts(token: string): AccountInfo[] {
-  const path = getDbPath(token);
-  const db = new Database(path, { readonly: true });
+export function getAccounts(): AccountInfo[] {
+  const path = getAppDbPath();
+  const db = new Database(path);
 
   try {
     return db
@@ -138,9 +138,9 @@ function mapTransaction(
   };
 }
 
-export function getAllTransactionsFiltered(token: string, filters?: Filters): TransactionRow[] {
-  const path = getDbPath(token);
-  const db = new Database(path, { readonly: true });
+export function getAllTransactionsFiltered(filters?: Filters): TransactionRow[] {
+  const path = getAppDbPath();
+  const db = new Database(path);
 
   try {
     const { conditions, params } = buildFilterConditions(filters);
@@ -166,13 +166,12 @@ export function getAllTransactionsFiltered(token: string, filters?: Filters): Tr
 }
 
 export function getTransactions(
-  token: string,
   page: number,
   pageSize: number,
   filters?: Filters
 ): TransactionsResult {
-  const path = getDbPath(token);
-  const db = new Database(path, { readonly: true });
+  const path = getAppDbPath();
+  const db = new Database(path);
 
   try {
     const { conditions, params } = buildFilterConditions(filters);

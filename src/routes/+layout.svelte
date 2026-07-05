@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { Minus, Square, X } from '@lucide/svelte';
   import * as Sidebar from '$lib/components/ui/sidebar/index.js';
   import AppSidebar from '$lib/components/app-sidebar.svelte';
@@ -11,16 +10,19 @@
   let { children } = $props();
 
   let isSmallScreen = new IsMobile(1280);
-  // eslint-disable-next-line svelte/prefer-writable-derived -- bound to Sidebar.Provider, must be writable
+  let hydrated = $state(false);
   let sidebarOpen = $state(false);
 
-  onMount(() => {
-    const cookie = document.cookie.split('; ').find((c) => c.startsWith(`${SIDEBAR_COOKIE_NAME}=`));
-    sidebarOpen = cookie ? cookie.split('=')[1] === 'true' : !isSmallScreen.current;
-  });
-
   $effect(() => {
-    sidebarOpen = !isSmallScreen.current;
+    if (!hydrated) {
+      hydrated = true;
+      const cookie = document.cookie
+        .split('; ')
+        .find((c) => c.startsWith(`${SIDEBAR_COOKIE_NAME}=`));
+      sidebarOpen = cookie ? cookie.split('=')[1] === 'true' : !isSmallScreen.current;
+    } else {
+      sidebarOpen = !isSmallScreen.current;
+    }
   });
 
   $effect(() => {
@@ -28,11 +30,12 @@
 
     document.documentElement.classList.toggle('dark', theme === 'dark');
     document.documentElement.style.colorScheme = theme;
+    document.documentElement.lang = 'en';
   });
 
   function handleKeydown(e: KeyboardEvent) {
     if (!(e.ctrlKey || e.metaKey)) return;
-    if (e.key.toLowerCase() === 't') {
+    if (e.key.toLowerCase() === 't' && e.shiftKey) {
       e.preventDefault();
       saveSettings({ theme: appSettings.value.theme === 'light' ? 'dark' : 'light' });
     }
@@ -40,6 +43,14 @@
 </script>
 
 <svelte:document onkeydown={handleKeydown} />
+
+<!-- skip-to-content link -->
+<a
+  href="#main-content"
+  class="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[100] focus:rounded focus:bg-background focus:p-2 focus:text-foreground"
+>
+  Skip to content
+</a>
 
 <Sidebar.Provider bind:open={sidebarOpen}>
   <AppSidebar />
@@ -56,6 +67,7 @@
 
       <div
         class="max-sm:hidden flex items-center gap-0.5"
+        aria-hidden="true"
         style="app-region: no-drag; -webkit-app-region: no-drag"
       >
         <button
@@ -85,8 +97,8 @@
       </div>
     </header>
 
-    <main class="flex-1 overflow-auto p-2 sm:p-3">
-      <div class="min-h-full rounded-lg border bg-card p-4 shadow-sm sm:p-6">
+    <main id="main-content" class="flex-1 overflow-auto p-2 sm:p-3">
+      <div class="flex min-h-full flex-col rounded-lg border bg-card p-4 shadow-sm sm:p-6">
         {@render children()}
       </div>
     </main>

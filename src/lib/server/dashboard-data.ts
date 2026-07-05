@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { getDbPath } from './uploaded-db';
+import { getAppDbPath } from './app-db';
 import { getUnifiedPricesMap } from './prices';
 
 export interface MonthBreakdown {
@@ -50,9 +50,9 @@ function monthNumber(ym: string): number {
   return y * 12 + (m - 1);
 }
 
-export function getDashboardData(token: string, monthCount?: number | null): DashboardData {
-  const path = getDbPath(token);
-  const db = new Database(path, { readonly: true });
+export function getDashboardData(monthCount?: number | null): DashboardData {
+  const path = getAppDbPath();
+  const db = new Database(path);
 
   try {
     const now = new Date();
@@ -123,7 +123,7 @@ export function getDashboardData(token: string, monthCount?: number | null): Das
       )
       .all() as { mnemonic: string; shares: number; cost_basis: number }[];
 
-    const unifiedPrices = getUnifiedPricesMap(token);
+    const unifiedPrices = getUnifiedPricesMap();
     let investmentValue = 0;
     for (const row of stockRows) {
       const price = unifiedPrices?.get(row.mnemonic);

@@ -1,6 +1,6 @@
 import { browser } from '$app/environment';
 
-export type Locale = 'en-US' | 'de-DE' | 'fr-FR' | 'ja-JP' | 'pt-BR' | 'es-ES';
+export type Locale = 'en-US' | 'en-GB' | 'de-DE' | 'fr-FR' | 'ja-JP' | 'pt-BR' | 'es-ES';
 export type DashboardRange = '1M' | '3M' | '6M' | '1Y' | 'All';
 export type FirstDayOfWeek = 0 | 1;
 export interface AppSettings {

@@ -1,8 +1,7 @@
 import Database from 'better-sqlite3';
-import { getDbPath } from './uploaded-db';
+import { getAppDbPath } from './app-db';
 import { getCachedPricesMap } from './prices';
-
-const CREDIT_NORMAL = new Set(['INCOME', 'LIABILITY', 'EQUITY', 'CREDIT', 'PAYABLE']);
+import { CREDIT_NORMAL } from '$lib/account-types';
 
 export interface DetailSplit {
   guid: string;
@@ -52,13 +51,15 @@ export interface AccountDetailResult {
 }
 
 export function getAccountDetail(
-  token: string,
   guid: string,
   page: number,
-  pageSize: number
+  pageSize: number,
+  dateFrom?: string,
+  dateTo?: string,
+  search?: string
 ): AccountDetailResult {
-  const path = getDbPath(token);
-  const db = new Database(path, { readonly: true });
+  const path = getAppDbPath();
+  const db = new Database(path);
 
   try {
     // 1. Account info
@@ -144,7 +145,7 @@ export function getAccountDetail(
     // Replace cost basis with market value for STOCK/MUTUAL if cached prices exist
     let rawBalance = balanceRow.raw_balance;
     if (stockQuantityRows.length > 0) {
-      const cachedPrices = getCachedPricesMap(token);
+      const cachedPrices = getCachedPricesMap();
       let stockMarketValue = 0;
       let hasPrices = false;
       for (const row of stockQuantityRows) {
@@ -185,6 +186,22 @@ export function getAccountDetail(
     }
 
     // 5. Summary (income = balance-increasing txns, expenses = balance-decreasing txns)
+    const extraClauses: string[] = [];
+    const extraParams: (string | number)[] = [];
+    if (dateFrom) {
+      extraClauses.push('t.post_date >= ?');
+      extraParams.push(dateFrom);
+    }
+    if (dateTo) {
+      extraClauses.push('t.post_date <= ?');
+      extraParams.push(dateTo);
+    }
+    if (search) {
+      extraClauses.push('t.description LIKE ?');
+      extraParams.push(`%${search}%`);
+    }
+    const extraFilterSql = extraClauses.length > 0 ? 'AND ' + extraClauses.join(' AND ') : '';
+
     const summaryRow = db
       .prepare(
         `SELECT
@@ -201,10 +218,15 @@ export function getAccountDetail(
 					JOIN accounts a ON a.guid = s.account_guid
 					WHERE s.account_guid IN (${placeholders})
 					AND t.post_date < date('now', '+1 day')
+					${extraFilterSql}
 					GROUP BY t.guid
 				 ) sub`
       )
-      .get(...subParams) as { total_txns: number; pos_effect: number; neg_effect: number };
+      .get(...subParams, ...extraParams) as {
+      total_txns: number;
+      pos_effect: number;
+      neg_effect: number;
+    };
 
     // 6. Total count for pagination
     const countRow = db
@@ -213,15 +235,27 @@ export function getAccountDetail(
 				 FROM transactions t
 				 JOIN splits s ON s.tx_guid = t.guid
 				 WHERE s.account_guid IN (${placeholders})
-				 AND t.post_date < date('now', '+1 day')`
+				 AND t.post_date < date('now', '+1 day')
+				 ${extraFilterSql}`
       )
-      .get(...subParams) as { cnt: number };
+      .get(...subParams, ...extraParams) as { cnt: number };
 
     const total = countRow.cnt;
     const totalPages = Math.max(Math.ceil(total / pageSize), 1);
-    const offset = (page - 1) * pageSize;
+    const safePage = Math.min(page, totalPages);
+    const offset = (safePage - 1) * pageSize;
 
     // 7. Paginated transactions with running balance
+    const txExtraFilterSql =
+      (dateFrom ? 'AND t.post_date >= ? ' : '') +
+      (dateTo ? 'AND t.post_date <= ? ' : '') +
+      (search ? 'AND t.description LIKE ? ' : '');
+
+    const txExtraParams: (string | number)[] = [];
+    if (dateFrom) txExtraParams.push(dateFrom);
+    if (dateTo) txExtraParams.push(dateTo);
+    if (search) txExtraParams.push(`%${search}%`);
+
     const txRows = db
       .prepare(
         `WITH RECURSIVE sub AS (
@@ -238,6 +272,7 @@ export function getAccountDetail(
 					JOIN accounts a ON a.guid = s.account_guid
 					WHERE s.account_guid IN (SELECT guid FROM sub)
 					AND t.post_date < date('now', '+1 day')
+					${txExtraFilterSql}
 				)
 				SELECT guid, post_date, description,
 					SUM(CASE WHEN account_type IN ('INCOME','LIABILITY','EQUITY','CREDIT','PAYABLE')
@@ -251,7 +286,7 @@ export function getAccountDetail(
 				ORDER BY post_date DESC, guid DESC
 				LIMIT ? OFFSET ?`
       )
-      .all(guid, pageSize, offset) as {
+      .all(guid, ...txExtraParams, pageSize, offset) as {
       guid: string;
       post_date: string;
       description: string;
@@ -313,7 +348,7 @@ export function getAccountDetail(
       },
       transactions,
       total,
-      page,
+      page: safePage,
       pageSize,
       totalPages
     };
