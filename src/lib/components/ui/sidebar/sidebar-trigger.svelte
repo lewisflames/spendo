@@ -1,36 +1,35 @@
 <script lang="ts">
-  import { Button } from '$lib/components/ui/button/index.js';
-  import PanelLeftIcon from '@lucide/svelte/icons/panel-left';
+  import { PanelLeftClose, PanelLeftOpen } from '@lucide/svelte';
   import { cn } from '$lib/utils.js';
-  import type { ComponentProps } from 'svelte';
+  import { Button } from '$lib/components/ui/button';
   import { useSidebar } from './context.svelte.js';
 
   let {
-    ref = $bindable(null),
     class: className,
-    onclick,
-    ...restProps
-  }: ComponentProps<typeof Button> & {
-    onclick?: (e: MouseEvent) => void;
+    title
+  }: {
+    class?: string;
+    title?: string;
   } = $props();
 
   const sidebar = useSidebar();
+
+  const label = $derived(sidebar.collapsed ? 'Expand sidebar' : 'Collapse sidebar');
 </script>
 
 <Button
-  bind:ref
-  data-sidebar="trigger"
   data-slot="sidebar-trigger"
+  data-sidebar="trigger"
   variant="ghost"
   size="icon-sm"
-  class={cn('cn-sidebar-trigger', className)}
-  type="button"
-  onclick={(e) => {
-    onclick?.(e);
-    sidebar.toggle();
-  }}
-  {...restProps}
+  class={cn('shrink-0', className)}
+  onclick={() => sidebar.toggle()}
+  aria-label={label}
+  title={title ?? label}
 >
-  <PanelLeftIcon />
-  <span class="sr-only">Toggle Sidebar</span>
+  {#if sidebar.collapsed}
+    <PanelLeftOpen class="size-4" />
+  {:else}
+    <PanelLeftClose class="size-4" />
+  {/if}
 </Button>

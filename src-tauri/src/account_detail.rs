@@ -1,0 +1,885 @@
+use chrono::Utc;
+use rusqlite::Connection;
+use serde::Serialize;
+use std::collections::{BTreeSet, HashMap, HashSet};
+
+use tauri::State;
+
+use crate::accounts;
+use crate::db::{get_conn, AppState};
+use crate::fx;
+use crate::prices::{get_cached_prices_map, get_quote_currency};
+use crate::sql;
+use crate::utils;
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DetailSplit {
+    pub guid: String,
+    pub account_guid: String,
+    pub account_name: String,
+    pub account_type: String,
+    pub amount: f64,
+    pub memo: Option<String>,
+    #[serde(skip)]
+    pub reconcile_state: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DetailTransaction {
+    pub guid: String,
+    pub post_date: String,
+    pub description: Option<String>,
+    pub num: Option<String>,
+    pub notes: Option<String>,
+    pub splits: Vec<DetailSplit>,
+    /// Names of the accounts on the other side of the transaction (outside
+    /// the viewed account's subtree), largest-magnitude split first.
+    pub counter_accounts: Vec<String>,
+    pub running_balance: f64,
+    /// GnuCash reconcile state ('n'/'c'/'y') of the transaction's splits
+    /// within the viewed subtree ('y' wins over 'c').
+    pub reconcile_state: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountDetailInfo {
+    pub guid: String,
+    pub name: String,
+    pub account_type: String,
+    pub code: Option<String>,
+    pub description: Option<String>,
+    pub placeholder: bool,
+    pub balance: f64,
+    pub children_count: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountSummary {
+    pub total_transactions: i64,
+    pub total_income: f64,
+    pub total_expenses: f64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountDetailResult {
+    pub account: AccountDetailInfo,
+    pub summary: AccountSummary,
+    pub transactions: Vec<DetailTransaction>,
+    pub total: i64,
+    pub page: i64,
+    pub page_size: i64,
+    pub total_pages: i64,
+}
+
+pub fn fetch_account_detail_inner(
+    conn: &Connection,
+    guid: &str,
+    page: i64,
+    page_size: i64,
+    date_from: Option<&str>,
+    date_to: Option<&str>,
+    search: Option<&str>,
+    sort_by: Option<&str>,
+    sort_dir: Option<&str>,
+) -> Result<AccountDetailResult, String> {
+    // 1. Account info
+    let account_row = conn
+        .query_row(
+            "SELECT guid, name, account_type, parent_guid, code, description, placeholder
+             FROM accounts WHERE guid = ?1",
+            [guid],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, i64>(6)?,
+                ))
+            },
+        )
+        .map_err(|_| format!("Account not found: {}", guid))?;
+
+    let (acc_guid, name, account_type, _, code, description, placeholder) = account_row;
+
+    // 2. Sub-accounts
+    let sub_guids = accounts::get_subaccount_guids(conn, guid)?;
+
+    let children_count = (sub_guids.len() as i64) - 1;
+
+    if sub_guids.is_empty() {
+        return Err("Account has no sub-account entries".to_string());
+    }
+
+    let placeholders_str = sql::in_clause(sub_guids.len());
+    let sub_params = sql::string_param_refs(&sub_guids);
+
+    let report_currency = fx::get_report_currency_mnemonic(conn).unwrap_or_default();
+    let fx_map = fx::get_fx_map(conn, None)?;
+
+    // 3. Balance: cash-type split values per account currency, converted to report currency.
+    //    (Stock accounts are valued separately via quantity x price below.)
+    let raw_balance: f64 = {
+        let sql = format!(
+            "SELECT c.mnemonic, COALESCE(SUM({}), 0) as raw_balance
+             FROM splits s
+             JOIN accounts a ON a.guid = s.account_guid
+             JOIN commodities c ON c.guid = a.commodity_guid
+             JOIN transactions t ON t.guid = s.tx_guid
+             WHERE s.account_guid IN ({})
+             AND a.account_type NOT IN ({})
+             AND t.post_date < date('now', '+1 day')
+             GROUP BY c.mnemonic",
+            utils::RAW_AMOUNT,
+            placeholders_str,
+            utils::investment_types_sql()
+        );
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+        let rows: Vec<(String, f64)> = stmt
+            .query_map(sub_params.as_slice(), |row| Ok((row.get(0)?, row.get(1)?)))
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        rows.iter()
+            .map(|(mn, v)| fx::convert(*v, mn, &report_currency, &fx_map))
+            .sum()
+    };
+
+    // Stock quantities and cost basis per stock, converted via the stock's quote currency.
+    let stock_rows: Vec<(String, f64, f64)> = {
+        let sql = format!(
+            "SELECT c.mnemonic as commodity_mnemonic,
+                    SUM({}) as quantity,
+                    SUM({}) as cost
+             FROM splits s
+             JOIN accounts a ON a.guid = s.account_guid
+             JOIN commodities c ON c.guid = a.commodity_guid
+             JOIN transactions t ON t.guid = s.tx_guid
+             WHERE s.account_guid IN ({})
+             AND t.post_date < date('now', '+1 day')
+             AND a.account_type IN ({})
+             GROUP BY c.mnemonic",
+            utils::QUANTITY_AMOUNT,
+            utils::RAW_AMOUNT,
+            placeholders_str,
+            utils::investment_types_sql()
+        );
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+        let result: Vec<_> = stmt
+            .query_map(sub_params.as_slice(), |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        result
+    };
+
+    let mut final_balance = raw_balance;
+    if !stock_rows.is_empty() {
+        let cached_prices = get_cached_prices_map(conn).unwrap_or_default();
+        let mut stock_market_value = 0.0;
+        let mut stock_cost_converted = 0.0;
+        let mut has_prices = false;
+        for (mnemonic, quantity, cost) in &stock_rows {
+            if let Some(price) = cached_prices.get(mnemonic) {
+                stock_market_value += quantity * price;
+                has_prices = true;
+            } else {
+                stock_market_value += quantity;
+            }
+            let quote =
+                get_quote_currency(conn, mnemonic).unwrap_or_else(|| report_currency.clone());
+            stock_cost_converted += fx::convert(*cost, &quote, &report_currency, &fx_map);
+        }
+        if has_prices {
+            final_balance = raw_balance - stock_cost_converted + stock_market_value;
+        }
+    }
+
+    let balance = if utils::is_credit_normal(&account_type) {
+        -final_balance
+    } else {
+        final_balance
+    };
+
+    fn filter_clauses(
+        date_from: Option<&str>,
+        date_to: Option<&str>,
+        search: Option<&str>,
+        param_offset: usize,
+        include_baseline: bool,
+    ) -> (Vec<String>, Vec<Box<dyn rusqlite::types::ToSql>>) {
+        let mut clauses: Vec<String> = if include_baseline {
+            vec!["t.post_date < date('now', '+1 day')".to_string()]
+        } else {
+            vec![]
+        };
+        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![];
+        let mut idx = param_offset + 1;
+        if let Some(df) = date_from {
+            clauses.push(format!("t.post_date >= ?{}", idx));
+            params.push(Box::new(df.to_string()));
+            idx += 1;
+        }
+        if let Some(dt) = date_to {
+            clauses.push(format!("t.post_date <= ?{}", idx));
+            params.push(Box::new(dt.to_string()));
+            idx += 1;
+        }
+        if let Some(s) = search {
+            clauses.push(format!(
+                "(t.description LIKE ?{} OR t.num LIKE ?{} OR t.notes LIKE ?{} OR EXISTS(SELECT 1 FROM splits m WHERE m.tx_guid = t.guid AND m.memo LIKE ?{}))",
+                idx,
+                idx + 1,
+                idx + 2,
+                idx + 3
+            ));
+            params.push(Box::new(format!("%{}%", s)));
+            params.push(Box::new(format!("%{}%", s)));
+            params.push(Box::new(format!("%{}%", s)));
+            params.push(Box::new(format!("%{}%", s)));
+        }
+        (clauses, params)
+    }
+
+    // 4. Summary: income/expense effects per transaction and currency, converted to report currency.
+    let (sum_extra_clauses, sum_extra_params) =
+        filter_clauses(None, None, search, sub_guids.len(), false);
+
+    let sum_extra_sql = if sum_extra_clauses.is_empty() {
+        String::new()
+    } else {
+        format!("AND {}", sum_extra_clauses.join(" AND "))
+    };
+
+    let summary_sql = format!(
+        "SELECT t.guid, c.mnemonic, SUM({}) as effect
+         FROM transactions t
+         JOIN splits s ON s.tx_guid = t.guid
+         JOIN accounts a ON a.guid = s.account_guid
+         JOIN commodities c ON c.guid = a.commodity_guid
+         WHERE s.account_guid IN ({})
+         AND t.post_date < date('now', '+1 day')
+         {}
+         GROUP BY t.guid, c.mnemonic",
+        utils::signed_amount_expr(utils::RAW_AMOUNT, "a.account_type"),
+        placeholders_str,
+        sum_extra_sql
+    );
+
+    let mut summary_stmt = conn.prepare(&summary_sql).map_err(|e| e.to_string())?;
+    let summary_params: Vec<&dyn rusqlite::types::ToSql> = sub_params
+        .iter()
+        .copied()
+        .chain(sum_extra_params.iter().map(|p| p.as_ref()))
+        .collect();
+
+    let summary_rows: Vec<(String, String, f64)> = summary_stmt
+        .query_map(summary_params.as_slice(), |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+
+    let mut total_txns: i64 = 0;
+    let mut pos_effect = 0.0;
+    let mut neg_effect = 0.0;
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for (tx_guid, mnemonic, effect) in &summary_rows {
+        if seen.insert(tx_guid.clone()) {
+            total_txns += 1;
+        }
+        let converted = fx::convert(*effect, mnemonic, &report_currency, &fx_map);
+        if converted > 0.0 {
+            pos_effect += converted;
+        } else {
+            neg_effect += -converted;
+        }
+    }
+
+    // 7. Count for pagination
+    let (count_extra_clauses, count_extra_params) =
+        filter_clauses(date_from, date_to, search, sub_guids.len(), true);
+
+    let count_extra_sql = count_extra_clauses.join(" AND ");
+    let count_sql = format!(
+        "SELECT COUNT(DISTINCT t.guid) as cnt
+         FROM transactions t
+         JOIN splits s ON s.tx_guid = t.guid
+         WHERE s.account_guid IN ({})
+         AND {}",
+        placeholders_str, count_extra_sql
+    );
+
+    let mut count_stmt = conn.prepare(&count_sql).map_err(|e| e.to_string())?;
+    let count_params: Vec<&dyn rusqlite::types::ToSql> = sub_params
+        .iter()
+        .copied()
+        .chain(count_extra_params.iter().map(|p| p.as_ref()))
+        .collect();
+
+    let total: i64 = count_stmt
+        .query_row(count_params.as_slice(), |row| row.get(0))
+        .map_err(|e| e.to_string())?;
+
+    let total_pages = std::cmp::max(((total as f64) / (page_size as f64)).ceil() as i64, 1);
+    let safe_page = utils::clamp_page(page, total_pages);
+    let offset = (safe_page - 1) * page_size;
+
+    // 8. Transactions with running balance.
+    //    Effects are grouped per (transaction, currency); the running balance is
+    //    accumulated in report currency in Rust, so multi-currency subtrees convert
+    //    each currency at the transaction's own date.
+    let (tx_extra_clauses, tx_extra_params) = filter_clauses(date_from, date_to, search, 1, true);
+
+    let tx_extra_filter = tx_extra_clauses.join(" AND ");
+
+    let grouped_balance = utils::signed_amount_expr("t.raw_amount", "t.account_type");
+
+    let tx_sql = format!(
+        "WITH RECURSIVE sub AS (
+            SELECT guid FROM accounts WHERE guid = ?1
+            UNION ALL
+            SELECT a.guid FROM accounts a JOIN sub ON a.parent_guid = sub.guid
+        ),
+        tx_splits AS (
+            SELECT t.guid, t.post_date, t.description, t.num,
+                {} as raw_amount,
+                a.account_type,
+                c.mnemonic as currency
+            FROM transactions t
+            JOIN splits s ON s.tx_guid = t.guid
+            JOIN accounts a ON a.guid = s.account_guid
+            JOIN commodities c ON c.guid = a.commodity_guid
+            WHERE s.account_guid IN (SELECT guid FROM sub)
+            AND {}
+        ),
+        tx_grouped AS (
+            SELECT t.guid, t.post_date, t.description, t.num, t.currency,
+                SUM({}) as balance_effect
+            FROM tx_splits t
+            GROUP BY t.guid, t.post_date, t.description, t.num, t.currency
+        )
+        SELECT guid, post_date, description, num, currency, balance_effect
+        FROM tx_grouped
+        ORDER BY post_date ASC, guid ASC",
+        utils::RAW_AMOUNT,
+        tx_extra_filter,
+        grouped_balance
+    );
+
+    let mut tx_stmt = conn.prepare(&tx_sql).map_err(|e| e.to_string())?;
+
+    let mut all_tx_params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![];
+    all_tx_params.push(Box::new(guid.to_string()));
+    for p in tx_extra_params {
+        all_tx_params.push(p);
+    }
+
+    let tx_refs: Vec<&dyn rusqlite::types::ToSql> =
+        all_tx_params.iter().map(|p| p.as_ref()).collect();
+
+    #[derive(Debug, Clone)]
+    struct TxEffect {
+        guid: String,
+        post_date: String,
+        description: Option<String>,
+        num: Option<String>,
+        currency: String,
+        balance_effect: f64,
+    }
+
+    let tx_effects: Vec<TxEffect> = tx_stmt
+        .query_map(tx_refs.as_slice(), |row| {
+            Ok(TxEffect {
+                guid: row.get(0)?,
+                post_date: row.get(1)?,
+                description: row.get(2)?,
+                num: row.get(3)?,
+                currency: row.get(4)?,
+                balance_effect: row.get(5)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+
+    // Group per transaction, preserving (post_date, guid) order.
+    let mut tx_map: HashMap<String, (String, Option<String>, Option<String>, Vec<(String, f64)>)> =
+        HashMap::new();
+    let mut tx_order: Vec<String> = vec![];
+    for e in tx_effects {
+        match tx_map.get_mut(&e.guid) {
+            Some(entry) => entry.3.push((e.currency, e.balance_effect)),
+            None => {
+                tx_order.push(e.guid.clone());
+                tx_map.insert(
+                    e.guid.clone(),
+                    (
+                        e.post_date.clone(),
+                        e.description.clone(),
+                        e.num.clone(),
+                        vec![(e.currency, e.balance_effect)],
+                    ),
+                );
+            }
+        }
+    }
+
+    // Running balance in report currency: convert each currency at the transaction date.
+    let fx_history = fx::FxHistory::load(conn)?;
+    let mut running = 0.0;
+    let mut running_by_guid: HashMap<String, f64> = HashMap::new();
+    for guid in &tx_order {
+        let (post_date, _, _, effects) = &tx_map[guid];
+        let fx_at = fx_history.map_for_date(post_date);
+        running += effects
+            .iter()
+            .map(|(mn, v)| fx::convert(*v, mn, &report_currency, &fx_at))
+            .sum::<f64>();
+        running_by_guid.insert(guid.clone(), running);
+    }
+
+    // Paginate in Rust. Default order is date descending (running balance
+    // accumulates in ascending date order, so reverse it for newest-first).
+    let mut ordered: Vec<&String> = tx_order.iter().collect();
+    let sort_by = sort_by.unwrap_or("date");
+    let ascending = match (sort_by, sort_dir) {
+        ("description", Some("desc")) => false,
+        ("description", _) => true,
+        ("date", Some("asc")) => true,
+        _ => false,
+    };
+    match sort_by {
+        "description" => {
+            // Precompute lowercase keys once instead of allocating per comparison.
+            let desc_keys: HashMap<&String, String> = tx_order
+                .iter()
+                .map(|g| (g, tx_map[g].1.as_deref().unwrap_or("").to_lowercase()))
+                .collect();
+            ordered.sort_by(|a, b| {
+                let da = &desc_keys[a];
+                let dbv = &desc_keys[b];
+                da.cmp(dbv).then_with(|| a.cmp(b))
+            });
+        }
+        _ => ordered.sort_by(|a, b| tx_map[*a].0.cmp(&tx_map[*b].0).then_with(|| a.cmp(b))),
+    }
+    if !ascending {
+        ordered.reverse();
+    }
+    let page_guids: Vec<String> = ordered
+        .iter()
+        .skip(offset as usize)
+        .take(page_size as usize)
+        .map(|s| s.to_string())
+        .collect();
+
+    // Notes for the page's transactions (kept out of the main CTE to avoid
+    // widening the grouping query).
+    let mut notes_map: HashMap<String, Option<String>> = HashMap::new();
+    if !page_guids.is_empty() {
+        let notes_sql = format!(
+            "SELECT guid, notes FROM transactions WHERE guid IN ({})",
+            sql::in_clause(page_guids.len())
+        );
+        let mut notes_stmt = conn.prepare(&notes_sql).map_err(|e| e.to_string())?;
+        let rows: Vec<(String, Option<String>)> = notes_stmt
+            .query_map(sql::string_param_refs(&page_guids).as_slice(), |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        notes_map.extend(rows);
+    }
+
+    // Split details for each transaction
+    let mut split_stmt = conn
+        .prepare(&format!(
+            "SELECT s.guid, s.account_guid, a.name as account_name, a.account_type,
+                    s.memo,
+                    {} as amount,
+                    s.reconcile_state
+             FROM splits s
+             JOIN accounts a ON a.guid = s.account_guid
+             WHERE s.tx_guid = ?1
+             ORDER BY ABS(s.value_num) DESC",
+            utils::RAW_AMOUNT,
+        ))
+        .map_err(|e| e.to_string())?;
+
+    let sub_set: HashSet<&str> = sub_guids.iter().map(|s| s.as_str()).collect();
+
+    let mut transactions: Vec<DetailTransaction> = vec![];
+    for tx_guid in &page_guids {
+        let (post_date, description, num, _) = &tx_map[tx_guid];
+        let splits: Vec<DetailSplit> = split_stmt
+            .query_map([tx_guid], |row| {
+                Ok(DetailSplit {
+                    guid: row.get(0)?,
+                    account_guid: row.get(1)?,
+                    account_name: row.get(2)?,
+                    account_type: row.get(3)?,
+                    amount: row.get(5)?,
+                    memo: row.get(4)?,
+                    reconcile_state: row.get(6)?,
+                })
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+
+        // Counter-accounts: distinct names of splits outside the viewed
+        // subtree, in largest-magnitude-first order. The transaction's
+        // reconcile status comes from its splits inside the subtree.
+        let mut counter_accounts: Vec<String> = vec![];
+        let mut seen_accounts: HashSet<&str> = HashSet::new();
+        let mut has_y = false;
+        let mut has_c = false;
+        for s in &splits {
+            if sub_set.contains(s.account_guid.as_str()) {
+                match s.reconcile_state.as_deref() {
+                    Some("y") => has_y = true,
+                    Some("c") => has_c = true,
+                    _ => {}
+                }
+            } else if seen_accounts.insert(s.account_name.as_str()) {
+                counter_accounts.push(s.account_name.clone());
+            }
+        }
+        let reconcile_state = if has_y {
+            Some("y".to_string())
+        } else if has_c {
+            Some("c".to_string())
+        } else {
+            splits
+                .iter()
+                .filter(|s| sub_set.contains(s.account_guid.as_str()))
+                .find_map(|s| s.reconcile_state.clone())
+        };
+
+        transactions.push(DetailTransaction {
+            guid: tx_guid.clone(),
+            post_date: post_date.clone(),
+            description: description.clone(),
+            num: num.clone(),
+            notes: notes_map.get(tx_guid).cloned().flatten(),
+            splits,
+            counter_accounts,
+            running_balance: running_by_guid[tx_guid],
+            reconcile_state,
+        });
+    }
+
+    Ok(AccountDetailResult {
+        account: AccountDetailInfo {
+            guid: acc_guid,
+            name,
+            account_type,
+            code,
+            description,
+            placeholder: placeholder != 0,
+            balance,
+            children_count,
+        },
+        summary: AccountSummary {
+            total_transactions: total_txns,
+            total_income: pos_effect,
+            total_expenses: neg_effect,
+        },
+        transactions,
+        total,
+        page: safe_page,
+        page_size,
+        total_pages,
+    })
+}
+
+#[tauri::command]
+pub async fn fetch_account_detail(
+    state: State<'_, AppState>,
+    guid: String,
+    page: i64,
+    page_size: i64,
+    date_from: Option<String>,
+    date_to: Option<String>,
+    search: Option<String>,
+    sort_by: Option<String>,
+    sort_dir: Option<String>,
+) -> Result<AccountDetailResult, String> {
+    let conn = get_conn(&state)?;
+    fetch_account_detail_inner(
+        &conn,
+        &guid,
+        page,
+        utils::clamp_page_size(page_size),
+        date_from.as_deref(),
+        date_to.as_deref(),
+        search.as_deref(),
+        sort_by.as_deref(),
+        sort_dir.as_deref(),
+    )
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountBalancePoint {
+    pub month: String,
+    pub balance: f64,
+}
+
+/// Per-(day, currency) signed split-value deltas for the account subtree.
+/// Amounts carry GnuCash display signs (credit-normal accounts negated) via
+/// `signed_amount_expr`, so running sums can be aggregated as-is.
+fn subtree_deltas_by_day(
+    conn: &Connection,
+    sub_guids: &[String],
+    amount_expr: &str,
+    type_filter: &str,
+    start_date: &str,
+    end_date: &str,
+) -> Result<Vec<(String, String, f64)>, String> {
+    let n = sub_guids.len();
+    let sql = format!(
+        "SELECT t.post_date, c.mnemonic, COALESCE(SUM({}), 0)
+         FROM splits s
+         JOIN accounts a ON a.guid = s.account_guid
+         JOIN commodities c ON c.guid = a.commodity_guid
+         JOIN transactions t ON t.guid = s.tx_guid
+         WHERE s.account_guid IN ({}) {} 
+           AND t.post_date >= ?{} AND t.post_date <= ?{}
+         GROUP BY t.post_date, c.mnemonic
+         ORDER BY t.post_date ASC",
+        amount_expr,
+        sql::in_clause(n),
+        type_filter,
+        n + 1,
+        n + 2
+    );
+    let mut params = sql::string_param_refs(sub_guids);
+    params.push(&start_date);
+    params.push(&end_date);
+
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params.as_slice(), |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+
+/// End-of-day balance history for an account and its sub-accounts. Mirrors
+/// the net worth trend approach in `balance.rs`: all-time daily deltas are
+/// accumulated per currency; share quantities are valued at the latest cached
+/// prices and cash currencies converted with historical FX rates.
+pub fn fetch_account_balance_trend_inner(
+    conn: &Connection,
+    guid: &str,
+) -> Result<Vec<AccountBalancePoint>, String> {
+    let sub_guids = accounts::get_subaccount_guids(conn, guid)?;
+    if sub_guids.is_empty() {
+        return Err(format!("Account not found: {}", guid));
+    }
+
+    let end_date = Utc::now().format("%Y-%m-%d").to_string();
+    let start_date = "0000-01-01";
+    let signed_cash = utils::signed_amount_expr(utils::RAW_AMOUNT, "a.account_type");
+    let cash_filter = format!("AND a.account_type NOT IN ({})", utils::investment_types_sql());
+    let signed_shares = utils::signed_amount_expr(utils::QUANTITY_AMOUNT, "a.account_type");
+    let shares_filter = format!("AND a.account_type IN ({})", utils::investment_types_sql());
+
+    let report_currency = fx::get_report_currency_mnemonic(conn).unwrap_or_default();
+    let fx_history = fx::FxHistory::load(conn)?;
+    let unified_prices = get_cached_prices_map(conn).unwrap_or_default();
+
+    let mut cash_by_day: HashMap<String, Vec<(String, f64)>> = HashMap::new();
+    for (day, mnemonic, delta) in subtree_deltas_by_day(
+        conn,
+        &sub_guids,
+        &signed_cash,
+        &cash_filter,
+        start_date,
+        &end_date,
+    )? {
+        cash_by_day.entry(day).or_default().push((mnemonic, delta));
+    }
+    let mut shares_by_day: HashMap<String, Vec<(String, f64)>> = HashMap::new();
+    for (day, mnemonic, delta) in subtree_deltas_by_day(
+        conn,
+        &sub_guids,
+        &signed_shares,
+        &shares_filter,
+        start_date,
+        &end_date,
+    )? {
+        shares_by_day
+            .entry(day)
+            .or_default()
+            .push((mnemonic, delta));
+    }
+
+    let days: BTreeSet<String> = cash_by_day
+        .keys()
+        .chain(shares_by_day.keys())
+        .cloned()
+        .collect();
+
+    if days.is_empty() {
+        return Ok(vec![AccountBalancePoint {
+            month: end_date,
+            balance: 0.0,
+        }]);
+    }
+
+    let mut cash_running: HashMap<String, f64> = HashMap::new();
+    let mut shares_running: HashMap<String, f64> = HashMap::new();
+    let mut trend: Vec<AccountBalancePoint> = Vec::with_capacity(days.len());
+
+    for day in days {
+        if let Some(deltas) = cash_by_day.get(&day) {
+            for (mn, d) in deltas {
+                *cash_running.entry(mn.clone()).or_insert(0.0) += d;
+            }
+        }
+        if let Some(deltas) = shares_by_day.get(&day) {
+            for (mn, d) in deltas {
+                *shares_running.entry(mn.clone()).or_insert(0.0) += d;
+            }
+        }
+        let fx_map = fx_history.map_for_date(&day);
+        let cash_total: f64 = cash_running
+            .iter()
+            .map(|(mn, v)| fx::convert(*v, mn, &report_currency, &fx_map))
+            .sum();
+        let shares_total: f64 = shares_running
+            .iter()
+            .map(|(mn, q)| unified_prices.get(mn).unwrap_or(&0.0) * q)
+            .sum();
+        trend.push(AccountBalancePoint {
+            month: day,
+            balance: cash_total + shares_total,
+        });
+    }
+
+    Ok(trend)
+}
+
+#[tauri::command]
+pub async fn fetch_account_balance_trend(
+    state: State<'_, AppState>,
+    guid: String,
+) -> Result<Vec<AccountBalancePoint>, String> {
+    let conn = get_conn(&state)?;
+    fetch_account_balance_trend_inner(&conn, &guid)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::init_db;
+    use rusqlite::params;
+
+    fn setup() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        init_db(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO commodities (guid, mnemonic, namespace) VALUES
+             ('c-eur', 'EUR', 'CURRENCY'), ('c-usd', 'USD', 'CURRENCY')",
+            [],
+        )
+        .unwrap();
+        // ROOT account pins the report currency to EUR.
+        conn.execute(
+            "INSERT INTO accounts (guid, name, account_type, parent_guid, placeholder, commodity_guid)
+             VALUES ('root', 'Root', 'ROOT', NULL, 0, 'c-eur')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO accounts (guid, name, account_type, parent_guid, placeholder, commodity_guid) VALUES
+             ('assets',   'Assets',      'ASSET',  'root', 1, 'c-eur'),
+             ('checking', 'Checking',    'BANK',   'assets', 0, 'c-eur'),
+             ('card',     'Credit Card', 'CREDIT', 'root', 0, 'c-eur'),
+             ('empty',    'Empty',       'BANK',   'root', 0, 'c-eur')",
+            [],
+        )
+        .unwrap();
+
+        add_split(&conn, "t1", "2024-01-10", "checking", 10_000);
+        add_split(&conn, "t2", "2024-02-05", "checking", -3_000);
+        // Credit-normal account: a 40 spend must display as -40.
+        add_split(&conn, "t3", "2024-02-20", "card", 4_000);
+        conn
+    }
+
+    fn add_split(conn: &Connection, tag: &str, date: &str, account: &str, value_num: i64) {
+        conn.execute(
+            "INSERT INTO transactions (guid, post_date) VALUES (?1, ?2)",
+            params![tag, date],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO splits (guid, tx_guid, account_guid, value_num, value_denom, quantity_num, quantity_denom)
+             VALUES (?1, ?2, ?3, ?4, 100, ?4, 100)",
+            params![format!("s-{tag}"), tag, account, value_num],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn trend_accumulates_subtree_with_display_signs() {
+        let conn = setup();
+
+        let sub = accounts::get_subaccount_guids(&conn, "assets").unwrap();
+        assert_eq!(sub, vec!["assets".to_string(), "checking".to_string()]);
+
+        // Parent placeholder aggregates only its own subtree (checking).
+        let trend = fetch_account_balance_trend_inner(&conn, "assets").unwrap();
+        assert_eq!(
+            trend,
+            vec![
+                AccountBalancePoint {
+                    month: "2024-01-10".into(),
+                    balance: 100.0
+                },
+                AccountBalancePoint {
+                    month: "2024-02-05".into(),
+                    balance: 70.0
+                },
+            ]
+        );
+
+        // Root includes the credit card; its spend shows as negative.
+        let trend = fetch_account_balance_trend_inner(&conn, "root").unwrap();
+        let last = trend.last().unwrap();
+        assert_eq!(last.month, "2024-02-20");
+        assert_eq!(last.balance, 30.0);
+    }
+
+    #[test]
+    fn account_without_activity_returns_single_zero_point() {
+        let conn = setup();
+        let trend = fetch_account_balance_trend_inner(&conn, "empty").unwrap();
+        assert_eq!(trend.len(), 1);
+        assert_eq!(trend[0].balance, 0.0);
+    }
+
+    #[test]
+    fn unknown_account_errors() {
+        let conn = setup();
+        assert!(fetch_account_balance_trend_inner(&conn, "nope").is_err());
+    }
+}

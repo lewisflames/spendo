@@ -1,211 +1,249 @@
 <script lang="ts">
-  import { Skeleton } from '$lib/components/ui/skeleton';
-  import {
-    fetchTransactions,
-    fetchAllTransactions,
-    fetchAccountNames
-  } from '$lib/transactions.remote';
+  import ErrorCard from '$lib/components/shared/error-card.svelte';
+  import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
+  import { Button } from '$lib/components/ui/button';
+  import { fetchTransactions, fetchAccountNames } from '$lib/tauri';
   import { dbSession } from '$lib/stores/db.svelte';
-  import { formatNumber } from '$lib/format.svelte';
-  import { appSettings } from '$lib/stores/settings.svelte';
-  import { goto } from '$app/navigation';
-  import TransactionFilters from '$lib/components/transactions/transaction-filters.svelte';
-  import TransactionTable from '$lib/components/transactions/transaction-table.svelte';
-  import Pagination from '$lib/components/transactions/pagination.svelte';
-  import type { TransactionsResult, AccountInfo } from '$lib/server/transactions';
+  import { formatNumber, sessionCurrency } from '$lib/utils/format.svelte';
+  import { appSettings, saveSettings } from '$lib/stores/settings.svelte';
+  import TransactionFilters from '$lib/features/transactions/transaction-filters.svelte';
+  import TransactionTable from '$lib/features/transactions/transaction-table.svelte';
+  import PaginationNav from '$lib/components/shared/pagination-nav';
+  import PageHeader from '$lib/components/layout/page-header.svelte';
+  import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
+  import ImportPrompt from '$lib/components/shared/import-prompt.svelte';
+  import EmptyState from '$lib/components/shared/empty-state.svelte';
+  import { errMsg } from '$lib/utils/error';
+  import { toast } from '$lib/components/ui/sonner';
+  import { downloadCsv } from '$lib/utils/csv';
+  import { fetchAllRows } from '$lib/utils/export';
+  import type { TransactionRow } from '$lib/tauri';
+  import { useDebouncedSearch } from '$lib/hooks/use-debounced-search.svelte';
+  import { useUrlParams } from '$lib/hooks/use-url-params.svelte';
+  import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
+  import { ArrowLeftRight, Download, LoaderCircle } from '@lucide/svelte';
+  import type { AccountInfo } from '$lib/tauri';
 
   let pageSize = $derived(appSettings.value.pageSize);
 
   let page = $state(1);
+  let sortBy = $state<'date' | 'description' | 'amount'>('date');
+  let sortDir = $state<'asc' | 'desc'>('desc');
 
   let searchInput = $state('');
-  let search = $state('');
   let dateFrom = $state('');
   let dateTo = $state('');
   let accountName = $state('');
 
-  $effect(() => {
-    const val = searchInput;
-    const timer = setTimeout(() => {
-      search = val;
-    }, 300);
-    return () => clearTimeout(timer);
-  });
+  let search = useDebouncedSearch(() => searchInput);
+
+  useUrlParams([
+    {
+      key: 'page',
+      get: () => (page > 1 ? String(page) : null),
+      apply: (v) => {
+        const n = Number(v);
+        page = Number.isInteger(n) && n >= 1 ? n : 1;
+      }
+    },
+    {
+      key: 'q',
+      get: () => search.value || null,
+      apply: (v) => {
+        searchInput = v ?? '';
+        search.set(v ?? '');
+      },
+      replace: true
+    },
+    {
+      key: 'from',
+      get: () => dateFrom || null,
+      apply: (v) => (dateFrom = v ?? ''),
+      replace: true
+    },
+    {
+      key: 'to',
+      get: () => dateTo || null,
+      apply: (v) => (dateTo = v ?? ''),
+      replace: true
+    },
+    {
+      key: 'account',
+      get: () => accountName || null,
+      apply: (v) => (accountName = v ?? ''),
+      replace: true
+    }
+  ]);
 
   let filters = $derived({
-    ...(search ? { search } : {}),
+    ...(search.value ? { search: search.value } : {}),
     ...(dateFrom ? { dateFrom } : {}),
     ...(dateTo ? { dateTo } : {}),
     ...(accountName ? { accountName } : {})
   });
 
-  let currency = $derived(dbSession.value?.summary.currency ?? 'EUR');
+  let currency = $derived(sessionCurrency());
 
   let accounts = $state<AccountInfo[]>([]);
 
-  $effect(() => {
-    if (!dbSession.value) {
+  useAsyncData({
+    enabled: () => !!dbSession.value,
+    fetch: fetchAccountNames,
+    label: 'Failed to load accounts',
+    onError: (message) => {
       accounts = [];
-      return;
+      toast.error(message);
+    },
+    onSuccess: (r) => {
+      accounts = r;
     }
-    let cancelled = false;
-    fetchAccountNames({}).then(
-      (r) => {
-        if (cancelled) return;
-        accounts = r;
-      },
-      () => {}
-    );
-    return () => {
-      cancelled = true;
-    };
   });
 
-  let loading = $state(false);
-  let data = $state<TransactionsResult | null>(null);
-  let fetchError = $state(false);
+  const res = useAsyncData({
+    enabled: () => !!dbSession.value,
+    fetch: async () => {
+      let r = await fetchTransactions(page, pageSize, filters, sortBy, sortDir);
+      // The backend serves out-of-range pages as empty rows instead of
+      // clamping; snap back to the last valid page (possible after
+      // shrinking pageSize or narrowing filters).
+      if (page > r.totalPages) {
+        page = r.totalPages;
+        r = await fetchTransactions(page, pageSize, filters, sortBy, sortDir);
+      }
+      return r;
+    },
+    label: 'Failed to load transactions'
+  });
 
-  let prevKey = '';
+  let loading = $derived(res.loading);
+  let data = $derived(res.data);
+  let error = $derived(res.error);
 
+  let prevFilterKey = '';
+
+  // Reset to page 1 whenever the query shape changes. Declared before the
+  // hook's effect so it runs first in the same flush: the fetch sees the
+  // reset page immediately instead of firing a doomed request.
   $effect(() => {
-    if (!dbSession.value) {
-      data = null;
-      loading = false;
-      fetchError = false;
-      return;
+    const fk = JSON.stringify({ filters, sortBy, sortDir });
+    if (prevFilterKey && prevFilterKey !== fk && page !== 1) {
+      page = 1;
     }
-
-    const fk = JSON.stringify(filters);
-    if (prevKey && prevKey !== fk) {
-      prevKey = fk;
-      if (page !== 1) {
-        page = 1;
-        return;
-      }
-    }
-    prevKey = fk;
-
-    let cancelled = false;
-
-    loading = true;
-    data = null;
-    fetchError = false;
-
-    fetchTransactions({ page, pageSize, filters }).then(
-      (r) => {
-        if (cancelled) return;
-        data = r;
-        loading = false;
-      },
-      () => {
-        if (cancelled) return;
-        fetchError = true;
-        loading = false;
-      }
-    );
-
-    return () => {
-      cancelled = true;
-    };
+    prevFilterKey = fk;
   });
 
-  function escapeCsv(val: string): string {
-    if (val.includes(',') || val.includes('"') || val.includes('\n')) {
-      return `"${val.replace(/"/g, '""').replace(/\n/g, ' ')}"`;
-    }
-    return val;
+  let exporting = $state(false);
+
+  function handlePageSizeChange(size: number) {
+    saveSettings({ pageSize: size });
+    page = 1;
   }
 
-  async function downloadCSV() {
-    const transactions = await fetchAllTransactions({ filters });
-
-    const delimiter = ',';
-    const header = ['Date', 'Description', 'Account', 'Type', 'Amount'].join(delimiter);
-    const rows = transactions.flatMap((txn) =>
-      txn.splits.map((s) =>
-        [
-          txn.postDate,
-          escapeCsv(txn.description),
-          escapeCsv(s.accountName),
-          s.accountType,
-          s.amount
-        ].join(delimiter)
-      )
-    );
-    const csv = [header, ...rows].join('\n');
-
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `transactions-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+  async function handleExportCsv() {
+    if (!data || exporting) return;
+    exporting = true;
+    try {
+      const all = await fetchAllRows<TransactionRow>(async (pageIdx) => {
+        const r = await fetchTransactions(pageIdx, 500, filters, sortBy, sortDir);
+        return { rows: r.transactions, total: r.total };
+      });
+      const headers = ['Date', 'Description', 'Number', 'Notes', 'Splits', 'Total'];
+      const rows = all.map((t) => [
+        t.postDate,
+        t.description ?? '',
+        t.num ?? '',
+        t.notes ?? '',
+        t.splits.map((s) => `${s.accountName} (${s.accountType}): ${s.amount}`).join(' | '),
+        String(t.totalAmount)
+      ]);
+      downloadCsv('transactions.csv', headers, rows);
+    } catch (e: unknown) {
+      toast.error(errMsg(e, 'Failed to export transactions'));
+    } finally {
+      exporting = false;
+    }
   }
-
-  $effect(() => {
-    if (!dbSession.value) goto('/');
-  });
 </script>
 
 <svelte:head>
-  <title>Transactions - Spendo</title>
+  <title>Transactions — Spendo</title>
+  <meta name="description" content="Transaction ledger with filters." />
 </svelte:head>
 
-<div class="flex flex-col gap-4">
-  <div class="flex items-center justify-between">
-    <div class="flex flex-col gap-1">
-      <h2 class="text-3xl font-bold tracking-tight">Transactions</h2>
-      <p class="text-sm text-muted-foreground">
-        {data
-          ? `${formatNumber(data.total)} transaction${data.total === 1 ? '' : 's'}`
-          : 'Loading...'}
-      </p>
-    </div>
-  </div>
-
-  <TransactionFilters
-    bind:search={searchInput}
-    bind:dateFrom
-    bind:dateTo
-    bind:accountName
-    {accounts}
-    showExport={!!data}
-    onExport={downloadCSV}
-  />
-
-  {#if loading}
-    <div class="overflow-x-auto rounded-lg border">
-      <table class="w-full min-w-150">
-        <thead>
-          <tr class="bg-muted/50 text-left text-sm text-muted-foreground">
-            <th class="px-4 py-3 font-medium">Date</th>
-            <th class="px-4 py-3 font-medium">Description</th>
-            <th class="px-4 py-3 font-medium">Debit</th>
-            <th class="px-4 py-3 font-medium">Credit</th>
-            <th class="px-4 py-3 text-right font-medium">Amount</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr><td class="px-4 py-3" colspan="5"><Skeleton class="h-5 w-full" /></td></tr>
-          <tr><td class="px-4 py-3" colspan="5"><Skeleton class="h-5 w-full" /></td></tr>
-          <tr><td class="px-4 py-3" colspan="5"><Skeleton class="h-5 w-full" /></td></tr>
-          <tr><td class="px-4 py-3" colspan="5"><Skeleton class="h-5 w-full" /></td></tr>
-          <tr><td class="px-4 py-3" colspan="5"><Skeleton class="h-5 w-full" /></td></tr>
-          <tr><td class="px-4 py-3" colspan="5"><Skeleton class="h-5 w-full" /></td></tr>
-          <tr><td class="px-4 py-3" colspan="5"><Skeleton class="h-5 w-full" /></td></tr>
-          <tr><td class="px-4 py-3" colspan="5"><Skeleton class="h-5 w-full" /></td></tr>
-        </tbody>
-      </table>
-    </div>
-  {:else if fetchError}
-    <div
-      class="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-8 text-center text-sm text-destructive"
+{#if dbSession.value}
+  <div class="flex flex-col gap-6">
+    <PageHeader
+      title="Transactions"
+      description={data
+        ? `${formatNumber(data.total)} transaction${data.total === 1 ? '' : 's'}`
+        : ''}
     >
-      Failed to load transactions. Your session may have expired.
-    </div>
-  {:else if data}
-    <TransactionTable transactions={data.transactions} {currency} />
-    <Pagination bind:page totalPages={data.totalPages} />
-  {/if}
-</div>
+      <Button
+        variant="outline"
+        onclick={handleExportCsv}
+        disabled={!data || data.transactions.length === 0 || exporting}
+      >
+        {#if exporting}
+          <LoaderCircle aria-hidden="true" class="size-3 animate-spin" />
+        {:else}
+          <Download aria-hidden="true" class="size-3" />
+        {/if}
+        Export
+      </Button>
+    </PageHeader>
+
+    <TransactionFilters
+      bind:search={searchInput}
+      bind:dateFrom
+      bind:dateTo
+      bind:accountName
+      {accounts}
+    />
+
+    {#if loading && !data}
+      <TableSkeleton cols={4} />
+    {:else if error}
+      <ErrorCard message={error} onRetry={() => res.reload()} />
+    {:else if data}
+      {#if data.transactions.length === 0}
+        <EmptyState
+          card
+          title="No transactions"
+          description="No transactions found{search.value || dateFrom || dateTo || accountName
+            ? ' matching the current filters'
+            : ''}."
+        >
+          {#snippet icon()}
+            <ArrowLeftRight aria-hidden="true" class="text-muted-foreground" />
+          {/snippet}
+        </EmptyState>
+      {:else}
+        <!-- Keep the previous table visible (dimmed) during refetches so the
+             page doesn't jump and pagination stays in place. -->
+        <DimWrapper active={loading} class="flex flex-col gap-4">
+          <TransactionTable
+            transactions={data.transactions}
+            {currency}
+            {sortBy}
+            {sortDir}
+            onSort={(key, dir) => {
+              sortBy = key;
+              sortDir = dir;
+            }}
+          />
+          <PaginationNav
+            bind:page
+            totalPages={data.totalPages}
+            pageSize={appSettings.value.pageSize}
+            onPageSizeChange={handlePageSizeChange}
+          />
+        </DimWrapper>
+      {/if}
+    {/if}
+  </div>
+{:else}
+  <div class="flex flex-col gap-6">
+    <PageHeader title="Transactions" description="Transaction ledger with filters" />
+    <ImportPrompt />
+  </div>
+{/if}

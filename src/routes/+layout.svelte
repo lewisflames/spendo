@@ -1,106 +1,123 @@
 <script lang="ts">
-  import { Minus, Square, X } from '@lucide/svelte';
+  import { onNavigate } from '$app/navigation';
+  import { MediaQuery } from 'svelte/reactivity';
   import * as Sidebar from '$lib/components/ui/sidebar/index.js';
-  import AppSidebar from '$lib/components/app-sidebar.svelte';
-  import { appSettings, saveSettings } from '$lib/stores/settings.svelte';
-  import { IsMobile } from '$lib/hooks/IsMobile.svelte';
-  import { SIDEBAR_COOKIE_NAME } from '$lib/components/ui/sidebar/constants.js';
-  import './layout.css';
+  import AppSidebar from '$lib/components/layout/app-sidebar';
+  import { appSettings, saveSettings, resolveTheme } from '$lib/stores/settings.svelte';
+  import { goBack, goForward, initNavHistory } from '$lib/stores/nav-history.svelte';
+  import { ensureDbSessionLoaded } from '$lib/stores/db.svelte';
+  import TitleBar from '$lib/components/layout/title-bar';
+  import { Sonner } from '$lib/components/ui/sonner';
+  import KeyboardShortcutsDialog from '$lib/components/layout/keyboard-shortcuts-dialog.svelte';
+  import { keyboardShortcutsDialog as shortcutsDialog } from '$lib/stores/keyboard-shortcuts.svelte';
+  import '../app.css';
 
   let { children } = $props();
 
-  let isSmallScreen = new IsMobile(1280);
-  let hydrated = $state(false);
-  let sidebarOpen = $state(false);
+  initNavHistory();
 
+  const prefersDark = new MediaQuery('(prefers-color-scheme: dark)');
+
+  // Bootstrap DB state once so deep-linked/refreshed pages see real data
+  // (e.g. Settings' "Clear all data" gate) instead of a stale null session.
   $effect(() => {
-    if (!hydrated) {
-      hydrated = true;
-      const cookie = document.cookie
-        .split('; ')
-        .find((c) => c.startsWith(`${SIDEBAR_COOKIE_NAME}=`));
-      sidebarOpen = cookie ? cookie.split('=')[1] === 'true' : !isSmallScreen.current;
-    } else {
-      sidebarOpen = !isSmallScreen.current;
-    }
+    void ensureDbSessionLoaded();
   });
 
-  $effect(() => {
-    const theme = appSettings.value.theme;
+  let transitionInFlight = false;
 
-    document.documentElement.classList.toggle('dark', theme === 'dark');
-    document.documentElement.style.colorScheme = theme;
-    document.documentElement.lang = 'en';
+  onNavigate((navigation) => {
+    if (!document.startViewTransition) return;
+    // User preference wins; otherwise honor the OS reduce-motion setting.
+    if (appSettings.value.reduceMotion) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    // A URL-sync goto can start a second navigation while the first
+    // transition is still running; starting another one skips/aborts it.
+    if (transitionInFlight) return;
+    transitionInFlight = true;
+    return new Promise((resolve) => {
+      const transition = document.startViewTransition(async () => {
+        // Resolve early so SvelteKit can render; the callback must stay alive
+        // until then or the browser would snapshot an unchanged DOM.
+        resolve();
+        try {
+          await navigation.complete;
+        } catch {
+          // aborted by a newer navigation (e.g. URL-sync goto) — ignore
+        }
+      });
+      // A superseded transition rejects ready/finished with AbortError;
+      // swallow those so they never surface as unhandled rejections.
+      transition.updateCallbackDone.catch(() => {});
+      transition.ready.catch(() => {});
+      transition.finished
+        .catch(() => {})
+        .finally(() => {
+          transitionInFlight = false;
+        });
+    });
+  });
+
+  // Effective theme ('system' resolves live via prefersDark) + document lang.
+  let resolvedTheme = $derived(
+    appSettings.value.theme === 'system'
+      ? prefersDark.current
+        ? 'dark'
+        : 'light'
+      : appSettings.value.theme
+  );
+
+  $effect(() => {
+    document.documentElement.classList.toggle('dark', resolvedTheme === 'dark');
+    document.documentElement.style.colorScheme = resolvedTheme;
+    document.documentElement.lang = appSettings.value.locale;
   });
 
   function handleKeydown(e: KeyboardEvent) {
+    if (e.target instanceof HTMLElement && e.target.closest('input, textarea, [contenteditable]')) {
+      return;
+    }
+    if (e.key === '?') {
+      e.preventDefault();
+      shortcutsDialog.open = !shortcutsDialog.open;
+      return;
+    }
+    if (e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+      e.preventDefault();
+      if (e.key === 'ArrowLeft') goBack();
+      else goForward();
+      return;
+    }
     if (!(e.ctrlKey || e.metaKey)) return;
     if (e.key.toLowerCase() === 't' && e.shiftKey) {
       e.preventDefault();
-      saveSettings({ theme: appSettings.value.theme === 'light' ? 'dark' : 'light' });
+      // Toggling always lands on an explicit theme, leaving 'system' mode.
+      saveSettings({ theme: resolveTheme(appSettings.value.theme) === 'dark' ? 'light' : 'dark' });
+      return;
+    }
+    if (e.key.toLowerCase() === 'b') {
+      e.preventDefault();
+      saveSettings({ sidebarCollapsed: !appSettings.value.sidebarCollapsed });
     }
   }
 </script>
 
 <svelte:document onkeydown={handleKeydown} />
 
-<!-- skip-to-content link -->
-<a
-  href="#main-content"
-  class="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[100] focus:rounded focus:bg-background focus:p-2 focus:text-foreground"
->
-  Skip to content
-</a>
+<div class="[--header-height:calc(--spacing(10))]">
+  <Sidebar.Provider class="flex flex-col">
+    <TitleBar />
+    <div class="flex flex-1 overflow-hidden">
+      <AppSidebar />
+      <Sidebar.Inset class="min-w-0">
+        <main id="main-content" class="flex-1 overflow-auto p-8">
+          {@render children()}
+        </main>
+      </Sidebar.Inset>
+    </div>
+  </Sidebar.Provider>
+</div>
 
-<Sidebar.Provider bind:open={sidebarOpen}>
-  <AppSidebar />
-  <div class="flex flex-1 flex-col">
-    <header
-      class="flex h-9.5 min-h-9.5 select-none items-center border-b bg-background px-2"
-      style="app-region: drag; -webkit-app-region: drag"
-    >
-      <div style="app-region: no-drag; -webkit-app-region: no-drag">
-        <Sidebar.Trigger />
-      </div>
+<Sonner theme={resolvedTheme} />
 
-      <div class="flex-1"></div>
-
-      <div
-        class="max-sm:hidden flex items-center gap-0.5"
-        aria-hidden="true"
-        style="app-region: no-drag; -webkit-app-region: no-drag"
-      >
-        <button
-          type="button"
-          tabindex="-1"
-          class="inline-flex size-7.5 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-          aria-label="Minimize"
-        >
-          <Minus aria-hidden="true" class="size-3.5" />
-        </button>
-        <button
-          type="button"
-          tabindex="-1"
-          class="inline-flex size-7.5 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-          aria-label="Maximize"
-        >
-          <Square aria-hidden="true" class="size-3" />
-        </button>
-        <button
-          type="button"
-          tabindex="-1"
-          class="inline-flex size-7.5 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive hover:text-destructive-foreground"
-          aria-label="Close"
-        >
-          <X aria-hidden="true" class="size-3.5" />
-        </button>
-      </div>
-    </header>
-
-    <main id="main-content" class="flex-1 overflow-auto p-2 sm:p-3">
-      <div class="flex min-h-full flex-col rounded-lg border bg-card p-4 shadow-sm sm:p-6">
-        {@render children()}
-      </div>
-    </main>
-  </div>
-</Sidebar.Provider>
+<KeyboardShortcutsDialog />

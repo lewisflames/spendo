@@ -3,7 +3,7 @@
   "style": "nova",
   "tailwind": {
     "config": "",
-    "css": "src/routes/layout.css",
+    "css": "src/app.css",
     "baseColor": "zinc"
   },
   "aliases": {

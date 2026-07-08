@@ -3,11 +3,24 @@
   import type { HTMLAttributes } from 'svelte/elements';
   import { getPayloadConfigFromPayload, useChart, type TooltipPayload } from './chart-utils.js';
   import { getChartContext, Tooltip as TooltipPrimitive } from 'layerchart';
+  import ChartTooltipRow from './chart-tooltip-row.svelte';
   import type { Snippet } from 'svelte';
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function defaultFormatter(value: any, _payload: TooltipPayload[]) {
     return `${value}`;
+  }
+
+  function resolveItemColor(
+    itemConfig: { color?: string; theme?: Record<string, string> } | undefined
+  ): string | undefined {
+    if (!itemConfig) return;
+    if (itemConfig.color) return itemConfig.color;
+    if (itemConfig.theme) {
+      const isDark =
+        typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
+      return itemConfig.theme[isDark ? 'dark' : 'light'];
+    }
   }
 
   let {
@@ -23,11 +36,13 @@
     formatter,
     nameKey,
     color,
+    valueFormatter,
+    footer,
     ...restProps
   }: WithoutChildren<WithElementRef<HTMLAttributes<HTMLDivElement>>> & {
     hideLabel?: boolean;
     label?: string;
-    indicator?: 'line' | 'dot' | 'dashed';
+    indicator?: 'dot' | 'line' | 'dashed';
     nameKey?: string;
     labelKey?: string;
     hideIndicator?: boolean;
@@ -46,6 +61,9 @@
         }
       ]
     >;
+    valueFormatter?: (value: unknown) => string;
+    /** Rendered below the series rows, separated by a hairline (e.g. totals). */
+    footer?: Snippet<[{ data: unknown }]>;
   } = $props();
 
   const chart = useChart();
@@ -87,8 +105,6 @@
     if (!labelFormatter) return value;
     return labelFormatter(value, visibleSeries);
   });
-
-  const nestLabel = $derived(visibleSeries.length === 1 && indicator !== 'dot');
 </script>
 
 {#snippet TooltipLabel()}
@@ -107,14 +123,12 @@
   <div
     bind:this={ref}
     class={cn(
-      'border-border/50 bg-background grid min-w-[9rem] items-start gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs shadow-xl',
+      'grid min-w-[10rem] gap-2 rounded-lg bg-popover p-2.5 text-xs text-popover-foreground shadow-md ring-1 ring-foreground/10',
       className
     )}
     {...restProps}
   >
-    {#if !nestLabel}
-      {@render TooltipLabel()}
-    {/if}
+    {@render TooltipLabel()}
     <div class="grid gap-1.5">
       {#each visibleSeries as item, i (item.key + i)}
         {@const key = `${nameKey || item.key || item.label || 'value'}`}
@@ -124,58 +138,43 @@
           key,
           chartCtx.tooltip.data
         )}
-        {@const indicatorColor = color || item.config?.color || item.color}
-        <div
-          class={cn(
-            '[&>svg]:text-muted-foreground flex w-full flex-wrap items-stretch gap-2 [&>svg]:size-2.5',
-            indicator === 'dot' && 'items-center'
-          )}
-        >
-          {#if formatter && item.value !== undefined && item.label}
-            {@render formatter({
-              value: item.value,
-              name: item.label,
-              item,
-              index: i,
-              payload: visibleSeries
-            })}
-          {:else}
-            {#if itemConfig?.icon}
-              <itemConfig.icon />
-            {:else if !hideIndicator}
-              <div
-                style="--color-bg: {indicatorColor}; --color-border: {indicatorColor};"
-                class={cn('shrink-0 rounded-[2px] border-(--color-border) bg-(--color-bg)', {
-                  'size-2.5': indicator === 'dot',
-                  'h-full w-1': indicator === 'line',
-                  'w-0 border-[1.5px] border-dashed bg-transparent': indicator === 'dashed',
-                  'my-0.5': nestLabel && indicator === 'dashed'
-                })}
-              ></div>
-            {/if}
-            <div
-              class={cn(
-                'flex flex-1 shrink-0 justify-between leading-none',
-                nestLabel ? 'items-end' : 'items-center'
-              )}
-            >
-              <div class="grid gap-1.5">
-                {#if nestLabel}
-                  {@render TooltipLabel()}
-                {/if}
-                <span class="text-muted-foreground">
-                  {itemConfig?.label || item.label}
-                </span>
-              </div>
-              {#if item.value !== undefined}
-                <span class="text-foreground font-mono font-medium tabular-nums">
-                  {item.value.toLocaleString()}
-                </span>
-              {/if}
-            </div>
-          {/if}
-        </div>
+        {@const indicatorColor =
+          color ||
+          resolveItemColor(itemConfig) ||
+          item.config?.color ||
+          item.color ||
+          `var(--color-${key})`}
+        {#if formatter && item.value !== undefined && item.label}
+          {@render formatter({
+            value: item.value,
+            name: item.label,
+            item,
+            index: i,
+            payload: visibleSeries
+          })}
+        {:else if itemConfig?.icon}
+          {#snippet rowIcon()}
+            <itemConfig.icon class="size-2.5 text-muted-foreground" />
+          {/snippet}
+          <ChartTooltipRow icon={rowIcon} label={itemConfig?.label || item.label || key} />
+        {:else}
+          <ChartTooltipRow
+            {indicator}
+            color={hideIndicator ? undefined : indicatorColor}
+            label={itemConfig?.label || item.label || key}
+            value={item.value !== undefined
+              ? valueFormatter
+                ? valueFormatter(item.value)
+                : item.value.toLocaleString()
+              : undefined}
+          />
+        {/if}
       {/each}
     </div>
+    {#if footer}
+      <div class="grid gap-1.5 border-t border-border/60 pt-1.5">
+        {@render footer({ data: chartCtx.tooltip.data })}
+      </div>
+    {/if}
   </div>
 </TooltipPrimitive.Root>

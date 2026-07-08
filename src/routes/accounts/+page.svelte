@@ -1,48 +1,153 @@
 <script lang="ts">
-  import * as Card from '$lib/components/ui/card';
-  import * as Table from '$lib/components/ui/table';
-  import { Badge } from '$lib/components/ui/badge';
-  import { Input } from '$lib/components/ui/input';
+  import { SearchInput } from '$lib/components/shared/search-input';
+  import * as Tooltip from '$lib/components/ui/tooltip';
+  import {
+    UnfoldVertical,
+    FoldVertical,
+    FolderTree,
+    Landmark,
+    PiggyBank,
+    CreditCard,
+    Download
+  } from '@lucide/svelte';
   import { Button } from '$lib/components/ui/button';
-  import { Skeleton } from '$lib/components/ui/skeleton';
-  import { ChevronRight, Search } from '@lucide/svelte';
-  import { resolve } from '$app/paths';
+  import { toast } from '$lib/components/ui/sonner';
+  import { downloadCsv } from '$lib/utils/csv';
   import { dbSession } from '$lib/stores/db.svelte';
-  import { fetchAccounts } from '$lib/accounts.remote';
-  import { goto } from '$app/navigation';
-  import { formatNumber as fmtCount, formatCurrency as fmtCurrency } from '$lib/format.svelte';
-  import { TYPE_CATEGORY } from '$lib/account-types';
-  import type { AccountsResult, AccountNode } from '$lib/server/accounts';
+  import { fetchAccounts } from '$lib/tauri';
+  import type { AccountNode } from '$lib/tauri';
+  import {
+    CATEGORY_ORDER,
+    TYPE_CATEGORY,
+    nodeCategory
+  } from '$lib/features/accounts/account-types';
+  import { useTreeExpand } from '$lib/hooks/use-tree-expand.svelte';
+  import { useDebouncedSearch } from '$lib/hooks/use-debounced-search.svelte';
+  import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
+  import ErrorCard from '$lib/components/shared/error-card.svelte';
+  import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
+  import ImportPrompt from '$lib/components/shared/import-prompt.svelte';
+  import EmptyState from '$lib/components/shared/empty-state.svelte';
+  import PageHeader from '$lib/components/layout/page-header.svelte';
+  import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
+  import KpiCard from '$lib/components/shared/kpi-card.svelte';
+  import KpiCardRow from '$lib/components/shared/kpi-card-row.svelte';
+  import { clampZero, formatSessionCurrency as fmt } from '$lib/utils/format.svelte';
+  import { errMsg } from '$lib/utils/error';
+  import AccountsTreeTable from '$lib/features/accounts/accounts-tree-table.svelte';
+  import BalanceTreemap from '$lib/features/accounts/balance-treemap.svelte';
 
-  function balanceColor(balance: number, category: string): string {
-    if (category === 'LIABILITY' || category === 'EQUITY') {
-      return balance >= 0
-        ? 'text-amber-600 dark:text-amber-400'
-        : 'text-emerald-600 dark:text-emerald-400';
-    }
-    if (category === 'INCOME') return 'text-emerald-600 dark:text-emerald-400';
-    if (category === 'EXPENSE') return 'text-red-600 dark:text-red-400';
-    return balance >= 0
-      ? 'text-emerald-600 dark:text-emerald-400'
-      : 'text-red-600 dark:text-red-400';
-  }
+  const CATEGORIES = ['All', ...CATEGORY_ORDER];
 
-  function nodeCategory(node: AccountNode): string {
+  const CATEGORY_LABEL: Record<string, string> = {
+    All: 'All',
+    ASSET: 'Assets',
+    LIABILITY: 'Liabilities',
+    EQUITY: 'Equity',
+    INCOME: 'Income',
+    EXPENSE: 'Expenses'
+  };
+
+  type Category = 'ASSET' | 'EQUITY' | 'LIABILITY';
+
+  const KPI_CATEGORIES: Category[] = ['ASSET', 'EQUITY', 'LIABILITY'];
+
+  const KPI_ICONS: Record<Category, typeof Landmark> = {
+    ASSET: Landmark,
+    EQUITY: PiggyBank,
+    LIABILITY: CreditCard
+  };
+
+  const KPI_ICON_COLORS: Record<Category, string> = {
+    ASSET: 'text-success',
+    EQUITY: 'text-warning',
+    LIABILITY: 'text-destructive'
+  };
+
+  const KPI_VALUE_COLORS: Record<Category, string> = {
+    ASSET: 'text-success',
+    EQUITY: 'text-warning',
+    LIABILITY: 'text-destructive'
+  };
+
+  const res = useAsyncData({
+    enabled: () => !!dbSession.value,
+    fetch: fetchAccounts,
+    label: 'Failed to load accounts'
+  });
+
+  let data = $derived(res.data);
+  let loading = $derived(res.loading);
+  let error = $derived(res.error);
+
+  let searchInput = $state('');
+  let category = $state('All');
+
+  let search = useDebouncedSearch(
+    () => searchInput,
+    (v) => v.trim().toLowerCase()
+  );
+
+  function categoryOf(node: AccountNode): string {
     return TYPE_CATEGORY[node.accountType] ?? node.accountType;
   }
 
-  let data = $state<AccountsResult | null>(null);
-  let loading = $state(true);
-  let error = $state<string | null>(null);
+  function matchesQuery(node: AccountNode, q: string): boolean {
+    return [node.name, node.description, node.code].some((s) => s?.toLowerCase().includes(q));
+  }
 
-  let expanded = $state<string[]>([]);
-  let expandedGroups = $state<string[]>([]);
-  let searchQuery = $state('');
+  function filterQuery(nodes: AccountNode[], q: string): AccountNode[] {
+    const out: AccountNode[] = [];
+    for (const n of nodes) {
+      if (matchesQuery(n, q)) {
+        out.push(n);
+      } else {
+        const kids = filterQuery(n.children, q);
+        if (kids.length > 0) out.push({ ...n, children: kids });
+      }
+    }
+    return out;
+  }
+
+  function filterCategory(nodes: AccountNode[], cat: string): AccountNode[] {
+    if (cat === 'All') return nodes;
+    const out: AccountNode[] = [];
+    for (const n of nodes) {
+      if (categoryOf(n) === cat) {
+        out.push(n);
+      } else {
+        out.push(...filterCategory(n.children, cat));
+      }
+    }
+    return out;
+  }
+
+  let filteredTrees = $derived.by(() => {
+    let trees = data?.trees ?? [];
+    if (search.value) trees = filterQuery(trees, search.value);
+    trees = filterCategory(trees, category);
+    return trees;
+  });
+
+  let tree = useTreeExpand();
   let initialExpandDone = $state(false);
 
-  let allNodeGuids = $derived.by(() => {
-    const d = data;
-    if (!d) return [];
+  $effect(() => {
+    if (data && !initialExpandDone) {
+      // Expand everything on the first load of a session only; later
+      // refetches must keep the user's manual collapse choices.
+      tree.expandAll(parentGuids);
+      initialExpandDone = true;
+    }
+  });
+
+  $effect(() => {
+    if (!dbSession.value) {
+      initialExpandDone = false;
+    }
+  });
+
+  let parentGuids = $derived.by(() => {
     const guids: string[] = [];
     function walk(nodes: AccountNode[]) {
       for (const n of nodes) {
@@ -50,340 +155,189 @@
         walk(n.children);
       }
     }
-    walk(d.trees);
+    walk(filteredTrees);
     return guids;
   });
 
-  let hasExpandableNodes = $derived(allNodeGuids.length > 0);
-
-  function toggle(guid: string) {
-    if (expanded.includes(guid)) {
-      expanded = expanded.filter((g) => g !== guid);
-    } else {
-      expanded = [...expanded, guid];
-    }
-  }
-
-  function toggleGroup(type: string) {
-    if (expandedGroups.includes(type)) {
-      expandedGroups = expandedGroups.filter((g) => g !== type);
-    } else {
-      expandedGroups = [...expandedGroups, type];
-    }
-  }
-
-  function expandAll() {
-    expanded = [...allNodeGuids];
-  }
-
-  function collapseAll() {
-    expanded = [];
-  }
-
-  function fmt(n: number): string {
-    return fmtCurrency(n, dbSession.value?.summary.currency ?? 'EUR');
-  }
-
-  function flattenByType(
-    nodes: AccountNode[],
-    type: string,
-    depth = 0
-  ): { node: AccountNode; depth: number }[] {
-    const result: { node: AccountNode; depth: number }[] = [];
-    for (const n of nodes) {
-      if (n.accountType === type || depth > 0) {
-        result.push({ node: n, depth });
-        if (n.children.length > 0 && (expanded.includes(n.guid) || searchQuery)) {
-          result.push(...flattenByType(n.children, type, depth + 1));
-        }
-      } else {
-        result.push(...flattenByType(n.children, type, depth));
-      }
-    }
-    return result;
-  }
-
-  type TableRow =
-    | { kind: 'group'; type: string; count: number; totalBalance: number }
-    | { kind: 'account'; node: AccountNode; depth: number };
-
   let rows = $derived.by(() => {
-    const d = data;
-    if (!d) return [];
-    const result: TableRow[] = [];
-    const isSearching = !!searchQuery;
-    const q = searchQuery.toLowerCase();
-
-    for (const type of Object.keys(d.byType)) {
-      const info = d.byType[type];
-      const accounts = flattenByType(d.trees, type);
-
-      const filtered = isSearching
-        ? accounts.filter(
-            ({ node }) =>
-              node.name.toLowerCase().includes(q) ||
-              (node.code && node.code.toLowerCase().includes(q))
-          )
-        : accounts;
-
-      if (filtered.length === 0 && !isSearching) continue;
-
-      if (!isSearching) {
-        result.push({ kind: 'group', type, count: info.count, totalBalance: info.totalBalance });
-      }
-
-      if (isSearching || expandedGroups.includes(type)) {
-        for (const { node, depth } of filtered) {
-          if (depth > 0 || isSearching) {
-            result.push({ kind: 'account', node, depth });
-          }
+    const result: { node: AccountNode; depth: number }[] = [];
+    function walk(nodes: AccountNode[], depth: number) {
+      for (const n of nodes) {
+        result.push({ node: n, depth });
+        if (n.children.length > 0 && (search.value || depth === 0 || tree.expanded.has(n.guid))) {
+          walk(n.children, depth + 1);
         }
       }
     }
+    walk(filteredTrees, 0);
     return result;
   });
 
-  let typeOrder = $derived(Object.keys(data?.byType ?? {}));
+  function categoryTotal(cat: Category): number {
+    return data?.byType[cat]?.totalBalance ?? 0;
+  }
 
-  $effect(() => {
-    if (!dbSession.value) {
-      data = null;
-      loading = false;
-      error = null;
-      return;
+  let kpiCards = $derived.by(() => {
+    if (!data) return [];
+    return KPI_CATEGORIES.map((cat) => ({
+      key: cat,
+      title: CATEGORY_LABEL[cat],
+      value: categoryTotal(cat),
+      icon: KPI_ICONS[cat],
+      iconClass: KPI_ICON_COLORS[cat],
+      valueClass: KPI_VALUE_COLORS[cat]
+    }));
+  });
+
+  function handleExportCsv() {
+    if (rows.length === 0) return;
+    try {
+      const headers = ['Category', 'Account', 'Type', 'Txn Count', 'Depth', 'Balance'];
+      const csvRows = rows.map(({ node, depth }) => [
+        nodeCategory(node.accountType),
+        node.description || node.name,
+        node.accountType,
+        String(node.txCount),
+        String(depth),
+        String(node.balance)
+      ]);
+      downloadCsv('accounts.csv', headers, csvRows);
+    } catch (e: unknown) {
+      toast.error(errMsg(e, 'Failed to export accounts'));
     }
-    loading = true;
-    error = null;
-    data = null;
+  }
 
-    let cancelled = false;
-
-    fetchAccounts({})
-      .then((result) => {
-        if (cancelled) return;
-        data = result;
-        if (!initialExpandDone) {
-          expanded = [...allNodeGuids];
-          expandedGroups = [...typeOrder];
-          initialExpandDone = true;
-        }
-        loading = false;
-      })
-      .catch((e: unknown) => {
-        if (cancelled) return;
-        error = e instanceof Error ? e.message : 'Failed to load accounts';
-        loading = false;
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  });
-
-  $effect(() => {
-    if (!dbSession.value) goto('/');
-  });
+  function displayValue(n: number): string {
+    return fmt(clampZero(n));
+  }
 </script>
 
 <svelte:head>
-  <title>Accounts - Spendo</title>
+  <title>Accounts — Spendo</title>
+  <meta name="description" content="Chart of accounts." />
 </svelte:head>
 
-<div class="flex flex-col gap-6">
-  <div class="flex flex-col gap-1">
-    <h2 class="text-3xl font-bold tracking-tight">Accounts</h2>
-    {#if data}
-      <p class="text-sm text-muted-foreground">
-        {fmtCount(data.totalAccounts)} account{data.totalAccounts === 1 ? '' : 's'}
-      </p>
-    {:else if loading}
-      <Skeleton class="h-4 w-32" />
+{#if dbSession.value}
+  <div class="flex flex-col gap-6">
+    <PageHeader
+      title="Accounts"
+      description={data
+        ? `Chart of accounts · ${data.totalAccounts} account${data.totalAccounts === 1 ? '' : 's'}`
+        : ''}
+    >
+      <Button variant="outline" onclick={handleExportCsv} disabled={rows.length === 0}>
+        <Download aria-hidden="true" class="size-3" />
+        Export
+      </Button>
+    </PageHeader>
+
+    {#if loading && !data}
+      <KpiCardRow />
+
+      <TableSkeleton cols={4} />
+    {:else if error}
+      <ErrorCard message={error} onRetry={() => res.reload()} />
+    {:else if data}
+      <!-- Summary cards by account category -->
+      <DimWrapper active={loading} class="grid grid-cols-1 gap-6 sm:grid-cols-3">
+        {#each kpiCards as card (card.key)}
+          <KpiCard title={card.title} value={displayValue(card.value)} valueClass={card.valueClass}>
+            {#snippet icon()}
+              {@const Icon = card.icon}
+              <Icon aria-hidden="true" class="size-4 {card.iconClass}" />
+            {/snippet}
+          </KpiCard>
+        {/each}
+      </DimWrapper>
+
+      <!-- Balance composition treemap -->
+      <BalanceTreemap data={data?.trees ?? []} {loading} />
+
+      <div class="flex flex-wrap items-center gap-2">
+        <SearchInput
+          id="accounts-search"
+          label="Search accounts"
+          placeholder="Search name, description, or code..."
+          bind:value={searchInput}
+          class="grow basis-48"
+        />
+
+        <div class="flex gap-1">
+          {#each CATEGORIES as cat (cat)}
+            <button
+              type="button"
+              class="rounded-md px-2 py-1 text-xs font-medium transition-colors {category === cat
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:bg-muted'}"
+              aria-pressed={category === cat}
+              onclick={() => (category = cat)}
+            >
+              {CATEGORY_LABEL[cat]}
+            </button>
+          {/each}
+        </div>
+
+        <div class="flex gap-1">
+          <Tooltip.Root>
+            <Tooltip.Trigger>
+              {#snippet child({ props })}
+                <button
+                  type="button"
+                  {...props}
+                  class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  aria-label="Expand all"
+                  disabled={parentGuids.length === 0}
+                  onclick={() => tree.expandAll(parentGuids)}
+                >
+                  <UnfoldVertical class="size-4" />
+                </button>
+              {/snippet}
+            </Tooltip.Trigger>
+            <Tooltip.Content>
+              <p>Expand all</p>
+            </Tooltip.Content>
+          </Tooltip.Root>
+          <Tooltip.Root>
+            <Tooltip.Trigger>
+              {#snippet child({ props })}
+                <button
+                  type="button"
+                  {...props}
+                  class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  aria-label="Collapse all"
+                  onclick={() => tree.collapseAll()}
+                >
+                  <FoldVertical class="size-4" />
+                </button>
+              {/snippet}
+            </Tooltip.Trigger>
+            <Tooltip.Content>
+              <p>Collapse all</p>
+            </Tooltip.Content>
+          </Tooltip.Root>
+        </div>
+      </div>
+
+      {#if rows.length === 0}
+        <EmptyState
+          card
+          title="No accounts found"
+          description="No accounts match the current filters."
+        >
+          {#snippet icon()}
+            <FolderTree aria-hidden="true" class="text-muted-foreground" />
+          {/snippet}
+        </EmptyState>
+      {:else}
+        <DimWrapper active={loading}>
+          <AccountsTreeTable {rows} {tree} searchActive={!!search.value} />
+        </DimWrapper>
+      {/if}
     {/if}
   </div>
-
-  {#if loading}
-    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      {#each Array(4) as _, i (i)}
-        <Card.Root>
-          <Card.Header>
-            <div class="flex items-center gap-2">
-              <Skeleton class="h-4 w-20" />
-              <Skeleton class="h-5 w-8 rounded-full" />
-            </div>
-          </Card.Header>
-          <Card.Content>
-            <Skeleton class="h-7 w-28" />
-          </Card.Content>
-        </Card.Root>
-      {/each}
-    </div>
-
-    <Card.Root class="pt-0">
-      <Card.Content class="p-0">
-        <Table.Root class="border-collapse">
-          <Table.Header>
-            <Table.Row>
-              <Table.Head class="px-4 py-3 text-muted-foreground">Account</Table.Head>
-              <Table.Head class="px-4 py-3 text-right text-muted-foreground">Balance</Table.Head>
-            </Table.Row>
-          </Table.Header>
-          <Table.Body>
-            {#each Array(8) as _, i (i)}
-              <Table.Row>
-                <Table.Cell><Skeleton class="h-4 w-48" /></Table.Cell>
-                <Table.Cell class="text-right"><Skeleton class="ml-auto h-4 w-20" /></Table.Cell>
-              </Table.Row>
-            {/each}
-          </Table.Body>
-        </Table.Root>
-      </Card.Content>
-    </Card.Root>
-  {:else if error}
-    <Card.Root class="border-destructive">
-      <Card.Content class="py-6 text-center text-sm text-destructive">
-        {error}
-      </Card.Content>
-    </Card.Root>
-  {:else if data}
-    <!-- Search and controls -->
-    <div class="flex items-center gap-2">
-      <div class="relative grow">
-        <Search
-          aria-hidden="true"
-          class="text-muted-foreground pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2"
-        />
-        <Input class="pl-8" placeholder="Search accounts..." bind:value={searchQuery} />
-      </div>
-      {#if hasExpandableNodes && !searchQuery}
-        <Button
-          variant="outline"
-          onclick={expandAll}
-          disabled={expanded.length === allNodeGuids.length}
-        >
-          Expand all
-        </Button>
-        <Button variant="outline" onclick={collapseAll} disabled={expanded.length === 0}>
-          Collapse all
-        </Button>
-      {/if}
-    </div>
-
-    <!-- Summary cards by type -->
-    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      {#each Object.entries(data.byType) as [type, info] (type)}
-        <Card.Root>
-          <Card.Header>
-            <div class="flex items-center gap-2">
-              <Card.Title>{type}</Card.Title>
-              <Badge variant="secondary">{fmtCount(info.count)}</Badge>
-            </div>
-          </Card.Header>
-          <Card.Content>
-            <p class="text-2xl font-bold tabular-nums {balanceColor(info.totalBalance, type)}">
-              {info.totalBalance >= 0 ? '+' : ''}{fmt(info.totalBalance)}
-            </p>
-          </Card.Content>
-        </Card.Root>
-      {/each}
-    </div>
-
-    <!-- Treetable -->
-    <Card.Root class="pt-0">
-      <Card.Content class="p-0">
-        <Table.Root class="border-collapse">
-          <Table.Header>
-            <Table.Row class="bg-muted/50">
-              <Table.Head class="w-full px-4 py-3 text-muted-foreground">Account</Table.Head>
-              <Table.Head class="px-4 py-3 text-right text-muted-foreground">Balance</Table.Head>
-            </Table.Row>
-          </Table.Header>
-          <Table.Body>
-            {#each rows as row (row.kind === 'group' ? row.type : row.node.guid)}
-              {#if row.kind === 'group'}
-                <Table.Row class="bg-muted/30 cursor-pointer" onclick={() => toggleGroup(row.type)}>
-                  <Table.Cell colspan={2} class="p-0">
-                    <div class="flex items-center gap-2 px-3 py-2">
-                      <ChevronRight
-                        aria-hidden="true"
-                        class="size-4 text-muted-foreground transition-transform {expandedGroups.includes(
-                          row.type
-                        )
-                          ? 'rotate-90'
-                          : ''}"
-                      />
-                      <span class="text-sm font-semibold">{row.type}</span>
-                      <Badge variant="secondary" class="text-[10px]">{fmtCount(row.count)}</Badge>
-                      <span
-                        class="ml-auto tabular-nums text-sm font-medium {balanceColor(
-                          row.totalBalance,
-                          row.type
-                        )}"
-                      >
-                        {row.totalBalance >= 0 ? '+' : ''}{fmt(row.totalBalance)}
-                      </span>
-                    </div>
-                  </Table.Cell>
-                </Table.Row>
-              {:else}
-                <Table.Row class="hover:bg-muted/50">
-                  <Table.Cell class="p-0">
-                    <div
-                      class="flex items-center gap-1 px-3 py-2"
-                      style="padding-left: {0.75 + row.depth * 1.25}rem"
-                    >
-                      {#if row.node.children.length > 0}
-                        <button
-                          type="button"
-                          class="flex size-4 shrink-0 items-center justify-center rounded hover:bg-muted-foreground/10"
-                          onclick={() => toggle(row.node.guid)}
-                        >
-                          <ChevronRight
-                            aria-hidden="true"
-                            class="size-3 text-muted-foreground transition-transform {expanded.includes(
-                              row.node.guid
-                            )
-                              ? 'rotate-90'
-                              : ''}"
-                          />
-                        </button>
-                      {:else}
-                        <div class="size-4 shrink-0"></div>
-                      {/if}
-                      <a
-                        href={resolve(`/accounts/${row.node.guid}`)}
-                        class="min-w-0 truncate text-sm font-medium hover:underline"
-                      >
-                        {row.node.name}
-                      </a>
-                      {#if row.node.code}
-                        <span class="hidden sm:inline text-xs text-muted-foreground"
-                          >{row.node.code}</span
-                        >
-                      {/if}
-                      {#if row.node.placeholder}
-                        <Badge
-                          variant="outline"
-                          class="shrink-0 text-[10px] leading-none text-muted-foreground"
-                        >
-                          PL
-                        </Badge>
-                      {/if}
-                    </div>
-                  </Table.Cell>
-                  <Table.Cell
-                    class="text-right tabular-nums text-sm {balanceColor(
-                      row.node.balance,
-                      nodeCategory(row.node)
-                    )}"
-                  >
-                    {fmt(row.node.balance)}
-                  </Table.Cell>
-                </Table.Row>
-              {/if}
-            {/each}
-          </Table.Body>
-        </Table.Root>
-      </Card.Content>
-    </Card.Root>
-  {/if}
-</div>
+{:else}
+  <div class="flex flex-col gap-6">
+    <PageHeader title="Accounts" description="Chart of accounts" />
+    <ImportPrompt />
+  </div>
+{/if}

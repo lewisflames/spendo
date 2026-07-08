@@ -1,26 +1,26 @@
 import { browser } from '$app/environment';
 
 export type Locale = 'en-US' | 'en-GB' | 'de-DE' | 'fr-FR' | 'ja-JP' | 'pt-BR' | 'es-ES';
-export type DashboardRange = '1M' | '3M' | '6M' | '1Y' | 'All';
-export type FirstDayOfWeek = 0 | 1;
+export type Theme = 'light' | 'dark' | 'system';
+
 export interface AppSettings {
   locale: Locale;
-  theme: 'light' | 'dark';
+  theme: Theme;
   pageSize: number;
-  dashboardRange: DashboardRange;
-  firstDayOfWeek: FirstDayOfWeek;
-  priceSymbolOverrides: Record<string, string>;
+  sidebarCollapsed: boolean;
+  reduceMotion: boolean;
 }
 
 const STORAGE_KEY = 'spendo-settings';
 
+export const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
+
 const DEFAULT_SETTINGS: AppSettings = {
   locale: 'en-US',
-  theme: 'light',
-  pageSize: 50,
-  dashboardRange: '1Y',
-  firstDayOfWeek: 1,
-  priceSymbolOverrides: {}
+  theme: 'system',
+  pageSize: 25,
+  sidebarCollapsed: false,
+  reduceMotion: false
 };
 
 function loadSettings(): AppSettings {
@@ -45,8 +45,14 @@ export function saveSettings(partial: Partial<AppSettings>) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(appSettings.value));
 }
 
+/** Restore every preference to its default (does not touch imported data). */
 export function resetSettings() {
-  appSettings.value = { ...DEFAULT_SETTINGS };
-  if (!browser) return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(appSettings.value));
+  saveSettings({ ...DEFAULT_SETTINGS });
+}
+
+/** Resolve the effective light/dark for the current OS preference. */
+export function resolveTheme(theme: Theme): 'light' | 'dark' {
+  if (theme !== 'system') return theme;
+  if (!browser) return 'light';
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }

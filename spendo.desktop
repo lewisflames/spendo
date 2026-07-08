@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Spendo
+Comment=GnuCash financial data importer and explorer
+Exec=spendo
+Icon=spendo
+Categories=Finance;Office;
+Terminal=false

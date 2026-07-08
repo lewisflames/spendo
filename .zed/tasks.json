@@ -1,0 +1,28 @@
+[
+  {
+    "label": "tauri dev",
+    "command": "bun run tauri:dev",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "always",
+    "reveal_target": "center",
+    "hide": "on_success",
+    "shell": "system",
+    "show_summary": true,
+    "show_command": true,
+    "save": "none"
+  },
+  {
+    "label": "tauri build",
+    "command": "bun run tauri:build",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "always",
+    "reveal_target": "center",
+    "hide": "never",
+    "shell": "system",
+    "show_summary": true,
+    "show_command": true,
+    "save": "none"
+  }
+]

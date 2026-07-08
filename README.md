@@ -1,33 +1,33 @@
-# spendo-app
+# spendo
 
-SvelteKit + Svelte 5 app. Import and explore your GnuCash financial data.
+Tauri v2 desktop app (Rust backend) + SvelteKit frontend. Import and explore your GnuCash financial data.
 
 - **UI**: shadcn-svelte (Nova), Tailwind CSS v4, Lucide icons
-- **Backend**: adapter-node, better-sqlite3 (persistent app database)
+- **Backend**: Rust (`rusqlite`), persistent SQLite database in Tauri app data directory
 - **Tooling**: Bun, TypeScript strict mode, Prettier + ESLint
 
 ## Commands
 
-| Action        | Command           |
-| ------------- | ----------------- |
-| Dev server    | `bun run dev`     |
-| Build         | `bun run build`   |
-| Preview build | `bun run preview` |
-| Type-check    | `bun run check`   |
-| Lint          | `bun run lint`    |
-| Format        | `bun run format`  |
+| Action        | Command                             |
+| ------------- | ----------------------------------- |
+| Dev server    | `bun run dev`                       |
+| Build         | `bun run build`                     |
+| Preview build | `bun run preview`                   |
+| Prepare       | `bun run prepare` (svelte-kit sync) |
+| Type-check    | `bun run check`                     |
+| Lint          | `bun run lint`                      |
+| Format        | `bun run format`                    |
+| Tauri dev     | `bun run tauri:dev`                 |
+| Tauri build   | `bun run tauri:build`               |
 
 ## Architecture
 
-The app maintains its own SQLite database at `data/spendo.db`. Upload a `.gnucash` file (GnuCash SQLite format, max 100 MB) on the home page to import and merge your financial data. Multiple imports accumulate — duplicates are skipped by GUID.
+The app maintains its own SQLite database in Tauri's app data directory (`spendo.db`). Upload a `.gnucash` file (GnuCash SQLite format) via the file dialog on the home page to import and merge your financial data. Multiple imports accumulate and duplicates are skipped by GUID.
 
-Server functions use SvelteKit's `remoteFunctions` (`$app/server` form/query helpers) instead of `+server.ts` / `+page.server.ts`. See `src/lib/db.remote.ts`.
+All backend calls go through `@tauri-apps/api/core` `invoke()` via `src/lib/tauri.ts`. The Rust backend lives in `src-tauri/src/` and uses `rusqlite` with Tauri's `State<Mutex<Connection>>`.
 
-All routes are client-rendered — no SSR data fetching.
+The SvelteKit frontend uses `@sveltejs/adapter-static` (SPA, no SSR).
 
-## Code style
+## License
 
-- **Svelte 5 runes**: `$props()`, `$derived()`, `$state()` — no `export let`, use `onclick` not `on:click`, `{@render children()}`
-- **Prettier**: tabs, single quotes, no trailing commas, print width 100
-- **Tailwind v4**: `@import 'tailwindcss'` (Vite plugin, no PostCSS)
-- **TypeScript**: strict mode, `moduleResolution: "bundler"`
+MIT. See [LICENSE.md](LICENSE.md). Copyright © 2026 Lewis Flames.

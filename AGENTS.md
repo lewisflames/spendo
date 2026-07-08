@@ -1,19 +1,22 @@
-# spendo-app
+# spendo
 
-SvelteKit + Svelte 5 (runes mode). Tailwind v4, adapter-node.
+SvelteKit + Svelte 5 (runes mode). Tailwind v4. Tauri v2 desktop app.
 
-App has its own persistent SQLite DB (`data/spendo.db`). GnuCash `.gnucash` files are imported/merged into it via `INSERT OR IGNORE` (GUID dedup). No ephemeral sessions — data persists across reloads.
+GnuCash financial data importer/explorer. Rust backend (`rusqlite`) + static SvelteKit frontend (`@sveltejs/adapter-static`).
 
 ## Commands
 
-| Action     | Command                                        |
-| ---------- | ---------------------------------------------- |
-| Dev server | `bun run dev`                                  |
-| Build      | `bun run build`                                |
-| Preview    | `bun run preview`                              |
-| Type-check | `bun run check` (runs `svelte-kit sync` first) |
-| Lint       | `bun run lint` (prettier --check + eslint)     |
-| Format     | `bun run format` (prettier --write)            |
+| Action      | Command                                        |
+| ----------- | ---------------------------------------------- |
+| Dev server  | `bun run dev`                                  |
+| Build       | `bun run build`                                |
+| Preview     | `bun run preview`                              |
+| Prepare     | `bun run prepare` (svelte-kit sync)            |
+| Type-check  | `bun run check` (runs `svelte-kit sync` first) |
+| Lint        | `bun run lint` (prettier --check + eslint)     |
+| Format      | `bun run format` (prettier --write)            |
+| Tauri dev   | `bun run tauri:dev`                            |
+| Tauri build | `bun run tauri:build`                          |
 
 No test framework configured.
 
@@ -21,44 +24,41 @@ No test framework configured.
 
 - **Svelte 5 runes**: `$props()`, `$derived()`, `$state()` — no `export let` or `on:click`; use `onclick`, `{@render children()}`
 - **Prettier**: tabs, single quotes, no trailing commas, print width 100. Tailwind class sorting via `prettier-plugin-tailwindcss`
-- **Tailwind v4**: `@import 'tailwindcss'` (Vite plugin, no PostCSS)
+- **Tailwind v4**: `@import 'tailwindcss'` (Vite plugin, no PostCSS). Stylesheet at `src/app.css`.
 - **TypeScript**: strict mode, `rewriteRelativeImportExtensions` enabled, `moduleResolution: "bundler"`
-- **Icons**: Lucide (`@lucide/svelte`)
 - **`compilerOptions.experimental.async: true`** — top-level `await` allowed in components
+- **Icons**: Lucide (`@lucide/svelte`)
+- **Rust backend**: `serde` with `#[serde(rename_all = "camelCase")]` on all response structs
 
 ## Architecture
 
-- **No `+server.ts` / `+page.server.ts`**. All server functions via SvelteKit `remoteFunctions`: `form` (file upload in `$lib/db.remote.ts`) and `query` (RPC reads in `$lib/*.remote.ts`).
-- **Server-only code** in `$lib/server/`. Each function opens `better-sqlite3` via `getAppDbPath()` (not a token), queries, closes in `finally`.
-- **App DB**: `data/spendo.db` (configurable via `DATA_DIR` env var). Schema created on first use. Tables mirror GnuCash columns for `commodities`, `accounts`, `transactions`, `splits`, `prices` plus `import_log` for tracking imports.
-- **Price cache**: in-memory map keyed by fixed `'app'` key (not token-based). Cleared on DB reset.
-- **Routes**: `/` (import or overview), `/accounts`, `/accounts/[guid]`, `/dashboard`, `/transactions`, `/prices`, `/settings`, `/about`, `/license`. All SPA — no SSR data fetching.
+- **Tauri v2** desktop app. Frontend is static SvelteKit (adapter-static, SPA, no SSR). Backend is Rust in `src-tauri/src/`.
+- **All backend calls** go through `@tauri-apps/api/core` `invoke()` via `$lib/tauri.ts`. No `+server.ts` / `+page.server.ts`.
+- **Rust modules** (`src-tauri/src/`): `db`, `accounts`, `account_detail`, `transactions`, `balance`, `prices`, `import`, `home`, `reports`, `budgets`, `portfolio`, `settings`, `utils`. Cargo crate: `spendo_app_lib`.
+- **DB**: SQLite via `rusqlite`. Connection held in Tauri `State<Mutex<Connection>>`, initialized once at startup. DB file lives in Tauri's `app_data_dir` (`spendo.db`). Schema created on first use in `db::init_db`.
+- **Routes**: `/`, `/accounts`, `/accounts/[guid]`, `/balance`, `/budgets`, `/pnl`, `/portfolio`, `/transactions`, `/transactions/[id]`, `/prices`, `/settings`, `/about`, `/license`.
+- **Frontend layout**: routes contain only route files (`+page.svelte` etc.). Page-specific components/types live in `$lib/features/<domain>/` (`home`, `accounts`, `budgets`, `pnl`, `portfolio`, `transactions`). Domain utilities in `$lib/utils/` (`csv`, `export`, `error`, `format.svelte.ts`, `date-utils.svelte.ts`).
 
 ## Data / imports
 
-- Accepts **only `.gnucash` files** (GnuCash SQLite format). Max 100 MB.
-- Upload via `UploadDialog` component or inline "Import" button on homepage.
-- `importGnucash()` in `$lib/server/import-gnucash.ts` reads source file, merges into app DB. Uploaded temp files deleted after import.
-- `clearAppDb()` in `$lib/server/app-db.ts` deletes all rows (keeps schema). Exposed via `clearAppDb` remote in Settings.
-- Homepage fetches `fetchHomeData` (`db.remote.ts`) on mount to restore session across reloads. Displays last import filename/date + account/transaction counts.
-- `*.db` and `*.gnucash` gitignored.
+- Accepts **only `.gnucash` files** (GnuCash SQLite format). Users pick files via Tauri file dialog (`@tauri-apps/plugin-dialog`).
+- Import in `src-tauri/src/import.rs`: reads source DB tables (commodities, accounts, transactions, splits, prices), merges into app DB via GUID-keyed upserts (`ON CONFLICT … DO UPDATE`); source file is opened strictly read-only.
+- `clear_app_db` in `settings.rs` deletes all rows (keeps schema). Frontend calls via `clearAppDb()` in `$lib/tauri.ts`. Exposed on Settings page.
+- Price data: live prices fetched via `reqwest` + async tokio runtime. Latest price per commodity queried from DB via `get_cached_prices_map()`.
 
 ## shadcn-svelte (Nova)
 
-- Components under `$lib/components/ui/`. Style is `nova` (see `components.json`).
+- Components under `$lib/components/ui/` (shadcn CLI-managed; alias in `components.json`). Hand-written components in `$lib/components/layout/` (app chrome) and `$lib/components/shared/` (reusable app-wide).
 - Uses `tailwind-variants` (`tv`), `bits-ui` for headless primitives.
-- `$lib/utils.ts`: `cn()` (clsx + tailwind-merge).
-- CSS variables in `src/routes/layout.css` (not `src/app.css`).
+- `$lib/utils.ts`: `cn()` (clsx + tailwind-merge). Domain utilities live in `$lib/utils/`.
+- CSS variables in `src/app.css`.
 
-## Svelte MCP
+## Notables
 
-Wired in `.opencode/opencode.json` (plugin `@sveltejs/opencode`). Use for docs lookups and code validation.
-
-## Build artifacts
-
-- Output goes to `/build`
-- Generated `.svelte-kit/` is gitignored (regenerated via `bun run prepare` / `svelte-kit sync`)
-
-## Desktop chrome
-
-`app-region: drag` title bar with min/max/close buttons — front-end only, no Tauri/Electron.
+- **Frameless window**: `decorations: false` in Tauri config. Custom `<TitleBar />` component handles drag.
+- **Theme toggle**: `Ctrl+Shift+T` toggles light/dark. Persisted in `localStorage` via `$app/environment` `browser` guard.
+- **Store convention**: `.svelte.ts` modules using `$state()` wrapped in `{ value }` (e.g., `export const x = $state({ value: ... })`).
+- **Sample data**: `data/test.gnucash` exists but is gitignored (`/data` in `.gitignore`).
+- **Charting/date deps**: `layerchart` (charts), `tw-animate-css` (animations), `@internationalized/date` (date utils).
+- **Build output**: `/build`, `.svelte-kit/` gitignored (regenerated via `bun run prepare`).
+- **Svelte MCP**: Wired via `@sveltejs/opencode` plugin in `.opencode/opencode.json`.
