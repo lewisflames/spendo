@@ -1,30 +1,26 @@
 import { useSidebar } from './context.svelte.js';
 import Content from './sidebar-content.svelte';
 import Footer from './sidebar-footer.svelte';
-import GroupContent from './sidebar-group-content.svelte';
-import GroupLabel from './sidebar-group-label.svelte';
 import Group from './sidebar-group.svelte';
-import Header from './sidebar-header.svelte';
+import GroupContent from './sidebar-group-content.svelte';
+import Inset from './sidebar-inset.svelte';
+import Menu from './sidebar-menu.svelte';
 import MenuButton from './sidebar-menu-button.svelte';
 import MenuItem from './sidebar-menu-item.svelte';
-import Menu from './sidebar-menu.svelte';
 import Provider from './sidebar-provider.svelte';
-import Rail from './sidebar-rail.svelte';
-import Trigger from './sidebar-trigger.svelte';
 import Root from './sidebar.svelte';
+import Trigger from './sidebar-trigger.svelte';
 
 export {
   Content,
   Footer,
   Group,
   GroupContent,
-  GroupLabel,
-  Header,
+  Inset,
   Menu,
   MenuButton,
   MenuItem,
   Provider,
-  Rail,
   Root,
   Trigger,
   //
@@ -33,13 +29,11 @@ export {
   Footer as SidebarFooter,
   Group as SidebarGroup,
   GroupContent as SidebarGroupContent,
-  GroupLabel as SidebarGroupLabel,
-  Header as SidebarHeader,
+  Inset as SidebarInset,
   Menu as SidebarMenu,
   MenuButton as SidebarMenuButton,
   MenuItem as SidebarMenuItem,
   Provider as SidebarProvider,
-  Rail as SidebarRail,
   Trigger as SidebarTrigger,
   useSidebar
 };

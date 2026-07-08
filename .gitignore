@@ -9,6 +9,8 @@ node_modules
 /build
 /data
 *.lock
+# Application crate: keep the lockfile in version control for reproducible builds
+!src-tauri/Cargo.lock
 
 # OS
 .DS_Store
@@ -27,3 +29,18 @@ vite.config.ts.timestamp-*
 # SQLite
 *.db
 *.gnucash
+
+# Makepkg
+*.pkg.tar.*
+pkg/
+
+# Tauri
+src-tauri/target/
+src-tauri/gen/
+
+# Generated from src-tauri/icons/app-icon.svg via `bun run generate-icons`
+src-tauri/icons/**/*.png
+src-tauri/icons/*.icns
+src-tauri/icons/*.ico
+src-tauri/icons/android/
+src-tauri/icons/ios/

@@ -1,11 +1,34 @@
-import type { GnucashSummary } from '$lib/server/gnucash-parser';
+import { fetchHomeData, type DataSummary } from '$lib/tauri';
 
 interface DbSession {
-  summary: GnucashSummary;
+  summary: DataSummary;
   filename: string | null;
 }
 
 export const dbSession = $state<{ value: DbSession | null }>({ value: null });
+
+let bootstrapped = false;
+let inflight: Promise<void> | null = null;
+
+/**
+ * Populate `dbSession` from the backend. Called by the layout once at startup
+ * so deep-linked pages (e.g. Settings) see real state, and by the home page
+ * with `force` to refresh on every visit.
+ */
+export function ensureDbSessionLoaded(force = false): Promise<void> {
+  if (!force && (bootstrapped || inflight)) {
+    return inflight ?? Promise.resolve();
+  }
+  bootstrapped = true;
+  const p = fetchHomeData().then((result) => {
+    dbSession.value =
+      result.hasData && result.summary ? { summary: result.summary, filename: null } : null;
+  });
+  inflight = p.finally(() => {
+    inflight = null;
+  });
+  return inflight;
+}
 
 export function clearSession() {
   dbSession.value = null;

@@ -1,0 +1,20 @@
+{
+  "identifier": "default",
+  "description": "Default capabilities for Spendo",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:default",
+    "core:window:allow-close",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-start-dragging",
+    "dialog:default",
+    "dialog:allow-open",
+    "dialog:allow-ask",
+    "dialog:allow-confirm",
+    "dialog:allow-message",
+    "opener:default",
+    "opener:allow-reveal-item-in-dir"
+  ]
+}

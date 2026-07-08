@@ -33,8 +33,15 @@ export default defineConfig(
   },
   {
     rules: {
-      'svelte/no-navigation-without-resolve': 'off',
+      'svelte/no-navigation-without-resolve': 'error',
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }]
+    }
+  },
+  {
+    // Generic pass-through component: callers supply concrete hrefs.
+    files: ['src/lib/components/ui/button/button.svelte'],
+    rules: {
+      'svelte/no-navigation-without-resolve': 'off'
     }
   }
 );

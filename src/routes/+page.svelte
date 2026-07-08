@@ -1,61 +1,54 @@
 <script lang="ts">
   import { Button } from '$lib/components/ui/button';
-  import * as Card from '$lib/components/ui/card';
-  import {
-    Wallet,
-    Upload,
-    LoaderCircle,
-    LayoutDashboard,
-    Database,
-    ArrowLeftRight,
-    TrendingUp,
-    AlertCircle
-  } from '@lucide/svelte';
-  import { dbSession } from '$lib/stores/db.svelte';
-  import { fetchHomeData, uploadDb } from '$lib/db.remote';
-  import { resolve } from '$app/paths';
-  import ImportHistory from '$lib/components/ImportHistory.svelte';
+  import { Wallet, RefreshCw, LoaderCircle, Calendar, Building2, Receipt } from '@lucide/svelte';
+  import { dbSession, ensureDbSessionLoaded } from '$lib/stores/db.svelte';
+  import { reimportLast } from '$lib/tauri';
+  import { formatDate } from '$lib/utils/format.svelte';
+  import ImportHistory from '$lib/features/home/import-history.svelte';
+  import ImportButton from '$lib/components/shared/import-button.svelte';
+  import PageHeader from '$lib/components/layout/page-header.svelte';
+  import KpiCard from '$lib/components/shared/kpi-card.svelte';
+  import { errMsg } from '$lib/utils/error';
+  import { toast } from '$lib/components/ui/sonner';
+  import ErrorCard from '$lib/components/shared/error-card.svelte';
 
-  // --- inline import ---
-  let importForm = $state<HTMLFormElement | null>(null);
-  let importInput = $state<HTMLInputElement | null>(null);
   let importing = $state(false);
+  let reimporting = $state(false);
   let importError = $state<string | null>(null);
 
   $effect(() => {
-    let cancelled = false;
-    fetchHomeData({}).then((result) => {
-      if (cancelled) return;
-      if (result.hasData && result.summary) {
-        dbSession.value = { summary: result.summary, filename: null };
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
+    // Refresh the shared session on every visit to the home page.
+    void ensureDbSessionLoaded(true);
   });
 
-  function handleImportFile() {
-    if (!importForm || !importInput?.files?.[0]) return;
+  async function handleReimport() {
     importError = null;
-    importing = true;
-    importForm.requestSubmit();
-  }
-
-  $effect(() => {
-    const r = uploadDb.result;
-    if (!r || !importing) return;
-    if (r.ok) {
+    reimporting = true;
+    try {
+      const result = await reimportLast();
       dbSession.value = {
-        summary: r.importResult.summary,
-        filename: importInput?.files?.[0]?.name ?? null
+        summary: result.summary,
+        filename: `${result.totalAccounts} accounts, ${result.totalTransactions} transactions`
       };
-      if (importInput) importInput.value = '';
-    } else {
-      importError = r.error;
+      if (
+        result.accountsAdded ||
+        result.transactionsAdded ||
+        result.splitsAdded ||
+        result.commoditiesAdded ||
+        result.accountsUpdated ||
+        result.transactionsUpdated ||
+        result.splitsUpdated
+      ) {
+        toast.success('Reimport complete');
+      } else {
+        toast.warning('No new data imported');
+      }
+    } catch (e: unknown) {
+      importError = errMsg(e, 'Reimport failed');
+    } finally {
+      reimporting = false;
     }
-    importing = false;
-  });
+  }
 </script>
 
 <svelte:head>
@@ -63,126 +56,85 @@
   <meta name="description" content="Spendo — expense tracking app" />
 </svelte:head>
 
-<section class="mt-16 flex flex-col gap-10">
-  <!-- Hero -->
-  <div class="flex flex-col items-center gap-6 text-center">
-    <div class="flex size-20 items-center justify-center rounded-2xl bg-primary/8">
-      <Wallet aria-hidden="true" class="size-10 text-primary" />
-    </div>
-    <div class="flex flex-col gap-2">
-      <h1 class="text-4xl font-bold tracking-tight sm:text-5xl">Spendo</h1>
-      <p class="text-lg text-muted-foreground">
-        Import your GnuCash file and start exploring your finances.
-      </p>
-    </div>
-  </div>
-
-  <!-- C: Quick-navigation cards -->
-  {#if dbSession.value}
-    <div class="mx-auto grid w-full max-w-4xl grid-cols-2 gap-4 lg:grid-cols-4">
-      <a
-        href={resolve('/dashboard')}
-        class="rounded-xl transition-colors hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-      >
-        <Card.Root size="sm" class="cursor-pointer">
-          <Card.Content class="flex items-center gap-3">
-            <div class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/8">
-              <LayoutDashboard aria-hidden="true" class="size-4 text-primary" />
-            </div>
-            <div class="flex min-w-0 flex-col gap-0.5">
-              <Card.Title class="text-sm">Dashboard</Card.Title>
-              <Card.Description>Financial overview</Card.Description>
-            </div>
-          </Card.Content>
-        </Card.Root>
-      </a>
-      <a
-        href={resolve('/accounts')}
-        class="rounded-xl transition-colors hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-      >
-        <Card.Root size="sm" class="cursor-pointer">
-          <Card.Content class="flex items-center gap-3">
-            <div class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/8">
-              <Database aria-hidden="true" class="size-4 text-primary" />
-            </div>
-            <div class="flex min-w-0 flex-col gap-0.5">
-              <Card.Title class="text-sm">Accounts</Card.Title>
-              <Card.Description>Chart of accounts</Card.Description>
-            </div>
-          </Card.Content>
-        </Card.Root>
-      </a>
-      <a
-        href={resolve('/transactions')}
-        class="rounded-xl transition-colors hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-      >
-        <Card.Root size="sm" class="cursor-pointer">
-          <Card.Content class="flex items-center gap-3">
-            <div class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/8">
-              <ArrowLeftRight aria-hidden="true" class="size-4 text-primary" />
-            </div>
-            <div class="flex min-w-0 flex-col gap-0.5">
-              <Card.Title class="text-sm">Transactions</Card.Title>
-              <Card.Description>All transactions</Card.Description>
-            </div>
-          </Card.Content>
-        </Card.Root>
-      </a>
-      <a
-        href={resolve('/prices')}
-        class="rounded-xl transition-colors hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-      >
-        <Card.Root size="sm" class="cursor-pointer">
-          <Card.Content class="flex items-center gap-3">
-            <div class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/8">
-              <TrendingUp aria-hidden="true" class="size-4 text-primary" />
-            </div>
-            <div class="flex min-w-0 flex-col gap-0.5">
-              <Card.Title class="text-sm">Prices</Card.Title>
-              <Card.Description>Commodity prices</Card.Description>
-            </div>
-          </Card.Content>
-        </Card.Root>
-      </a>
-    </div>
-  {/if}
-
-  <!-- Import History -->
-  <div class="mx-auto flex w-full max-w-4xl flex-col gap-4">
-    <form bind:this={importForm} {...uploadDb} enctype="multipart/form-data" class="hidden">
-      <input
-        bind:this={importInput}
-        type="file"
-        name="dbFile"
-        accept=".gnucash"
-        onchange={handleImportFile}
-        aria-label="Choose a GnuCash file to import"
+{#if dbSession.value}
+  <!-- ── Data dashboard ── -->
+  <section class="flex flex-col gap-6">
+    <PageHeader title="Overview" description="Financial overview and key metrics">
+      <ImportButton
+        onError={(msg) => (importError = msg)}
+        onStatusChange={(v) => (importing = v)}
       />
-    </form>
-    <div class="flex items-center justify-between">
-      <h3 class="text-lg font-semibold tracking-tight">Import History</h3>
-      <div class="flex items-center gap-2">
-        {#if importing}
-          <LoaderCircle aria-hidden="true" class="size-4 animate-spin text-primary" />
+      <Button variant="outline" onclick={handleReimport} disabled={importing || reimporting}>
+        {#if reimporting}
+          <LoaderCircle aria-hidden="true" class="size-3 animate-spin" />
         {:else}
-          <Button variant="outline" onclick={() => importInput?.click()}>
-            <Upload aria-hidden="true" class="size-3" />
-            Import
-          </Button>
+          <RefreshCw aria-hidden="true" class="size-3" />
         {/if}
+        Reimport
+      </Button>
+    </PageHeader>
+
+    <!-- Dashboard stat cards -->
+    <div class="grid gap-6 sm:grid-cols-3">
+      <KpiCard title="Accounts" value={String(dbSession.value.summary.totalAccounts)}>
+        {#snippet icon()}
+          <Building2 aria-hidden="true" class="size-4 text-muted-foreground" />
+        {/snippet}
+      </KpiCard>
+      <KpiCard title="Transactions" value={String(dbSession.value.summary.totalTransactions)}>
+        {#snippet icon()}
+          <Receipt aria-hidden="true" class="size-4 text-muted-foreground" />
+        {/snippet}
+      </KpiCard>
+      <KpiCard
+        title="Date Range"
+        value={`${
+          dbSession.value.summary.earliestDate
+            ? formatDate(dbSession.value.summary.earliestDate)
+            : '—'
+        } – ${
+          dbSession.value.summary.latestDate ? formatDate(dbSession.value.summary.latestDate) : '—'
+        }`}
+        valueClass="text-lg"
+      >
+        {#snippet icon()}
+          <Calendar aria-hidden="true" class="size-4 text-muted-foreground" />
+        {/snippet}
+      </KpiCard>
+    </div>
+
+    <!-- Import History -->
+    <div class="flex flex-col gap-6">
+      {#if importError}
+        <ErrorCard message={importError} />
+      {/if}
+      <ImportHistory />
+    </div>
+  </section>
+{:else}
+  <!-- ── Empty state ── -->
+  <section class="flex flex-col items-center justify-center gap-8 py-36">
+    <div class="flex flex-col items-center gap-6 text-center">
+      <div class="flex size-20 items-center justify-center rounded-2xl bg-primary/8">
+        <Wallet aria-hidden="true" class="size-10 text-primary" />
+      </div>
+      <div class="flex flex-col gap-2">
+        <h1 class="text-4xl font-bold tracking-tight sm:text-5xl">Spendo</h1>
+        <p class="text-lg text-muted-foreground">
+          Import your GnuCash file and start exploring your finances.
+        </p>
       </div>
     </div>
 
-    <!-- F: Error banner -->
     {#if importError}
-      <Card.Root class="border-destructive/50" size="sm">
-        <Card.Content class="flex items-center gap-2 py-3 text-sm text-destructive">
-          <AlertCircle aria-hidden="true" class="size-4 shrink-0" />
-          {importError}
-        </Card.Content>
-      </Card.Root>
+      <ErrorCard message={importError} />
     {/if}
 
-    <ImportHistory />
-  </div>
-</section>
+    <ImportButton
+      size="lg"
+      label="Import GnuCash File"
+      onError={(msg) => (importError = msg)}
+      onStatusChange={(v) => (importing = v)}
+    />
+  </section>
+{/if}
