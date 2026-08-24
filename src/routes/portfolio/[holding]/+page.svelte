@@ -107,6 +107,22 @@
     ]);
     downloadCsv(`${d.holding.mnemonic}-transactions.csv`, headers, rows);
   }
+
+  function openAccount(guid: string) {
+    void goto(resolve('/accounts/[guid]', { guid }));
+  }
+
+  function openTransaction(id: string) {
+    void goto(resolve('/transactions/[id]', { id }));
+  }
+
+  function handleRowClick(e: MouseEvent, go: () => void) {
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
+      return;
+    }
+    if ((e.target as HTMLElement).closest('a')) return;
+    void go();
+  }
 </script>
 
 <svelte:head>
@@ -298,7 +314,10 @@
             {@const unitPrice = h.shares > 0 && h.price !== null ? h.price : 0}
             {@const gainPerShare = h.shares > 0 ? h.gainLoss / h.shares : 0}
             {@const acctGain = acct.shares * gainPerShare}
-            <Table.Row>
+            <Table.Row
+              class="cursor-pointer hover:bg-muted/50"
+              onclick={(e) => handleRowClick(e, () => openAccount(acct.accountGuid))}
+            >
               <Table.Cell class="py-2.5">
                 <a
                   href={resolve('/accounts/[guid]', { guid: acct.accountGuid })}
@@ -360,11 +379,18 @@
           </Table.Header>
           <Table.Body>
             {#each data.transactions as t (t.guid)}
-              <Table.Row>
+              <Table.Row
+                class="cursor-pointer hover:bg-muted/50"
+                onclick={(e) => handleRowClick(e, () => openTransaction(t.guid))}
+              >
                 <Table.Cell class="py-2 text-muted-foreground tabular-nums">
                   {formatDate(t.postDate)}
                 </Table.Cell>
-                <Table.Cell class="max-w-64 truncate py-2">{t.description ?? '—'}</Table.Cell>
+                <Table.Cell class="max-w-64 truncate py-2">
+                  <a href={resolve('/transactions/[id]', { id: t.guid })} class="block truncate">
+                    {t.description ?? '—'}
+                  </a>
+                </Table.Cell>
                 <Table.Cell class="py-2 text-xs text-muted-foreground">{t.accountName}</Table.Cell>
                 <Table.Cell class="py-2 text-right tabular-nums {signColor(t.sharesDelta)}">
                   {t.sharesDelta >= 0 ? '+' : ''}{t.sharesDelta.toFixed(2)}
