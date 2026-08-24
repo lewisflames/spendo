@@ -208,9 +208,17 @@ export interface DataInfo {
   dbPath: string;
 }
 
+export interface ImportHistoryPage {
+  logs: ImportLogDetails[];
+  total: number;
+  pageSize: number;
+  totalPages: number;
+}
+
 export const getDataInfo = (): Promise<DataInfo> => invoke('get_data_info');
 
-export const fetchImportHistory = (): Promise<ImportLogDetails[]> => invoke('fetch_import_history');
+export const fetchImportHistory = (page: number, pageSize: number): Promise<ImportHistoryPage> =>
+  invoke('fetch_import_history', { page, pageSize });
 
 export const importGnucash = (path: string, filename: string): Promise<ImportResult> =>
   invoke('import_gnucash', { path, filename });
