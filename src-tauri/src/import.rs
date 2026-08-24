@@ -66,6 +66,15 @@ pub struct ImportLogDetails {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ImportHistoryPage {
+    pub logs: Vec<ImportLogDetails>,
+    pub total: i64,
+    pub page_size: i64,
+    pub total_pages: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ImportResult {
     pub accounts_added: i64,
     pub transactions_added: i64,
@@ -86,7 +95,11 @@ pub struct ImportResult {
 
 // ── Log helpers ─────────────────────────────────────────────────────────────
 
-pub fn get_import_logs(conn: &Connection, limit: i64) -> Result<Vec<ImportLogDetails>, String> {
+pub fn get_import_logs(
+    conn: &Connection,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<ImportLogDetails>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT id, filename, file_path, imported_at, sha256,
@@ -94,12 +107,12 @@ pub fn get_import_logs(conn: &Connection, limit: i64) -> Result<Vec<ImportLogDet
 			        accounts_updated, transactions_updated, splits_updated,
 			        accounts_orphaned, transactions_orphaned, splits_orphaned, commodities_orphaned,
 			        prices_orphaned
-			 FROM import_log ORDER BY id DESC LIMIT ?1",
+			 FROM import_log ORDER BY id DESC LIMIT ?1 OFFSET ?2",
         )
         .map_err(|e| e.to_string())?;
 
     let rows = stmt
-        .query_map([limit], |row| {
+        .query_map(rusqlite::params![limit, offset], |row| {
             Ok(ImportLogDetails {
                 id: row.get(0)?,
                 filename: row.get(1)?,
@@ -125,6 +138,11 @@ pub fn get_import_logs(conn: &Connection, limit: i64) -> Result<Vec<ImportLogDet
         .map_err(|e| e.to_string())?;
 
     Ok(rows)
+}
+
+fn count_import_logs(conn: &Connection) -> Result<i64, String> {
+    conn.query_row("SELECT COUNT(*) FROM import_log", [], |row| row.get(0))
+        .map_err(|e| e.to_string())
 }
 
 // ── SHA256 ──────────────────────────────────────────────────────────────────
@@ -768,15 +786,24 @@ pub async fn import_gnucash(
     .await
 }
 
-/// Maximum number of log entries returned to the UI.
-const IMPORT_HISTORY_LIMIT: i64 = 20;
-
 #[tauri::command]
 pub async fn fetch_import_history(
     state: State<'_, AppState>,
-) -> Result<Vec<ImportLogDetails>, String> {
+    page: i64,
+    page_size: i64,
+) -> Result<ImportHistoryPage, String> {
     let conn = get_conn(&state)?;
-    get_import_logs(&conn, IMPORT_HISTORY_LIMIT)
+    let page_size = utils::clamp_page_size(page_size);
+    let total = count_import_logs(&conn)?;
+    let total_pages = std::cmp::max(((total as f64) / (page_size as f64)).ceil() as i64, 1);
+    let safe_page = utils::clamp_page(page, total_pages);
+    let logs = get_import_logs(&conn, page_size, (safe_page - 1) * page_size)?;
+    Ok(ImportHistoryPage {
+        logs,
+        total,
+        page_size,
+        total_pages,
+    })
 }
 
 #[tauri::command]
