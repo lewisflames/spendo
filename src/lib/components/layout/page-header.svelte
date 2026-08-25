@@ -4,17 +4,15 @@
   let {
     title,
     description,
-    children,
-    class: className = ''
+    children
   }: {
     title: string;
     description?: string | Snippet;
     children?: Snippet;
-    class?: string;
   } = $props();
 </script>
 
-<div class="flex items-center justify-between gap-4 {className}">
+<div class="flex items-center justify-between gap-4">
   <div class="flex flex-1 flex-col gap-1">
     <h2 class="text-3xl font-bold tracking-tight">{title}</h2>
     {#if description}

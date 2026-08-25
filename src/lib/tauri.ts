@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 
-export interface HomeDataResult {
+interface HomeDataResult {
   hasData: boolean;
   summary: DataSummary | null;
 }
@@ -34,7 +34,7 @@ export interface ImportLogDetails {
   pricesOrphaned: number;
 }
 
-export interface ImportResult {
+interface ImportResult {
   accountsAdded: number;
   transactionsAdded: number;
   splitsAdded: number;
@@ -65,7 +65,7 @@ export interface AccountNode {
   children: AccountNode[];
 }
 
-export interface TypeSummary {
+interface TypeSummary {
   count: number;
   totalBalance: number;
 }
@@ -76,7 +76,7 @@ export interface AccountsResult {
   totalAccounts: number;
 }
 
-export interface SplitInfo {
+interface SplitInfo {
   guid: string;
   accountGuid: string;
   accountName: string;
@@ -99,14 +99,14 @@ export interface AccountInfo {
   name: string;
 }
 
-export interface Filters {
+interface Filters {
   search?: string;
   dateFrom?: string;
   dateTo?: string;
   accountName?: string;
 }
 
-export interface TransactionsResult {
+interface TransactionsResult {
   transactions: TransactionRow[];
   total: number;
   page: number;
@@ -124,7 +124,7 @@ export interface SplitDetail extends SplitInfo {
   accountDescription?: string | null;
 }
 
-export interface TransactionDetail {
+interface TransactionDetail {
   guid: string;
   postDate: string;
   description: string | null;
@@ -134,7 +134,7 @@ export interface TransactionDetail {
   totalAmount: number;
 }
 
-export interface TransactionDetailResult {
+interface TransactionDetailResult {
   transaction: TransactionDetail;
   prevGuid?: string | null;
   nextGuid?: string | null;
@@ -149,7 +149,7 @@ export interface AccountBalancePoint {
  * Response of `refresh_prices`. The backend also returns the full price list
  * and a `fetchedAt` timestamp; the UI only consumes per-commodity errors.
  */
-export interface PricesResult {
+interface PricesResult {
   errors: { mnemonic: string; error: string }[];
 }
 
@@ -173,6 +173,18 @@ export interface DetailTransaction {
   reconcileState?: string | null;
 }
 
+/** Direct child of the viewed account, with tree-consistent balances. */
+export interface ChildAccountInfo {
+  guid: string;
+  name: string;
+  description: string | null;
+  code: string | null;
+  commodity: string | null;
+  accountType: string;
+  balance: number;
+  txCount: number;
+}
+
 export interface AccountDetailInfo {
   guid: string;
   name: string;
@@ -181,10 +193,12 @@ export interface AccountDetailInfo {
   description: string | null;
   placeholder: boolean;
   balance: number;
-  childrenCount: number;
+  /** Whole subtree minus self — not direct children. */
+  descendantCount: number;
+  childAccounts: ChildAccountInfo[];
 }
 
-export interface AccountSummary {
+interface AccountSummary {
   totalTransactions: number;
   totalIncome: number;
   totalExpenses: number;
@@ -204,11 +218,11 @@ export const fetchHomeData = (): Promise<HomeDataResult> => invoke('fetch_home_d
 
 export const clearAppDb = (): Promise<void> => invoke('clear_app_db');
 
-export interface DataInfo {
+interface DataInfo {
   dbPath: string;
 }
 
-export interface ImportHistoryPage {
+interface ImportHistoryPage {
   logs: ImportLogDetails[];
   total: number;
   pageSize: number;
@@ -377,7 +391,7 @@ export const getEarliestTransactionDate = (accountGuid: string): Promise<string 
 export const getGlobalEarliestDate = (): Promise<string | null> =>
   invoke('get_global_earliest_transaction_date');
 
-export interface BudgetDateRange {
+interface BudgetDateRange {
   earliestDate: string | null;
   latestDate: string | null;
 }
@@ -386,7 +400,7 @@ export const getBudgetDateRange = (): Promise<BudgetDateRange> => invoke('get_bu
 
 // ── Portfolio ──
 
-export interface HoldingAccount {
+interface HoldingAccount {
   accountGuid: string;
   accountName: string;
   shares: number;
@@ -417,7 +431,7 @@ export interface PortfolioValuePoint {
   costBasis: number;
 }
 
-export interface PortfolioData {
+interface PortfolioData {
   totalMarketValue: number;
   totalCostBasis: number;
   totalGainLoss: number;

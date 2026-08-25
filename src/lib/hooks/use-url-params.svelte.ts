@@ -10,6 +10,48 @@ export interface UrlParamSpec {
   replace?: boolean;
 }
 
+/** Spec factory: a 1-based page number that stays valid when absent. */
+export function pageParam(
+  key: string,
+  getPage: () => number,
+  setPage: (p: number) => void
+): UrlParamSpec {
+  return {
+    key,
+    get: () => String(getPage()),
+    apply: (v) => {
+      const n = Number(v);
+      setPage(Number.isInteger(n) && n >= 1 ? n : 1);
+    }
+  };
+}
+
+/**
+ * Spec factory: debounced search. The caller applies the value to both the
+ * raw input (what's in the field) and the committed search (what's fetched).
+ */
+export function debouncedSearchParam(
+  key: string,
+  getCommitted: () => string | null,
+  applyValue: (v: string) => void
+): UrlParamSpec {
+  return {
+    key,
+    get: getCommitted,
+    apply: (v) => applyValue(v ?? ''),
+    replace: true
+  };
+}
+
+/** Spec factory for an optional `YYYY-MM-DD` date bound to a picker. */
+export function dateParam(
+  key: string,
+  get: () => string | null,
+  set: (v: string | null) => void
+): UrlParamSpec {
+  return { key, get, apply: (v) => set(v || null) };
+}
+
 /**
  * Two-way sync between component state and the URL query string, following the
  * pattern used by the Budgets page. Call from a component (before data-loading

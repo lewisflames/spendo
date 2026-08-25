@@ -3,7 +3,6 @@
   import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
   import { Badge } from '$lib/components/ui/badge';
   import { Button } from '$lib/components/ui/button';
-  import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
@@ -12,6 +11,9 @@
   import { SearchInput } from '$lib/components/shared/search-input';
   import { TrendingUp, Columns3 } from '@lucide/svelte';
   import type { PortfolioHolding } from '$lib/tauri';
+  import { STALE_PRICE_DAYS, priceStaleDays } from './price-utils';
+  import { handleRowClick, gotoHolding } from '$lib/utils/navigation';
+  import { useDebouncedSearch } from '$lib/hooks/use-debounced-search.svelte';
   import {
     formatDate,
     signColor,
@@ -52,10 +54,14 @@
 
   let visibleColumns = $state<ColumnId[]>([...DEFAULT_COLUMNS]);
 
-  let query = $state('');
+  let queryInput = $state('');
+  let query = useDebouncedSearch(
+    () => queryInput,
+    (v) => v.trim().toLowerCase()
+  );
 
   let filteredHoldings = $derived.by(() => {
-    const q = query.trim().toLowerCase();
+    const q = query.value;
     if (!q) return holdings;
     return holdings.filter(
       (h) => (h.fullName ?? '').toLowerCase().includes(q) || h.mnemonic.toLowerCase().includes(q)
@@ -130,12 +136,6 @@
   }
 
   const fmt = formatSessionCurrency;
-
-  const STALE_PRICE_DAYS = 7;
-
-  function priceStaleDays(priceDate: string): number {
-    return Math.floor((Date.now() - new Date(priceDate).getTime()) / 86_400_000);
-  }
 </script>
 
 {#if loading}
@@ -154,7 +154,7 @@
         id="holdings-search"
         label="Search holdings"
         placeholder="Search name or ticker..."
-        bind:value={query}
+        bind:value={queryInput}
         class="w-60"
       />
       <DropdownMenu.Root>
@@ -268,13 +268,7 @@
             {@const isWatchOnly = h.shares === 0 && h.accounts.length === 0}
             <Table.Row
               class="cursor-pointer {isClosed || isWatchOnly ? 'text-muted-foreground' : ''}"
-              onclick={(e) => {
-                // Anchor clicks must reach the document so SvelteKit's link
-                // interceptor turns them into client-side navigations; a native
-                // full-page load here would reboot the whole app.
-                if ((e.target as HTMLElement).closest('a')) return;
-                goto(resolve('/portfolio/[holding]', { holding: h.commodityGuid }));
-              }}
+              onclick={(e) => handleRowClick(e, () => gotoHolding(h.commodityGuid))}
             >
               <Table.Cell class="py-2">
                 <!-- Real link for keyboard/AT users; the row click stays as a

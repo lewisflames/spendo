@@ -7,7 +7,7 @@
     balanceColor,
     clampZero
   } from '$lib/utils/format.svelte';
-  import { TYPE_CATEGORY, nodeCategory } from '$lib/features/accounts/account-types';
+  import { nodeCategory, CATEGORY_LABEL_SINGULAR } from '$lib/features/accounts/account-types';
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import TreeChevron from '$lib/components/shared/tree-chevron.svelte';
   import { treeIndentStyle } from '$lib/utils';
@@ -25,19 +25,7 @@
     searchActive: boolean;
   } = $props();
 
-  const CATEGORY_LABEL: Record<string, string> = {
-    ASSET: 'Asset',
-    LIABILITY: 'Liability',
-    EQUITY: 'Equity',
-    INCOME: 'Income',
-    EXPENSE: 'Expense'
-  };
-
   const reportCurrency = $derived(dbSession.value?.summary.currency ?? '');
-
-  function categoryOf(node: AccountNode): string {
-    return TYPE_CATEGORY[node.accountType] ?? node.accountType;
-  }
 </script>
 
 <TableShell>
@@ -95,7 +83,7 @@
         <Table.Cell
           class={'text-sm text-muted-foreground ' + (row.depth === 0 ? 'py-2 ' : 'py-2.5 ')}
         >
-          {CATEGORY_LABEL[categoryOf(node)] ?? node.accountType}
+          {CATEGORY_LABEL_SINGULAR[nodeCategory(node.accountType)] ?? node.accountType}
         </Table.Cell>
         <Table.Cell
           class={'text-right text-sm text-muted-foreground tabular-nums ' +

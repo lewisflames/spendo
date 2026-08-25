@@ -18,7 +18,7 @@
   import type { AccountNode } from '$lib/tauri';
   import {
     CATEGORY_ORDER,
-    TYPE_CATEGORY,
+    CATEGORY_LABEL_PLURAL,
     nodeCategory
   } from '$lib/features/accounts/account-types';
   import { useTreeExpand } from '$lib/hooks/use-tree-expand.svelte';
@@ -32,21 +32,14 @@
   import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
   import KpiCard from '$lib/components/shared/kpi-card.svelte';
   import KpiCardRow from '$lib/components/shared/kpi-card-row.svelte';
-  import { clampZero, formatSessionCurrency as fmt } from '$lib/utils/format.svelte';
+  import { clampZero, formatSessionCurrency as fmt, plural } from '$lib/utils/format.svelte';
   import { errMsg } from '$lib/utils/error';
   import AccountsTreeTable from '$lib/features/accounts/accounts-tree-table.svelte';
   import BalanceTreemap from '$lib/features/accounts/balance-treemap.svelte';
 
   const CATEGORIES = ['All', ...CATEGORY_ORDER];
 
-  const CATEGORY_LABEL: Record<string, string> = {
-    All: 'All',
-    ASSET: 'Assets',
-    LIABILITY: 'Liabilities',
-    EQUITY: 'Equity',
-    INCOME: 'Income',
-    EXPENSE: 'Expenses'
-  };
+  const CATEGORY_LABEL: Record<string, string> = { All: 'All', ...CATEGORY_LABEL_PLURAL };
 
   type Category = 'ASSET' | 'EQUITY' | 'LIABILITY';
 
@@ -88,10 +81,6 @@
     (v) => v.trim().toLowerCase()
   );
 
-  function categoryOf(node: AccountNode): string {
-    return TYPE_CATEGORY[node.accountType] ?? node.accountType;
-  }
-
   function matchesQuery(node: AccountNode, q: string): boolean {
     return [node.name, node.description, node.code].some((s) => s?.toLowerCase().includes(q));
   }
@@ -113,7 +102,7 @@
     if (cat === 'All') return nodes;
     const out: AccountNode[] = [];
     for (const n of nodes) {
-      if (categoryOf(n) === cat) {
+      if (nodeCategory(n.accountType) === cat) {
         out.push(n);
       } else {
         out.push(...filterCategory(n.children, cat));
@@ -221,9 +210,7 @@
   <div class="flex flex-col gap-6">
     <PageHeader
       title="Accounts"
-      description={data
-        ? `Chart of accounts · ${data.totalAccounts} account${data.totalAccounts === 1 ? '' : 's'}`
-        : ''}
+      description={data ? `Chart of accounts · ${plural(data.totalAccounts, 'account')}` : ''}
     >
       <Button variant="outline" onclick={handleExportCsv} disabled={rows.length === 0}>
         <Download aria-hidden="true" class="size-3" />

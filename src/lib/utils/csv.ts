@@ -13,5 +13,7 @@ export function downloadCsv(filename: string, headers: string[], rows: string[][
   a.href = url;
   a.download = filename;
   a.click();
-  URL.revokeObjectURL(url);
+  // WebKit (Tauri's macOS WebView) needs the blob URL alive past the click
+  // task; revoking synchronously can abort the download.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }

@@ -2,16 +2,13 @@
   import * as Card from '$lib/components/ui/card';
   import { Button } from '$lib/components/ui/button';
   import { CircleAlert, RefreshCw } from '@lucide/svelte';
-  import type { Snippet } from 'svelte';
 
   let {
     message,
-    onRetry,
-    children
+    onRetry
   }: {
     message?: string;
     onRetry?: () => void;
-    children?: Snippet;
   } = $props();
 </script>
 
@@ -21,9 +18,6 @@
     <span class="min-w-0 flex-1">
       {#if message}
         {message}
-      {/if}
-      {#if children}
-        {@render children()}
       {/if}
     </span>
     {#if onRetry}

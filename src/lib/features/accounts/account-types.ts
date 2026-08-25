@@ -4,6 +4,7 @@ export const TYPE_CATEGORY: Record<string, string> = {
   CASH: 'ASSET',
   STOCK: 'ASSET',
   MUTUAL: 'ASSET',
+  FUND: 'ASSET',
   CURRENCY: 'ASSET',
   RECEIVABLE: 'ASSET',
   LIABILITY: 'LIABILITY',
@@ -20,3 +21,21 @@ export const CATEGORY_ORDER = ['ASSET', 'LIABILITY', 'EQUITY', 'INCOME', 'EXPENS
 export function nodeCategory(accountType: string): string {
   return TYPE_CATEGORY[accountType] ?? accountType;
 }
+
+/** Singular display labels for categories (table headers, tree groupings). */
+export const CATEGORY_LABEL_SINGULAR: Record<string, string> = {
+  ASSET: 'Asset',
+  LIABILITY: 'Liability',
+  INCOME: 'Income',
+  EXPENSE: 'Expense',
+  EQUITY: 'Equity'
+};
+
+/** Plural display labels (KPI cards, section summaries). */
+export const CATEGORY_LABEL_PLURAL: Record<string, string> = {
+  ASSET: 'Assets',
+  LIABILITY: 'Liabilities',
+  INCOME: 'Income',
+  EXPENSE: 'Expenses',
+  EQUITY: 'Equity'
+};

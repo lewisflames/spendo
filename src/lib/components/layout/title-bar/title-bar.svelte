@@ -6,6 +6,7 @@
   import { SidebarTrigger } from '$lib/components/ui/sidebar/index.js';
   import { breadcrumb, type BreadcrumbItem } from '$lib/stores/breadcrumb.svelte';
   import { goBack, goForward, navHistory } from '$lib/stores/nav-history.svelte';
+  import { routeTitle } from '$lib/routes';
   import * as Breadcrumb from '$lib/components/ui/breadcrumb';
 
   let maximized = $state(false);
@@ -58,7 +59,7 @@
   }
 
   function isInteractive(e: MouseEvent) {
-    return (e.target as HTMLElement).closest('button, a') !== null;
+    return (e.target as Element).closest('button, a') !== null;
   }
 
   function onHeaderMouseDown(e: MouseEvent) {
@@ -74,28 +75,7 @@
     toggleMaximize();
   }
 
-  const pageNames: Record<string, string> = {
-    '/': 'Overview',
-    '/accounts': 'Accounts',
-    '/transactions': 'Transactions',
-    '/settings': 'Settings',
-    '/about': 'About',
-    '/budgets': 'Budgets',
-    '/pnl': 'Profit & Loss',
-    '/portfolio': 'Portfolio'
-  };
-
-  const defaultItems: BreadcrumbItem[] = $derived([
-    {
-      name:
-        pageNames[page.url.pathname] ??
-        (page.url.pathname.startsWith('/accounts/')
-          ? 'Accounts'
-          : page.url.pathname.startsWith('/portfolio/')
-            ? 'Portfolio'
-            : 'Home')
-    }
-  ]);
+  const defaultItems: BreadcrumbItem[] = $derived([{ name: routeTitle(page.url.pathname) }]);
 
   const items = $derived(
     breadcrumb.value.route === page.url.pathname ? breadcrumb.value.items : defaultItems

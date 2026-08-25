@@ -4,11 +4,10 @@
   import { Button } from '$lib/components/ui/button';
   import { fetchTransactions, fetchAccountNames } from '$lib/tauri';
   import { dbSession } from '$lib/stores/db.svelte';
-  import { formatNumber, sessionCurrency } from '$lib/utils/format.svelte';
   import { appSettings, saveSettings } from '$lib/stores/settings.svelte';
   import TransactionFilters from '$lib/features/transactions/transaction-filters.svelte';
   import TransactionTable from '$lib/features/transactions/transaction-table.svelte';
-  import PaginationNav from '$lib/components/shared/pagination-nav';
+  import { PaginationNav } from '$lib/components/shared/pagination-nav';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
   import ImportPrompt from '$lib/components/shared/import-prompt.svelte';
@@ -19,16 +18,27 @@
   import { fetchAllRows } from '$lib/utils/export';
   import type { TransactionRow } from '$lib/tauri';
   import { useDebouncedSearch } from '$lib/hooks/use-debounced-search.svelte';
-  import { useUrlParams } from '$lib/hooks/use-url-params.svelte';
+  import {
+    useUrlParams,
+    pageParam,
+    debouncedSearchParam,
+    dateParam
+  } from '$lib/hooks/use-url-params.svelte';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
+  import { useTableSort } from '$lib/hooks/use-table-sort.svelte';
+  import { plural, sessionCurrency } from '$lib/utils/format.svelte';
   import { ArrowLeftRight, Download, LoaderCircle } from '@lucide/svelte';
   import type { AccountInfo } from '$lib/tauri';
 
   let pageSize = $derived(appSettings.value.pageSize);
 
   let page = $state(1);
-  let sortBy = $state<'date' | 'description' | 'amount'>('date');
-  let sortDir = $state<'asc' | 'desc'>('desc');
+  const sort = useTableSort<'date' | 'description' | 'amount'>(
+    { sortBy: 'date', sortDir: 'desc' },
+    ['date', 'amount']
+  );
+  let sortBy = $derived(sort.sortBy);
+  let sortDir = $derived(sort.sortDir);
 
   let searchInput = $state('');
   let dateFrom = $state('');
@@ -38,35 +48,29 @@
   let search = useDebouncedSearch(() => searchInput);
 
   useUrlParams([
-    {
-      key: 'page',
-      get: () => (page > 1 ? String(page) : null),
-      apply: (v) => {
-        const n = Number(v);
-        page = Number.isInteger(n) && n >= 1 ? n : 1;
+    pageParam(
+      'page',
+      () => page,
+      (p) => (page = p)
+    ),
+    debouncedSearchParam(
+      'q',
+      () => search.value || null,
+      (v) => {
+        searchInput = v;
+        search.set(v);
       }
-    },
-    {
-      key: 'q',
-      get: () => search.value || null,
-      apply: (v) => {
-        searchInput = v ?? '';
-        search.set(v ?? '');
-      },
-      replace: true
-    },
-    {
-      key: 'from',
-      get: () => dateFrom || null,
-      apply: (v) => (dateFrom = v ?? ''),
-      replace: true
-    },
-    {
-      key: 'to',
-      get: () => dateTo || null,
-      apply: (v) => (dateTo = v ?? ''),
-      replace: true
-    },
+    ),
+    dateParam(
+      'from',
+      () => dateFrom || null,
+      (v) => (dateFrom = v ?? '')
+    ),
+    dateParam(
+      'to',
+      () => dateTo || null,
+      (v) => (dateTo = v ?? '')
+    ),
     {
       key: 'account',
       get: () => accountName || null,
@@ -172,12 +176,7 @@
 
 {#if dbSession.value}
   <div class="flex flex-col gap-6">
-    <PageHeader
-      title="Transactions"
-      description={data
-        ? `${formatNumber(data.total)} transaction${data.total === 1 ? '' : 's'}`
-        : ''}
-    >
+    <PageHeader title="Transactions" description={data ? plural(data.total, 'transaction') : ''}>
       <Button
         variant="outline"
         onclick={handleExportCsv}
@@ -226,10 +225,7 @@
             {currency}
             {sortBy}
             {sortDir}
-            onSort={(key, dir) => {
-              sortBy = key;
-              sortDir = dir;
-            }}
+            onSort={sort.toggle}
           />
           <PaginationNav
             bind:page

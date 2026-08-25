@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import * as Table from '$lib/components/ui/table';
   import { formatDate as fmtDate, formatSignedCurrency, signColor } from '$lib/utils/format.svelte';
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import SortHead from '$lib/components/shared/sort-head.svelte';
+  import { handleRowClick, openTransaction } from '$lib/utils/navigation';
   import type { TransactionRow } from '$lib/tauri';
 
   let {
@@ -18,34 +18,9 @@
     currency?: string;
     sortBy?: 'date' | 'description' | 'amount' | null;
     sortDir?: 'asc' | 'desc';
-    onSort?: (key: 'date' | 'description' | 'amount', dir: 'asc' | 'desc') => void;
+    /** Direction handling lives with the caller's sort state; just report the key. */
+    onSort?: (key: 'date' | 'description' | 'amount') => void;
   } = $props();
-
-  function toggleSort(key: 'date' | 'description' | 'amount') {
-    if (sortBy === key) {
-      onSort?.(key, sortDir === 'asc' ? 'desc' : 'asc');
-    } else {
-      onSort?.(key, key === 'description' ? 'asc' : 'desc');
-    }
-  }
-
-  function openTransaction(id: string) {
-    void goto(resolve('/transactions/[id]', { id }));
-  }
-
-  /**
-   * Row-level navigation shortcut for plain clicks anywhere on the row.
-   * Clicks on real links bubble up untouched: SvelteKit's root click listener
-   * performs their client-side navigation (stopPropagation on the link would
-   * defeat that interceptor and cause a full page reload).
-   */
-  function handleRowClick(e: MouseEvent, id: string) {
-    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
-      return;
-    }
-    if ((e.target as HTMLElement).closest('a')) return;
-    openTransaction(id);
-  }
 </script>
 
 <TableShell>
@@ -55,19 +30,19 @@
         label="Date"
         active={sortBy === 'date'}
         dir={sortDir}
-        onclick={() => toggleSort('date')}
+        onclick={() => onSort?.('date')}
       />
       <SortHead
         label="Description"
         active={sortBy === 'description'}
         dir={sortDir}
-        onclick={() => toggleSort('description')}
+        onclick={() => onSort?.('description')}
       />
       <SortHead
         label="Total"
         active={sortBy === 'amount'}
         dir={sortDir}
-        onclick={() => toggleSort('amount')}
+        onclick={() => onSort?.('amount')}
         class="text-right"
       />
     </Table.Row>
@@ -76,7 +51,7 @@
     {#each transactions as txn (txn.guid)}
       <Table.Row
         class="cursor-pointer hover:bg-muted/50"
-        onclick={(e) => handleRowClick(e, txn.guid)}
+        onclick={(e) => handleRowClick(e, () => openTransaction(txn.guid))}
       >
         <Table.Cell class="py-2.5 whitespace-nowrap text-muted-foreground">
           {fmtDate(txn.postDate)}

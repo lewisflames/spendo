@@ -30,6 +30,12 @@
   import { setBreadcrumb } from '$lib/stores/breadcrumb.svelte';
   import { downloadCsv } from '$lib/utils/csv';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
+  import {
+    STALE_PRICE_DAYS,
+    priceStaleDays,
+    holdingLabel
+  } from '$lib/features/portfolio/price-utils';
+  import { handleRowClick, openAccount, openTransaction } from '$lib/utils/navigation';
 
   let holdingGuid = $derived(page.params.holding);
 
@@ -49,7 +55,7 @@
   let notFound = $derived(error !== null && error.includes('Holding not found'));
 
   let holding = $derived(data?.holding ?? null);
-  let name = $derived(holding ? (holding.fullName ?? holding.mnemonic) : 'Holding');
+  let name = $derived(holding ? holdingLabel(holding) : 'Holding');
   let currency = $derived(sessionCurrency());
   // Price history is stored in its original quote currency, so the chart and
   // its range stats are labeled in that currency rather than the report one.
@@ -59,12 +65,6 @@
     if (!dbSession.value) return;
     setBreadcrumb([{ name: 'Portfolio', href: resolve('/portfolio') }, { name }]);
   });
-
-  const STALE_PRICE_DAYS = 7;
-
-  function priceStaleDays(priceDate: string): number {
-    return Math.floor((Date.now() - new Date(priceDate).getTime()) / 86_400_000);
-  }
 
   function dayChangePct(h: PortfolioHolding): number | null {
     if (h.price === null || h.prevPrice === null || h.prevPrice === 0) return null;
@@ -106,22 +106,6 @@
       t.valueDelta.toFixed(2)
     ]);
     downloadCsv(`${d.holding.mnemonic}-transactions.csv`, headers, rows);
-  }
-
-  function openAccount(guid: string) {
-    void goto(resolve('/accounts/[guid]', { guid }));
-  }
-
-  function openTransaction(id: string) {
-    void goto(resolve('/transactions/[id]', { id }));
-  }
-
-  function handleRowClick(e: MouseEvent, go: () => void) {
-    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
-      return;
-    }
-    if ((e.target as HTMLElement).closest('a')) return;
-    void go();
   }
 </script>
 
