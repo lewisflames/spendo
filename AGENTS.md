@@ -18,7 +18,7 @@ GnuCash financial data importer/explorer. Rust backend (`rusqlite`) + static Sve
 | Tauri dev   | `bun run tauri:dev`                            |
 | Tauri build | `bun run tauri:build`                          |
 
-No test framework configured.
+No test framework configured. Rust unit tests run with `cargo test` (in `src-tauri/`); frontend is verified via `bun run check` + `bun run lint`.
 
 ## Code style
 
@@ -56,9 +56,27 @@ No test framework configured.
 ## Notables
 
 - **Frameless window**: `decorations: false` in Tauri config. Custom `<TitleBar />` component handles drag.
-- **Theme toggle**: `Ctrl+Shift+T` toggles light/dark. Persisted in `localStorage` via `$app/environment` `browser` guard.
-- **Store convention**: `.svelte.ts` modules using `$state()` wrapped in `{ value }` (e.g., `export const x = $state({ value: ... })`).
+- **Theme toggle**: `Ctrl/Cmd+Shift+T` toggles light/dark. Persisted in `localStorage`, validated per-key on load (`settings.svelte.ts`).
+- **Store convention**: `.svelte.ts` modules using `$state()` wrapped in `{ value }` (e.g., `export const x = $state({ value: ... })`). Applies to every store, including scalar flags like `keyboardShortcutsDialog`.
 - **Sample data**: `data/test.gnucash` exists but is gitignored (`/data` in `.gitignore`).
 - **Charting/date deps**: `layerchart` (charts), `tw-animate-css` (animations), `@internationalized/date` (date utils).
 - **Build output**: `/build`, `.svelte-kit/` gitignored (regenerated via `bun run prepare`).
 - **Svelte MCP**: Wired via `@sveltejs/opencode` plugin in `.opencode/opencode.json`.
+
+## Backend conventions
+
+- **Every DB-touching command** runs through `db::run_blocking(state.db.clone(), move |conn| …)` — never lock the connection directly inside an `async fn` (it blocks a tokio worker). File I/O (hashing, dialogs) happens before acquiring the lock.
+- **Visibility window**: future-dated transactions are excluded from every "current state" query via `utils::VISIBLE_TX_FILTER`. Don't hand-write the predicate — new money queries must use it or net worth/PnL/budgets diverge.
+- **SQL fragments**: reuse `utils::RAW_AMOUNT` / `QUANTITY_AMOUNT` / `signed_amount_expr` and the `sql::WhereBuilder` for dynamic WHERE clauses (auto-numbered `?N`, `param_offset` reserves leading indices). Escape user search input with `utils::escape_like` + `ESCAPE '\'`.
+- **Pagination**: clamp client input at the boundary with `utils::clamp_page_size` / `clamp_page`; compute totals with `utils::total_pages`.
+- Private command cores follow `<command>_inner(conn, …)` naming; commands stay thin wrappers.
+
+## Frontend conventions
+
+- **Navigation**: row-click navigation goes through `$lib/utils/navigation.ts` (`handleRowClick(e, go)`, `openTransaction`, `openAccount`, `gotoHolding`) — never copy per-table click guards; keep real `<a>` elements for keyboard/middle-click.
+- **Sorting**: table sort state uses `useTableSort<K>(defaults, descFirst)` from `$lib/hooks/`.
+- **URL state**: compose specs from the factories in `use-url-params.svelte.ts` (`pageParam`, `debouncedSearchParam`, `dateParam`); free-form specs only when no factory fits.
+- **Search inputs**: always debounce through `useDebouncedSearch`.
+- **Formatting**: dates parse through `parseLocalDate` (date-only strings are local, not UTC); counts use `plural(n, 'word')`; ranges use `formatDateRange`. Route titles come from `$lib/routes.ts` (`routeTitle`).
+- **Barrels**: named exports only in `index.ts` re-export files (no default+named duplication).
+- **tauri.ts**: leaf payload types are module-private; only export types that other modules import.
