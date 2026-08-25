@@ -8,7 +8,7 @@
 
   import { setBudget, getEarliestTransactionDate, getGlobalEarliestDate } from '$lib/tauri';
   import { errMsg } from '$lib/utils/error';
-  import { formatCurrency } from '$lib/utils/format.svelte';
+  import { formatCurrency, parseLocalDate } from '$lib/utils/format.svelte';
   import { appSettings } from '$lib/stores/settings.svelte';
   import type { Budget, AccountsResult } from '$lib/tauri';
 
@@ -75,10 +75,6 @@
   // Parse the 'YYYY-MM-DD' prefix of a stored date as a local calendar date
   // so displayed months match the stored value exactly (no TZ shifting).
   // Matches the backend, which also slices the raw UTC date prefix.
-  function parseLocalDate(s: string): Date {
-    return new Date(s.slice(0, 10) + 'T00:00:00');
-  }
-
   let creationMonth = $derived.by(() => {
     if (!budget?.createdAt) return '';
     return parseLocalDate(budget.createdAt).toLocaleDateString(appSettings.value.locale, {

@@ -3,7 +3,7 @@
   import { Wallet, RefreshCw, LoaderCircle, Calendar, Building2, Receipt } from '@lucide/svelte';
   import { dbSession, ensureDbSessionLoaded } from '$lib/stores/db.svelte';
   import { reimportLast } from '$lib/tauri';
-  import { formatDate } from '$lib/utils/format.svelte';
+  import { formatDateRange } from '$lib/utils/format.svelte';
   import ImportHistory from '$lib/features/home/import-history.svelte';
   import ImportButton from '$lib/components/shared/import-button.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
@@ -17,8 +17,9 @@
   let importError = $state<string | null>(null);
 
   $effect(() => {
-    // Refresh the shared session on every visit to the home page.
-    void ensureDbSessionLoaded(true);
+    // Refresh the shared session on every visit to the home page; failures
+    // surface through the import error card / empty state, not a rejection.
+    ensureDbSessionLoaded(true).catch(() => {});
   });
 
   async function handleReimport() {
@@ -26,10 +27,7 @@
     reimporting = true;
     try {
       const result = await reimportLast();
-      dbSession.value = {
-        summary: result.summary,
-        filename: `${result.totalAccounts} accounts, ${result.totalTransactions} transactions`
-      };
+      dbSession.value = { summary: result.summary };
       if (
         result.accountsAdded ||
         result.transactionsAdded ||
@@ -88,13 +86,10 @@
       </KpiCard>
       <KpiCard
         title="Date Range"
-        value={`${
-          dbSession.value.summary.earliestDate
-            ? formatDate(dbSession.value.summary.earliestDate)
-            : '—'
-        } – ${
-          dbSession.value.summary.latestDate ? formatDate(dbSession.value.summary.latestDate) : '—'
-        }`}
+        value={formatDateRange(
+          dbSession.value.summary.earliestDate,
+          dbSession.value.summary.latestDate
+        )}
         valueClass="text-lg"
       >
         {#snippet icon()}

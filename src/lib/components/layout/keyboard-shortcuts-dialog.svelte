@@ -3,6 +3,9 @@
   import Kbd from '$lib/components/shared/kbd.svelte';
   import { keyboardShortcutsDialog } from '$lib/stores/keyboard-shortcuts.svelte';
 
+  /** The layout accepts Cmd on macOS; show the chord users actually press. */
+  const modKey = navigator.platform.toLowerCase().includes('mac') ? '⌘' : 'Ctrl';
+
   interface ShortcutEntry {
     keys: string[];
     description: string;
@@ -12,12 +15,12 @@
     { keys: ['?'], description: 'Open keyboard shortcuts help' },
     { keys: ['Alt', '←'], description: 'Go back' },
     { keys: ['Alt', '→'], description: 'Go forward' },
-    { keys: ['Ctrl', 'Shift', 'T'], description: 'Toggle theme' },
-    { keys: ['Ctrl', 'B'], description: 'Toggle sidebar' }
+    { keys: [modKey, 'Shift', 'T'], description: 'Toggle theme' },
+    { keys: [modKey, 'B'], description: 'Toggle sidebar' }
   ];
 </script>
 
-<Dialog.Root bind:open={keyboardShortcutsDialog.open}>
+<Dialog.Root bind:open={keyboardShortcutsDialog.value}>
   <Dialog.Content class="sm:max-w-sm">
     <Dialog.Header>
       <Dialog.Title>Keyboard Shortcuts</Dialog.Title>

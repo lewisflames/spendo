@@ -117,7 +117,7 @@
       <Sidebar.MenuItem>
         <Sidebar.MenuButton
           tooltipContent="Keyboard shortcuts"
-          onclick={() => (keyboardShortcutsDialog.open = true)}
+          onclick={() => (keyboardShortcutsDialog.value = true)}
         >
           <CircleHelp aria-hidden="true" />
           <span class="group-data-[collapsible=icon]:hidden">Shortcuts</span>

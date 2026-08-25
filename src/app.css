@@ -164,8 +164,20 @@
 }
 
 @media print {
-  body > *:not(main) {
-    display: none !important;
+  /* `main` sits nested inside the sidebar layout, so hiding by DOM position
+   * is not an option: blank out everything, then restore the content region
+   * (classic visibility pattern). */
+  body * {
+    visibility: hidden;
+  }
+  #main-content,
+  #main-content * {
+    visibility: visible;
+  }
+  #main-content {
+    position: absolute;
+    inset: 0;
+    overflow: visible;
   }
 }
 

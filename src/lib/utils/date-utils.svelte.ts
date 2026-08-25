@@ -1,5 +1,5 @@
 /* eslint-disable svelte/prefer-svelte-reactivity -- Date instances are ephemeral, not stored in reactive state */
-import { CalendarDate } from '@internationalized/date';
+import { CalendarDate, parseDate } from '@internationalized/date';
 
 export interface DatePreset {
   label: string;
@@ -7,10 +7,8 @@ export interface DatePreset {
 }
 
 export function calendarDateToStr(cd: CalendarDate): string {
-  const y = cd.year;
-  const m = String(cd.month).padStart(2, '0');
-  const d = String(cd.day).padStart(2, '0');
-  return `${y}-${m}-${d}`;
+  // CalendarDate#toString() emits ISO `YYYY-MM-DD`.
+  return cd.toString();
 }
 
 export function last12MonthsRange(): { start: CalendarDate; end: CalendarDate } {
@@ -24,11 +22,8 @@ export function last12MonthsRange(): { start: CalendarDate; end: CalendarDate } 
 }
 
 export function computePrevRange(from: string, to: string): { prevFrom: string; prevTo: string } {
-  const parts = (s: string) => s.split('-').map(Number);
-  const [fy, fm, fd] = parts(from);
-  const [ty, tm, td] = parts(to);
-  const fromD = new CalendarDate(fy, fm, fd);
-  const toD = new CalendarDate(ty, tm, td);
+  const fromD = parseDate(from.slice(0, 10));
+  const toD = parseDate(to.slice(0, 10));
   // Same-length window immediately before `from` (whole-day arithmetic keeps
   // the previous period exactly as long as the current one).
   const lengthDays = toD.compare(fromD) + 1;
