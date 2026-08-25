@@ -470,14 +470,15 @@ fn neighbor_guid(
     above: bool,
 ) -> Result<Option<String>, String> {
     let (op, order) = if above {
-        (">", "ORDER BY post_date ASC, guid ASC")
+        (">", "ORDER BY t.post_date ASC, t.guid ASC")
     } else {
-        ("<", "ORDER BY post_date DESC, guid DESC")
+        ("<", "ORDER BY t.post_date DESC, t.guid DESC")
     };
     let sql = format!(
-        "SELECT guid FROM transactions
+        // Alias the table: VISIBLE_TX_FILTER qualifies its column as `t`.
+        "SELECT t.guid FROM transactions t
          WHERE {}
-           AND (post_date {op} ?1 OR (post_date = ?1 AND guid {op} ?2))
+           AND (t.post_date {op} ?1 OR (t.post_date = ?1 AND t.guid {op} ?2))
          {order}
          LIMIT 1",
         utils::VISIBLE_TX_FILTER
@@ -546,4 +547,62 @@ pub async fn fetch_transaction(
     guid: String,
 ) -> Result<Option<TransactionDetailResult>, String> {
     run_blocking(state.db.clone(), move |conn| fetch_transaction_inner(conn, &guid)).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::init_db;
+    use rusqlite::params;
+
+    fn setup() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        init_db(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO commodities (guid, mnemonic, namespace) VALUES ('c-eur', 'EUR', 'CURRENCY')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO accounts (guid, name, account_type, parent_guid, placeholder, commodity_guid)
+             VALUES ('root', 'Root', 'ROOT', NULL, 0, 'c-eur'),
+                    ('checking', 'Checking', 'BANK', 'root', 0, 'c-eur')",
+            [],
+        )
+        .unwrap();
+        for (tag, date, value) in [("t1", "2024-01-10", 5_000i64), ("t2", "2024-02-05", -1_500)] {
+            conn.execute(
+                "INSERT INTO transactions (guid, post_date) VALUES (?1, ?2)",
+                params![tag, date],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO splits (guid, tx_guid, account_guid, value_num, value_denom, quantity_num, quantity_denom)
+                 VALUES (?1, ?2, 'checking', ?3, 100, ?3, 100)",
+                params![format!("s-{tag}"), tag, value],
+            )
+            .unwrap();
+        }
+        conn
+    }
+
+    /// Exercises neighbor_guid's visibility-window query, which must alias
+    /// `transactions` as `t` to match the shared filter fragment.
+    #[test]
+    fn detail_returns_neighbors_in_ledger_order() {
+        let conn = setup();
+
+        // Ledger order is newest-first: `prev` is the more recent row.
+        let oldest = fetch_transaction_inner(&conn, "t1")
+            .expect("query runs")
+            .expect("tx exists");
+        assert_eq!(oldest.prev_guid.as_deref(), Some("t2"));
+        assert_eq!(oldest.next_guid, None);
+
+        let newest = fetch_transaction_inner(&conn, "t2")
+            .expect("query runs")
+            .expect("tx exists");
+        assert_eq!(newest.prev_guid, None);
+        assert_eq!(newest.next_guid.as_deref(), Some("t1"));
+    }
 }

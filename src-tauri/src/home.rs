@@ -36,7 +36,11 @@ pub fn get_summary(conn: &Connection) -> Result<DataSummary, String> {
     // must not inflate totals, the displayed date range or net worth.
     let total_transactions: i64 = conn
         .query_row(
-            &format!("SELECT COUNT(*) FROM transactions WHERE {}", utils::VISIBLE_TX_FILTER),
+            // Alias the table: VISIBLE_TX_FILTER qualifies its column as `t`.
+            &format!(
+                "SELECT COUNT(*) FROM transactions t WHERE {}",
+                utils::VISIBLE_TX_FILTER
+            ),
             [],
             |row| row.get(0),
         )
@@ -45,8 +49,9 @@ pub fn get_summary(conn: &Connection) -> Result<DataSummary, String> {
     let (earliest_date, latest_date): (Option<String>, Option<String>) = conn
         .query_row(
             &format!(
-                "SELECT substr(MIN(post_date), 1, 10), substr(MAX(post_date), 1, 10)
-                 FROM transactions WHERE {}",
+                "SELECT substr(MIN(t.post_date), 1, 10), substr(MAX(t.post_date), 1, 10)
+                 FROM transactions t
+                 WHERE {}",
                 utils::VISIBLE_TX_FILTER
             ),
             [],
@@ -134,4 +139,78 @@ pub async fn fetch_home_data(state: State<'_, AppState>) -> Result<HomeDataResul
         })
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::init_db;
+    use rusqlite::params;
+
+    fn setup() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        init_db(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO commodities (guid, mnemonic, namespace) VALUES ('c-eur', 'EUR', 'CURRENCY')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO accounts (guid, name, account_type, parent_guid, placeholder, commodity_guid)
+             VALUES ('root', 'Root', 'ROOT', NULL, 0, 'c-eur'),
+                    ('checking', 'Checking', 'BANK', 'root', 0, 'c-eur')",
+            [],
+        )
+        .unwrap();
+        for (tag, date, value) in [("t1", "2024-01-10", 5_000i64), ("t2", "2024-02-05", -1_500)] {
+            conn.execute(
+                "INSERT INTO transactions (guid, post_date) VALUES (?1, ?2)",
+                params![tag, date],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO splits (guid, tx_guid, account_guid, value_num, value_denom, quantity_num, quantity_denom)
+                 VALUES (?1, ?2, 'checking', ?3, 100, ?3, 100)",
+                params![format!("s-{tag}"), tag, value],
+            )
+            .unwrap();
+        }
+        conn
+    }
+
+    /// Guards every plain-`transactions` summary query: VISIBLE_TX_FILTER
+    /// qualifies its column as `t`, so any unaliased table reference fails
+    /// here instead of at user import time.
+    #[test]
+    fn summary_queries_run_with_visibility_filter() {
+        let conn = setup();
+        let summary = get_summary(&conn).expect("get_summary must not error");
+
+        assert_eq!(summary.total_transactions, 2);
+        assert_eq!(summary.earliest_date.as_deref(), Some("2024-01-10"));
+        assert_eq!(summary.latest_date.as_deref(), Some("2024-02-05"));
+        // 50 - 15 in EUR (the report currency).
+        assert_eq!(summary.net_worth, 35.0);
+    }
+
+    #[test]
+    fn future_transactions_are_excluded_from_current_state() {
+        let conn = setup();
+        conn.execute(
+            "INSERT INTO transactions (guid, post_date) VALUES ('t-future', '9999-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO splits (guid, tx_guid, account_guid, value_num, value_denom, quantity_num, quantity_denom)
+             VALUES ('s-future', 't-future', 'checking', 99_000, 100, 99_000, 100)",
+            [],
+        )
+        .unwrap();
+
+        let summary = get_summary(&conn).unwrap();
+        assert_eq!(summary.total_transactions, 2);
+        assert_eq!(summary.latest_date.as_deref(), Some("2024-02-05"));
+        assert_eq!(summary.net_worth, 35.0);
+    }
 }
