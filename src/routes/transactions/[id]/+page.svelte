@@ -1,7 +1,6 @@
 <script lang="ts">
   import { page } from '$app/state';
   import { resolve } from '$app/paths';
-  import { goto } from '$app/navigation';
   import * as Table from '$lib/components/ui/table';
   import { Badge } from '$lib/components/ui/badge';
   import { Button } from '$lib/components/ui/button';
@@ -41,6 +40,7 @@
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
+  import { openTransaction } from '$lib/utils/navigation';
 
   let guid = $derived(page.params.id);
 
@@ -69,10 +69,6 @@
       { name: detail?.description || 'Transaction' }
     ]);
   });
-
-  function goToTransaction(id: string) {
-    void goto(resolve('/transactions/[id]', { id }));
-  }
 
   async function copyGuid() {
     if (!detail) return;
@@ -148,7 +144,7 @@
               aria-label="Previous transaction"
               title="Previous transaction"
               onclick={() => {
-                if (prevGuid) goToTransaction(prevGuid);
+                if (prevGuid) void openTransaction(prevGuid);
               }}
             >
               <ArrowLeft aria-hidden="true" />
@@ -160,7 +156,7 @@
               aria-label="Next transaction"
               title="Next transaction"
               onclick={() => {
-                if (nextGuid) goToTransaction(nextGuid);
+                if (nextGuid) void openTransaction(nextGuid);
               }}
             >
               <ArrowRight aria-hidden="true" />

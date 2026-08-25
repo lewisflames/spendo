@@ -1,13 +1,19 @@
 <script lang="ts">
   import { dbSession } from '$lib/stores/db.svelte';
   import { generatePnlReport } from '$lib/tauri';
-  import { formatDate, signColor, fmtPct, formatSessionCurrency } from '$lib/utils/format.svelte';
+  import {
+    formatDateRange,
+    signColor,
+    fmtPct,
+    formatSessionCurrency
+  } from '$lib/utils/format.svelte';
   import { TrendingUp, TrendingDown, ArrowLeftRight, Download } from '@lucide/svelte';
   import { Button } from '$lib/components/ui/button';
   import { downloadCsv } from '$lib/utils/csv';
   import { toast } from '$lib/components/ui/sonner';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import KpiCard from '$lib/components/shared/kpi-card.svelte';
+  import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
   import ImportPrompt from '$lib/components/shared/import-prompt.svelte';
   import PnlTreetable from '$lib/features/pnl/pnl-treetable.svelte';
   import { errMsg } from '$lib/utils/error';
@@ -79,21 +85,13 @@
 
   const fmt = formatSessionCurrency;
 
-  function formatDateRange(from: string, to: string): string {
-    if (!from || !to) return '';
-    try {
-      return `${formatDate(from)} – ${formatDate(to)}`;
-    } catch {
-      return `${from} – ${to}`;
-    }
-  }
-
+  /** Rows arrive parent-before-child with depth-first indents; a single
+   * forward pass with an ancestry stack rebuilds the tree in order. */
   function buildTree(rows: ProfitLossRow[]): PnLTreeNode[] {
     const root: PnLTreeNode[] = [];
     const stack: { indent: number; node: PnLTreeNode }[] = [];
 
-    for (let i = rows.length - 1; i >= 0; i--) {
-      const row = rows[i];
+    for (const row of rows) {
       const node: PnLTreeNode = { row, children: [] };
       while (stack.length > 0 && stack[stack.length - 1].indent >= row.indent) {
         stack.pop();
@@ -105,14 +103,6 @@
       }
       stack.push({ indent: row.indent, node });
     }
-
-    function reverseTree(nodes: PnLTreeNode[]) {
-      nodes.reverse();
-      for (const n of nodes) {
-        reverseTree(n.children);
-      }
-    }
-    reverseTree(root);
 
     return root;
   }
@@ -147,13 +137,7 @@
         collectParentGuids(incomeTree).join(',') + '|' + collectParentGuids(expenseTree).join(',');
       if (key === appliedExpandKey) return;
       appliedExpandKey = key;
-      tree.collapseAll();
-      for (const g of collectParentGuids(incomeTree)) {
-        tree.expanded.add(g);
-      }
-      for (const g of collectParentGuids(expenseTree)) {
-        tree.expanded.add(g);
-      }
+      tree.expandAll([...collectParentGuids(incomeTree), ...collectParentGuids(expenseTree)]);
     }
   });
 
@@ -222,9 +206,9 @@
 
   {#if dbSession.value}
     <!-- KPI summary cards -->
-    {#if pnlData && !loading}
+    {#if pnlData}
       {@const pd = pnlData}
-      <div class="grid grid-cols-1 gap-6 sm:grid-cols-3">
+      <DimWrapper active={loading} class="grid grid-cols-1 gap-6 sm:grid-cols-3">
         <KpiCard title="Total Income" value={fmt(pd.totalIncome)} valueClass="text-success">
           {#snippet icon()}
             <TrendingUp aria-hidden="true" class="size-4 text-success" />
@@ -240,7 +224,7 @@
             <ArrowLeftRight aria-hidden="true" class="size-4 {signColor(pd.netIncome)}" />
           {/snippet}
         </KpiCard>
-      </div>
+      </DimWrapper>
     {/if}
 
     <PnlTreetable

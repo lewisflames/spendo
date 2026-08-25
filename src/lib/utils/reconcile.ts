@@ -1,6 +1,6 @@
 import type { BadgeVariant } from '$lib/components/ui/badge';
 
-export interface ReconcileStatus {
+interface ReconcileStatus {
   label: string;
   variant: BadgeVariant;
 }

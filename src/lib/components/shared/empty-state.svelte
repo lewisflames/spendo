@@ -7,8 +7,7 @@
     title,
     description,
     action,
-    card = false,
-    class: className = ''
+    card = false
   }: {
     icon?: Snippet;
     title?: string;
@@ -16,12 +15,11 @@
     action?: Snippet;
     /** Wrap in a borderless card so the empty state matches table shells. */
     card?: boolean;
-    class?: string;
   } = $props();
 </script>
 
 {#snippet inner()}
-  <div class="flex flex-col items-center gap-3 py-10 text-center {className}">
+  <div class="flex flex-col items-center gap-3 py-10 text-center">
     {#if icon}
       <div class="flex size-12 items-center justify-center rounded-full bg-muted [&_svg]:size-6">
         {@render icon()}

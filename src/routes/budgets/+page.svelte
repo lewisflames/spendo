@@ -16,6 +16,7 @@
     getBudgetDateRange
   } from '$lib/tauri';
   import { useUrlParams } from '$lib/hooks/use-url-params.svelte';
+  import { useDebouncedSearch } from '$lib/hooks/use-debounced-search.svelte';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import { Plus, PiggyBank, Wallet, TrendingDown, ChevronLeft, ChevronRight } from '@lucide/svelte';
   import type { Budget, BudgetActualRow, AccountNode } from '$lib/tauri';
@@ -46,7 +47,8 @@
   let deleteTargetGuid = $state<string | null>(null);
   let deleteTargetName = $state('');
 
-  let search = $state('');
+  let searchInput = $state('');
+  let search = useDebouncedSearch(() => searchInput);
 
   // URL params are applied before the fetch is set up so the first load
   // already uses values from the URL.
@@ -101,6 +103,7 @@
   let accountsData = $derived(res.data?.[2] ?? null);
   let dateRange = $derived(res.data?.[3] ?? null);
   let error = $derived(res.error);
+  let formError = $state<string | null>(null);
   // Dim during refetches only; the initial load shows the skeleton instead.
   let monthLoading = $derived(res.loading && res.data !== null);
 
@@ -132,9 +135,9 @@
         actual: budgetActuals.get(b.accountGuid)
       }))
       .filter((r) => {
-        if (!search) return true;
+        if (!search.value) return true;
         const path = accountPaths.get(r.budget.accountGuid)?.join(' ') ?? r.budget.accountName;
-        return path.toLowerCase().includes(search.toLowerCase());
+        return path.toLowerCase().includes(search.value.toLowerCase());
       })
       .sort((a, b) => a.budget.accountName.localeCompare(b.budget.accountName));
   });
@@ -157,20 +160,25 @@
       .map(([category, rows]) => ({ category, rows }));
   });
 
+  // Month-index arithmetic in one place: idx = y*12 + (m-1), invertible.
+  const monthIdx = (year: number, month: number) => year * 12 + (month - 1);
+  const idxYear = (idx: number) => Math.floor(idx / 12);
+  const idxMonth = (idx: number) => (idx % 12) + 1;
+
   let minMonthIdx = $derived.by(() => {
     if (!dateRange?.earliestDate) return null;
     const [y, m] = dateRange.earliestDate.split('-').map(Number);
-    return y * 12 + (m - 1);
+    return monthIdx(y, m);
   });
 
   let maxMonthIdx = $derived.by(() => {
     if (!dateRange?.latestDate) return null;
     const [y, m] = dateRange.latestDate.split('-').map(Number);
-    return y * 12 + (m - 1);
+    return monthIdx(y, m);
   });
 
-  let minYear = $derived(minMonthIdx === null ? null : Math.floor(minMonthIdx / 12));
-  let maxYear = $derived(maxMonthIdx === null ? null : Math.floor(maxMonthIdx / 12));
+  let minYear = $derived(minMonthIdx === null ? null : idxYear(minMonthIdx));
+  let maxYear = $derived(maxMonthIdx === null ? null : idxYear(maxMonthIdx));
 
   let monthOptions = $derived(
     Array.from({ length: 12 }, (_, i) => ({
@@ -178,7 +186,7 @@
       label: new Date(2000, i, 1).toLocaleDateString(appSettings.value.locale, { month: 'long' })
     })).filter((o) => {
       if (minMonthIdx === null || maxMonthIdx === null) return true;
-      const idx = currentYear * 12 + (Number(o.value) - 1);
+      const idx = monthIdx(currentYear, Number(o.value));
       return idx >= minMonthIdx && idx <= maxMonthIdx;
     })
   );
@@ -205,21 +213,17 @@
 
   function clampSelection() {
     if (minMonthIdx === null || maxMonthIdx === null) return;
-    const idx = clampMonthIdx(currentYear * 12 + (currentMonth - 1));
-    const y = Math.floor(idx / 12);
-    const m = (idx % 12) + 1;
+    const idx = clampMonthIdx(monthIdx(currentYear, currentMonth));
+    const y = idxYear(idx);
+    const m = idxMonth(idx);
     if (y !== currentYear || m !== currentMonth) {
       monthSel = String(m);
       yearSel = String(y);
     }
   }
 
-  let atMin = $derived(
-    minMonthIdx !== null && currentYear * 12 + (currentMonth - 1) <= minMonthIdx
-  );
-  let atMax = $derived(
-    maxMonthIdx !== null && currentYear * 12 + (currentMonth - 1) >= maxMonthIdx
-  );
+  let atMin = $derived(minMonthIdx !== null && monthIdx(currentYear, currentMonth) <= minMonthIdx);
+  let atMax = $derived(maxMonthIdx !== null && monthIdx(currentYear, currentMonth) >= maxMonthIdx);
 
   // Keep the selection within the transaction date range
   $effect(() => {
@@ -263,9 +267,9 @@
   }
 
   function shiftMonth(delta: number) {
-    const idx = clampMonthIdx(currentYear * 12 + (currentMonth - 1) + delta);
-    monthSel = String((idx % 12) + 1);
-    yearSel = String(Math.floor(idx / 12));
+    const idx = clampMonthIdx(monthIdx(currentYear, currentMonth) + delta);
+    monthSel = String(idxMonth(idx));
+    yearSel = String(idxYear(idx));
   }
 
   function prevMonth() {
@@ -292,6 +296,19 @@
   <meta name="description" content="Monthly and annual spending targets." />
 </svelte:head>
 
+{#snippet yearPicker()}
+  <Select.Root type="single" bind:value={yearSel} items={yearOptions}>
+    <Select.Trigger class="min-w-20 justify-center" id="year-picker">
+      <SelectPrimitive.Value />
+    </Select.Trigger>
+    <Select.Content>
+      {#each yearOptions as o (o.value)}
+        <Select.Item value={o.value} label={o.label}>{o.label}</Select.Item>
+      {/each}
+    </Select.Content>
+  </Select.Root>
+{/snippet}
+
 {#if dbSession.value}
   <div class="flex flex-col gap-6">
     <PageHeader
@@ -304,7 +321,6 @@
             editBudget = null;
             showAddDialog = true;
           }}
-          disabled={!dbSession.value}
         >
           <Plus aria-hidden="true" />
           Add Budget
@@ -316,7 +332,6 @@
             size="sm"
             class="h-7"
             onclick={() => (viewMode = 'MONTHLY')}
-            disabled={!dbSession.value}
           >
             Month
           </Button>
@@ -325,7 +340,6 @@
             size="sm"
             class="h-7"
             onclick={() => (viewMode = 'YEARLY')}
-            disabled={!dbSession.value}
           >
             Year
           </Button>
@@ -333,8 +347,11 @@
       </div>
     </PageHeader>
 
+    {#if formError}
+      <ErrorCard message={formError} />
+    {/if}
     {#if error}
-      <ErrorCard message={error} />
+      <ErrorCard message={error} onRetry={() => res.reload()} />
     {/if}
 
     <!-- KPI summary cards -->
@@ -383,7 +400,7 @@
               size="icon"
               onclick={prevMonth}
               aria-label="Previous month"
-              disabled={!dbSession.value || atMin}
+              disabled={atMin}
             >
               <ChevronLeft />
             </Button>
@@ -397,22 +414,13 @@
                 {/each}
               </Select.Content>
             </Select.Root>
-            <Select.Root type="single" bind:value={yearSel} items={yearOptions}>
-              <Select.Trigger class="min-w-20 justify-center" id="year-picker">
-                <SelectPrimitive.Value />
-              </Select.Trigger>
-              <Select.Content>
-                {#each yearOptions as o (o.value)}
-                  <Select.Item value={o.value} label={o.label}>{o.label}</Select.Item>
-                {/each}
-              </Select.Content>
-            </Select.Root>
+            {@render yearPicker()}
             <Button
               variant="outline"
               size="icon"
               onclick={nextMonth}
               aria-label="Next month"
-              disabled={!dbSession.value || atMax}
+              disabled={atMax}
             >
               <ChevronRight />
             </Button>
@@ -424,26 +432,17 @@
               size="icon"
               onclick={() => shiftYear(-1)}
               aria-label="Previous year"
-              disabled={!dbSession.value || (minYear !== null && currentYear <= minYear)}
+              disabled={minYear !== null && currentYear <= minYear}
             >
               <ChevronLeft />
             </Button>
-            <Select.Root type="single" bind:value={yearSel} items={yearOptions}>
-              <Select.Trigger class="min-w-28 justify-center" id="year-picker">
-                <SelectPrimitive.Value />
-              </Select.Trigger>
-              <Select.Content>
-                {#each yearOptions as o (o.value)}
-                  <Select.Item value={o.value} label={o.label}>{o.label}</Select.Item>
-                {/each}
-              </Select.Content>
-            </Select.Root>
+            {@render yearPicker()}
             <Button
               variant="outline"
               size="icon"
               onclick={() => shiftYear(1)}
               aria-label="Next year"
-              disabled={!dbSession.value || (maxYear !== null && currentYear >= maxYear)}
+              disabled={maxYear !== null && currentYear >= maxYear}
             >
               <ChevronRight />
             </Button>
@@ -456,7 +455,7 @@
           id="budgets-search"
           label="Search budgets"
           placeholder="Search budgets…"
-          bind:value={search}
+          bind:value={searchInput}
           class="w-full max-w-xs"
         />
       {/if}
@@ -494,7 +493,7 @@
   viewYear={currentYear}
   {currency}
   onSave={handleSaveSuccess}
-  onError={(msg) => (error = msg)}
+  onError={(msg) => (formError = msg)}
 />
 
 <Dialog.Root bind:open={showDeleteConfirm}>

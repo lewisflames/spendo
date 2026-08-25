@@ -5,17 +5,15 @@
   let {
     icon,
     title,
-    description,
-    class: className = ''
+    description
   }: {
     icon: Snippet;
     title: string;
     description?: string;
-    class?: string;
   } = $props();
 </script>
 
-<Card.Header class={className}>
+<Card.Header>
   <div class="flex items-center gap-2">
     {@render icon()}
     <Card.Title>{title}</Card.Title>

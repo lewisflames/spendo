@@ -6,16 +6,16 @@
   import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
   import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
   import TreeChevron from '$lib/components/shared/tree-chevron.svelte';
-  import PaginationNav from '$lib/components/shared/pagination-nav';
+  import { PaginationNav } from '$lib/components/shared/pagination-nav';
   import { Upload } from '@lucide/svelte';
   import { dbSession } from '$lib/stores/db.svelte';
   import { appSettings, saveSettings } from '$lib/stores/settings.svelte';
   import { fetchImportHistory } from '$lib/tauri';
   import type { ImportLogDetails } from '$lib/tauri';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
-  import { formatDate, formatNumber } from '$lib/utils/format.svelte';
+  import { formatDate, formatNumber, plural } from '$lib/utils/format.svelte';
   import ImportHistoryEntry from '$lib/features/home/import-history-entry.svelte';
-  import { SvelteSet } from 'svelte/reactivity';
+  import { useTreeExpand } from '$lib/hooks/use-tree-expand.svelte';
 
   let page = $state(1);
   let pageSize = $derived(appSettings.value.pageSize);
@@ -39,15 +39,7 @@
   let data = $derived(res.data);
   let error = $derived(res.error);
 
-  const expanded = new SvelteSet<number>();
-
-  function toggleExpanded(id: number) {
-    if (expanded.has(id)) {
-      expanded.delete(id);
-    } else {
-      expanded.add(id);
-    }
-  }
+  const tree = useTreeExpand<number>();
 
   function handlePageSizeChange(size: number) {
     saveSettings({ pageSize: size });
@@ -79,9 +71,7 @@
   <div class="flex items-baseline justify-between gap-4">
     <h3 class="text-xl font-bold tracking-tight">Import history</h3>
     {#if data}
-      <p class="text-sm text-muted-foreground">
-        {formatNumber(data.total)} import{data.total === 1 ? '' : 's'}
-      </p>
+      <p class="text-sm text-muted-foreground">{plural(data.total, 'import')}</p>
     {/if}
   </div>
 
@@ -118,12 +108,12 @@
             {#each data.logs as entry (entry.id)}
               <Table.Row
                 class="cursor-pointer hover:bg-muted/50"
-                onclick={() => toggleExpanded(entry.id)}
+                onclick={() => tree.toggle(entry.id)}
               >
                 <Table.Cell class="py-2.5">
                   <TreeChevron
-                    open={expanded.has(entry.id)}
-                    ontoggle={() => toggleExpanded(entry.id)}
+                    open={tree.expanded.has(entry.id)}
+                    ontoggle={() => tree.toggle(entry.id)}
                   />
                 </Table.Cell>
                 <Table.Cell class="py-2.5 whitespace-nowrap">
@@ -166,7 +156,7 @@
                   {totalOrphaned(entry) === 0 ? '\u2014' : formatNumber(totalOrphaned(entry))}
                 </Table.Cell>
               </Table.Row>
-              {#if expanded.has(entry.id)}
+              {#if tree.expanded.has(entry.id)}
                 <ImportHistoryEntry {entry} />
               {/if}
             {/each}

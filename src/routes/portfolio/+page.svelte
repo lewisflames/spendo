@@ -25,7 +25,9 @@
   import { toast } from '$lib/components/ui/sonner';
   import PortfolioChart from '$lib/features/portfolio/portfolio-chart.svelte';
   import HoldingsTable from '$lib/features/portfolio/holdings-table.svelte';
+  import { holdingLabel } from '$lib/features/portfolio/price-utils';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
+  import { plural } from '$lib/utils/format.svelte';
 
   const res = useAsyncData({
     enabled: () => !!dbSession.value,
@@ -45,9 +47,7 @@
     try {
       const result = await refreshPrices();
       if (result.errors.length > 0) {
-        toast.warning(
-          `Prices refreshed with ${result.errors.length} error${result.errors.length === 1 ? '' : 's'}`
-        );
+        toast.warning(`Prices refreshed with ${plural(result.errors.length, 'error')}`);
       } else {
         toast.success('Prices refreshed');
       }
@@ -64,7 +64,7 @@
     const cfg: Chart.ChartConfig = {};
     if (res.data) {
       for (const h of res.data.holdings) {
-        cfg[h.commodityGuid] = { label: h.fullName ?? h.mnemonic };
+        cfg[h.commodityGuid] = { label: holdingLabel(h) };
       }
     }
     return cfg;
@@ -86,7 +86,7 @@
     if (!res.data) return [];
     return res.data.holdings.map((h, i) => ({
       key: h.commodityGuid,
-      label: h.fullName ?? h.mnemonic,
+      label: holdingLabel(h),
       value: Math.max(h.marketValue, 0),
       color: holdingColor(i)
     }));
@@ -212,7 +212,7 @@
                           )}
                           <ChartTooltipRow
                             color={item.color as string}
-                            label={holding?.fullName ?? holding?.mnemonic ?? String(item.key)}
+                            label={holding ? holdingLabel(holding) : String(item.key)}
                             value={fmt(value as number)}
                             valueSuffix={holding
                               ? `${holding.allocationPct.toFixed(1)}%`

@@ -1,32 +1,28 @@
 <script lang="ts">
   import { page } from '$app/state';
   import { resolve } from '$app/paths';
-  import { goto } from '$app/navigation';
   import * as Table from '$lib/components/ui/table';
-  import PaginationNav from '$lib/components/shared/pagination-nav';
+  import { PaginationNav } from '$lib/components/shared/pagination-nav';
   import { Badge } from '$lib/components/ui/badge';
   import { Button } from '$lib/components/ui/button';
-  import { SearchInput } from '$lib/components/shared/search-input';
   import { Skeleton } from '$lib/components/ui/skeleton';
   import {
     TrendingUp,
     TrendingDown,
     Wallet,
-    X,
     Receipt,
     Download,
     LoaderCircle
   } from '@lucide/svelte';
   import SortHead from '$lib/components/shared/sort-head.svelte';
-  import { DatePicker } from '$lib/components/shared/date-picker';
   import { dbSession } from '$lib/stores/db.svelte';
   import { appSettings, saveSettings } from '$lib/stores/settings.svelte';
   import { setBreadcrumb } from '$lib/stores/breadcrumb.svelte';
-  import { fetchAccountDetail, fetchAccounts } from '$lib/tauri';
+  import { fetchAccountDetail } from '$lib/tauri';
   import {
-    formatNumber,
     formatDate as fmtDate,
-    formatSessionCurrency as fmt
+    formatSessionCurrency as fmt,
+    plural
   } from '$lib/utils/format.svelte';
   import { statusFor } from '$lib/utils/reconcile';
   import { errMsg } from '$lib/utils/error';
@@ -35,11 +31,19 @@
   import ImportPrompt from '$lib/components/shared/import-prompt.svelte';
   import { downloadCsv } from '$lib/utils/csv';
   import { fetchAllRows } from '$lib/utils/export';
-  import type { AccountNode, DetailTransaction } from '$lib/tauri';
+  import type { DetailTransaction } from '$lib/tauri';
   import { toast } from '$lib/components/ui/sonner';
   import { useDebouncedSearch } from '$lib/hooks/use-debounced-search.svelte';
-  import { useUrlParams } from '$lib/hooks/use-url-params.svelte';
+  import {
+    useUrlParams,
+    pageParam,
+    debouncedSearchParam,
+    dateParam
+  } from '$lib/hooks/use-url-params.svelte';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
+  import { useTableSort } from '$lib/hooks/use-table-sort.svelte';
+  import { handleRowClick, openTransaction } from '$lib/utils/navigation';
+  import TransactionFilters from '$lib/features/transactions/transaction-filters.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import KpiCard from '$lib/components/shared/kpi-card.svelte';
   import KpiCardRow from '$lib/components/shared/kpi-card-row.svelte';
@@ -52,8 +56,9 @@
   let guid = $derived(page.params.guid);
   let pageSize = $derived(appSettings.value.pageSize);
   let pg = $state(1);
-  let sortBy = $state<'date' | 'description'>('date');
-  let sortDir = $state<'asc' | 'desc'>('desc');
+  const sort = useTableSort<'date' | 'description'>({ sortBy: 'date', sortDir: 'desc' }, ['date']);
+  let sortBy = $derived(sort.sortBy);
+  let sortDir = $derived(sort.sortDir);
 
   // Filter state + URL-param restore must be set up before useAsyncData so the
   // first fetch already uses values from the URL.
@@ -64,35 +69,29 @@
   let search = useDebouncedSearch(() => searchInput);
 
   useUrlParams([
-    {
-      key: 'page',
-      get: () => (pg > 1 ? String(pg) : null),
-      apply: (v) => {
-        const n = Number(v);
-        pg = Number.isInteger(n) && n >= 1 ? n : 1;
+    pageParam(
+      'page',
+      () => pg,
+      (p) => (pg = p)
+    ),
+    debouncedSearchParam(
+      'q',
+      () => search.value || null,
+      (v) => {
+        searchInput = v;
+        search.set(v);
       }
-    },
-    {
-      key: 'q',
-      get: () => search.value || null,
-      apply: (v) => {
-        searchInput = v ?? '';
-        search.set(v ?? '');
-      },
-      replace: true
-    },
-    {
-      key: 'from',
-      get: () => dateFrom || null,
-      apply: (v) => (dateFrom = v ?? ''),
-      replace: true
-    },
-    {
-      key: 'to',
-      get: () => dateTo || null,
-      apply: (v) => (dateTo = v ?? ''),
-      replace: true
-    }
+    ),
+    dateParam(
+      'from',
+      () => dateFrom || null,
+      (v) => (dateFrom = v ?? '')
+    ),
+    dateParam(
+      'to',
+      () => dateTo || null,
+      (v) => (dateTo = v ?? '')
+    )
   ]);
 
   const res = useAsyncData({
@@ -121,60 +120,14 @@
   let loading = $derived(res.loading);
   let error = $derived(res.error);
 
-  const accountsRes = useAsyncData({
-    enabled: () => !!dbSession.value && !!guid,
-    fetch: () => fetchAccounts(),
-    label: 'Failed to load sub-accounts'
-  });
-
-  function findNode(nodes: AccountNode[], g: string): AccountNode | undefined {
-    for (const n of nodes) {
-      if (n.guid === g) return n;
-      const found = findNode(n.children, g);
-      if (found) return found;
-    }
-    return undefined;
-  }
-
-  let subAccounts = $derived.by(() => {
-    const trees = accountsRes.data?.trees;
-    return guid && trees ? (findNode(trees, guid)?.children ?? []) : [];
-  });
-
-  let hasFilters = $derived(!!(searchInput || dateFrom || dateTo));
+  // Direct children come with the detail payload — no second full-tree fetch.
+  let subAccounts = $derived(data?.account.childAccounts ?? []);
 
   let currentBalance = $derived(data?.account.balance ?? 0);
-
-  function toggleSort(key: 'date' | 'description') {
-    if (sortBy === key) {
-      sortDir = sortDir === 'asc' ? 'desc' : 'asc';
-    } else {
-      sortBy = key;
-      sortDir = key === 'description' ? 'asc' : 'desc';
-    }
-  }
-
-  function openTransaction(id: string) {
-    void goto(resolve('/transactions/[id]', { id }));
-  }
 
   function handlePageSizeChange(size: number) {
     saveSettings({ pageSize: size });
     pg = 1;
-  }
-
-  /**
-   * Row-level navigation shortcut for plain clicks anywhere on the row.
-   * Clicks on real links bubble up untouched: SvelteKit's root click listener
-   * performs their client-side navigation (stopPropagation on the link would
-   * defeat that interceptor and cause a full page reload).
-   */
-  function handleRowClick(e: MouseEvent, id: string) {
-    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
-      return;
-    }
-    if ((e.target as HTMLElement).closest('a')) return;
-    openTransaction(id);
   }
 
   let prevNavKey = '';
@@ -268,14 +221,12 @@
         {#snippet description()}
           {d.account.accountType}
           {#if d.account.placeholder}· Placeholder{/if}
-          {#if d.account.childrenCount > 0}· {d.account.childrenCount} sub-account{d.account
-              .childrenCount === 1
-              ? ''
-              : 's'}{/if}
-          {#if d.summary.totalTransactions > 0}· {formatNumber(d.summary.totalTransactions)} txn{d
-              .summary.totalTransactions === 1
-              ? ''
-              : 's'}{/if}
+          {#if d.account.descendantCount > 0}
+            · {plural(d.account.descendantCount, 'sub-account')}
+          {/if}
+          {#if d.summary.totalTransactions > 0}
+            · {plural(d.summary.totalTransactions, 'txn')}
+          {/if}
         {/snippet}
         <Button
           variant="outline"
@@ -321,14 +272,12 @@
 
     <!-- Sub-accounts -->
     {#if subAccounts.length > 0}
-      <DimWrapper active={accountsRes.loading}>
-        <section class="flex flex-col gap-3">
-          <h2 class="text-xs font-semibold tracking-wider text-muted-foreground uppercase">
-            Sub-accounts
-          </h2>
-          <SubaccountsTable nodes={subAccounts} />
-        </section>
-      </DimWrapper>
+      <section class="flex flex-col gap-3">
+        <h2 class="text-xs font-semibold tracking-wider text-muted-foreground uppercase">
+          Sub-accounts
+        </h2>
+        <SubaccountsTable nodes={subAccounts} />
+      </section>
     {/if}
 
     <!-- Balance over time -->
@@ -336,38 +285,8 @@
       <BalanceTrendChart {guid} />
     {/if}
 
-    <!-- Filters + action buttons -->
-    <div class="flex flex-wrap items-end gap-2">
-      <SearchInput
-        id="acct-search"
-        label="Search description, notes, memo, number"
-        placeholder="Search description, notes, memo, number..."
-        bind:value={searchInput}
-        class="grow basis-48"
-      />
-      <div class="flex flex-col gap-1">
-        <label for="acct-from" class="text-xs text-muted-foreground">From</label>
-        <DatePicker id="acct-from" bind:value={dateFrom} placeholder="Start date" />
-      </div>
-      <div class="flex flex-col gap-1">
-        <label for="acct-to" class="text-xs text-muted-foreground">To</label>
-        <DatePicker id="acct-to" bind:value={dateTo} placeholder="End date" />
-      </div>
-      {#if hasFilters}
-        <Button
-          variant="ghost"
-          onclick={() => {
-            searchInput = '';
-            search.set('');
-            dateFrom = '';
-            dateTo = '';
-          }}
-        >
-          <X aria-hidden="true" class="mr-1 size-3" />
-          Clear
-        </Button>
-      {/if}
-    </div>
+    <!-- Filters -->
+    <TransactionFilters bind:search={searchInput} bind:dateFrom bind:dateTo />
 
     {#if loading && !data}
       <TableSkeleton cols={4} rows={5} />
@@ -397,15 +316,15 @@
               <Table.Row class="bg-muted/75">
                 <SortHead
                   label="Date"
-                  active={sortBy === 'date'}
-                  dir={sortDir}
-                  onclick={() => toggleSort('date')}
+                  active={sort.sortBy === 'date'}
+                  dir={sort.sortDir}
+                  onclick={() => sort.toggle('date')}
                 />
                 <SortHead
                   label="Description"
-                  active={sortBy === 'description'}
-                  dir={sortDir}
-                  onclick={() => toggleSort('description')}
+                  active={sort.sortBy === 'description'}
+                  dir={sort.sortDir}
+                  onclick={() => sort.toggle('description')}
                 />
                 <Table.Head class="text-muted-foreground">Transfer</Table.Head>
                 <Table.Head class="text-muted-foreground">Status</Table.Head>
@@ -416,7 +335,7 @@
               {#each d.transactions as txn (txn.guid)}
                 <Table.Row
                   class="cursor-pointer hover:bg-muted/50"
-                  onclick={(e) => handleRowClick(e, txn.guid)}
+                  onclick={(e) => handleRowClick(e, () => openTransaction(txn.guid))}
                 >
                   <Table.Cell class="py-2.5 whitespace-nowrap text-muted-foreground">
                     {fmtDate(txn.postDate)}

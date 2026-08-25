@@ -1,7 +1,6 @@
 <script lang="ts">
   import * as Table from '$lib/components/ui/table';
   import { resolve } from '$app/paths';
-  import { goto } from '$app/navigation';
   import {
     formatNumber,
     formatSessionCurrency,
@@ -9,33 +8,15 @@
     clampZero
   } from '$lib/utils/format.svelte';
   import { nodeCategory } from '$lib/features/accounts/account-types';
+  import { CATEGORY_LABEL_SINGULAR } from '$lib/features/accounts/account-types';
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import { dbSession } from '$lib/stores/db.svelte';
-  import type { AccountNode } from '$lib/tauri';
+  import type { ChildAccountInfo } from '$lib/tauri';
+  import { handleRowClick, openAccount } from '$lib/utils/navigation';
 
-  let { nodes }: { nodes: AccountNode[] } = $props();
-
-  const CATEGORY_LABEL: Record<string, string> = {
-    ASSET: 'Asset',
-    LIABILITY: 'Liability',
-    EQUITY: 'Equity',
-    INCOME: 'Income',
-    EXPENSE: 'Expense'
-  };
+  let { nodes }: { nodes: ChildAccountInfo[] } = $props();
 
   const reportCurrency = $derived(dbSession.value?.summary.currency ?? '');
-
-  function openAccount(guid: string) {
-    void goto(resolve('/accounts/[guid]', { guid }));
-  }
-
-  function handleRowClick(e: MouseEvent, guid: string) {
-    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
-      return;
-    }
-    if ((e.target as HTMLElement).closest('a')) return;
-    openAccount(guid);
-  }
 </script>
 
 <TableShell>
@@ -51,7 +32,7 @@
     {#each nodes as node (node.guid)}
       <Table.Row
         class="cursor-pointer hover:bg-muted/50"
-        onclick={(e) => handleRowClick(e, node.guid)}
+        onclick={(e) => handleRowClick(e, () => openAccount(node.guid))}
       >
         <Table.Cell class="p-0">
           <div class="flex items-center gap-1 py-2.5">
@@ -75,7 +56,7 @@
           </div>
         </Table.Cell>
         <Table.Cell class="py-2.5 text-sm text-muted-foreground">
-          {CATEGORY_LABEL[nodeCategory(node.accountType)] ?? node.accountType}
+          {CATEGORY_LABEL_SINGULAR[nodeCategory(node.accountType)] ?? node.accountType}
         </Table.Cell>
         <Table.Cell class="py-2.5 text-right text-sm text-muted-foreground tabular-nums">
           {formatNumber(node.txCount)}
