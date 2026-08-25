@@ -20,6 +20,31 @@ pub const RAW_AMOUNT: &str = "CAST(s.value_num AS REAL) / CAST(s.value_denom AS 
 pub const PRICE_AMOUNT: &str = "CAST(p.value_num AS REAL) / CAST(p.value_denom AS REAL)";
 pub const QUANTITY_AMOUNT: &str = "CAST(s.quantity_num AS REAL) / CAST(s.quantity_denom AS REAL)";
 
+/// Visibility window applied to every "current state" query: future-dated
+/// transactions are excluded so net worth, PnL, budgets and portfolio agree
+/// across pages for the same book.
+pub const VISIBLE_TX_FILTER: &str = "t.post_date < date('now', '+1 day')";
+
+/// Escape `%`, `_` and `\` in user input for LIKE patterns used together
+/// with `ESCAPE '\'`, so searching for a literal `%` matches a literal `%`
+/// instead of acting as a wildcard.
+pub fn escape_like(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for c in input.chars() {
+        if c == '\\' || c == '%' || c == '_' {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// Total pages for a paginated result set, always at least 1 so empty result
+/// sets still render page 1. Shared by every paginated command.
+pub fn total_pages(total: i64, page_size: i64) -> i64 {
+    (((total as f64) / (page_size as f64)).ceil() as i64).max(1)
+}
+
 pub fn signed_amount_expr(amount_col: &str, type_col: &str) -> String {
     let types = CREDIT_NORMAL
         .iter()
@@ -94,4 +119,59 @@ pub fn validate_gnucash_path(path: &str) -> Result<(), String> {
         return Err(format!("File not found: {}", path));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn month_number_parses_year_month_pairs() {
+        assert_eq!(month_number("0000-01").unwrap(), 0);
+        assert_eq!(month_number("0000-12").unwrap(), 11);
+        assert_eq!(month_number("0001-01").unwrap(), 12);
+        assert_eq!(month_number("2024-01").unwrap(), 24_288);
+        assert_eq!(month_number("2024-12").unwrap(), 24_299);
+        assert_eq!(month_number("2025-01").unwrap(), 24_300);
+        assert!(month_number("2024").is_err());
+        assert!(month_number("2024-13x").is_err());
+    }
+
+    #[test]
+    fn format_month_round_trips_month_number() {
+        for n in [0i64, 11, 12, 25, 603] {
+            let ym = format_month(n);
+            assert_eq!(month_number(&ym).unwrap(), n);
+        }
+        assert_eq!(format_month(0), "0000-01");
+        assert_eq!(format_month(24), "0002-01");
+    }
+
+    #[test]
+    fn month_range_spans_into_next_year() {
+        assert_eq!(
+            month_range(2024, 1),
+            ("2024-01".to_string(), "2024-02".to_string())
+        );
+        assert_eq!(
+            month_range(2024, 12),
+            ("2024-12".to_string(), "2025-01".to_string())
+        );
+    }
+
+    #[test]
+    fn escape_like_escapes_metacharacters() {
+        assert_eq!(escape_like("100%"), r"100\%");
+        assert_eq!(escape_like("a_b"), r"a\_b");
+        assert_eq!(escape_like(r"back\slash"), r"back\\slash");
+        assert_eq!(escape_like("plain"), "plain");
+    }
+
+    #[test]
+    fn total_pages_always_at_least_one() {
+        assert_eq!(total_pages(0, 50), 1);
+        assert_eq!(total_pages(1, 50), 1);
+        assert_eq!(total_pages(51, 50), 2);
+        assert_eq!(total_pages(100, 50), 2);
+    }
 }

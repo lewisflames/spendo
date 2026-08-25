@@ -2,7 +2,7 @@ use rusqlite::Connection;
 use serde::Serialize;
 use tauri::State;
 
-use crate::db::{get_conn, AppState};
+use crate::db::{run_blocking, AppState};
 use crate::fx;
 use crate::prices::get_cached_prices_map;
 use crate::utils;
@@ -32,13 +32,23 @@ pub fn get_summary(conn: &Connection) -> Result<DataSummary, String> {
         .query_row("SELECT COUNT(*) FROM accounts", [], |row| row.get(0))
         .map_err(|e| e.to_string())?;
 
+    // Same visibility window as every other page: future-dated transactions
+    // must not inflate totals, the displayed date range or net worth.
     let total_transactions: i64 = conn
-        .query_row("SELECT COUNT(*) FROM transactions", [], |row| row.get(0))
+        .query_row(
+            &format!("SELECT COUNT(*) FROM transactions WHERE {}", utils::VISIBLE_TX_FILTER),
+            [],
+            |row| row.get(0),
+        )
         .map_err(|e| e.to_string())?;
 
     let (earliest_date, latest_date): (Option<String>, Option<String>) = conn
         .query_row(
-            "SELECT MIN(post_date), MAX(post_date) FROM transactions",
+            &format!(
+                "SELECT substr(MIN(post_date), 1, 10), substr(MAX(post_date), 1, 10)
+                 FROM transactions WHERE {}",
+                utils::VISIBLE_TX_FILTER
+            ),
             [],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
@@ -59,11 +69,14 @@ pub fn get_summary(conn: &Connection) -> Result<DataSummary, String> {
                  FROM splits s
                  JOIN accounts a ON a.guid = s.account_guid
                  JOIN commodities c ON c.guid = a.commodity_guid
+                 JOIN transactions t ON t.guid = s.tx_guid
+                 WHERE {}
                  GROUP BY c.mnemonic",
                 utils::RAW_AMOUNT,
                 utils::investment_types_sql(),
                 utils::QUANTITY_AMOUNT,
-                utils::RAW_AMOUNT
+                utils::RAW_AMOUNT,
+                utils::VISIBLE_TX_FILTER
             ))
             .map_err(|e| e.to_string())?;
         let rows = stmt
@@ -103,22 +116,22 @@ pub fn get_summary(conn: &Connection) -> Result<DataSummary, String> {
 
 #[tauri::command]
 pub async fn fetch_home_data(state: State<'_, AppState>) -> Result<HomeDataResult, String> {
-    let conn = get_conn(&state)?;
-    let cnt: i64 = conn
-        .query_row("SELECT COUNT(*) as cnt FROM accounts", [], |row| row.get(0))
-        .map_err(|e| e.to_string())?;
+    run_blocking(state.db.clone(), move |conn| {
+        let cnt: i64 = conn
+            .query_row("SELECT COUNT(*) as cnt FROM accounts", [], |row| row.get(0))
+            .map_err(|e| e.to_string())?;
 
-    if cnt == 0 {
-        return Ok(HomeDataResult {
-            has_data: false,
-            summary: None,
-        });
-    }
+        if cnt == 0 {
+            return Ok(HomeDataResult {
+                has_data: false,
+                summary: None,
+            });
+        }
 
-    let summary = get_summary(&conn)?;
-
-    Ok(HomeDataResult {
-        has_data: true,
-        summary: Some(summary),
+        Ok(HomeDataResult {
+            has_data: true,
+            summary: Some(get_summary(conn)?),
+        })
     })
+    .await
 }

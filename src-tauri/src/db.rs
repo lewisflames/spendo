@@ -8,13 +8,9 @@ pub struct AppState {
     pub db_path: PathBuf,
 }
 
-pub fn get_conn(state: &AppState) -> Result<std::sync::MutexGuard<'_, Connection>, String> {
-    state.db.lock().map_err(|e| e.to_string())
-}
-
-/// Run a closure with the DB connection on a blocking thread. Long-running
-/// work (imports, bulk price writes) must go through here so the tokio
-/// runtime thread isn't blocked while the global mutex is held.
+/// Run a closure with the DB connection on a blocking thread. Every DB-touching
+/// command must go through here so the tokio runtime threads are never blocked
+/// while the global mutex is held.
 pub async fn run_blocking<T, F>(db: Arc<Mutex<Connection>>, f: F) -> Result<T, String>
 where
     F: FnOnce(&Connection) -> Result<T, String> + Send + 'static,

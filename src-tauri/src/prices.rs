@@ -135,37 +135,15 @@ fn normalize_price(
 }
 
 pub fn get_latest_live_prices(conn: &Connection) -> Result<Vec<PriceEntry>, String> {
-    let mut stmt = conn
-        .prepare(&format!(
-            "SELECT mnemonic, price, date as priceDate, currency FROM (
-                SELECT c.mnemonic,
-                    {} as price,
-                    p.date,
-                    cur.mnemonic as currency,
-                    ROW_NUMBER() OVER (PARTITION BY c.mnemonic ORDER BY p.date DESC, p.guid DESC) as rn
-                FROM prices p
-                JOIN commodities c ON c.guid = p.commodity_guid
-                JOIN commodities cur ON cur.guid = p.currency_guid
-                WHERE c.namespace != 'CURRENCY'
-             ) WHERE rn = 1",
-            utils::PRICE_AMOUNT
-        ))
-        .map_err(|e| e.to_string())?;
-
-    let rows = stmt
-        .query_map([], |row| {
-            Ok(PriceEntry {
-                mnemonic: row.get(0)?,
-                price: row.get(1)?,
-                price_date: row.get(2)?,
-                currency: row.get(3)?,
-            })
+    Ok(latest_n_prices_raw(conn, 1)?
+        .into_iter()
+        .map(|(mnemonic, price, date, currency)| PriceEntry {
+            mnemonic,
+            price,
+            price_date: date,
+            currency,
         })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
-
-    Ok(rows)
+        .collect())
 }
 
 pub fn get_last_refresh_timestamp(conn: &Connection) -> Result<Option<String>, String> {
@@ -240,26 +218,28 @@ fn read_price_data(conn: &Connection) -> Result<PricePreRead, String> {
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?
+            .collect::<Result<HashSet<_>, _>>()
             .map_err(|e| e.to_string())?;
-        let mut set = HashSet::new();
-        for row in rows {
-            set.insert(row.map_err(|e| e.to_string())?);
-        }
-        set
+        rows
     };
 
-    let mut latest_dates: HashMap<String, String> = HashMap::new();
-    if let Ok(mut stmt) =
-        conn.prepare("SELECT commodity_guid, MAX(date) FROM prices GROUP BY commodity_guid")
-    {
-        if let Ok(rows) = stmt.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        }) {
-            for row in rows.flatten() {
-                latest_dates.insert(row.0, row.1);
-            }
-        }
-    }
+    // Latest stored date per commodity drives incremental fetching (period1).
+    // Failures here must propagate: silently degrading to empty dates turns an
+    // incremental refresh into a full 10-year refetch for every symbol.
+    let latest_dates: HashMap<String, String> = {
+        let mut stmt = conn
+            .prepare("SELECT commodity_guid, MAX(date) FROM prices GROUP BY commodity_guid")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<HashMap<_, _>, _>>()
+            .map_err(|e| e.to_string())?;
+        rows
+    };
 
     let report_currency_guid = fx::get_report_currency_guid(conn);
     let report_currency = fx::get_report_currency_mnemonic(conn);
@@ -443,7 +423,11 @@ pub async fn fetch_prices_inner(pre: PricePreRead) -> Result<(PricesResult, Pric
     // period2 = tomorrow at 00:00 UTC (ensures today's data is included)
     let today = chrono::Utc::now().date_naive();
     let tomorrow = today.succ_opt().unwrap_or(today);
-    let period2 = tomorrow.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp();
+    let period2 = tomorrow
+        .and_hms_opt(0, 0, 0)
+        .ok_or_else(|| "Failed to construct period2 timestamp".to_string())?
+        .and_utc()
+        .timestamp();
 
     let mut symbol_map: HashMap<String, String> = HashMap::new();
     let mut all_symbols: Vec<String> = vec![];
@@ -508,8 +492,12 @@ pub async fn fetch_prices_inner(pre: PricePreRead) -> Result<(PricesResult, Pric
         let p2 = period2;
         let permit = std::sync::Arc::clone(&semaphore);
         handles.push(tokio::spawn(async move {
-            let _guard = permit.acquire().await.expect("Semaphore closed");
-            (sym.clone(), fetch_single_yahoo_history(&sym, p1, p2).await)
+            // A closed semaphore would mean the runtime is shutting down; map
+            // it into the result tuple instead of panicking the task.
+            match permit.acquire().await {
+                Ok(_guard) => (sym.clone(), fetch_single_yahoo_history(&sym, p1, p2).await),
+                Err(e) => (sym, Err(format!("Fetch scheduler unavailable: {e}"))),
+            }
         }));
     }
 
@@ -708,26 +696,19 @@ fn report_currency_pair(conn: &Connection) -> (String, String) {
     )
 }
 
-/// Quote currency mnemonic of a commodity's latest price (used as the cost-basis
-/// currency proxy for stock accounts).
-pub fn get_quote_currency(conn: &Connection, mnemonic: &str) -> Option<String> {
-    conn.query_row(
-        "SELECT cur.mnemonic
-         FROM prices p
-         JOIN commodities c ON c.guid = p.commodity_guid
-         JOIN commodities cur ON cur.guid = p.currency_guid
-         WHERE c.mnemonic = ?1 AND c.namespace != 'CURRENCY'
-         ORDER BY p.date DESC
-         LIMIT 1",
-        [mnemonic],
-        |row| row.get(0),
-    )
-    .ok()
+/// Quote currency mnemonic per commodity (from each commodity's latest price),
+/// used as the cost-basis currency proxy for stock accounts. One query instead
+/// of one lookup per commodity.
+pub fn latest_quote_currencies(conn: &Connection) -> Result<HashMap<String, String>, String> {
+    Ok(latest_n_prices_raw(conn, 1)?
+        .into_iter()
+        .map(|(mnemonic, _, _, quote)| (mnemonic, quote))
+        .collect())
 }
 
 #[tauri::command]
 pub async fn refresh_prices(state: State<'_, AppState>) -> Result<PricesResult, String> {
-    let pre = db::run_blocking(state.db.clone(), |conn| read_price_data(conn)).await?;
+    let pre = db::run_blocking(state.db.clone(), read_price_data).await?;
 
     let (result, write_data) = fetch_prices_inner(pre).await?;
 
