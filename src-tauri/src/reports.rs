@@ -3,7 +3,7 @@ use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use tauri::State;
 
-use crate::db::{get_conn, AppState};
+use crate::db::{AppState, run_blocking};
 use crate::fx;
 use crate::sql;
 use crate::tree;
@@ -65,7 +65,7 @@ fn build_tree_adjacency(rows: &[RawAccountBalance], account_types: &[&str]) -> t
             !(r.placeholder
                 && r.parent_guid
                     .as_ref()
-                    .map_or(true, |p| !guids.contains(p.as_str())))
+                    .is_none_or(|p| !guids.contains(p.as_str())))
         })
         .collect();
 
@@ -83,25 +83,33 @@ fn fetch_account_balances(
     // Build a CASE expression that only includes split amounts when the
     // transaction's post_date falls within the range. Using CASE inside SUM
     // instead of filtering in the LEFT JOIN ensures accounts with no matching
-    // transactions still appear (with balance 0).
+    // transactions still appear (with balance 0). The upper bound is capped at
+    // the shared visibility window so a period ending today or later never
+    // includes future-dated transactions.
     let amount = utils::signed_amount_expr(utils::RAW_AMOUNT, "a.account_type");
     let (date_case, params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
         match (date_from, date_to) {
             (Some(f), Some(t)) => (
                 format!(
-                    "CASE WHEN t.post_date >= ?1 AND t.post_date <= ?2 THEN {amount} ELSE 0 END"
+                    "CASE WHEN t.post_date >= ?1 AND t.post_date <= min(?2, date('now', '+1 day')) THEN {amount} ELSE 0 END"
                 ),
                 vec![Box::new(f.to_string()), Box::new(t.to_string())],
             ),
             (Some(f), None) => (
-                format!("CASE WHEN t.post_date >= ?1 THEN {amount} ELSE 0 END"),
+                format!(
+                    "CASE WHEN t.post_date >= ?1 AND {} THEN {amount} ELSE 0 END",
+                    utils::VISIBLE_TX_FILTER
+                ),
                 vec![Box::new(f.to_string())],
             ),
             (None, Some(t)) => (
-                format!("CASE WHEN t.post_date <= ?1 THEN {amount} ELSE 0 END"),
+                format!("CASE WHEN t.post_date <= min(?1, date('now', '+1 day')) THEN {amount} ELSE 0 END"),
                 vec![Box::new(t.to_string())],
             ),
-            (None, None) => (amount, vec![]),
+            (None, None) => (
+                format!("CASE WHEN {} THEN {amount} ELSE 0 END", utils::VISIBLE_TX_FILTER),
+                vec![],
+            ),
         };
 
     let sql = format!(
@@ -233,8 +241,8 @@ pub fn generate_pnl_report_inner(
             change_pct: None,
         }
     };
-    let income_rows = build_tree(&current_rows, &["INCOME"], &push_pnl);
-    let expense_rows = build_tree(&current_rows, &["EXPENSE"], &push_pnl);
+    let income_rows = build_tree(&current_rows, &["INCOME"], push_pnl);
+    let expense_rows = build_tree(&current_rows, &["EXPENSE"], push_pnl);
 
     let income_total: f64 = income_rows
         .iter()
@@ -266,8 +274,8 @@ pub fn generate_pnl_report_inner(
         fetch_account_balances(conn, Some(&prev_date_from_owned), Some(&prev_date_to_owned))?;
     convert_balances(&mut prev_rows, conn, &prev_date_to_owned)?;
 
-    let prev_income_rows = build_tree(&prev_rows, &["INCOME"], &push_pnl);
-    let prev_expense_rows = build_tree(&prev_rows, &["EXPENSE"], &push_pnl);
+    let prev_income_rows = build_tree(&prev_rows, &["INCOME"], push_pnl);
+    let prev_expense_rows = build_tree(&prev_rows, &["EXPENSE"], push_pnl);
 
     let mut prev_income_map: HashMap<String, f64> = HashMap::new();
     for r in &prev_income_rows {
@@ -345,12 +353,14 @@ pub async fn generate_pnl_report(
     prev_date_from: Option<String>,
     prev_date_to: Option<String>,
 ) -> Result<ProfitLossReport, String> {
-    let conn = get_conn(&state)?;
-    generate_pnl_report_inner(
-        &conn,
-        &date_from,
-        &date_to,
-        prev_date_from.as_deref(),
-        prev_date_to.as_deref(),
-    )
+    run_blocking(state.db.clone(), move |conn| {
+        generate_pnl_report_inner(
+            conn,
+            &date_from,
+            &date_to,
+            prev_date_from.as_deref(),
+            prev_date_to.as_deref(),
+        )
+    })
+    .await
 }

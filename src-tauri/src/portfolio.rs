@@ -4,12 +4,13 @@ use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use tauri::State;
 
-use crate::db::{get_conn, AppState};
+use crate::db::{run_blocking, AppState};
 use crate::fx;
 use crate::prices::{
     get_cached_prev_prices_map, get_cached_prices_with_date_map, get_last_refresh_timestamp,
-    get_price_history, get_quote_currency, list_commodities, PriceHistoryEntry,
+    get_price_history, latest_quote_currencies, list_commodities, PriceHistoryEntry,
 };
+use crate::sql;
 use crate::utils;
 
 /// Upper bound on transactions returned for a single holding detail view.
@@ -119,27 +120,10 @@ fn priced_commodity_guids(conn: &Connection) -> Result<HashSet<String>, String> 
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([], |row| row.get::<_, String>(0))
-        .map_err(|e| e.to_string())?;
-    let mut set = HashSet::new();
-    for row in rows {
-        set.insert(row.map_err(|e| e.to_string())?);
-    }
-    Ok(set)
-}
-
-fn advance_fx(
-    fx_events: &HashMap<String, Vec<(String, f64)>>,
-    fx_pointers: &mut HashMap<String, usize>,
-    fx_rates: &mut HashMap<String, f64>,
-    date_str: &str,
-) {
-    for (mnemonic, events) in fx_events {
-        let ptr = fx_pointers.entry(mnemonic.clone()).or_insert(0);
-        while *ptr < events.len() && events[*ptr].0.as_str() <= date_str {
-            fx_rates.insert(mnemonic.clone(), events[*ptr].1);
-            *ptr += 1;
-        }
-    }
+        .map_err(|e| e.to_string())?
+        .collect::<Result<HashSet<_>, _>>()
+        .map_err(|e| e.to_string());
+    rows
 }
 
 /// Aggregated investment-account splits grouped by (commodity, account),
@@ -159,20 +143,20 @@ fn load_holding_splits(
 		 JOIN transactions t ON t.guid = s.tx_guid
 		 WHERE a.account_type IN ({})
 		   AND a.placeholder = 0
-		   AND t.post_date < date('now', '+1 day')",
-        utils::investment_types_sql()
+		   AND {}",
+        utils::investment_types_sql(),
+        utils::VISIBLE_TX_FILTER
     );
-    let filter_owned = filter.map(str::to_string);
-    let mut params: Vec<&dyn rusqlite::ToSql> = vec![];
-    if let Some(g) = &filter_owned {
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![];
+    if let Some(g) = filter {
         sql.push_str(" AND a.commodity_guid = ?1");
-        params.push(g);
+        params.push(Box::new(g.to_string()));
     }
     sql.push_str(" GROUP BY a.commodity_guid, s.account_guid ORDER BY c.mnemonic");
 
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
     let rows = stmt
-        .query_map(params.as_slice(), |row| {
+        .query_map(sql::param_refs(&params).as_slice(), |row| {
             Ok(HoldingSplit {
                 commodity_guid: row.get(0)?,
                 mnemonic: row.get(1)?,
@@ -225,7 +209,7 @@ fn build_holdings(
     if let Some(guid) = filter {
         // Filtered mode starts from a single GUID that may have no splits at
         // all, so its metadata comes straight from the commodities table.
-        let meta = conn
+        let meta: Meta = conn
             .query_row(
                 "SELECT mnemonic, fullname, namespace FROM commodities WHERE guid = ?1",
                 [guid],
@@ -237,10 +221,13 @@ fn build_holdings(
                     })
                 },
             )
-            .map_err(|e| e.to_string());
-        if let Ok(meta) = meta {
-            meta_by_guid.insert(guid.to_string(), meta);
-        }
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => {
+                    format!("Commodity not found: {guid}")
+                }
+                other => other.to_string(),
+            })?;
+        meta_by_guid.insert(guid.to_string(), meta);
     } else {
         for c in list_commodities(conn)? {
             meta_by_guid.entry(c.guid.clone()).or_insert_with(|| Meta {
@@ -264,6 +251,8 @@ fn build_holdings(
 
     let report_currency = fx::get_report_currency_mnemonic(conn).unwrap_or_default();
     let fx_map = fx::get_fx_map(conn, None)?;
+    // Cost-basis currency per commodity: its latest price quote currency.
+    let quote_currencies = latest_quote_currencies(conn)?;
 
     let mut commodity_map: HashMap<String, CommodityGroup> = HashMap::new();
 
@@ -287,8 +276,10 @@ fn build_holdings(
     }
 
     for r in &rows {
-        let quote_currency =
-            get_quote_currency(conn, &r.mnemonic).unwrap_or_else(|| report_currency.clone());
+        let quote_currency = quote_currencies
+            .get(&r.mnemonic)
+            .cloned()
+            .unwrap_or_else(|| report_currency.clone());
         let cost_converted = fx::convert(r.cost, &quote_currency, &report_currency, &fx_map);
         let entry = commodity_map
             .entry(r.commodity_guid.clone())
@@ -373,22 +364,22 @@ fn build_value_trend(
 		 JOIN transactions t ON t.guid = s.tx_guid
 		 WHERE a.account_type IN ({})
 		   AND a.placeholder = 0
-		   AND t.post_date < date('now', '+1 day')",
+		   AND {}",
         utils::QUANTITY_AMOUNT,
         utils::RAW_AMOUNT,
-        utils::investment_types_sql()
+        utils::investment_types_sql(),
+        utils::VISIBLE_TX_FILTER
     );
-    let filter_owned = filter.map(str::to_string);
-    let mut event_params: Vec<&dyn rusqlite::ToSql> = vec![];
-    if let Some(g) = &filter_owned {
+    let mut event_params: Vec<Box<dyn rusqlite::ToSql>> = vec![];
+    if let Some(g) = filter {
         events_sql.push_str(" AND a.commodity_guid = ?1");
-        event_params.push(g);
+        event_params.push(Box::new(g.to_string()));
     }
     events_sql.push_str(" ORDER BY t.post_date ASC");
 
     let mut stmt = conn.prepare(&events_sql).map_err(|e| e.to_string())?;
     let events: Vec<SplitEvent> = stmt
-        .query_map(event_params.as_slice(), |row| {
+        .query_map(sql::param_refs(&event_params).as_slice(), |row| {
             Ok(SplitEvent {
                 commodity_guid: row.get(0)?,
                 post_date: row.get(1)?,
@@ -415,17 +406,16 @@ fn build_value_trend(
 		 WHERE c.namespace != 'CURRENCY'",
         utils::PRICE_AMOUNT
     );
-    let filter_owned = filter.map(str::to_string);
-    let mut price_params: Vec<&dyn rusqlite::ToSql> = vec![];
-    if let Some(g) = &filter_owned {
+    let mut price_params: Vec<Box<dyn rusqlite::ToSql>> = vec![];
+    if let Some(g) = filter {
         prices_sql.push_str(" AND p.commodity_guid = ?1");
-        price_params.push(g);
+        price_params.push(Box::new(g.to_string()));
     }
     prices_sql.push_str(" ORDER BY p.date ASC");
 
     let mut price_stmt = conn.prepare(&prices_sql).map_err(|e| e.to_string())?;
     let price_events: Vec<PriceEvent> = price_stmt
-        .query_map(price_params.as_slice(), |row| {
+        .query_map(sql::param_refs(&price_params).as_slice(), |row| {
             Ok(PriceEvent {
                 mnemonic: row.get(0)?,
                 date: row.get(1)?,
@@ -438,33 +428,9 @@ fn build_value_trend(
         .map_err(|e| e.to_string())?;
 
     // FX rate history per currency (quoted in the report currency), for normalizing
-    // prices and cost basis per date.
-    let report_guid = fx::get_report_currency_guid(conn);
+    // prices and cost basis per date. Same source `account_detail.rs` uses.
     let report_currency = fx::get_report_currency_mnemonic(conn).unwrap_or_default();
-    let mut fx_events: HashMap<String, Vec<(String, f64)>> = HashMap::new();
-    if let Some(ref rg) = report_guid {
-        let mut fx_stmt = conn
-            .prepare(&format!(
-                "SELECT c.mnemonic, p.date,
-						{} as rate
-				 FROM prices p
-				 JOIN commodities c ON c.guid = p.commodity_guid
-				 WHERE c.namespace = 'CURRENCY' AND p.currency_guid = ?1
-				 ORDER BY p.date ASC",
-                utils::PRICE_AMOUNT
-            ))
-            .map_err(|e| e.to_string())?;
-        let rows: Vec<(String, String, f64)> = fx_stmt
-            .query_map([rg], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?;
-        for (mnemonic, date, rate) in rows {
-            fx_events.entry(mnemonic).or_default().push((date, rate));
-        }
-    }
-    let mut fx_pointers: HashMap<String, usize> = HashMap::new();
-    let mut fx_rates: HashMap<String, f64> = HashMap::new();
+    let fx_history = fx::FxHistory::load(conn)?;
 
     // Get commodity_guid → mnemonic for market value computation
     let mut guid_sql = format!(
@@ -474,17 +440,18 @@ fn build_value_trend(
 		 WHERE a.account_type IN ({}) AND a.placeholder = 0",
         utils::investment_types_sql()
     );
-    let filter_owned = filter.map(str::to_string);
-    let mut guid_params: Vec<&dyn rusqlite::ToSql> = vec![];
-    if let Some(g) = &filter_owned {
+    let mut guid_params: Vec<Box<dyn rusqlite::ToSql>> = vec![];
+    if let Some(g) = filter {
         guid_sql.push_str(" AND a.commodity_guid = ?1");
-        guid_params.push(g);
+        guid_params.push(Box::new(g.to_string()));
     }
 
     let mut guid_stmt = conn.prepare(&guid_sql).map_err(|e| e.to_string())?;
     let mut guid_to_mnemonic: HashMap<String, String> = HashMap::new();
     let mappings: Vec<(String, String)> = guid_stmt
-        .query_map(guid_params.as_slice(), |row| Ok((row.get(0)?, row.get(1)?)))
+        .query_map(sql::param_refs(&guid_params).as_slice(), |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
@@ -493,9 +460,13 @@ fn build_value_trend(
     }
 
     // Cost-basis currency per commodity (its price quote currency)
+    let quote_currencies = latest_quote_currencies(conn)?;
     let mut guid_to_quote: HashMap<String, String> = HashMap::new();
     for (guid, mnemonic) in &guid_to_mnemonic {
-        let quote = get_quote_currency(conn, mnemonic).unwrap_or_else(|| report_currency.clone());
+        let quote = quote_currencies
+            .get(mnemonic)
+            .cloned()
+            .unwrap_or_else(|| report_currency.clone());
         guid_to_quote.insert(guid.clone(), quote);
     }
 
@@ -541,8 +512,8 @@ fn build_value_trend(
             event_idx += 1;
         }
 
-        // Advance FX rates on or before this date
-        advance_fx(&fx_events, &mut fx_pointers, &mut fx_rates, &date_str);
+        // FX rates effective on this date
+        let fx_at = fx_history.map_for_date(&date_str);
 
         // Advance prices on or before this date, normalized to the report currency
         while price_idx < price_events.len() && price_events[price_idx].date <= date_str {
@@ -550,7 +521,7 @@ fn build_value_trend(
             let rate = if p.quote == report_currency {
                 1.0
             } else {
-                fx_rates.get(&p.quote).copied().unwrap_or(1.0)
+                fx_at.get(&p.quote).copied().unwrap_or(1.0)
             };
             running_prices.insert(p.mnemonic.clone(), p.price * rate);
             price_idx += 1;
@@ -576,7 +547,7 @@ fn build_value_trend(
                 let rate = if quote == report_currency {
                     1.0
                 } else {
-                    fx_rates.get(quote).copied().unwrap_or(1.0)
+                    fx_at.get(quote).copied().unwrap_or(1.0)
                 };
                 cost * rate
             })
@@ -629,7 +600,7 @@ fn finalize_totals(
     )
 }
 
-fn fetch_portfolio_inner(conn: &Connection) -> Result<PortfolioData, String> {
+fn fetch_portfolio_data_inner(conn: &Connection) -> Result<PortfolioData, String> {
     let holdings = build_holdings(conn, None)?;
     let (total_market_value, total_cost_basis, total_gain_loss, total_gain_loss_pct, holdings) =
         finalize_totals(holdings);
@@ -663,12 +634,14 @@ fn fetch_holding_transactions(
 			 WHERE a.commodity_guid = ?1
 			   AND a.account_type IN ({})
 			   AND a.placeholder = 0
+			   AND {}
 			 GROUP BY t.guid
 			 ORDER BY t.post_date DESC
 			 LIMIT {}",
             utils::QUANTITY_AMOUNT,
             utils::RAW_AMOUNT,
             utils::investment_types_sql(),
+            utils::VISIBLE_TX_FILTER,
             MAX_HOLDING_TRANSACTIONS
         ))
         .map_err(|e| e.to_string())?;
@@ -724,8 +697,7 @@ fn fetch_holding_detail_inner(
 
 #[tauri::command]
 pub async fn fetch_portfolio_data(state: State<'_, AppState>) -> Result<PortfolioData, String> {
-    let conn = get_conn(&state)?;
-    fetch_portfolio_inner(&conn)
+    run_blocking(state.db.clone(), fetch_portfolio_data_inner).await
 }
 
 #[tauri::command]
@@ -733,6 +705,8 @@ pub async fn fetch_holding_detail(
     state: State<'_, AppState>,
     commodity_guid: String,
 ) -> Result<HoldingDetail, String> {
-    let conn = get_conn(&state)?;
-    fetch_holding_detail_inner(&conn, &commodity_guid)
+    run_blocking(state.db.clone(), move |conn| {
+        fetch_holding_detail_inner(conn, &commodity_guid)
+    })
+    .await
 }

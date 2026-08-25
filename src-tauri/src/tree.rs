@@ -46,3 +46,45 @@ where
 
     TreeIndex { children, roots }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn index(rows: Vec<(&str, Option<&str>, &str)>) -> TreeIndex {
+        build_index(
+            rows.into_iter()
+                .map(|(g, p, n)| (g.to_string(), p.map(str::to_string), n.to_string())),
+        )
+    }
+
+    #[test]
+    fn builds_name_sorted_adjacency() {
+        let idx = index(vec![
+            ("root", None, "Root"),
+            ("b", Some("root"), "Beta"),
+            ("a", Some("root"), "Alpha"),
+            ("c", Some("b"), "Gamma"),
+        ]);
+        assert_eq!(idx.roots, vec!["root".to_string()]);
+        assert_eq!(idx.children["root"], vec!["a".to_string(), "b".to_string()]);
+        assert_eq!(idx.children["b"], vec!["c".to_string()]);
+    }
+
+    #[test]
+    fn orphaned_parents_become_roots() {
+        let idx = index(vec![("x", Some("missing"), "X"), ("y", None, "Y")]);
+        // `missing` is not in the included set, so `x` is promoted to a root.
+        assert_eq!(idx.roots, vec!["x".to_string(), "y".to_string()]);
+    }
+
+    #[test]
+    fn parent_cycles_do_not_hang_or_lose_nodes() {
+        // Corrupt book: a <-> b cycle. Both stay reachable via `children`
+        // (they reference each other); neither silently disappears.
+        let idx = index(vec![("a", Some("b"), "A"), ("b", Some("a"), "B")]);
+        assert!(idx.children.contains_key("a"));
+        assert!(idx.children.contains_key("b"));
+        assert_eq!(idx.roots.len(), 0);
+    }
+}

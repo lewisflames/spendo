@@ -202,3 +202,44 @@ pub async fn fetch_single_yahoo_history(
         Err("No result from Yahoo".to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn derive_symbols_by_namespace() {
+        assert_eq!(derive_yahoo_symbols("SIE", "XETRA", "-EUR"), vec!["SIE.DE"]);
+        assert_eq!(
+            derive_yahoo_symbols("AIR", "EURONEXT", "-EUR"),
+            vec!["AIR.AS", "AIR.PA"]
+        );
+        assert_eq!(derive_yahoo_symbols("AAPL", "NASDAQ", "-EUR"), vec!["AAPL"]);
+        assert_eq!(derive_yahoo_symbols("BTCB", "CRYPTO", "-USD"), vec!["BTCB-USD"]);
+        // Unknown namespaces try the default suffix list.
+        assert_eq!(
+            derive_yahoo_symbols("XYZ", "LSE", "-EUR"),
+            vec!["XYZ.AS", "XYZ.L", "XYZ.DE", "XYZ.PA", "XYZ"]
+        );
+    }
+
+    #[test]
+    fn dotted_or_dashed_mnemonics_pass_through() {
+        // Already Yahoo-shaped (or crypto-like) mnemonics are used verbatim.
+        assert_eq!(derive_yahoo_symbols("BRK.B", "NYSE", "-EUR"), vec!["BRK.B"]);
+        assert_eq!(derive_yahoo_symbols("SOME-PAIR", "CRYPTO", "-EUR"), vec!["SOME-PAIR"]);
+    }
+
+    #[test]
+    fn quote_currency_from_symbol_shape() {
+        assert_eq!(quote_currency_for_symbol("AAPL", "NASDAQ", "EUR"), "USD");
+        assert_eq!(quote_currency_for_symbol("SIE.DE", "XETRA", "USD"), "EUR");
+        assert_eq!(quote_currency_for_symbol("BP.L", "LSE", "EUR"), "GBP");
+        assert_eq!(quote_currency_for_symbol("7203.T", "JPX", "EUR"), "JPY");
+        assert_eq!(quote_currency_for_symbol("0700.HK", "HKEX", "EUR"), "HKD");
+        assert_eq!(quote_currency_for_symbol("RY.TO", "TSX", "EUR"), "CAD");
+        assert_eq!(quote_currency_for_symbol("BTC-EUR", "CRYPTO", "USD"), "EUR");
+        // No signal at all -> report currency.
+        assert_eq!(quote_currency_for_symbol("WEIRD", "OTHER", "CHF"), "CHF");
+    }
+}

@@ -2,7 +2,7 @@ use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
-use crate::db::{get_conn, AppState};
+use crate::db::{run_blocking, AppState};
 use crate::fx;
 use crate::sql;
 use crate::utils;
@@ -129,53 +129,52 @@ pub struct TransactionsResult {
     pub total_pages: i64,
 }
 
+/// Shared transaction-list WHERE builder. `param_offset` reserves leading
+/// placeholder indices already used by the surrounding query.
 fn build_filter_conditions(
     filters: &Option<Filters>,
-) -> (Vec<String>, Vec<Box<dyn rusqlite::types::ToSql>>) {
-    let mut conditions: Vec<String> = vec!["t.post_date < date('now', '+1 day')".to_string()];
-    let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = vec![];
+    param_offset: usize,
+) -> sql::WhereBuilder {
+    let mut w = sql::WhereBuilder::new(param_offset);
+    w.push_raw(utils::VISIBLE_TX_FILTER);
 
     if let Some(ref f) = filters {
         if let Some(ref search) = f.search {
-            conditions.push(
-                "(t.description LIKE '%' || ? || '%' OR t.num LIKE '%' || ? || '%' OR t.notes LIKE '%' || ? || '%' OR t.guid IN (SELECT s.tx_guid FROM splits s WHERE s.memo LIKE '%' || ? || '%'))"
-                    .to_string(),
+            let s = utils::escape_like(search);
+            w.add(
+                "(t.description LIKE '%' || ?{} ESCAPE '\\' \
+                 OR t.num LIKE '%' || ?{} ESCAPE '\\' \
+                 OR t.notes LIKE '%' || ?{} ESCAPE '\\' \
+                 OR t.guid IN (SELECT s.tx_guid FROM splits s WHERE s.memo LIKE '%' || ?{} ESCAPE '\\'))",
+                vec![
+                    Box::new(s.clone()) as Box<dyn rusqlite::types::ToSql>,
+                    Box::new(s.clone()),
+                    Box::new(s.clone()),
+                    Box::new(s),
+                ],
             );
-            params_vec.push(Box::new(search.clone()));
-            params_vec.push(Box::new(search.clone()));
-            params_vec.push(Box::new(search.clone()));
-            params_vec.push(Box::new(search.clone()));
         }
         if let Some(ref date_from) = f.date_from {
-            conditions.push("t.post_date >= ?".to_string());
-            params_vec.push(Box::new(date_from.clone()));
+            w.add("t.post_date >= ?", vec![Box::new(date_from.clone())]);
         }
         if let Some(ref date_to) = f.date_to {
-            conditions.push("t.post_date <= ?".to_string());
-            params_vec.push(Box::new(date_to.clone()));
+            w.add("t.post_date <= ?", vec![Box::new(date_to.clone())]);
         }
         if let Some(ref account_name) = f.account_name {
-            conditions.push(
-                "t.guid IN (SELECT s.tx_guid FROM splits s JOIN accounts a ON a.guid = s.account_guid WHERE a.name = ?)"
-                    .to_string(),
+            w.add(
+                "t.guid IN (SELECT s.tx_guid FROM splits s JOIN accounts a ON a.guid = s.account_guid WHERE a.name = ?)",
+                vec![Box::new(account_name.clone())],
             );
-            params_vec.push(Box::new(account_name.clone()));
         }
     }
 
-    (conditions, params_vec)
+    w
 }
 
-fn fetch_splits_for_txns(
-    conn: &Connection,
-    guids: &[String],
-) -> Result<
-    (
-        std::collections::HashMap<String, Vec<SplitData>>,
-        std::collections::HashMap<String, f64>,
-    ),
-    String,
-> {
+/// Per-transaction split rows plus the FX-converted transaction total.
+type SplitMaps = (std::collections::HashMap<String, Vec<SplitData>>, std::collections::HashMap<String, f64>);
+
+fn fetch_splits_for_txns(conn: &Connection, guids: &[String]) -> Result<SplitMaps, String> {
     if guids.is_empty() {
         return Ok((
             std::collections::HashMap::new(),
@@ -292,16 +291,16 @@ fn map_tx_rows(conn: &Connection, rows: Vec<TxRow>) -> Result<Vec<TransactionRow
     Ok(rows
         .into_iter()
         .map(|r| TransactionRow {
-            guid: r.guid.clone(),
-            post_date: r.post_date,
-            description: r.description,
-            num: r.num,
-            notes: r.notes,
             splits: split_map
                 .get(&r.guid)
                 .map(|v| v.iter().map(|d| d.info.clone()).collect())
                 .unwrap_or_default(),
             total_amount: total_map.get(&r.guid).copied().unwrap_or(0.0),
+            guid: r.guid,
+            post_date: r.post_date,
+            description: r.description,
+            num: r.num,
+            notes: r.notes,
         })
         .collect())
 }
@@ -314,33 +313,33 @@ pub fn fetch_transactions_inner(
     sort_by: Option<&str>,
     sort_dir: Option<&str>,
 ) -> Result<TransactionsResult, String> {
-    let (conditions, params) = build_filter_conditions(&filters);
-    let where_clause = if conditions.is_empty() {
+    let w = build_filter_conditions(&filters, 0);
+    let where_clause = if w.clauses.is_empty() {
         String::new()
     } else {
-        format!(" WHERE {}", conditions.join(" AND "))
+        format!(" WHERE {}", w.joined())
     };
 
     let count_sql = format!("SELECT COUNT(*) as cnt FROM transactions t{where_clause}");
     let mut count_stmt = conn.prepare(&count_sql).map_err(|e| e.to_string())?;
-    let param_refs = sql::param_refs(&params);
+    let param_refs = sql::param_refs(&w.params);
 
     let total: i64 = count_stmt
         .query_row(param_refs.as_slice(), |row| row.get(0))
         .map_err(|e| e.to_string())?;
 
-    let total_pages = std::cmp::max(((total as f64) / (page_size as f64)).ceil() as i64, 1);
+    let total_pages = utils::total_pages(total, page_size);
     let safe_page = utils::clamp_page(page, total_pages);
     let offset = (safe_page - 1) * page_size;
 
     // Amount sorting needs the FX-converted totals, which are computed in Rust,
     // so fetch all matching rows, sort, then paginate.
-    if sort_by.as_deref() == Some("amount") {
+    if sort_by == Some("amount") {
         let query_sql = format!(
             "SELECT guid, post_date, description, num, notes FROM transactions t{where_clause} ORDER BY post_date DESC"
         );
         let mut query_stmt = conn.prepare(&query_sql).map_err(|e| e.to_string())?;
-        let all_refs = sql::param_refs(&params);
+        let all_refs = sql::param_refs(&w.params);
         let rows: Vec<TxRow> = query_stmt
             .query_map(all_refs.as_slice(), |row| {
                 Ok(TxRow {
@@ -356,7 +355,7 @@ pub fn fetch_transactions_inner(
             .map_err(|e| e.to_string())?;
 
         let mut all_txns = map_tx_rows(conn, rows)?;
-        let ascending = sort_dir.as_deref() == Some("asc");
+        let ascending = sort_dir == Some("asc");
         all_txns.sort_by(|a, b| {
             let cmp = a
                 .total_amount
@@ -384,7 +383,7 @@ pub fn fetch_transactions_inner(
         });
     }
 
-    let order_clause = match (sort_by.as_deref(), sort_dir.as_deref()) {
+    let order_clause = match (sort_by, sort_dir) {
         (Some("description"), Some("asc")) => {
             "ORDER BY COALESCE(LOWER(description), '') ASC, guid ASC"
         }
@@ -398,7 +397,8 @@ pub fn fetch_transactions_inner(
     );
 
     let mut query_stmt = conn.prepare(&query_sql).map_err(|e| e.to_string())?;
-    let all_params: Vec<Box<dyn rusqlite::types::ToSql>> = params
+    let all_params: Vec<Box<dyn rusqlite::types::ToSql>> = w
+        .params
         .into_iter()
         .chain(vec![
             Box::new(page_size) as Box<dyn rusqlite::types::ToSql>,
@@ -434,8 +434,7 @@ pub fn fetch_transactions_inner(
 
 #[tauri::command]
 pub async fn fetch_account_names(state: State<'_, AppState>) -> Result<Vec<AccountInfo>, String> {
-    let conn = get_conn(&state)?;
-    fetch_account_names_inner(&conn)
+    run_blocking(state.db.clone(), fetch_account_names_inner).await
 }
 
 #[tauri::command]
@@ -447,15 +446,17 @@ pub async fn fetch_transactions(
     sort_by: Option<String>,
     sort_dir: Option<String>,
 ) -> Result<TransactionsResult, String> {
-    let conn = get_conn(&state)?;
-    fetch_transactions_inner(
-        &conn,
-        page,
-        utils::clamp_page_size(page_size),
-        filters,
-        sort_by.as_deref(),
-        sort_dir.as_deref(),
-    )
+    run_blocking(state.db.clone(), move |conn| {
+        fetch_transactions_inner(
+            conn,
+            page,
+            utils::clamp_page_size(page_size),
+            filters,
+            sort_by.as_deref(),
+            sort_dir.as_deref(),
+        )
+    })
+    .await
 }
 
 /// Nearest neighbor of a transaction in the ledger list ordering
@@ -475,10 +476,11 @@ fn neighbor_guid(
     };
     let sql = format!(
         "SELECT guid FROM transactions
-         WHERE post_date < date('now', '+1 day')
+         WHERE {}
            AND (post_date {op} ?1 OR (post_date = ?1 AND guid {op} ?2))
          {order}
-         LIMIT 1"
+         LIMIT 1",
+        utils::VISIBLE_TX_FILTER
     );
     conn.query_row(&sql, rusqlite::params![post_date, guid], |row| row.get(0))
         .optional()
@@ -543,6 +545,5 @@ pub async fn fetch_transaction(
     state: State<'_, AppState>,
     guid: String,
 ) -> Result<Option<TransactionDetailResult>, String> {
-    let conn = get_conn(&state)?;
-    fetch_transaction_inner(&conn, &guid)
+    run_blocking(state.db.clone(), move |conn| fetch_transaction_inner(conn, &guid)).await
 }

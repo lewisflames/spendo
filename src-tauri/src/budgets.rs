@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use uuid::Uuid;
 
-use crate::db::{get_conn, AppState};
+use crate::db::{run_blocking, AppState};
 use crate::fx;
 use crate::utils;
 
@@ -107,49 +107,70 @@ pub fn set_budget_inner(
             [account_guid],
             |row| row.get(0),
         )
-        .map_err(|_| "Account not found".to_string())?;
+        .optional()
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Account not found: {account_guid}"))?;
     if acct_type != "EXPENSE" {
         return Err("Only expense accounts can have budgets".to_string());
     }
 
-    let existing: Option<String> = conn
-        .query_row(
-            "SELECT guid FROM budgets WHERE account_guid = ?1",
-            [account_guid],
-            |row| row.get(0),
-        )
-        .ok();
-
-    let guid = if let Some(g) = existing {
-        conn.execute(
-            "UPDATE budgets SET amount = ?1, period_type = ?2, rollover = ?3, rollover_start = ?4, notes = ?5
-			 WHERE guid = ?6",
-            rusqlite::params![amount, period_type, rollover as i64, rollover_start, notes, g],
-        )
+    // Atomic check-then-write: SELECT existing GUID, UPDATE or INSERT, then
+    // re-SELECT the stored row — a failure mid-way must not half-update.
+    conn.execute_batch("BEGIN")
         .map_err(|e| e.to_string())?;
-        g
-    } else {
-        let g = Uuid::new_v4().to_string();
-        conn.execute(
-			"INSERT INTO budgets (guid, account_guid, period_type, amount, rollover, rollover_start, notes, created_at)
-			 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now'))",
-			rusqlite::params![g, account_guid, period_type, amount, rollover as i64, rollover_start, notes],
-		)
-		.map_err(|e| e.to_string())?;
-        g
-    };
+    let write_result = (|| -> Result<String, String> {
+        let existing: Option<String> = conn
+            .query_row(
+                "SELECT guid FROM budgets WHERE account_guid = ?1",
+                [account_guid],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
 
-    let mut stmt = conn
-        .prepare(
-            "SELECT b.guid, b.account_guid, a.name, a.description, a.account_type,
-			        b.period_type, b.amount, b.rollover, b.rollover_start, b.notes, b.created_at
-			 FROM budgets b
-			 JOIN accounts a ON a.guid = b.account_guid
-			 WHERE b.guid = ?1",
-        )
-        .map_err(|e| e.to_string())?;
+        Ok(if let Some(g) = existing {
+            conn.execute(
+                "UPDATE budgets SET amount = ?1, period_type = ?2, rollover = ?3, rollover_start = ?4, notes = ?5
+			     WHERE guid = ?6",
+                rusqlite::params![amount, period_type, rollover as i64, rollover_start, notes, g],
+            )
+            .map_err(|e| e.to_string())?;
+            g
+        } else {
+            let g = Uuid::new_v4().to_string();
+            conn.execute(
+			    "INSERT INTO budgets (guid, account_guid, period_type, amount, rollover, rollover_start, notes, created_at)
+			     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+			    rusqlite::params![g, account_guid, period_type, amount, rollover as i64, rollover_start, notes, utils::iso_now()],
+		    )
+		    .map_err(|e| e.to_string())?;
+            g
+        })
+    })();
 
-    stmt.query_row([&guid], row_to_budget)
+    match write_result {
+        Ok(guid) => {
+            conn.execute_batch("COMMIT").map_err(|e| e.to_string())?;
+            read_budget(conn, &guid)
+        }
+        Err(e) => {
+            conn.execute_batch("ROLLBACK").ok();
+            Err(e)
+        }
+    }
+}
+
+fn budget_select_sql() -> &'static str {
+    "SELECT b.guid, b.account_guid, a.name, a.description, a.account_type,
+	        b.period_type, b.amount, b.rollover, b.rollover_start, b.notes, b.created_at
+	 FROM budgets b
+	 JOIN accounts a ON a.guid = b.account_guid
+	 WHERE b.guid = ?1"
+}
+
+fn read_budget(conn: &Connection, guid: &str) -> Result<Budget, String> {
+    let mut stmt = conn.prepare(budget_select_sql()).map_err(|e| e.to_string())?;
+    stmt.query_row([guid], row_to_budget)
         .map_err(|e| e.to_string())
 }
 
@@ -159,10 +180,10 @@ pub fn delete_budget_inner(conn: &Connection, guid: &str) -> Result<(), String> 
     Ok(())
 }
 
-fn months_between(start_ym: &str, end_ym: &str) -> i32 {
-    let start_n = utils::month_number(start_ym).unwrap_or(0);
-    let end_n = utils::month_number(end_ym).unwrap_or(0);
-    (end_n - start_n) as i32
+fn months_between(start_ym: &str, end_ym: &str) -> Result<i32, String> {
+    let start_n = utils::month_number(start_ym)?;
+    let end_n = utils::month_number(end_ym)?;
+    Ok((end_n - start_n) as i32)
 }
 
 fn period_range(year: i32, month: i32, period: &str) -> (String, String) {
@@ -249,7 +270,10 @@ fn compute_cumulative_carryovers(
             None => total_actual,
         };
         let start_ym = &budget_start[..7];
-        let num_months = months_between(start_ym, period_ym);
+        // `rollover_start` is validated at write time; a malformed value here
+        // means DB tampering/corruption and must surface, not silently
+        // corrupt the carryover via a bogus month count.
+        let num_months = months_between(start_ym, period_ym)?;
         let carryover = if num_months <= 0 {
             0.0
         } else {
@@ -306,7 +330,8 @@ pub fn get_budget_vs_actual_inner(
         ))
         .map_err(|e| e.to_string())?;
 
-    let raw_rows: Vec<(
+    /// (guid, name, description, type, period_type, budget, commodity, actual)
+    type RawBudgetRow = (
         String,
         String,
         Option<String>,
@@ -315,7 +340,8 @@ pub fn get_budget_vs_actual_inner(
         f64,
         Option<String>,
         f64,
-    )> = stmt
+    );
+    let raw_rows: Vec<RawBudgetRow> = stmt
         .query_map(rusqlite::params![&period_start, &period_end], |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -423,29 +449,35 @@ pub fn get_budget_vs_actual_inner(
     Ok(rows)
 }
 
-pub fn get_global_earliest_transaction_date_inner(
-    conn: &Connection,
-) -> Result<Option<String>, String> {
-    conn.query_row("SELECT MIN(t.post_date) FROM transactions t", [], |row| {
-        row.get(0)
-    })
+/// Book-wide earliest visible transaction date (`YYYY-MM-DD`). Shared by the
+/// global query and the budget date range so both answers can never diverge.
+fn earliest_visible_tx_date(conn: &Connection) -> Result<Option<String>, String> {
+    conn.query_row(
+        &format!(
+            "SELECT substr(MIN(t.post_date), 1, 10) FROM transactions t WHERE {}",
+            utils::VISIBLE_TX_FILTER
+        ),
+        [],
+        |row| row.get(0),
+    )
     .map_err(|e| e.to_string())
 }
 
+pub fn get_global_earliest_transaction_date_inner(
+    conn: &Connection,
+) -> Result<Option<String>, String> {
+    earliest_visible_tx_date(conn)
+}
+
 pub fn get_budget_date_range_inner(conn: &Connection) -> Result<BudgetDateRange, String> {
-    let earliest: Option<String> = conn
-        .query_row(
-            "SELECT substr(MIN(t.post_date), 1, 10) FROM transactions t
-             WHERE t.post_date < date('now', '+1 day')",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|e| e.to_string())?;
+    let earliest = earliest_visible_tx_date(conn)?;
 
     let latest: Option<String> = conn
         .query_row(
-            "SELECT substr(MAX(t.post_date), 1, 10) FROM transactions t
-             WHERE t.post_date < date('now', '+1 day')",
+            &format!(
+                "SELECT substr(MAX(t.post_date), 1, 10) FROM transactions t WHERE {}",
+                utils::VISIBLE_TX_FILTER
+            ),
             [],
             |row| row.get(0),
         )
@@ -466,18 +498,22 @@ pub fn get_earliest_transaction_date_inner(
 ) -> Result<Option<String>, String> {
     let date: Option<String> = conn
         .query_row(
-            "WITH RECURSIVE
-             descendants(descendant_guid) AS (
-                 SELECT ?1
-                 UNION ALL
-                 SELECT a.guid
-                 FROM descendants d
-                 JOIN accounts a ON a.parent_guid = d.descendant_guid
-             )
-             SELECT MIN(t.post_date)
-             FROM transactions t
-             JOIN splits s ON s.tx_guid = t.guid
-             WHERE s.account_guid IN (SELECT descendant_guid FROM descendants)",
+            &format!(
+                "WITH RECURSIVE
+                 descendants(descendant_guid) AS (
+                     SELECT ?1
+                     UNION ALL
+                     SELECT a.guid
+                     FROM descendants d
+                     JOIN accounts a ON a.parent_guid = d.descendant_guid
+                 )
+                 SELECT MIN(t.post_date)
+                 FROM transactions t
+                 JOIN splits s ON s.tx_guid = t.guid
+                 WHERE s.account_guid IN (SELECT descendant_guid FROM descendants)
+                 AND {}",
+                utils::VISIBLE_TX_FILTER
+            ),
             [account_guid],
             |row| row.get(0),
         )
@@ -487,8 +523,7 @@ pub fn get_earliest_transaction_date_inner(
 
 #[tauri::command]
 pub async fn list_budgets(state: State<'_, AppState>) -> Result<Vec<Budget>, String> {
-    let conn = get_conn(&state)?;
-    list_budgets_inner(&conn)
+    run_blocking(state.db.clone(), list_budgets_inner).await
 }
 
 #[tauri::command]
@@ -501,22 +536,23 @@ pub async fn set_budget(
     rollover_start: Option<String>,
     notes: Option<String>,
 ) -> Result<Budget, String> {
-    let conn = get_conn(&state)?;
-    set_budget_inner(
-        &conn,
-        &account_guid,
-        amount,
-        &period_type,
-        rollover,
-        rollover_start.as_deref(),
-        notes.as_deref(),
-    )
+    run_blocking(state.db.clone(), move |conn| {
+        set_budget_inner(
+            conn,
+            &account_guid,
+            amount,
+            &period_type,
+            rollover,
+            rollover_start.as_deref(),
+            notes.as_deref(),
+        )
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn delete_budget(state: State<'_, AppState>, guid: String) -> Result<(), String> {
-    let conn = get_conn(&state)?;
-    delete_budget_inner(&conn, &guid)
+    run_blocking(state.db.clone(), move |conn| delete_budget_inner(conn, &guid)).await
 }
 
 #[tauri::command]
@@ -526,16 +562,20 @@ pub async fn get_budget_vs_actual(
     month: i32,
     period: String,
 ) -> Result<Vec<BudgetActualRow>, String> {
-    let conn = get_conn(&state)?;
-    get_budget_vs_actual_inner(&conn, year, month, &period)
+    run_blocking(state.db.clone(), move |conn| {
+        get_budget_vs_actual_inner(conn, year, month, &period)
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn get_global_earliest_transaction_date(
     state: State<'_, AppState>,
 ) -> Result<Option<String>, String> {
-    let conn = get_conn(&state)?;
-    get_global_earliest_transaction_date_inner(&conn)
+    run_blocking(state.db.clone(), move |conn| {
+        get_global_earliest_transaction_date_inner(conn)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -543,12 +583,13 @@ pub async fn get_earliest_transaction_date(
     state: State<'_, AppState>,
     account_guid: String,
 ) -> Result<Option<String>, String> {
-    let conn = get_conn(&state)?;
-    get_earliest_transaction_date_inner(&conn, &account_guid)
+    run_blocking(state.db.clone(), move |conn| {
+        get_earliest_transaction_date_inner(conn, &account_guid)
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn get_budget_date_range(state: State<'_, AppState>) -> Result<BudgetDateRange, String> {
-    let conn = get_conn(&state)?;
-    get_budget_date_range_inner(&conn)
+    run_blocking(state.db.clone(), get_budget_date_range_inner).await
 }

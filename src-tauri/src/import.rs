@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use tauri::State;
 
-use crate::db::{self, connect_source_db, get_conn, init_db, AppState};
+use crate::db::{self, connect_source_db, init_db, AppState};
 use crate::home::{get_summary, DataSummary};
 use crate::utils;
 
@@ -25,16 +25,14 @@ fn process_entities<T: Importable>(
     let mut added = 0;
     let mut updated = 0;
     for r in src {
-        match existing.get(r.guid()) {
-            Some(ex) if r.has_changes(ex) => {
-                r.upsert(conn)?;
-                updated += 1;
-            }
-            Some(_) => {}
-            None => {
-                r.upsert(conn)?;
-                added += 1;
-            }
+        let Some(ex) = existing.get(r.guid()) else {
+            r.upsert(conn)?;
+            added += 1;
+            continue;
+        };
+        if r.has_changes(ex) {
+            r.upsert(conn)?;
+            updated += 1;
         }
     }
     Ok((added, updated))
@@ -474,6 +472,34 @@ fn read_transaction(conn: &Connection) -> Result<Vec<Transaction>, String> {
     Ok(rows)
 }
 
+/// Normalize a source-book `post_date` to a lexicographically comparable
+/// ISO form. GnuCash normally stores `YYYY-MM-DD HH:MM:SS`, but some
+/// producers write the compact `YYYYMMDDHHMMSS` form, which would silently
+/// break every date-range comparison (digits sort after `-`). Anything not
+/// composed of dates/times characters is passed through unchanged.
+fn normalize_post_date(raw: &str) -> String {
+    let clean = raw.trim();
+    let digits: String = clean.chars().filter(|c| c.is_ascii_digit()).collect();
+    let plausible = clean
+        .chars()
+        .all(|c| c.is_ascii_digit() || matches!(c, '-' | ':' | ' '))
+        && digits.len() >= 8;
+    if !plausible {
+        return clean.to_string();
+    }
+    let date = format!("{}-{}-{}", &digits[..4], &digits[4..6], &digits[6..8]);
+    if digits.len() == 8 {
+        return date;
+    }
+    // Remaining pairs are HH, MM, SS… joined back with colons.
+    let time = digits.as_bytes()[8..]
+        .chunks(2)
+        .map(|pair| std::str::from_utf8(pair).unwrap_or(""))
+        .collect::<Vec<_>>()
+        .join(":");
+    format!("{date} {time}")
+}
+
 /// Source-book loader: joins GnuCash's `slots` table, where transaction notes
 /// live ('notes' string slot keyed by the tx GUID).
 fn read_source_transaction(source: &Connection) -> Result<Vec<Transaction>, String> {
@@ -491,7 +517,7 @@ fn read_source_transaction(source: &Connection) -> Result<Vec<Transaction>, Stri
             let notes: Option<String> = row.get(4)?;
             Ok(Transaction {
                 guid: row.get(0)?,
-                post_date: row.get(1)?,
+                post_date: normalize_post_date(row.get::<_, String>(1)?.trim()),
                 description: row.get(2)?,
                 num: non_empty(num),
                 notes: non_empty(notes),
@@ -792,31 +818,34 @@ pub async fn fetch_import_history(
     page: i64,
     page_size: i64,
 ) -> Result<ImportHistoryPage, String> {
-    let conn = get_conn(&state)?;
-    let page_size = utils::clamp_page_size(page_size);
-    let total = count_import_logs(&conn)?;
-    let total_pages = std::cmp::max(((total as f64) / (page_size as f64)).ceil() as i64, 1);
-    let safe_page = utils::clamp_page(page, total_pages);
-    let logs = get_import_logs(&conn, page_size, (safe_page - 1) * page_size)?;
-    Ok(ImportHistoryPage {
-        logs,
-        total,
-        page_size,
-        total_pages,
+    db::run_blocking(state.db.clone(), move |conn| {
+        let page_size = utils::clamp_page_size(page_size);
+        let total = count_import_logs(conn)?;
+        let total_pages = utils::total_pages(total, page_size);
+        let safe_page = utils::clamp_page(page, total_pages);
+        let logs = get_import_logs(conn, page_size, (safe_page - 1) * page_size)?;
+        Ok(ImportHistoryPage {
+            logs,
+            total,
+            page_size,
+            total_pages,
+        })
     })
+    .await
 }
 
 #[tauri::command]
 pub async fn reimport_last(state: State<'_, AppState>) -> Result<ImportResult, String> {
-    let (file_path, filename) = {
-        let conn = get_conn(&state)?;
+    // Look up the last import outside the blocking closure, then hash + merge.
+    let (file_path, filename) = db::run_blocking(state.db.clone(), |conn| {
         conn.query_row(
             "SELECT file_path, filename FROM import_log WHERE file_path IS NOT NULL ORDER BY id DESC LIMIT 1",
             [],
             |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
         )
-        .map_err(|e| format!("Failed to look up previous import: {}", e))?
-    };
+        .map_err(|e| format!("Failed to look up previous import: {}", e))
+    })
+    .await?;
     utils::validate_gnucash_path(&file_path)?;
     let sha256 = file_sha256(&file_path)?;
 
@@ -824,4 +853,39 @@ pub async fn reimport_last(state: State<'_, AppState>) -> Result<ImportResult, S
         import_gnucash_inner(conn, &file_path, &filename, &sha256)
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_uuid_matches_both_formats() {
+        assert!(is_uuid("0123456789abcdef0123456789abcdef"));
+        assert!(is_uuid("01234567-89ab-cdef-0123-456789abcdef"));
+        assert!(!is_uuid("Checking Account"));
+        assert!(!is_uuid("0123456789ABCDEF0123456789ABCDEFZ"));
+        assert!(!is_uuid(""));
+    }
+
+    #[test]
+    fn normalize_post_date_handles_known_shapes() {
+        assert_eq!(
+            normalize_post_date("2024-01-15 10:30:00"),
+            "2024-01-15 10:30:00"
+        );
+        assert_eq!(normalize_post_date("2024-01-15"), "2024-01-15");
+        assert_eq!(
+            normalize_post_date("20240115103000"),
+            "2024-01-15 10:30:00"
+        );
+        assert_eq!(normalize_post_date(" 20240115 "), "2024-01-15");
+    }
+
+    #[test]
+    fn normalize_post_date_passthrough_unexpected_shapes() {
+        assert_eq!(normalize_post_date("not-a-date"), "not-a-date");
+        assert_eq!(normalize_post_date(""), "");
+        assert_eq!(normalize_post_date("2024-01"), "2024-01");
+    }
 }

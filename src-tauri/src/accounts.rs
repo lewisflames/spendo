@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 
 use tauri::State;
 
-use crate::db::{get_conn, AppState};
+use crate::db::{run_blocking, AppState};
 use crate::fx;
 use crate::prices::get_cached_prices_map;
 use crate::tree;
@@ -59,12 +59,10 @@ const TYPE_CATEGORY: [(&str, &str); 14] = [
 ];
 
 fn get_category(account_type: &str) -> &str {
-    for (ty, cat) in &TYPE_CATEGORY {
-        if *ty == account_type {
-            return cat;
-        }
-    }
-    account_type
+    TYPE_CATEGORY
+        .iter()
+        .find(|(ty, _)| *ty == account_type)
+        .map_or(account_type, |(_, cat)| cat)
 }
 
 struct AccountRow {
@@ -231,7 +229,7 @@ pub fn fetch_accounts_inner(
 
     // Propagate child balances/txns into placeholder parents.
     // Non-placeholder accounts already have their own values from direct splits.
-    fn propagate_placeholder(nodes: &mut Vec<AccountNode>) {
+    fn propagate_placeholder(nodes: &mut [AccountNode]) {
         for node in nodes.iter_mut() {
             propagate_placeholder(&mut node.children);
             if node.placeholder {
@@ -273,11 +271,67 @@ pub fn get_subaccount_guids(conn: &Connection, guid: &str) -> Result<Vec<String>
     Ok(result)
 }
 
+/// Direct child of one account with the same balance semantics as the
+/// accounts tree (credit-normal signs, investment mark-to-market, FX
+/// conversion). Carries everything the account-detail child table renders,
+/// so that view needs no second full-tree fetch.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChildAccountInfo {
+    pub guid: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub code: Option<String>,
+    pub commodity: Option<String>,
+    pub account_type: String,
+    pub balance: f64,
+    pub tx_count: i64,
+}
+
+/// Find an account node in fetched trees and return its direct children.
+fn child_accounts_of(
+    trees: &[AccountNode],
+    parent_guid: &str,
+) -> Option<Vec<ChildAccountInfo>> {
+    fn find<'a>(nodes: &'a [AccountNode], guid: &str) -> Option<&'a AccountNode> {
+        nodes.iter().find(|n| n.guid == guid).or_else(|| {
+            nodes.iter().find_map(|n| find(&n.children, guid))
+        })
+    }
+    let node = find(trees, parent_guid)?;
+    Some(
+        node.children
+            .iter()
+            .map(|c| ChildAccountInfo {
+                guid: c.guid.clone(),
+                name: c.name.clone(),
+                description: c.description.clone(),
+                code: c.code.clone(),
+                commodity: c.commodity.clone(),
+                account_type: c.account_type.clone(),
+                balance: c.balance,
+                tx_count: c.tx_count,
+            })
+            .collect(),
+    )
+}
+
+/// Direct children for the detail page; empty when the account has none.
+pub fn fetch_child_accounts(
+    conn: &Connection,
+    parent_guid: &str,
+) -> Result<Vec<ChildAccountInfo>, String> {
+    let result = fetch_accounts_inner(conn, None)?;
+    Ok(child_accounts_of(&result.trees, parent_guid).unwrap_or_default())
+}
+
 #[tauri::command]
 pub async fn fetch_accounts(
     state: State<'_, AppState>,
     as_of_date: Option<String>,
 ) -> Result<AccountsResult, String> {
-    let conn = get_conn(&state)?;
-    fetch_accounts_inner(&conn, as_of_date.as_deref())
+    run_blocking(state.db.clone(), move |conn| {
+        fetch_accounts_inner(conn, as_of_date.as_deref())
+    })
+    .await
 }
