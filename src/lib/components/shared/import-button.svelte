@@ -36,11 +36,8 @@
       if (!selected) return;
       const filename = await basename(selected);
       const result = await importGnucash(selected, filename);
-      dbSession.value = {
-        summary: result.summary,
-        filename
-      };
-      toast.success('Import complete');
+      dbSession.value = { summary: result.summary };
+      toast.success(`Imported ${filename}`);
     } catch (e: unknown) {
       const msg = errMsg(e, 'Import failed');
       if (onError) {

@@ -101,18 +101,44 @@ export function formatSessionCurrency(n: number): string {
   return formatCurrency(n, sessionCurrency());
 }
 
+/**
+ * Parse date-only strings (`YYYY-MM-DD`) as local dates. The ES spec parses
+ * them as UTC midnight, which renders as the previous day west of UTC.
+ */
+export function parseLocalDate(date: string | Date): Date {
+  if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return new Date(`${date}T00:00:00`);
+  }
+  return new Date(date);
+}
+
 export function formatDate(date: string | Date, opts?: Intl.DateTimeFormatOptions): string {
-  const d = typeof date === 'string' ? new Date(date) : date;
+  const d = parseLocalDate(date);
   const o = opts ?? { month: 'short', day: 'numeric', year: 'numeric' };
   return cachedDateTimeFormat(appSettings.value.locale, o).format(d);
 }
 
 export function formatMonth(date: string | Date): string {
-  const d = typeof date === 'string' ? new Date(date) : date;
+  const d = parseLocalDate(date);
   return cachedDateTimeFormat(appSettings.value.locale, {
     month: 'short',
     year: '2-digit'
   }).format(d);
+}
+
+/** English pluralization for counts, e.g. `plural(3, 'account')` -> "3 accounts". */
+export function plural(n: number, word: string): string {
+  return `${formatNumber(n)} ${n === 1 ? word : `${word}s`}`;
+}
+
+/**
+ * Label for a bounded date range, e.g. "Jan 5 – Mar 12, 2024". Em-dash
+ * placeholders keep the layout stable when either bound is missing.
+ */
+export function formatDateRange(from?: string | null, to?: string | null): string {
+  const start = from ? formatDate(from, { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
+  const end = to ? formatDate(to, { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
+  return `${start} – ${end}`;
 }
 
 export function formatCompact(n: number): string {

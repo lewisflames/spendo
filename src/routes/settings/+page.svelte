@@ -9,7 +9,6 @@
     saveSettings,
     resetSettings,
     PAGE_SIZE_OPTIONS,
-    type AppSettings,
     type Locale,
     type Theme
   } from '$lib/stores/settings.svelte';
@@ -29,6 +28,7 @@
   import * as Dialog from '$lib/components/ui/dialog';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import IconCardHeader from '$lib/components/shared/icon-card-header.svelte';
+  import ErrorCard from '$lib/components/shared/error-card.svelte';
 
   import { dbSession, clearSession } from '$lib/stores/db.svelte';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
@@ -85,10 +85,6 @@
     resetSettings();
     toast.success('Preferences reset to defaults');
   }
-
-  function update(partial: Partial<AppSettings>) {
-    saveSettings(partial);
-  }
 </script>
 
 <svelte:head>
@@ -120,7 +116,7 @@
           type="single"
           value={appSettings.value.theme}
           onValueChange={(v) => {
-            if (v === 'light' || v === 'dark' || v === 'system') update({ theme: v });
+            if (v === 'light' || v === 'dark' || v === 'system') saveSettings({ theme: v });
           }}
           items={themes}
         >
@@ -141,7 +137,7 @@
         </div>
         <Switch
           checked={appSettings.value.reduceMotion}
-          onCheckedChange={(v) => update({ reduceMotion: v })}
+          onCheckedChange={(v) => saveSettings({ reduceMotion: v })}
           aria-label="Reduce motion"
         />
       </div>
@@ -165,7 +161,7 @@
         <Select.Root
           type="single"
           value={appSettings.value.locale}
-          onValueChange={(v) => update({ locale: v as Locale })}
+          onValueChange={(v) => saveSettings({ locale: v as Locale })}
           items={locales}
         >
           <Select.Trigger class="w-48">
@@ -196,7 +192,7 @@
         <Select.Root
           type="single"
           value={String(appSettings.value.pageSize)}
-          onValueChange={(v) => update({ pageSize: Number(v) })}
+          onValueChange={(v) => saveSettings({ pageSize: Number(v) })}
           items={PAGE_SIZE_OPTIONS.map((opt) => ({ value: String(opt), label: `${opt} per page` }))}
         >
           <Select.Trigger class="w-36">
@@ -221,16 +217,20 @@
       {/snippet}
     </IconCardHeader>
     <Card.Content class="flex flex-col items-start gap-3">
-      <code
-        class="max-w-full truncate rounded bg-muted px-2 py-1 font-mono text-xs text-muted-foreground"
-        title={dataRes.data?.dbPath}
-      >
-        {dataRes.data?.dbPath ?? '…'}
-      </code>
-      <Button variant="outline" disabled={!dataRes.data} onclick={handleRevealDb}>
-        <FolderOpen aria-hidden="true" class="size-4" />
-        Reveal in file manager
-      </Button>
+      {#if dataRes.error}
+        <ErrorCard message={dataRes.error} onRetry={() => dataRes.reload()} />
+      {:else}
+        <code
+          class="max-w-full truncate rounded bg-muted px-2 py-1 font-mono text-xs text-muted-foreground"
+          title={dataRes.data?.dbPath}
+        >
+          {dataRes.data?.dbPath ?? '…'}
+        </code>
+        <Button variant="outline" disabled={!dataRes.data} onclick={handleRevealDb}>
+          <FolderOpen aria-hidden="true" class="size-4" />
+          Reveal in file manager
+        </Button>
+      {/if}
     </Card.Content>
   </Card.Root>
 

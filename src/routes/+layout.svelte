@@ -2,11 +2,11 @@
   import { onNavigate } from '$app/navigation';
   import { MediaQuery } from 'svelte/reactivity';
   import * as Sidebar from '$lib/components/ui/sidebar/index.js';
-  import AppSidebar from '$lib/components/layout/app-sidebar';
+  import { AppSidebar } from '$lib/components/layout/app-sidebar';
   import { appSettings, saveSettings, resolveTheme } from '$lib/stores/settings.svelte';
   import { goBack, goForward, initNavHistory } from '$lib/stores/nav-history.svelte';
   import { ensureDbSessionLoaded } from '$lib/stores/db.svelte';
-  import TitleBar from '$lib/components/layout/title-bar';
+  import { TitleBar } from '$lib/components/layout/title-bar';
   import { Sonner } from '$lib/components/ui/sonner';
   import KeyboardShortcutsDialog from '$lib/components/layout/keyboard-shortcuts-dialog.svelte';
   import { keyboardShortcutsDialog as shortcutsDialog } from '$lib/stores/keyboard-shortcuts.svelte';
@@ -20,8 +20,11 @@
 
   // Bootstrap DB state once so deep-linked/refreshed pages see real data
   // (e.g. Settings' "Clear all data" gate) instead of a stale null session.
+  // The rejection is deliberately swallowed here: the store resets its
+  // bootstrap flag, so a later navigation retries; pages that need the
+  // session surface their own errors.
   $effect(() => {
-    void ensureDbSessionLoaded();
+    ensureDbSessionLoaded().catch(() => {});
   });
 
   let transitionInFlight = false;
@@ -79,7 +82,7 @@
     }
     if (e.key === '?') {
       e.preventDefault();
-      shortcutsDialog.open = !shortcutsDialog.open;
+      shortcutsDialog.value = !shortcutsDialog.value;
       return;
     }
     if (e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {

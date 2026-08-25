@@ -2,7 +2,6 @@ import { fetchHomeData, type DataSummary } from '$lib/tauri';
 
 interface DbSession {
   summary: DataSummary;
-  filename: string | null;
 }
 
 export const dbSession = $state<{ value: DbSession | null }>({ value: null });
@@ -20,10 +19,16 @@ export function ensureDbSessionLoaded(force = false): Promise<void> {
     return inflight ?? Promise.resolve();
   }
   bootstrapped = true;
-  const p = fetchHomeData().then((result) => {
-    dbSession.value =
-      result.hasData && result.summary ? { summary: result.summary, filename: null } : null;
-  });
+  const p = fetchHomeData()
+    .then((result) => {
+      dbSession.value = result.hasData && result.summary ? { summary: result.summary } : null;
+    })
+    .catch((e) => {
+      // A failed bootstrap must not stick: allow a later call to retry so a
+      // transient startup error doesn't leave the session null forever.
+      bootstrapped = false;
+      throw e;
+    });
   inflight = p.finally(() => {
     inflight = null;
   });
