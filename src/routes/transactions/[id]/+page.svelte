@@ -12,7 +12,7 @@
     CircleCheck,
     Copy,
     Receipt,
-    StickyNote
+    Calendar
   } from '@lucide/svelte';
   import { toast } from '$lib/components/ui/sonner';
   import { dbSession } from '$lib/stores/db.svelte';
@@ -133,7 +133,7 @@
       {@const d = detail}
       <PageHeader title={d.description || 'Transaction'}>
         {#snippet description()}
-          {fmtDate(d.postDate)}{#if d.num}&nbsp;&middot; #{d.num}{/if}
+          {d.notes ?? '\u2014'}{#if d.num}&nbsp;&middot; #{d.num}{/if}
         {/snippet}
         <div class="flex items-center gap-2">
           <div class="flex items-center gap-1">
@@ -170,6 +170,11 @@
       </PageHeader>
 
       <div class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        <KpiCard title="Date" value={fmtDate(d.postDate)}>
+          {#snippet icon()}
+            <Calendar aria-hidden="true" class="size-4 text-muted-foreground" />
+          {/snippet}
+        </KpiCard>
         <KpiCard
           title="Total Amount"
           value={fmt(clampZero(d.totalAmount))}
@@ -188,21 +193,6 @@
         >
           {#snippet icon()}
             <CircleCheck aria-hidden="true" class="size-4 text-muted-foreground" />
-          {/snippet}
-        </KpiCard>
-        <KpiCard title="Notes">
-          {#snippet icon()}
-            <StickyNote aria-hidden="true" class="size-4 text-muted-foreground" />
-          {/snippet}
-          {#snippet value()}
-            <p
-              class="text-sm leading-snug font-medium {d.notes
-                ? 'line-clamp-2'
-                : 'text-muted-foreground'}"
-              title={d.notes ?? undefined}
-            >
-              {d.notes || '\u2014'}
-            </p>
           {/snippet}
         </KpiCard>
       </div>
