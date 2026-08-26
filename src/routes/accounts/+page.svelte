@@ -1,28 +1,15 @@
 <script lang="ts">
-  import { SearchInput } from '$lib/components/shared/search-input';
-  import * as Tooltip from '$lib/components/ui/tooltip';
-  import {
-    UnfoldVertical,
-    FoldVertical,
-    FolderTree,
-    Landmark,
-    PiggyBank,
-    CreditCard,
-    Download
-  } from '@lucide/svelte';
+  import { Landmark, PiggyBank, CreditCard, Download } from '@lucide/svelte';
   import { Button } from '$lib/components/ui/button';
   import { toast } from '$lib/components/ui/sonner';
   import { downloadCsv } from '$lib/utils/csv';
   import { dbSession } from '$lib/stores/db.svelte';
   import { fetchAccounts } from '$lib/tauri';
-  import type { AccountNode } from '$lib/tauri';
   import {
     CATEGORY_ORDER,
     CATEGORY_LABEL_PLURAL,
     nodeCategory
   } from '$lib/features/accounts/account-types';
-  import { useTreeExpand } from '$lib/hooks/use-tree-expand.svelte';
-  import { useDebouncedSearch } from '$lib/hooks/use-debounced-search.svelte';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
   import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
@@ -34,12 +21,10 @@
   import KpiCardRow from '$lib/components/shared/kpi-card-row.svelte';
   import { clampZero, formatSessionCurrency as fmt, plural } from '$lib/utils/format.svelte';
   import { errMsg } from '$lib/utils/error';
-  import AccountsTreeTable from '$lib/features/accounts/accounts-tree-table.svelte';
+  import AccountsTable from '$lib/features/accounts/accounts-table.svelte';
   import BalanceTreemap from '$lib/features/accounts/balance-treemap.svelte';
 
-  const CATEGORIES = ['All', ...CATEGORY_ORDER];
-
-  const CATEGORY_LABEL: Record<string, string> = { All: 'All', ...CATEGORY_LABEL_PLURAL };
+  const CATEGORY_LABEL: Record<string, string> = { ...CATEGORY_LABEL_PLURAL };
 
   type Category = 'ASSET' | 'EQUITY' | 'LIABILITY';
 
@@ -73,93 +58,15 @@
   let loading = $derived(res.loading);
   let error = $derived(res.error);
 
-  let searchInput = $state('');
-  let category = $state('All');
-
-  let search = useDebouncedSearch(
-    () => searchInput,
-    (v) => v.trim().toLowerCase()
-  );
-
-  function matchesQuery(node: AccountNode, q: string): boolean {
-    return [node.name, node.description, node.code].some((s) => s?.toLowerCase().includes(q));
-  }
-
-  function filterQuery(nodes: AccountNode[], q: string): AccountNode[] {
-    const out: AccountNode[] = [];
-    for (const n of nodes) {
-      if (matchesQuery(n, q)) {
-        out.push(n);
-      } else {
-        const kids = filterQuery(n.children, q);
-        if (kids.length > 0) out.push({ ...n, children: kids });
-      }
-    }
-    return out;
-  }
-
-  function filterCategory(nodes: AccountNode[], cat: string): AccountNode[] {
-    if (cat === 'All') return nodes;
-    const out: AccountNode[] = [];
-    for (const n of nodes) {
-      if (nodeCategory(n.accountType) === cat) {
-        out.push(n);
-      } else {
-        out.push(...filterCategory(n.children, cat));
-      }
-    }
-    return out;
-  }
-
-  let filteredTrees = $derived.by(() => {
-    let trees = data?.trees ?? [];
-    if (search.value) trees = filterQuery(trees, search.value);
-    trees = filterCategory(trees, category);
-    return trees;
-  });
-
-  let tree = useTreeExpand();
-  let initialExpandDone = $state(false);
-
-  $effect(() => {
-    if (data && !initialExpandDone) {
-      // Expand everything on the first load of a session only; later
-      // refetches must keep the user's manual collapse choices.
-      tree.expandAll(parentGuids);
-      initialExpandDone = true;
-    }
-  });
-
-  $effect(() => {
-    if (!dbSession.value) {
-      initialExpandDone = false;
-    }
-  });
-
-  let parentGuids = $derived.by(() => {
-    const guids: string[] = [];
-    function walk(nodes: AccountNode[]) {
-      for (const n of nodes) {
-        if (n.children.length > 0) guids.push(n.guid);
-        walk(n.children);
-      }
-    }
-    walk(filteredTrees);
-    return guids;
-  });
-
-  let rows = $derived.by(() => {
-    const result: { node: AccountNode; depth: number }[] = [];
-    function walk(nodes: AccountNode[], depth: number) {
-      for (const n of nodes) {
-        result.push({ node: n, depth });
-        if (n.children.length > 0 && (search.value || depth === 0 || tree.expanded.has(n.guid))) {
-          walk(n.children, depth + 1);
-        }
-      }
-    }
-    walk(filteredTrees, 0);
-    return result;
+  // Top-level accounts only, in the canonical category order (unknown
+  // categories sort last).
+  let accounts = $derived.by(() => {
+    const order = new Map(CATEGORY_ORDER.map((c, i) => [c, i]));
+    return [...(data?.trees ?? [])].sort(
+      (a, b) =>
+        (order.get(nodeCategory(a.accountType)) ?? CATEGORY_ORDER.length) -
+        (order.get(nodeCategory(b.accountType)) ?? CATEGORY_ORDER.length)
+    );
   });
 
   function categoryTotal(cat: Category): number {
@@ -179,15 +86,14 @@
   });
 
   function handleExportCsv() {
-    if (rows.length === 0) return;
+    if (accounts.length === 0) return;
     try {
-      const headers = ['Category', 'Account', 'Type', 'Txn Count', 'Depth', 'Balance'];
-      const csvRows = rows.map(({ node, depth }) => [
+      const headers = ['Category', 'Account', 'Type', 'Txn Count', 'Balance'];
+      const csvRows = accounts.map((node) => [
         nodeCategory(node.accountType),
         node.description || node.name,
         node.accountType,
         String(node.txCount),
-        String(depth),
         String(node.balance)
       ]);
       downloadCsv('accounts.csv', headers, csvRows);
@@ -212,7 +118,7 @@
       title="Accounts"
       description={data ? `Chart of accounts · ${plural(data.totalAccounts, 'account')}` : ''}
     >
-      <Button variant="outline" onclick={handleExportCsv} disabled={rows.length === 0}>
+      <Button variant="outline" onclick={handleExportCsv} disabled={accounts.length === 0}>
         <Download aria-hidden="true" class="size-3" />
         Export
       </Button>
@@ -240,84 +146,15 @@
       <!-- Balance composition treemap -->
       <BalanceTreemap data={data?.trees ?? []} {loading} />
 
-      <div class="flex flex-wrap items-center gap-2">
-        <SearchInput
-          id="accounts-search"
-          label="Search accounts"
-          placeholder="Search name, description, or code..."
-          bind:value={searchInput}
-          class="grow basis-48"
-        />
-
-        <div class="flex gap-1">
-          {#each CATEGORIES as cat (cat)}
-            <button
-              type="button"
-              class="rounded-md px-2 py-1 text-xs font-medium transition-colors {category === cat
-                ? 'bg-primary text-primary-foreground'
-                : 'text-muted-foreground hover:bg-muted'}"
-              aria-pressed={category === cat}
-              onclick={() => (category = cat)}
-            >
-              {CATEGORY_LABEL[cat]}
-            </button>
-          {/each}
-        </div>
-
-        <div class="flex gap-1">
-          <Tooltip.Root>
-            <Tooltip.Trigger>
-              {#snippet child({ props })}
-                <button
-                  type="button"
-                  {...props}
-                  class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                  aria-label="Expand all"
-                  disabled={parentGuids.length === 0}
-                  onclick={() => tree.expandAll(parentGuids)}
-                >
-                  <UnfoldVertical class="size-4" />
-                </button>
-              {/snippet}
-            </Tooltip.Trigger>
-            <Tooltip.Content>
-              <p>Expand all</p>
-            </Tooltip.Content>
-          </Tooltip.Root>
-          <Tooltip.Root>
-            <Tooltip.Trigger>
-              {#snippet child({ props })}
-                <button
-                  type="button"
-                  {...props}
-                  class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                  aria-label="Collapse all"
-                  onclick={() => tree.collapseAll()}
-                >
-                  <FoldVertical class="size-4" />
-                </button>
-              {/snippet}
-            </Tooltip.Trigger>
-            <Tooltip.Content>
-              <p>Collapse all</p>
-            </Tooltip.Content>
-          </Tooltip.Root>
-        </div>
-      </div>
-
-      {#if rows.length === 0}
-        <EmptyState
-          card
-          title="No accounts found"
-          description="No accounts match the current filters."
-        >
+      {#if accounts.length === 0}
+        <EmptyState card title="No accounts found" description="No top-level accounts exist yet.">
           {#snippet icon()}
-            <FolderTree aria-hidden="true" class="text-muted-foreground" />
+            <Landmark aria-hidden="true" class="text-muted-foreground" />
           {/snippet}
         </EmptyState>
       {:else}
         <DimWrapper active={loading}>
-          <AccountsTreeTable {rows} {tree} searchActive={!!search.value} />
+          <AccountsTable {accounts} />
         </DimWrapper>
       {/if}
     {/if}
