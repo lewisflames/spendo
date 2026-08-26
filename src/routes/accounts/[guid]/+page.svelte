@@ -270,6 +270,11 @@
       </div>
     {/if}
 
+    <!-- Balance over time -->
+    {#if guid}
+      <BalanceTrendChart {guid} />
+    {/if}
+
     <!-- Sub-accounts -->
     {#if subAccounts.length > 0}
       <section class="flex flex-col gap-3">
@@ -278,11 +283,6 @@
         </h2>
         <SubaccountsTable nodes={subAccounts} />
       </section>
-    {/if}
-
-    <!-- Balance over time -->
-    {#if guid}
-      <BalanceTrendChart {guid} />
     {/if}
 
     <!-- Filters -->
