@@ -19,6 +19,7 @@ pub struct DetailSplit {
     pub guid: String,
     pub account_guid: String,
     pub account_name: String,
+    pub account_description: Option<String>,
     pub account_type: String,
     pub amount: f64,
     pub memo: Option<String>,
@@ -654,7 +655,8 @@ fn enrich_page_transactions(
     // Split details for each transaction
     let mut split_stmt = conn
         .prepare(&format!(
-            "SELECT s.guid, s.account_guid, a.name as account_name, a.account_type,
+            "SELECT s.guid, s.account_guid, a.name as account_name, a.description as account_description,
+                    a.account_type,
                     s.memo,
                     {} as amount,
                     s.reconcile_state
@@ -677,19 +679,21 @@ fn enrich_page_transactions(
                     guid: row.get(0)?,
                     account_guid: row.get(1)?,
                     account_name: row.get(2)?,
-                    account_type: row.get(3)?,
-                    amount: row.get(5)?,
-                    memo: row.get(4)?,
-                    reconcile_state: row.get(6)?,
+                    account_description: row.get(3)?,
+                    account_type: row.get(4)?,
+                    amount: row.get(6)?,
+                    memo: row.get(5)?,
+                    reconcile_state: row.get(7)?,
                 })
             })
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())?;
 
-        // Counter-accounts: distinct names of splits outside the viewed
-        // subtree, in largest-magnitude-first order. The transaction's
-        // reconcile status comes from its splits inside the subtree.
+        // Counter-accounts: distinct descriptions (falling back to name) of
+        // splits outside the viewed subtree, in largest-magnitude-first
+        // order. The transaction's reconcile status comes from its splits
+        // inside the subtree.
         let mut counter_accounts: Vec<String> = vec![];
         let mut seen_accounts: HashSet<&str> = HashSet::new();
         let mut has_y = false;
@@ -701,8 +705,9 @@ fn enrich_page_transactions(
                     Some("c") => has_c = true,
                     _ => {}
                 }
-            } else if seen_accounts.insert(s.account_name.as_str()) {
-                counter_accounts.push(s.account_name.clone());
+            } else if seen_accounts.insert(s.account_guid.as_str()) {
+                let label = s.account_description.as_deref().unwrap_or(&s.account_name);
+                counter_accounts.push(label.to_string());
             }
         }
         let reconcile_state = if has_y {
