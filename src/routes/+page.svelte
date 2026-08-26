@@ -38,6 +38,9 @@
         result.splitsUpdated
       ) {
         toast.success('Reimport complete');
+        toast.info(
+          'Prices are not imported — refresh prices in Portfolio to load them from Yahoo Finance.'
+        );
       } else {
         toast.warning('No new data imported');
       }

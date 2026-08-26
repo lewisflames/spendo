@@ -89,8 +89,7 @@ CREATE TABLE IF NOT EXISTS import_log (
 	accounts_updated INTEGER DEFAULT 0,
 	transactions_updated INTEGER DEFAULT 0,
 	splits_updated INTEGER DEFAULT 0,
-	commodities_orphaned INTEGER DEFAULT 0,
-	prices_orphaned INTEGER DEFAULT 0
+	commodities_orphaned INTEGER DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_transactions_post_date ON transactions(post_date);
@@ -133,7 +132,6 @@ const COLUMN_MIGRATIONS: &[(&str, &str)] = &[
     ("budgets", "rollover_start"),
     ("transactions", "num"),
     ("splits", "memo"),
-    ("import_log", "prices_orphaned"),
     ("transactions", "notes"),
 ];
 

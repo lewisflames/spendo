@@ -38,6 +38,9 @@
       const result = await importGnucash(selected, filename);
       dbSession.value = { summary: result.summary };
       toast.success(`Imported ${filename}`);
+      toast.info(
+        'Prices are not imported — refresh prices in Portfolio to load them from Yahoo Finance.'
+      );
     } catch (e: unknown) {
       const msg = errMsg(e, 'Import failed');
       if (onError) {

@@ -61,8 +61,7 @@
       entry.accountsOrphaned +
       entry.transactionsOrphaned +
       entry.splitsOrphaned +
-      entry.commoditiesOrphaned +
-      entry.pricesOrphaned
+      entry.commoditiesOrphaned
     );
   }
 </script>

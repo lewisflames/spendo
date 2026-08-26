@@ -59,7 +59,6 @@ pub struct ImportLogDetails {
     pub transactions_orphaned: i64,
     pub splits_orphaned: i64,
     pub commodities_orphaned: i64,
-    pub prices_orphaned: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -85,7 +84,6 @@ pub struct ImportResult {
     pub transactions_orphaned: i64,
     pub splits_orphaned: i64,
     pub commodities_orphaned: i64,
-    pub prices_orphaned: i64,
     pub total_accounts: i64,
     pub total_transactions: i64,
     pub summary: DataSummary,
@@ -103,8 +101,7 @@ pub fn get_import_logs(
             "SELECT id, filename, file_path, imported_at, sha256,
 			        accounts_added, transactions_added, splits_added, commodities_added,
 			        accounts_updated, transactions_updated, splits_updated,
-			        accounts_orphaned, transactions_orphaned, splits_orphaned, commodities_orphaned,
-			        prices_orphaned
+			        accounts_orphaned, transactions_orphaned, splits_orphaned, commodities_orphaned
 			 FROM import_log ORDER BY id DESC LIMIT ?1 OFFSET ?2",
         )
         .map_err(|e| e.to_string())?;
@@ -128,7 +125,6 @@ pub fn get_import_logs(
                 transactions_orphaned: row.get(13)?,
                 splits_orphaned: row.get(14)?,
                 commodities_orphaned: row.get(15)?,
-                prices_orphaned: row.get(16)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -175,7 +171,6 @@ struct SourceData {
     accounts: Vec<Account>,
     splits: Vec<Split>,
     transactions: Vec<Transaction>,
-    prices: Vec<Price>,
 }
 
 fn read_source_data(source: &Connection) -> Result<SourceData, String> {
@@ -191,7 +186,6 @@ fn read_source_data(source: &Connection) -> Result<SourceData, String> {
         accounts,
         splits,
         transactions: read_source_transaction(source)?,
-        prices: read_price(source)?,
     })
 }
 
@@ -347,41 +341,6 @@ impl Importable for Split {
 		)
 		.map_err(|e| e.to_string())?
 		.execute(rusqlite::params![self.guid, self.tx_guid, self.account_guid, self.value_num, self.value_denom, self.quantity_num, self.quantity_denom, reconciled as i64, self.reconcile_state, self.memo])
-		.map_err(|e| e.to_string())?;
-        Ok(())
-    }
-}
-
-#[derive(Clone)]
-struct Price {
-    guid: String,
-    commodity_guid: String,
-    currency_guid: String,
-    value_num: i64,
-    value_denom: i64,
-    date: String,
-}
-
-impl Importable for Price {
-    fn guid(&self) -> &str {
-        &self.guid
-    }
-
-    fn has_changes(&self, existing: &Self) -> bool {
-        existing.commodity_guid != self.commodity_guid
-            || existing.currency_guid != self.currency_guid
-            || existing.value_num != self.value_num
-            || existing.value_denom != self.value_denom
-            || existing.date != self.date
-    }
-
-    fn upsert(&self, conn: &Connection) -> Result<(), String> {
-        conn.prepare_cached(
-			"INSERT INTO prices (guid, commodity_guid, currency_guid, value_num, value_denom, date) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-			 ON CONFLICT(guid) DO UPDATE SET commodity_guid=excluded.commodity_guid, currency_guid=excluded.currency_guid, value_num=excluded.value_num, value_denom=excluded.value_denom, date=excluded.date",
-		)
-		.map_err(|e| e.to_string())?
-		.execute(rusqlite::params![self.guid, self.commodity_guid, self.currency_guid, self.value_num, self.value_denom, self.date])
 		.map_err(|e| e.to_string())?;
         Ok(())
     }
@@ -560,38 +519,9 @@ fn non_empty(s: Option<String>) -> Option<String> {
     s.filter(|v| !v.is_empty())
 }
 
-fn read_price(conn: &Connection) -> Result<Vec<Price>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT guid, commodity_guid, currency_guid, value_num, value_denom, date FROM prices",
-        )
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([], |row| {
-            Ok(Price {
-                guid: row.get(0)?,
-                commodity_guid: row.get(1)?,
-                currency_guid: row.get(2)?,
-                value_num: row.get(3)?,
-                value_denom: row.get(4)?,
-                date: row.get(5)?,
-            })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
-    Ok(rows)
-}
-
 // ── Orphan helpers ──────────────────────────────────────────────────────────
 
-const VALID_TABLES: &[&str] = &[
-    "commodities",
-    "accounts",
-    "transactions",
-    "splits",
-    "prices",
-];
+const VALID_TABLES: &[&str] = &["commodities", "accounts", "transactions", "splits"];
 
 fn validate_table(table: &str) -> Result<(), String> {
     if VALID_TABLES.contains(&table) {
@@ -654,19 +584,16 @@ fn import_gnucash_inner(
     let account_guids: Vec<String> = src.accounts.iter().map(|r| r.guid.clone()).collect();
     let tx_guids: Vec<String> = src.transactions.iter().map(|r| r.guid.clone()).collect();
     let split_guids: Vec<String> = src.splits.iter().map(|r| r.guid.clone()).collect();
-    let price_guids: Vec<String> = src.prices.iter().map(|r| r.guid.clone()).collect();
 
     populate_source_guids(dest_conn, "tmp_src_commodities", &commodity_guids)?;
     populate_source_guids(dest_conn, "tmp_src_accounts", &account_guids)?;
     populate_source_guids(dest_conn, "tmp_src_transactions", &tx_guids)?;
     populate_source_guids(dest_conn, "tmp_src_splits", &split_guids)?;
-    populate_source_guids(dest_conn, "tmp_src_prices", &price_guids)?;
 
     let commodities_orphaned = count_orphaned(dest_conn, "commodities", "tmp_src_commodities")?;
     let accounts_orphaned = count_orphaned(dest_conn, "accounts", "tmp_src_accounts")?;
     let transactions_orphaned = count_orphaned(dest_conn, "transactions", "tmp_src_transactions")?;
     let splits_orphaned = count_orphaned(dest_conn, "splits", "tmp_src_splits")?;
-    let prices_orphaned = count_orphaned(dest_conn, "prices", "tmp_src_prices")?;
 
     let mut commodities_added = 0i64;
     let mut commodities_updated = 0i64;
@@ -698,10 +625,6 @@ fn import_gnucash_inner(
             .into_iter()
             .map(|s| (s.guid.clone(), s))
             .collect();
-        let existing_prices: HashMap<String, Price> = read_price(dest_conn)?
-            .into_iter()
-            .map(|p| (p.guid.clone(), p))
-            .collect();
 
         (commodities_added, commodities_updated) =
             process_entities(dest_conn, &src.commodities, &existing_commodities)?;
@@ -711,9 +634,7 @@ fn import_gnucash_inner(
             process_entities(dest_conn, &src.transactions, &existing_txns)?;
         (splits_added, splits_updated) =
             process_entities(dest_conn, &src.splits, &existing_splits)?;
-        process_entities(dest_conn, &src.prices, &existing_prices)?;
 
-        delete_orphans(dest_conn, "prices", "tmp_src_prices")?;
         delete_orphans(dest_conn, "splits", "tmp_src_splits")?;
         delete_orphans(dest_conn, "transactions", "tmp_src_transactions")?;
         delete_orphans(dest_conn, "accounts", "tmp_src_accounts")?;
@@ -729,15 +650,14 @@ fn import_gnucash_inner(
             || accounts_orphaned != 0
             || transactions_orphaned != 0
             || splits_orphaned != 0
-            || commodities_orphaned != 0
-            || prices_orphaned != 0;
+            || commodities_orphaned != 0;
 
         if has_changes {
             let now = utils::iso_now();
             dest_conn
 				.execute(
-					"INSERT INTO import_log (filename, file_path, imported_at, sha256, accounts_added, transactions_added, splits_added, commodities_added, accounts_updated, transactions_updated, splits_updated, accounts_orphaned, transactions_orphaned, splits_orphaned, commodities_orphaned, prices_orphaned) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
-					rusqlite::params![filename, source_path, now, sha256, accounts_added, transactions_added, splits_added, commodities_added, accounts_updated, transactions_updated, splits_updated, accounts_orphaned, transactions_orphaned, splits_orphaned, commodities_orphaned, prices_orphaned],
+					"INSERT INTO import_log (filename, file_path, imported_at, sha256, accounts_added, transactions_added, splits_added, commodities_added, accounts_updated, transactions_updated, splits_updated, accounts_orphaned, transactions_orphaned, splits_orphaned, commodities_orphaned) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+					rusqlite::params![filename, source_path, now, sha256, accounts_added, transactions_added, splits_added, commodities_added, accounts_updated, transactions_updated, splits_updated, accounts_orphaned, transactions_orphaned, splits_orphaned, commodities_orphaned],
 				)
 				.map_err(|e| e.to_string())?;
         }
@@ -752,8 +672,7 @@ fn import_gnucash_inner(
             "DROP TABLE IF EXISTS tmp_src_commodities;
              DROP TABLE IF EXISTS tmp_src_accounts;
              DROP TABLE IF EXISTS tmp_src_transactions;
-             DROP TABLE IF EXISTS tmp_src_splits;
-             DROP TABLE IF EXISTS tmp_src_prices;",
+             DROP TABLE IF EXISTS tmp_src_splits;",
         );
 
         Ok(())
@@ -788,7 +707,6 @@ fn import_gnucash_inner(
         transactions_orphaned,
         splits_orphaned,
         commodities_orphaned,
-        prices_orphaned,
         total_accounts,
         total_transactions,
         summary,
