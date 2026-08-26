@@ -31,7 +31,6 @@ export interface ImportLogDetails {
   transactionsOrphaned: number;
   splitsOrphaned: number;
   commoditiesOrphaned: number;
-  pricesOrphaned: number;
 }
 
 interface ImportResult {
@@ -46,7 +45,6 @@ interface ImportResult {
   transactionsOrphaned: number;
   splitsOrphaned: number;
   commoditiesOrphaned: number;
-  pricesOrphaned: number;
   totalAccounts: number;
   totalTransactions: number;
   summary: DataSummary;
