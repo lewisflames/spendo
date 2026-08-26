@@ -40,7 +40,7 @@
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
-  import { openTransaction } from '$lib/utils/navigation';
+  import { handleRowClick, openAccount, openTransaction } from '$lib/utils/navigation';
 
   let guid = $derived(page.params.id);
 
@@ -223,7 +223,10 @@
             {#each d.splits as split (split.guid)}
               {@const qline = quantityLine(split)}
               {@const status = statusFor(split.reconcileState)}
-              <Table.Row class="hover:bg-muted/50">
+              <Table.Row
+                class="cursor-pointer hover:bg-muted/50"
+                onclick={(e) => handleRowClick(e, () => openAccount(split.accountGuid))}
+              >
                 <Table.Cell class="py-2.5 font-medium">
                   <a
                     href={resolve('/accounts/[guid]', { guid: split.accountGuid })}

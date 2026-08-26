@@ -126,10 +126,10 @@
                     })}
                   </span>
                   <span
-                    class="block max-w-56 truncate text-xs text-muted-foreground/70"
+                    class="block max-w-96 truncate text-xs text-muted-foreground/70"
                     title={entry.filePath ?? entry.filename}
                   >
-                    {entry.filename}
+                    {entry.filePath ?? entry.filename}
                   </span>
                 </Table.Cell>
                 <Table.Cell
