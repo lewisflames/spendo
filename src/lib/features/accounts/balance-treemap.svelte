@@ -30,7 +30,7 @@
   import ChartTooltipRow from '$lib/components/ui/chart/chart-tooltip-row.svelte';
   import { Skeleton } from '$lib/components/ui/skeleton';
   import { nodeCategory } from '$lib/features/accounts/account-types';
-  import { clampZero, formatSessionCurrency as fmt, plural } from '$lib/utils/format.svelte';
+  import { clampZero, formatSessionCurrency as fmt } from '$lib/utils/format.svelte';
   import type { AccountNode } from '$lib/tauri';
 
   let { data, loading }: { data: AccountNode[]; loading: boolean } = $props();
@@ -180,10 +180,6 @@
     hovered = null;
   }
 
-  function groupLabel(category: Category): string {
-    return GROUPS.find((g) => g.key === category)?.label ?? category;
-  }
-
   // Focused tiles (children of the selected node) are stronger; the siblings
   // of the selected node's ancestors shrink into the background and are dimmed.
   function tileFill(node: HierarchyRectangularNode<TreemapDatum>): string {
@@ -305,7 +301,7 @@
                             stroke={node.data.color}
                             strokeOpacity={0.4}
                           />
-                          {#if !isLeaf && h > 52}
+                          {#if !isLeaf && h > 28 && w > 28}
                             <g transform="translate({w - 22}, 6)">
                               <rect
                                 width="16"
@@ -357,7 +353,7 @@
               {#snippet children({ data: node })}
                 {@const share = shareOfGroup(node)}
                 <div
-                  class="grid min-w-40 gap-2 rounded-lg bg-popover p-2.5 text-xs text-popover-foreground shadow-md ring-1 ring-foreground/10"
+                  class="grid gap-2 rounded-lg bg-popover p-2.5 text-xs text-popover-foreground shadow-md ring-1 ring-foreground/10"
                 >
                   <div class="flex items-center gap-1.5 font-medium">
                     <span
@@ -369,10 +365,12 @@
                   <ChartTooltipRow
                     label="Balance"
                     value={fmt(clampZero(node.data.balance ?? node.value ?? 0))}
-                    valueSuffix={share !== null ? `${share.toFixed(1)}%` : undefined}
                   />
+                  {#if share !== null}
+                    <ChartTooltipRow label="Ratio" value={`${share.toFixed(1)}%`} />
+                  {/if}
                   {#if node.children?.length}
-                    <ChartTooltipRow label="Accounts" value={`x${node.children.length}`} />
+                    <ChartTooltipRow label="Subaccounts" value={`x${node.children.length}`} />
                   {/if}
                 </div>
               {/snippet}

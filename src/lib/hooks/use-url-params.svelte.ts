@@ -18,7 +18,10 @@ export function pageParam(
 ): UrlParamSpec {
   return {
     key,
-    get: () => String(getPage()),
+    get: () => {
+      const p = getPage();
+      return p === 1 ? null : String(p);
+    },
     apply: (v) => {
       const n = Number(v);
       setPage(Number.isInteger(n) && n >= 1 ? n : 1);
