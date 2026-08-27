@@ -51,6 +51,7 @@
   import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import BalanceTrendChart from '$lib/features/accounts/balance-trend-chart.svelte';
+  import BalanceTreemap from '$lib/features/accounts/balance-treemap.svelte';
   import SubaccountsTable from '$lib/features/accounts/subaccounts-table.svelte';
 
   let guid = $derived(page.params.guid);
@@ -268,6 +269,11 @@
           {/snippet}
         </KpiCard>
       </div>
+
+      <!-- Balance composition of the subtree -->
+      {#if d.subtree?.children.length}
+        <BalanceTreemap subtree={d.subtree} {loading} />
+      {/if}
     {/if}
 
     <!-- Balance over time -->

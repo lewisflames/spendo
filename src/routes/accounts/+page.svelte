@@ -22,7 +22,7 @@
   import { clampZero, formatSessionCurrency as fmt, plural } from '$lib/utils/format.svelte';
   import { errMsg } from '$lib/utils/error';
   import AccountsTable from '$lib/features/accounts/accounts-table.svelte';
-  import BalanceTreemap from '$lib/features/accounts/balance-treemap.svelte';
+  import BalanceTree from '$lib/features/accounts/balance-tree.svelte';
 
   const CATEGORY_LABEL: Record<string, string> = { ...CATEGORY_LABEL_PLURAL };
 
@@ -143,8 +143,8 @@
         {/each}
       </DimWrapper>
 
-      <!-- Balance composition treemap -->
-      <BalanceTreemap data={data?.trees ?? []} {loading} />
+      <!-- Balance composition tree -->
+      <BalanceTree data={data?.trees ?? []} {loading} />
 
       {#if accounts.length === 0}
         <EmptyState card title="No accounts found" description="No top-level accounts exist yet.">

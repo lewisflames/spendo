@@ -29,75 +29,47 @@
   import * as Tooltip from '$lib/components/ui/tooltip';
   import ChartTooltipRow from '$lib/components/ui/chart/chart-tooltip-row.svelte';
   import { Skeleton } from '$lib/components/ui/skeleton';
-  import { nodeCategory } from '$lib/features/accounts/account-types';
+  import { TYPE_COLOR } from '$lib/features/accounts/account-types';
   import { clampZero, formatSessionCurrency as fmt } from '$lib/utils/format.svelte';
   import type { AccountNode } from '$lib/tauri';
 
-  let { data, loading }: { data: AccountNode[]; loading: boolean } = $props();
+  let { subtree, loading }: { subtree: AccountNode | null; loading: boolean } = $props();
 
   interface TreemapDatum {
     name: string;
     guid?: string;
-    category: Category;
     color: string;
     balance?: number;
     children?: TreemapDatum[];
   }
 
-  type Category = 'ASSET' | 'LIABILITY' | 'EQUITY' | 'INCOME' | 'EXPENSE';
+  function colorFor(accountType: string): string {
+    return TYPE_COLOR[accountType] ?? 'var(--color-muted-foreground)';
+  }
 
-  const GROUPS: { key: Category; label: string; color: string }[] = [
-    { key: 'ASSET', label: 'Assets', color: 'var(--color-success)' },
-    { key: 'LIABILITY', label: 'Liabilities', color: 'var(--color-destructive)' },
-    { key: 'EQUITY', label: 'Equity', color: 'var(--color-warning)' },
-    { key: 'INCOME', label: 'Income', color: 'var(--color-chart-4)' },
-    { key: 'EXPENSE', label: 'Expenses', color: 'var(--color-chart-5)' }
-  ];
-
-  function prune(node: AccountNode, color: string, category: Category): TreemapDatum | null {
-    const children = node.children
-      .map((child) => prune(child, color, category))
-      .filter((c): c is TreemapDatum => c !== null);
+  function prune(node: AccountNode): TreemapDatum | null {
+    const children = node.children.map(prune).filter((c): c is TreemapDatum => c !== null);
     const name = node.description || node.name;
+    const color = colorFor(node.accountType);
     if (children.length > 0) {
-      return { name, category, color, children };
+      return { name, guid: node.guid, color, children };
     }
     // Drop zero-balance leaves; they would render as invisible slivers.
     if (Math.abs(clampZero(node.balance)) < 0.005) return null;
-    return { name, guid: node.guid, category, color, balance: node.balance };
+    return { name, guid: node.guid, color, balance: node.balance };
   }
 
   let root = $derived.by(() => {
-    const groups: TreemapDatum[] = [];
-    for (const group of GROUPS) {
-      const children: TreemapDatum[] = [];
-      for (const tree of data.filter((t) => nodeCategory(t.accountType) === group.key)) {
-        const pruned = prune(tree, group.color, group.key);
-        if (!pruned) continue;
-        // Top-level accounts duplicate their category group ("Assets" inside
-        // Assets), so splice their children directly into the group.
-        if (pruned.children) children.push(...pruned.children);
-        else children.push(pruned);
-      }
-      if (children.length > 0) {
-        groups.push({ name: group.label, category: group.key, color: group.color, children });
-      }
-    }
-    if (groups.length === 0) return null;
-    // Synthetic root; never rendered (visibility filters to children of the
-    // selected node and the selected node's ancestors).
-    const root = hierarchy<TreemapDatum>({
-      name: 'Balances',
-      category: 'ASSET',
-      color: 'transparent',
-      children: groups
-    });
-    root.sum((d) => (d.children ? 0 : Math.abs(d.balance ?? 0)));
-    root.sort(
+    if (!subtree) return null;
+    const pruned = prune(subtree);
+    if (!pruned) return null;
+    const h = hierarchy<TreemapDatum>(pruned);
+    h.sum((d) => (d.children ? 0 : Math.abs(d.balance ?? 0)));
+    h.sort(
       (a: HierarchyNode<TreemapDatum>, b: HierarchyNode<TreemapDatum>) =>
         (b.value ?? 0) - (a.value ?? 0)
     );
-    return root;
+    return h;
   });
 
   // Chart area dimensions; drive the layout. Treemap component would lay out
@@ -188,7 +160,7 @@
   }
 
   function shareOfGroup(node: HierarchyRectangularNode<TreemapDatum>): number | null {
-    if (node.depth < 2 || !node.parent || !node.parent.value) return null;
+    if (node.depth < 1 || !node.parent || !node.parent.value) return null;
     return ((node.value ?? 0) / node.parent.value) * 100;
   }
 </script>
@@ -199,7 +171,7 @@
       <div class="flex min-w-0 flex-col gap-1">
         <Card.Title>Balance Composition</Card.Title>
         <Card.Description>
-          Account balances by category. Click a group or use the controls to zoom.
+          Sub-account balances colored by account type. Click a group or use the controls to zoom.
         </Card.Description>
       </div>
       <ButtonGroup.Root class="shrink-0">

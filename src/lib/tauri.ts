@@ -210,6 +210,8 @@ export interface AccountDetailResult {
   page: number;
   pageSize: number;
   totalPages: number;
+  /** The account node with its full subtree (tree-consistent balances). */
+  subtree: AccountNode | null;
 }
 
 export const fetchHomeData = (): Promise<HomeDataResult> => invoke('fetch_home_data');

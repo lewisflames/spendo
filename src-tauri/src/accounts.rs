@@ -288,41 +288,41 @@ pub struct ChildAccountInfo {
     pub tx_count: i64,
 }
 
-/// Find an account node in fetched trees and return its direct children.
-fn child_accounts_of(
-    trees: &[AccountNode],
-    parent_guid: &str,
-) -> Option<Vec<ChildAccountInfo>> {
-    fn find<'a>(nodes: &'a [AccountNode], guid: &str) -> Option<&'a AccountNode> {
-        nodes.iter().find(|n| n.guid == guid).or_else(|| {
-            nodes.iter().find_map(|n| find(&n.children, guid))
-        })
-    }
-    let node = find(trees, parent_guid)?;
-    Some(
-        node.children
-            .iter()
-            .map(|c| ChildAccountInfo {
-                guid: c.guid.clone(),
-                name: c.name.clone(),
-                description: c.description.clone(),
-                code: c.code.clone(),
-                commodity: c.commodity.clone(),
-                account_type: c.account_type.clone(),
-                balance: c.balance,
-                tx_count: c.tx_count,
-            })
-            .collect(),
-    )
+/// Find an account node (with its subtree) in fetched trees.
+fn find_account_node<'a>(trees: &'a [AccountNode], guid: &str) -> Option<&'a AccountNode> {
+    trees
+        .iter()
+        .find(|n| n.guid == guid)
+        .or_else(|| trees.iter().find_map(|n| find_account_node(&n.children, guid)))
 }
 
-/// Direct children for the detail page; empty when the account has none.
-pub fn fetch_child_accounts(
+/// Direct children (for the child table) and the whole subtree (for the
+/// balance-composition chart) of one account, from a single tree fetch so the
+/// detail view needs no second full-tree fetch. Empty/`None` when the account
+/// is missing from the tree.
+pub fn fetch_children_and_subtree(
     conn: &Connection,
     parent_guid: &str,
-) -> Result<Vec<ChildAccountInfo>, String> {
+) -> Result<(Vec<ChildAccountInfo>, Option<AccountNode>), String> {
     let result = fetch_accounts_inner(conn, None)?;
-    Ok(child_accounts_of(&result.trees, parent_guid).unwrap_or_default())
+    let Some(node) = find_account_node(&result.trees, parent_guid) else {
+        return Ok((Vec::new(), None));
+    };
+    let children = node
+        .children
+        .iter()
+        .map(|c| ChildAccountInfo {
+            guid: c.guid.clone(),
+            name: c.name.clone(),
+            description: c.description.clone(),
+            code: c.code.clone(),
+            commodity: c.commodity.clone(),
+            account_type: c.account_type.clone(),
+            balance: c.balance,
+            tx_count: c.tx_count,
+        })
+        .collect();
+    Ok((children, Some(node.clone())))
 }
 
 #[tauri::command]
