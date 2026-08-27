@@ -6,7 +6,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use tauri::State;
 
 use crate::accounts;
-use crate::accounts::{AccountNode, ChildAccountInfo};
+use crate::accounts::{AccountNode, ChildAccountInfo, ParentAccountInfo};
 use crate::db::{run_blocking, AppState};
 use crate::fx;
 use crate::prices::{get_cached_prices_map, latest_quote_currencies};
@@ -83,6 +83,9 @@ pub struct AccountDetailResult {
     /// The account node with its full subtree (tree-consistent balances), for
     /// the balance-composition chart; `None` when the account is missing.
     pub subtree: Option<AccountNode>,
+    /// The account's parent, for the pie's parent-ratio label; `None` for
+    /// top-level accounts (the ROOT node is excluded from the tree).
+    pub parent: Option<ParentAccountInfo>,
 }
 
 /// Ledger query parameters shared by the count and page queries.
@@ -359,7 +362,7 @@ pub fn fetch_account_detail_inner(
     }
 
     let descendants_count = (sub_guids.len() as i64) - 1;
-    let (child_accounts, subtree) = accounts::fetch_children_and_subtree(conn, guid)?;
+    let (child_accounts, subtree, parent) = accounts::fetch_children_and_subtree(conn, guid)?;
     let ctx = FxCtx {
         report_currency: fx::get_report_currency_mnemonic(conn).unwrap_or_default(),
         fx_map: fx::get_fx_map(conn, None)?,
@@ -394,6 +397,7 @@ pub fn fetch_account_detail_inner(
         page_size: query.page_size,
         total_pages: tx_page.total_pages,
         subtree,
+        parent,
     })
 }
 
@@ -1020,6 +1024,25 @@ mod tests {
         let trend = fetch_account_balance_trend_inner(&conn, "empty").unwrap();
         assert_eq!(trend.len(), 1);
         assert_eq!(trend[0].balance, 0.0);
+    }
+
+    #[test]
+    fn detail_parent_links_to_parent_and_none_at_root() {
+        let conn = setup();
+
+        // 'checking' sits under 'assets', whose subtree balance is 70 (100 - 30).
+        let (_, _, parent) = accounts::fetch_children_and_subtree(&conn, "checking").unwrap();
+        let parent = parent.unwrap();
+        assert_eq!(parent.guid, "assets");
+        assert_eq!(parent.balance, 70.0);
+
+        // 'assets' is top-level: its parent is the excluded ROOT node.
+        let (_, _, parent) = accounts::fetch_children_and_subtree(&conn, "assets").unwrap();
+        assert!(parent.is_none());
+
+        let (_, subtree, parent) = accounts::fetch_children_and_subtree(&conn, "nope").unwrap();
+        assert!(subtree.is_none());
+        assert!(parent.is_none());
     }
 
     #[test]

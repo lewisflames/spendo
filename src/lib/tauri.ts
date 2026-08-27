@@ -196,6 +196,14 @@ export interface AccountDetailInfo {
   childAccounts: ChildAccountInfo[];
 }
 
+/** The viewed account's parent; `null` for top-level accounts. */
+export interface ParentAccountInfo {
+  guid: string;
+  name: string;
+  description: string | null;
+  balance: number;
+}
+
 interface AccountSummary {
   totalTransactions: number;
   totalIncome: number;
@@ -212,6 +220,8 @@ export interface AccountDetailResult {
   totalPages: number;
   /** The account node with its full subtree (tree-consistent balances). */
   subtree: AccountNode | null;
+  /** The viewed account's parent, for the pie's parent-ratio label. */
+  parent: ParentAccountInfo | null;
 }
 
 export const fetchHomeData = (): Promise<HomeDataResult> => invoke('fetch_home_data');
