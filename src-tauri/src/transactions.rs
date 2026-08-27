@@ -129,6 +129,14 @@ pub struct TransactionsResult {
     pub total_pages: i64,
 }
 
+/// Per-day transaction count for the activity heatmap. `date` is `YYYY-MM-DD`.
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct HeatmapPoint {
+    pub date: String,
+    pub count: i64,
+}
+
 /// Shared transaction-list WHERE builder. `param_offset` reserves leading
 /// placeholder indices already used by the surrounding query.
 fn build_filter_conditions(
@@ -432,6 +440,42 @@ pub fn fetch_transactions_inner(
     })
 }
 
+/// Per-day transaction counts for the activity heatmap, honoring the same
+/// filters and visibility window as the ledger list.
+pub fn fetch_transaction_heatmap_inner(
+    conn: &Connection,
+    filters: Option<Filters>,
+) -> Result<Vec<HeatmapPoint>, String> {
+    let w = build_filter_conditions(&filters, 0);
+    let where_clause = if w.clauses.is_empty() {
+        String::new()
+    } else {
+        format!(" WHERE {}", w.joined())
+    };
+
+    let sql = format!(
+        "SELECT substr(t.post_date, 1, 10) AS day, COUNT(*) AS cnt
+         FROM transactions t{where_clause}
+         GROUP BY day
+         ORDER BY day"
+    );
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let param_refs = sql::param_refs(&w.params);
+
+    let points = stmt
+        .query_map(param_refs.as_slice(), |row| {
+            Ok(HeatmapPoint {
+                date: row.get(0)?,
+                count: row.get(1)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+
+    Ok(points)
+}
+
 #[tauri::command]
 pub async fn fetch_account_names(state: State<'_, AppState>) -> Result<Vec<AccountInfo>, String> {
     run_blocking(state.db.clone(), fetch_account_names_inner).await
@@ -455,6 +499,17 @@ pub async fn fetch_transactions(
             sort_by.as_deref(),
             sort_dir.as_deref(),
         )
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn fetch_transaction_heatmap(
+    state: State<'_, AppState>,
+    filters: Option<Filters>,
+) -> Result<Vec<HeatmapPoint>, String> {
+    run_blocking(state.db.clone(), move |conn| {
+        fetch_transaction_heatmap_inner(conn, filters)
     })
     .await
 }
@@ -604,5 +659,32 @@ mod tests {
             .expect("tx exists");
         assert_eq!(newest.prev_guid, None);
         assert_eq!(newest.next_guid.as_deref(), Some("t1"));
+    }
+
+    /// The heatmap must reuse the shared visibility-window filter: future-dated
+    /// transactions stay out of the per-day counts.
+    #[test]
+    fn heatmap_counts_visible_transactions_per_day() {
+        let conn = setup();
+        conn.execute(
+            "INSERT INTO transactions (guid, post_date) VALUES ('t3', '2099-01-01')",
+            [],
+        )
+        .unwrap();
+
+        let points = fetch_transaction_heatmap_inner(&conn, None).expect("query runs");
+        assert_eq!(
+            points,
+            vec![
+                HeatmapPoint {
+                    date: "2024-01-10".into(),
+                    count: 1
+                },
+                HeatmapPoint {
+                    date: "2024-02-05".into(),
+                    count: 1
+                }
+            ]
+        );
     }
 }

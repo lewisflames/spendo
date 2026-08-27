@@ -50,6 +50,7 @@ pub fn run() {
             accounts::fetch_accounts,
             transactions::fetch_transactions,
             transactions::fetch_transaction,
+            transactions::fetch_transaction_heatmap,
             transactions::fetch_account_names,
             prices::refresh_prices,
             account_detail::fetch_account_detail,

@@ -7,6 +7,7 @@
   import { appSettings, saveSettings } from '$lib/stores/settings.svelte';
   import TransactionFilters from '$lib/features/transactions/transaction-filters.svelte';
   import TransactionTable from '$lib/features/transactions/transaction-table.svelte';
+  import TransactionHeatmap from '$lib/features/transactions/transaction-heatmap.svelte';
   import { PaginationNav } from '$lib/components/shared/pagination-nav';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
@@ -190,6 +191,8 @@
         Export
       </Button>
     </PageHeader>
+
+    <TransactionHeatmap {filters} />
 
     <TransactionFilters
       bind:search={searchInput}
