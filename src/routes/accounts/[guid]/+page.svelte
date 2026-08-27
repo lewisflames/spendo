@@ -20,6 +20,7 @@
   import { setBreadcrumb } from '$lib/stores/breadcrumb.svelte';
   import { fetchAccountDetail } from '$lib/tauri';
   import {
+    clampZero,
     formatDate as fmtDate,
     formatSessionCurrency as fmt,
     plural
@@ -51,7 +52,7 @@
   import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import BalanceTrendChart from '$lib/features/accounts/balance-trend-chart.svelte';
-  import BalanceTreemap from '$lib/features/accounts/balance-treemap.svelte';
+  import BalancePie from '$lib/features/accounts/balance-pie.svelte';
   import SubaccountsTable from '$lib/features/accounts/subaccounts-table.svelte';
 
   let guid = $derived(page.params.guid);
@@ -125,6 +126,12 @@
   let subAccounts = $derived(data?.account.childAccounts ?? []);
 
   let currentBalance = $derived(data?.account.balance ?? 0);
+
+  let subtreeNode = $derived(data?.subtree ?? null);
+  let parentInfo = $derived(data?.parent ?? null);
+  let hasPieData = $derived(
+    !!subtreeNode && subtreeNode.children.some((c) => Math.abs(clampZero(c.balance)) >= 0.005)
+  );
 
   function handlePageSizeChange(size: number) {
     saveSettings({ pageSize: size });
@@ -269,16 +276,20 @@
           {/snippet}
         </KpiCard>
       </div>
-
-      <!-- Balance composition of the subtree -->
-      {#if d.subtree?.children.length}
-        <BalanceTreemap subtree={d.subtree} {loading} />
-      {/if}
     {/if}
 
-    <!-- Balance over time -->
+    <!-- Balance over time + composition -->
     {#if guid}
-      <BalanceTrendChart {guid} />
+      {#if hasPieData && subtreeNode}
+        <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
+          <div class="lg:col-span-2">
+            <BalanceTrendChart {guid} />
+          </div>
+          <BalancePie node={subtreeNode} parent={parentInfo} {loading} />
+        </div>
+      {:else}
+        <BalanceTrendChart {guid} />
+      {/if}
     {/if}
 
     <!-- Sub-accounts -->

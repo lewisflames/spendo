@@ -288,25 +288,57 @@ pub struct ChildAccountInfo {
     pub tx_count: i64,
 }
 
-/// Find an account node (with its subtree) in fetched trees.
-fn find_account_node<'a>(trees: &'a [AccountNode], guid: &str) -> Option<&'a AccountNode> {
-    trees
-        .iter()
-        .find(|n| n.guid == guid)
-        .or_else(|| trees.iter().find_map(|n| find_account_node(&n.children, guid)))
+/// Slim view of the parent account for the balance-composition pie: enough to
+/// label it and express this account's share of its balance. `None` for
+/// top-level accounts whose parent is the (excluded) ROOT node.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParentAccountInfo {
+    pub guid: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub balance: f64,
 }
 
-/// Direct children (for the child table) and the whole subtree (for the
-/// balance-composition chart) of one account, from a single tree fetch so the
-/// detail view needs no second full-tree fetch. Empty/`None` when the account
-/// is missing from the tree.
+/// Find an account node together with its direct parent; the first tuple
+/// element is the parent, the second the node itself.
+fn find_account_with_parent<'a>(
+    trees: &'a [AccountNode],
+    guid: &str,
+) -> (Option<&'a AccountNode>, Option<&'a AccountNode>) {
+    for tree in trees {
+        if tree.guid == guid {
+            return (None, Some(tree));
+        }
+        let (parent, node) = find_account_with_parent(&tree.children, guid);
+        if node.is_some() {
+            return (Some(parent.unwrap_or(tree)), node);
+        }
+    }
+    (None, None)
+}
+
+/// Tree slices of one account: direct children, the node with its subtree,
+/// and its parent.
+type AccountTreeSlice = (
+    Vec<ChildAccountInfo>,
+    Option<AccountNode>,
+    Option<ParentAccountInfo>,
+);
+
+/// Direct children (for the child table), the whole subtree (for the
+/// balance-composition chart) and the parent (for the pie's parent-ratio
+/// label) of one account, from a single tree fetch so the detail view needs
+/// no second full-tree fetch. Empty/`None` when the account is missing from
+/// the tree.
 pub fn fetch_children_and_subtree(
     conn: &Connection,
     parent_guid: &str,
-) -> Result<(Vec<ChildAccountInfo>, Option<AccountNode>), String> {
+) -> Result<AccountTreeSlice, String> {
     let result = fetch_accounts_inner(conn, None)?;
-    let Some(node) = find_account_node(&result.trees, parent_guid) else {
-        return Ok((Vec::new(), None));
+    let (parent, node) = find_account_with_parent(&result.trees, parent_guid);
+    let Some(node) = node else {
+        return Ok((Vec::new(), None, None));
     };
     let children = node
         .children
@@ -322,7 +354,13 @@ pub fn fetch_children_and_subtree(
             tx_count: c.tx_count,
         })
         .collect();
-    Ok((children, Some(node.clone())))
+    let parent_info = parent.map(|p| ParentAccountInfo {
+        guid: p.guid.clone(),
+        name: p.name.clone(),
+        description: p.description.clone(),
+        balance: p.balance,
+    });
+    Ok((children, Some(node.clone()), parent_info))
 }
 
 #[tauri::command]
