@@ -112,6 +112,12 @@ interface TransactionsResult {
   totalPages: number;
 }
 
+export interface HeatmapPoint {
+  /** YYYY-MM-DD */
+  date: string;
+  count: number;
+}
+
 export interface SplitDetail extends SplitInfo {
   /** Raw signed quantity; share counts for investment accounts, else equals amount. */
   quantity: number;
@@ -268,6 +274,9 @@ export const fetchTransactions = (
   });
 
 export const fetchAccountNames = (): Promise<AccountInfo[]> => invoke('fetch_account_names');
+
+export const fetchTransactionHeatmap = (filters?: Filters): Promise<HeatmapPoint[]> =>
+  invoke('fetch_transaction_heatmap', { filters: filters ?? null });
 
 /** `null` when no transaction with that GUID exists. */
 export const fetchTransaction = (guid: string): Promise<TransactionDetailResult | null> =>
