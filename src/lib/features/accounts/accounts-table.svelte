@@ -1,13 +1,7 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
   import * as Table from '$lib/components/ui/table';
-  import {
-    formatNumber,
-    formatSessionCurrency,
-    balanceColor,
-    clampZero
-  } from '$lib/utils/format.svelte';
-  import { nodeCategory } from '$lib/features/accounts/account-types';
+  import { formatNumber, formatSessionCurrency, clampZero } from '$lib/utils/format.svelte';
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import { handleRowClick, openAccount } from '$lib/utils/navigation';
   import { dbSession } from '$lib/stores/db.svelte';

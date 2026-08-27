@@ -6,7 +6,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use tauri::State;
 
 use crate::accounts;
-use crate::accounts::ChildAccountInfo;
+use crate::accounts::{AccountNode, ChildAccountInfo};
 use crate::db::{run_blocking, AppState};
 use crate::fx;
 use crate::prices::{get_cached_prices_map, latest_quote_currencies};
@@ -80,6 +80,9 @@ pub struct AccountDetailResult {
     pub page: i64,
     pub page_size: i64,
     pub total_pages: i64,
+    /// The account node with its full subtree (tree-consistent balances), for
+    /// the balance-composition chart; `None` when the account is missing.
+    pub subtree: Option<AccountNode>,
 }
 
 /// Ledger query parameters shared by the count and page queries.
@@ -356,7 +359,7 @@ pub fn fetch_account_detail_inner(
     }
 
     let descendants_count = (sub_guids.len() as i64) - 1;
-    let child_accounts = accounts::fetch_child_accounts(conn, guid)?;
+    let (child_accounts, subtree) = accounts::fetch_children_and_subtree(conn, guid)?;
     let ctx = FxCtx {
         report_currency: fx::get_report_currency_mnemonic(conn).unwrap_or_default(),
         fx_map: fx::get_fx_map(conn, None)?,
@@ -390,6 +393,7 @@ pub fn fetch_account_detail_inner(
         page: tx_page.safe_page,
         page_size: query.page_size,
         total_pages: tx_page.total_pages,
+        subtree,
     })
 }
 
