@@ -394,6 +394,7 @@
           <PaginationNav
             bind:page={pg}
             totalPages={d.totalPages}
+            totalItems={d.total}
             pageSize={appSettings.value.pageSize}
             onPageSizeChange={handlePageSizeChange}
           />
