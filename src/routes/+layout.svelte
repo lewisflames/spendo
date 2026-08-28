@@ -114,7 +114,9 @@
       <AppSidebar />
       <Sidebar.Inset class="min-w-0">
         <main id="main-content" class="flex-1 overflow-auto p-8">
-          {@render children()}
+          <div class="mx-auto w-full max-w-7xl">
+            {@render children()}
+          </div>
         </main>
       </Sidebar.Inset>
     </div>
