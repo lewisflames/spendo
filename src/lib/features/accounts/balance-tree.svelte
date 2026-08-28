@@ -1,17 +1,17 @@
 <script lang="ts">
-  import { hierarchy, type HierarchyPointLink, type HierarchyPointNode } from 'd3-hierarchy';
+  import {
+    hierarchy,
+    type HierarchyNode,
+    type HierarchyPointLink,
+    type HierarchyPointNode
+  } from 'd3-hierarchy';
   import { resolve } from '$app/paths';
   import { Chart, Group, Layer, Link, Tooltip as ChartTooltip } from 'layerchart';
   import { Tree } from 'layerchart/hierarchy';
   import * as Card from '$lib/components/ui/card';
   import { Skeleton } from '$lib/components/ui/skeleton';
-  import ChartTooltipRow from '$lib/components/ui/chart/chart-tooltip-row.svelte';
-  import {
-    CATEGORY_LABEL_SINGULAR,
-    TYPE_COLOR,
-    nodeCategory
-  } from '$lib/features/accounts/account-types';
-  import { clampZero, formatNumber, formatSessionCurrency as fmt } from '$lib/utils/format.svelte';
+  import { TYPE_COLOR } from '$lib/features/accounts/account-types';
+  import { clampZero, formatSessionCurrency as fmt } from '$lib/utils/format.svelte';
   import type { AccountNode } from '$lib/tauri';
 
   let { data, loading }: { data: AccountNode[]; loading: boolean } = $props();
@@ -23,18 +23,18 @@
     accountType?: string;
     balance?: number;
     txCount?: number;
+    placeholder?: boolean;
     children?: TreeDatum[];
   }
 
-  const NODE_WIDTH = 60;
-  const MIN_NODE_WIDTH = 120;
-  const NODE_GAP = 20;
-  const NODE_HEIGHT = 20;
-
-  // Full tree with aggregate (subtree) balances, fully expanded.
+  // Full tree with aggregate (subtree) balances, fully expanded. Placeholder
+  // parents contribute 0: they hold no splits themselves and their `balance`
+  // already carries propagated child balances, so summing it would double
+  // count. `.sum()` adds children recursively, so each node's value is its
+  // subtree total with every account's own balance counted exactly once.
   let root = $derived(
     hierarchy<TreeDatum>({ name: 'root', children: data }, (d) => d.children).sum((d) =>
-      d.children ? 0 : Math.abs(clampZero(d.balance ?? 0))
+      d.placeholder ? 0 : Math.abs(clampZero(d.balance ?? 0))
     )
   );
 
@@ -44,41 +44,15 @@
   }
 
   function nodeFill(node: HierarchyPointNode<TreeDatum>): string {
-    return `color-mix(in srgb, ${nodeColor(node)} 40%, var(--color-background))`;
+    return `color-mix(in srgb, ${nodeColor(node)} 50%, var(--color-background))`;
   }
 
   function nodeLabel(node: HierarchyPointNode<TreeDatum>): string {
     return node.data.description || node.data.name;
   }
 
-  function nodeBalance(node: HierarchyPointNode<TreeDatum>): number {
+  function nodeBalance(node: HierarchyNode<TreeDatum>): number {
     return node.data.children?.length ? (node.value ?? 0) : (node.data.balance ?? 0);
-  }
-
-  function linkColor(link: HierarchyPointLink<TreeDatum>): string {
-    return nodeColor(link.target);
-  }
-
-  // Smallest horizontal gap between sibling nodes at each depth; node widths
-  // shrink so dense layouts never overlap.
-  function levelGaps(nodes: HierarchyPointNode<TreeDatum>[]): Record<number, number> {
-    const positions: Record<number, number[]> = {};
-    for (const node of nodes) {
-      (positions[node.depth] ??= []).push(node.y);
-    }
-    const gaps: Record<number, number> = {};
-    for (const [depth, ys] of Object.entries(positions)) {
-      ys.sort((a, b) => a - b);
-      let gap = Infinity;
-      for (let i = 1; i < ys.length; i++) gap = Math.min(gap, ys[i] - ys[i - 1]);
-      gaps[Number(depth)] = gap;
-    }
-    return gaps;
-  }
-
-  function nodeWidth(node: HierarchyPointNode<TreeDatum>, gaps: Record<number, number>): number {
-    const gap = gaps[node.depth] ?? Infinity;
-    return Math.max(MIN_NODE_WIDTH, Math.min(NODE_WIDTH, gap - NODE_GAP));
   }
 
   function linkKey(link: HierarchyPointLink<TreeDatum>): string {
@@ -93,89 +67,69 @@
   </Card.Header>
   <Card.Content>
     {#if loading}
-      <Skeleton class="h-120 w-full" />
+      <Skeleton class="mx-auto h-160 w-full max-w-160" />
     {:else if data.length === 0}
       <div class="py-6 text-center text-sm text-muted-foreground">No account balances found.</div>
     {:else}
-      <div class="h-120 w-full">
-        <Chart padding={{ right: 72, left: 72 }}>
+      <div class="mx-auto h-120 w-full max-w-160">
+        <Chart radial>
           {#snippet children({ context })}
             <Tree hierarchy={root} orientation="horizontal">
               {#snippet children({ nodes, links })}
-                {@const gaps = levelGaps(nodes)}
                 <Layer>
-                  {#each links as link (linkKey(link))}
-                    <Link
-                      data={link}
-                      orientation="horizontal"
-                      motion="tween"
-                      stroke={linkColor(link)}
-                      class="opacity-20"
-                    />
-                  {/each}
+                  <Group center>
+                    {#each links as link (linkKey(link))}
+                      <Link data={link} type="straight" opacity={0.2} />
+                    {/each}
+                  </Group>
                 </Layer>
 
                 <Layer type="html">
-                  {#each nodes as node (node.data.guid ?? 'root')}
-                    {@const w = nodeWidth(node, gaps)}
-                    {@const color = nodeColor(node)}
-                    {@const label = nodeLabel(node)}
-                    <Group
-                      x={node.y - w / 2}
-                      y={node.x - NODE_HEIGHT / 2}
-                      motion="tween"
-                      style={`width: ${w}px; height: ${NODE_HEIGHT}px;`}
-                      onpointermove={(e) => {
-                        context.tooltip.show(e, node);
-                      }}
-                      onpointerleave={() => {
-                        context.tooltip.hide();
-                      }}
-                    >
-                      {#if node.data.guid}
-                        <a
-                          href={resolve('/accounts/[guid]', { guid: node.data.guid })}
-                          class="flex h-full w-full cursor-pointer items-center justify-center rounded-full border text-[11px] font-medium focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                          style={`background-color: ${nodeFill(node)}; border-color: ${color}; color: ${color};`}
-                        >
-                          <span class="min-w-0 truncate px-1.5">{label}</span>
-                        </a>
-                      {:else}
-                        <div
-                          class="flex h-full w-full items-center justify-center rounded-full border text-[11px] font-medium"
-                          style={`background-color: ${nodeFill(node)}; border-color: ${color}; color: ${color};`}
-                        >
-                          <span class="min-w-0 truncate px-1.5">{label}</span>
-                        </div>
-                      {/if}
-                    </Group>
-                  {/each}
+                  <Group center>
+                    {#each nodes as node (node.data.guid ?? 'root')}
+                      {@const r = 10}
+                      {@const color = nodeColor(node)}
+                      {@const label = nodeLabel(node)}
+                      {@const x = node.y * Math.sin(node.x) - r}
+                      {@const y = -node.y * Math.cos(node.x) - r}
+                      <Group
+                        {x}
+                        {y}
+                        motion="tween"
+                        style={`width: ${r * 2}px; height: ${r * 2}px;`}
+                        onpointermove={(e) => {
+                          context.tooltip.show(e, node);
+                        }}
+                        onpointerleave={() => {
+                          context.tooltip.hide();
+                        }}
+                      >
+                        {#if node.data.guid}
+                          <a
+                            href={resolve('/accounts/[guid]', { guid: node.data.guid })}
+                            class="block h-full w-full cursor-pointer rounded-full border hover:scale-120"
+                            style={`background-color: ${nodeFill(node)}; border-color: ${color};`}
+                            aria-label={label}
+                          ></a>
+                        {:else}
+                          <div
+                            class="h-full w-full rounded-full border hover:scale-120"
+                            style={`background-color: ${nodeFill(node)}; border-color: ${color};`}
+                          ></div>
+                        {/if}
+                      </Group>
+                    {/each}
+                  </Group>
                 </Layer>
               {/snippet}
             </Tree>
             <ChartTooltip.Root variant="none">
               {#snippet children({ data: node })}
                 <div
-                  class="grid gap-2 rounded-lg bg-popover p-2.5 text-xs text-popover-foreground shadow-md ring-1 ring-foreground/10"
+                  class="flex gap-2 rounded-lg bg-popover p-2.5 text-xs text-popover-foreground shadow-md ring-1 ring-foreground/10"
                 >
-                  <div class="flex items-center gap-1.5 font-medium">
-                    <span
-                      class="size-2.5 shrink-0 rounded-[2px]"
-                      style="background-color: {nodeColor(node)};"
-                    ></span>
-                    <span class="truncate">{nodeLabel(node)}</span>
-                  </div>
-                  <ChartTooltipRow label="Balance" value={fmt(clampZero(nodeBalance(node)))} />
-                  {#if node.data.guid}
-                    <ChartTooltipRow
-                      label="Category"
-                      value={CATEGORY_LABEL_SINGULAR[nodeCategory(node.data.accountType ?? '')] ??
-                        node.data.accountType}
-                    />
-                  {/if}
-                  {#if node.data.txCount}
-                    <ChartTooltipRow label="Transactions" value={formatNumber(node.data.txCount)} />
-                  {/if}
+                  <div class="font-medium text-muted-foreground">{nodeLabel(node)}</div>
+                  <span class="font-medium tabular-nums">{fmt(clampZero(nodeBalance(node)))}</span>
                 </div>
               {/snippet}
             </ChartTooltip.Root>
