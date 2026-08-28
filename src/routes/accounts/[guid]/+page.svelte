@@ -2,6 +2,7 @@
   import { page } from '$app/state';
   import { resolve } from '$app/paths';
   import * as Table from '$lib/components/ui/table';
+  import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
   import { PaginationNav } from '$lib/components/shared/pagination-nav';
   import { Badge } from '$lib/components/ui/badge';
   import { Button } from '$lib/components/ui/button';
@@ -12,7 +13,8 @@
     Wallet,
     Receipt,
     Download,
-    LoaderCircle
+    LoaderCircle,
+    Columns3
   } from '@lucide/svelte';
   import SortHead from '$lib/components/shared/sort-head.svelte';
   import { dbSession } from '$lib/stores/db.svelte';
@@ -23,6 +25,9 @@
     clampZero,
     formatDate as fmtDate,
     formatSessionCurrency as fmt,
+    formatSignedCurrency,
+    sessionCurrency,
+    signColor,
     plural
   } from '$lib/utils/format.svelte';
   import { statusFor } from '$lib/utils/reconcile';
@@ -58,9 +63,45 @@
   let guid = $derived(page.params.guid);
   let pageSize = $derived(appSettings.value.pageSize);
   let pg = $state(1);
-  const sort = useTableSort<'date' | 'description'>({ sortBy: 'date', sortDir: 'desc' }, ['date']);
+  const sort = useTableSort<'date' | 'description' | 'amount'>(
+    { sortBy: 'date', sortDir: 'desc' },
+    ['date', 'amount']
+  );
   let sortBy = $derived(sort.sortBy);
   let sortDir = $derived(sort.sortDir);
+
+  type ColumnId = 'transfer' | 'status' | 'amount' | 'runningBalance';
+
+  const COLUMNS: { id: ColumnId; label: string }[] = [
+    { id: 'transfer', label: 'Transfer' },
+    { id: 'status', label: 'Status' },
+    { id: 'amount', label: 'Amount' },
+    { id: 'runningBalance', label: 'Balance' }
+  ];
+
+  const DEFAULT_COLUMNS: ColumnId[] = ['transfer', 'amount'];
+
+  let visibleColumns = $state<ColumnId[]>([...DEFAULT_COLUMNS]);
+
+  function isVisible(id: ColumnId): boolean {
+    return visibleColumns.includes(id);
+  }
+
+  function setVisible(id: ColumnId, checked: boolean) {
+    if (checked) {
+      if (!visibleColumns.includes(id)) visibleColumns = [...visibleColumns, id];
+    } else {
+      visibleColumns = visibleColumns.filter((c) => c !== id);
+    }
+  }
+
+  function resetColumns() {
+    visibleColumns = [...DEFAULT_COLUMNS];
+  }
+
+  let skeletonCols = $derived(visibleColumns.length + 2);
+
+  let currency = $derived(sessionCurrency());
 
   // Filter state + URL-param restore must be set up before useAsyncData so the
   // first fetch already uses values from the URL.
@@ -193,13 +234,22 @@
         );
         return { rows: r.transactions, total: r.total };
       });
-      const headers = ['Date', 'Description', 'Number', 'Notes', 'Splits', 'Running Balance'];
+      const headers = [
+        'Date',
+        'Description',
+        'Number',
+        'Notes',
+        'Splits',
+        'Amount',
+        'Running Balance'
+      ];
       const rows = all.map((t) => [
         t.postDate,
         t.description ?? '',
         t.num ?? '',
         t.notes ?? '',
         t.splits.map((s) => `${s.accountName}: ${s.amount}`).join(' | '),
+        String(t.amount),
         String(t.runningBalance)
       ]);
       downloadCsv(`account-${guid}.csv`, headers, rows);
@@ -298,10 +348,36 @@
     {/if}
 
     <!-- Filters -->
-    <TransactionFilters bind:search={searchInput} bind:dateFrom bind:dateTo />
+    <TransactionFilters bind:search={searchInput} bind:dateFrom bind:dateTo>
+      {#snippet extra()}
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger>
+            {#snippet child({ props })}
+              <Button {...props} variant="outline">
+                <Columns3 aria-hidden="true" class="text-muted-foreground" />
+                Columns
+              </Button>
+            {/snippet}
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Content align="end">
+            {#each COLUMNS as col (col.id)}
+              <DropdownMenu.CheckboxItem
+                checked={isVisible(col.id)}
+                onCheckedChange={(checked) => setVisible(col.id, checked)}
+                closeOnSelect={false}
+              >
+                {col.label}
+              </DropdownMenu.CheckboxItem>
+            {/each}
+            <DropdownMenu.Separator />
+            <DropdownMenu.Item onclick={resetColumns}>Reset to default</DropdownMenu.Item>
+          </DropdownMenu.Content>
+        </DropdownMenu.Root>
+      {/snippet}
+    </TransactionFilters>
 
     {#if loading && !data}
-      <TableSkeleton cols={4} rows={5} />
+      <TableSkeleton cols={skeletonCols} rows={5} />
     {:else if error}
       <ErrorCard message={error} onRetry={() => res.reload()} />
     {:else if data}
@@ -338,9 +414,24 @@
                   dir={sort.sortDir}
                   onclick={() => sort.toggle('description')}
                 />
-                <Table.Head class="text-muted-foreground">Transfer</Table.Head>
-                <Table.Head class="text-muted-foreground">Status</Table.Head>
-                <Table.Head class="text-right text-muted-foreground">Running Balance</Table.Head>
+                {#if isVisible('transfer')}
+                  <Table.Head class="text-muted-foreground">Transfer</Table.Head>
+                {/if}
+                {#if isVisible('status')}
+                  <Table.Head class="text-muted-foreground">Status</Table.Head>
+                {/if}
+                {#if isVisible('amount')}
+                  <SortHead
+                    label="Amount"
+                    active={sort.sortBy === 'amount'}
+                    dir={sort.sortDir}
+                    onclick={() => sort.toggle('amount')}
+                    class="text-right"
+                  />
+                {/if}
+                {#if isVisible('runningBalance')}
+                  <Table.Head class="text-right text-muted-foreground">Balance</Table.Head>
+                {/if}
               </Table.Row>
             </Table.Header>
             <Table.Body>
@@ -373,19 +464,47 @@
                       </p>
                     {/if}
                   </Table.Cell>
-                  <Table.Cell
-                    class="max-w-xs truncate py-2.5 text-muted-foreground"
-                    title={txn.counterAccounts.join(', ')}
-                  >
-                    {txn.counterAccounts.length > 0 ? txn.counterAccounts.join(', ') : '\u2014'}
-                  </Table.Cell>
-                  <Table.Cell class="py-2.5">
-                    {@const status = statusFor(txn.reconcileState)}
-                    <Badge variant={status.variant}>{status.label}</Badge>
-                  </Table.Cell>
-                  <Table.Cell class="py-2.5 text-right font-medium whitespace-nowrap tabular-nums">
-                    {fmt(txn.runningBalance)}
-                  </Table.Cell>
+                  {#if isVisible('transfer')}
+                    <Table.Cell
+                      class="max-w-xs py-2.5 text-muted-foreground"
+                      title={txn.counterAccounts.join(', ')}
+                    >
+                      {#if txn.counterAccounts.length === 0}
+                        —
+                      {:else}
+                        <div class="flex items-center gap-1">
+                          <span class="truncate">{txn.counterAccounts[0]}</span>
+                          {#if txn.counterAccounts.length > 1}
+                            <Badge variant="outline" class="shrink-0 text-[10px] leading-none"
+                              >+{txn.counterAccounts.length - 1} more</Badge
+                            >
+                          {/if}
+                        </div>
+                      {/if}
+                    </Table.Cell>
+                  {/if}
+                  {#if isVisible('status')}
+                    <Table.Cell class="py-2.5">
+                      {@const status = statusFor(txn.reconcileState)}
+                      <Badge variant={status.variant}>{status.label}</Badge>
+                    </Table.Cell>
+                  {/if}
+                  {#if isVisible('amount')}
+                    <Table.Cell
+                      class="py-2.5 text-right font-medium whitespace-nowrap tabular-nums {signColor(
+                        txn.amount
+                      )}"
+                    >
+                      {formatSignedCurrency(txn.amount, currency)}
+                    </Table.Cell>
+                  {/if}
+                  {#if isVisible('runningBalance')}
+                    <Table.Cell
+                      class="py-2.5 text-right font-medium whitespace-nowrap tabular-nums"
+                    >
+                      {fmt(txn.runningBalance)}
+                    </Table.Cell>
+                  {/if}
                 </Table.Row>
               {/each}
             </Table.Body>
