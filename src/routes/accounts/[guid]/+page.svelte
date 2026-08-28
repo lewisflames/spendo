@@ -333,12 +333,12 @@
       {#if hasPieData && subtreeNode}
         <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
           <div class="lg:col-span-2">
-            <BalanceTrendChart {guid} />
+            <BalanceTrendChart {guid} accountType={data?.account.accountType} />
           </div>
           <BalancePie node={subtreeNode} parent={parentInfo} {loading} />
         </div>
       {:else}
-        <BalanceTrendChart {guid} />
+        <BalanceTrendChart {guid} accountType={data?.account.accountType} />
       {/if}
     {/if}
 
