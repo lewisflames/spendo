@@ -39,6 +39,9 @@ pub struct DetailTransaction {
     /// Names of the accounts on the other side of the transaction (outside
     /// the viewed account's subtree), largest-magnitude split first.
     pub counter_accounts: Vec<String>,
+    /// Signed effect on the viewed subtree, converted to the report currency
+    /// at the transaction's date (the delta of `running_balance`).
+    pub amount: f64,
     pub running_balance: f64,
     /// GnuCash reconcile state ('n'/'c'/'y') of the transaction's splits
     /// within the viewed subtree ('y' wins over 'c').
@@ -553,23 +556,35 @@ fn load_tx_page(
     let fx_history = fx::FxHistory::load(conn)?;
     let mut running = 0.0;
     let mut running_by_guid: HashMap<String, f64> = HashMap::new();
+    let mut amount_by_guid: HashMap<String, f64> = HashMap::new();
     for guid in &tx_order {
         let (post_date, _, _, effects) = &tx_map[guid];
         let fx_at = fx_history.map_for_date(post_date);
+        let prev = running;
         running += effects
             .iter()
             .map(|(mn, v)| fx::convert(*v, mn, &ctx.report_currency, &fx_at))
             .sum::<f64>();
         running_by_guid.insert(guid.clone(), running);
+        amount_by_guid.insert(guid.clone(), running - prev);
     }
 
-    let page_guids = order_page_guids(&tx_order, &tx_map, sort_by, sort_dir, safe_page, page_size);
+    let page_guids = order_page_guids(
+        &tx_order,
+        &tx_map,
+        &amount_by_guid,
+        sort_by,
+        sort_dir,
+        safe_page,
+        page_size,
+    );
 
     let transactions = enrich_page_transactions(
         conn,
         &page_guids,
         &tx_map,
         &running_by_guid,
+        &amount_by_guid,
         sub_guids,
     )?;
 
@@ -587,6 +602,7 @@ fn load_tx_page(
 fn order_page_guids(
     tx_order: &[String],
     tx_map: &TxGroups,
+    amount_by_guid: &HashMap<String, f64>,
     sort_by: Option<&str>,
     sort_dir: Option<&str>,
     safe_page: i64,
@@ -595,29 +611,46 @@ fn order_page_guids(
     let offset = ((safe_page - 1) * page_size) as usize;
     let take = page_size as usize;
 
-    let (key_is_date, ascending) = match (sort_by.unwrap_or("date"), sort_dir) {
-        ("description", Some("desc")) => (false, false),
-        ("description", _) => (false, true),
-        ("date", Some("asc")) => (true, true),
-        _ => (true, false),
+    #[derive(Clone, Copy, PartialEq)]
+    enum SortKey {
+        Date,
+        Description,
+        Amount,
+    }
+
+    let key = match sort_by.unwrap_or("date") {
+        "description" => SortKey::Description,
+        "amount" => SortKey::Amount,
+        _ => SortKey::Date,
+    };
+    let ascending = match (key, sort_dir) {
+        (SortKey::Date, Some("asc")) => true,
+        (SortKey::Date, _) => false,
+        (SortKey::Description, Some("desc")) => false,
+        (SortKey::Description, _) => true,
+        (SortKey::Amount, Some("desc")) => false,
+        (SortKey::Amount, _) => true,
     };
 
     // Precompute lowercase keys once instead of allocating per comparison.
-    let desc_keys: HashMap<&String, String> = if key_is_date {
-        HashMap::new()
-    } else {
-        tx_order
+    let desc_keys: HashMap<&String, String> = match key {
+        SortKey::Description => tx_order
             .iter()
             .map(|g| (g, tx_map[g].1.as_deref().unwrap_or("").to_lowercase()))
-            .collect()
+            .collect(),
+        _ => HashMap::new(),
     };
 
     let mut ordered: Vec<&String> = tx_order.iter().collect();
     ordered.sort_by(|a, b| {
-        let cmp = if key_is_date {
-            tx_map[*a].0.cmp(&tx_map[*b].0).then_with(|| a.cmp(b))
-        } else {
-            desc_keys[a].cmp(&desc_keys[b]).then_with(|| a.cmp(b))
+        let cmp = match key {
+            SortKey::Date => tx_map[*a].0.cmp(&tx_map[*b].0).then_with(|| a.cmp(b)),
+            SortKey::Description => {
+                desc_keys[a].cmp(&desc_keys[b]).then_with(|| a.cmp(b))
+            }
+            SortKey::Amount => amount_by_guid[*a]
+                .total_cmp(&amount_by_guid[*b])
+                .then_with(|| a.cmp(b)),
         };
         if ascending {
             cmp
@@ -639,6 +672,7 @@ fn enrich_page_transactions(
     page_guids: &[String],
     tx_map: &TxGroups,
     running_by_guid: &HashMap<String, f64>,
+    amount_by_guid: &HashMap<String, f64>,
     sub_guids: &[String],
 ) -> Result<Vec<DetailTransaction>, String> {
     // Notes for the page's transactions (kept out of the main CTE to avoid
@@ -737,6 +771,7 @@ fn enrich_page_transactions(
             notes: notes_map.get(tx_guid).cloned().flatten(),
             splits,
             counter_accounts,
+            amount: amount_by_guid[tx_guid],
             running_balance: running_by_guid[tx_guid],
             reconcile_state,
         });
@@ -1049,5 +1084,106 @@ mod tests {
     fn unknown_account_errors() {
         let conn = setup();
         assert!(fetch_account_balance_trend_inner(&conn, "nope").is_err());
+    }
+
+    #[test]
+    fn tx_page_amounts_match_running_balance_deltas() {
+        let conn = setup();
+        let ctx = FxCtx {
+            report_currency: "EUR".into(),
+            fx_map: HashMap::new(),
+        };
+
+        let page = load_tx_page(
+            &conn,
+            &ctx,
+            &accounts::get_subaccount_guids(&conn, "assets").unwrap(),
+            &TxQuery {
+                page: 1,
+                page_size: 50,
+                date_from: None,
+                date_to: None,
+                search: None,
+                sort_by: None,
+                sort_dir: None,
+            },
+        )
+        .unwrap();
+
+        // Default sort is date descending: t2 (2024-02-05) first, then t1 (2024-01-10).
+        assert_eq!(page.transactions.len(), 2);
+        let (t2, t1) = (&page.transactions[0], &page.transactions[1]);
+        assert_eq!(t1.amount, 100.0);
+        assert_eq!(t1.running_balance, 100.0);
+        assert_eq!(t2.amount, -30.0);
+        assert_eq!(t2.running_balance, 70.0);
+
+        // Credit-normal card spend shows as a negative amount under root.
+        let page = load_tx_page(
+            &conn,
+            &ctx,
+            &accounts::get_subaccount_guids(&conn, "root").unwrap(),
+            &TxQuery {
+                page: 1,
+                page_size: 50,
+                date_from: None,
+                date_to: None,
+                search: None,
+                sort_by: None,
+                sort_dir: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(page.transactions.len(), 3);
+        let t3 = &page.transactions[0]; // 2024-02-20, newest
+        assert_eq!(t3.amount, -40.0);
+        assert_eq!(t3.running_balance, 30.0);
+    }
+
+    #[test]
+    fn tx_page_sorts_by_amount() {
+        let conn = setup();
+        let ctx = FxCtx {
+            report_currency: "EUR".into(),
+            fx_map: HashMap::new(),
+        };
+
+        let page = load_tx_page(
+            &conn,
+            &ctx,
+            &accounts::get_subaccount_guids(&conn, "assets").unwrap(),
+            &TxQuery {
+                page: 1,
+                page_size: 50,
+                date_from: None,
+                date_to: None,
+                search: None,
+                sort_by: Some("amount"),
+                sort_dir: Some("desc"),
+            },
+        )
+        .unwrap();
+
+        // Largest effect first: t1 (+100) before t2 (-30).
+        let amounts: Vec<f64> = page.transactions.iter().map(|t| t.amount).collect();
+        assert_eq!(amounts, vec![100.0, -30.0]);
+
+        let page = load_tx_page(
+            &conn,
+            &ctx,
+            &accounts::get_subaccount_guids(&conn, "assets").unwrap(),
+            &TxQuery {
+                page: 1,
+                page_size: 50,
+                date_from: None,
+                date_to: None,
+                search: None,
+                sort_by: Some("amount"),
+                sort_dir: Some("asc"),
+            },
+        )
+        .unwrap();
+        let amounts: Vec<f64> = page.transactions.iter().map(|t| t.amount).collect();
+        assert_eq!(amounts, vec![-30.0, 100.0]);
     }
 }

@@ -172,6 +172,8 @@ export interface DetailTransaction {
   splits: SplitInfo[];
   /** Other accounts involved, outside the viewed account's subtree. */
   counterAccounts: string[];
+  /** Signed effect on the viewed subtree, in report currency at the tx date. */
+  amount: number;
   runningBalance: number;
   /** GnuCash reconcile state of the viewed subtree's splits: 'n'/'c'/'y'. */
   reconcileState?: string | null;

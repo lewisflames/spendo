@@ -5,6 +5,7 @@
   import { DatePicker } from '$lib/components/shared/date-picker';
   import { Button } from '$lib/components/ui/button';
   import { X } from '@lucide/svelte';
+  import type { Snippet } from 'svelte';
   import type { AccountInfo } from '$lib/tauri';
 
   let {
@@ -12,7 +13,8 @@
     dateFrom = $bindable(''),
     dateTo = $bindable(''),
     accountName = $bindable(''),
-    accounts = []
+    accounts = [],
+    extra = undefined
   }: {
     search?: string;
     dateFrom?: string;
@@ -20,6 +22,8 @@
     /** Bound only when an account picker is wanted (pass the choices). */
     accountName?: string;
     accounts?: AccountInfo[];
+    /** Optional trailing controls (e.g. a columns toggle), right-aligned. */
+    extra?: Snippet;
   } = $props();
 
   let hasFilters = $derived(
@@ -75,5 +79,8 @@
       <X aria-hidden="true" class="mr-1 size-3" />
       Clear
     </Button>
+  {/if}
+  {#if extra}
+    <div class="ml-auto">{@render extra()}</div>
   {/if}
 </div>
