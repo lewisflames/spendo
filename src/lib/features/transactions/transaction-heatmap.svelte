@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { timeWeek } from 'd3-time';
   import { scaleThreshold } from 'd3-scale';
   import { Calendar, Chart, Layer, Rect, Tooltip as ChartTooltip } from 'layerchart';
   import { dbSession } from '$lib/stores/db.svelte';
@@ -52,6 +53,18 @@
     return { start, end, empty: start.getTime() >= lastDay.getTime() };
   });
 
+  // Cells stay square and scale to fill the card width, capped so narrow
+  // ranges can't blow them up. The chart height follows the cell size so
+  // the 7-day grid always fits exactly.
+  const CELL_CAP = 35;
+  const TOP_PADDING = 20;
+  const DAY_ROWS = 7;
+
+  let chartWidth = $state(0);
+  let cols = $derived(timeWeek.count(range.start, range.end) + 1);
+  let cell = $derived(Math.min((chartWidth || 17.1) / cols, CELL_CAP));
+  let chartHeight = $derived(Math.round(TOP_PADDING + DAY_ROWS * cell));
+
   // Intensity ramp from the accent chart color, tinted against the page
   // background so every level stays visibly colored in both themes.
   const CELL_RAMP = [
@@ -75,7 +88,7 @@
     {:else if range.empty}
       <div class="py-6 text-center text-sm text-muted-foreground">No activity in this period.</div>
     {:else}
-      <div class="w-full">
+      <div class="w-full" bind:clientWidth={chartWidth}>
         <Chart
           data={points}
           x={(d: CellDatum) => d.date}
@@ -83,12 +96,12 @@
           cScale={scaleThreshold().unknown('transparent')}
           cDomain={[1, 2, 4]}
           cRange={CELL_RAMP}
-          padding={{ top: 20 }}
-          height={140}
+          padding={{ top: TOP_PADDING }}
+          height={chartHeight}
         >
           {#snippet children({ context })}
             <Layer>
-              <Calendar start={range.start} end={range.end}>
+              <Calendar start={range.start} end={range.end} cellSize={[cell, cell]}>
                 {#snippet children({ cells, cellSize })}
                   {@const gap = Math.min(3, Math.max(1, cellSize[0] * 0.12))}
                   {#each cells as cell (cell.data.date.getTime())}
