@@ -1,14 +1,7 @@
 <script lang="ts">
   import * as Table from '$lib/components/ui/table';
   import { resolve } from '$app/paths';
-  import {
-    formatNumber,
-    formatSessionCurrency,
-    balanceColor,
-    clampZero
-  } from '$lib/utils/format.svelte';
-  import { nodeCategory } from '$lib/features/accounts/account-types';
-  import { CATEGORY_LABEL_SINGULAR } from '$lib/features/accounts/account-types';
+  import { formatNumber, formatSessionCurrency, clampZero } from '$lib/utils/format.svelte';
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import { dbSession } from '$lib/stores/db.svelte';
   import type { ChildAccountInfo } from '$lib/tauri';
@@ -22,7 +15,7 @@
 <TableShell>
   <Table.Header>
     <Table.Row class="bg-muted/75">
-      <Table.Head class="text-muted-foreground">Account</Table.Head>
+      <Table.Head class="text-muted-foreground">Subaccount</Table.Head>
       <Table.Head class="text-muted-foreground">Type</Table.Head>
       <Table.Head class="text-right text-muted-foreground">Txn</Table.Head>
       <Table.Head class="text-right text-muted-foreground">Balance</Table.Head>
@@ -56,15 +49,12 @@
           </div>
         </Table.Cell>
         <Table.Cell class="py-2.5 text-sm text-muted-foreground">
-          {CATEGORY_LABEL_SINGULAR[nodeCategory(node.accountType)] ?? node.accountType}
+          {node.accountType}
         </Table.Cell>
         <Table.Cell class="py-2.5 text-right text-sm text-muted-foreground tabular-nums">
           {formatNumber(node.txCount)}
         </Table.Cell>
-        <Table.Cell
-          class={'py-2.5 text-right font-medium whitespace-nowrap tabular-nums ' +
-            balanceColor(node.balance, nodeCategory(node.accountType))}
-        >
+        <Table.Cell class="py-2.5 text-right font-medium whitespace-nowrap tabular-nums">
           {formatSessionCurrency(clampZero(node.balance))}
         </Table.Cell>
       </Table.Row>

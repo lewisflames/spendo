@@ -294,12 +294,7 @@
 
     <!-- Sub-accounts -->
     {#if subAccounts.length > 0}
-      <section class="flex flex-col gap-3">
-        <h2 class="text-xs font-semibold tracking-wider text-muted-foreground uppercase">
-          Sub-accounts
-        </h2>
-        <SubaccountsTable nodes={subAccounts} />
-      </section>
+      <SubaccountsTable nodes={subAccounts} />
     {/if}
 
     <!-- Filters -->
