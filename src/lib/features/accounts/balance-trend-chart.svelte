@@ -6,8 +6,11 @@
   import type { AccountBalancePoint } from '$lib/tauri';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import { sessionCurrency } from '$lib/utils/format.svelte';
+  import { TYPE_COLOR } from '$lib/features/accounts/account-types';
 
-  let { guid }: { guid: string } = $props();
+  let { guid, accountType }: { guid: string; accountType?: string } = $props();
+
+  let color = $derived(TYPE_COLOR[accountType ?? ''] ?? 'var(--color-primary)');
 
   const res = useAsyncData({
     enabled: () => !!dbSession.value && !!guid,
@@ -32,7 +35,7 @@
     emptyMessage="No balance history found."
     {data}
     getX={(d: AccountBalancePoint) => new Date(d.month)}
-    series={[{ key: 'balance', label: 'Balance', color: 'var(--color-primary)' }]}
+    series={[{ key: 'balance', label: 'Balance', color }]}
     {currency}
   />
 {/if}

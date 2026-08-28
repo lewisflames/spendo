@@ -5,7 +5,7 @@
   import { PieChart } from 'layerchart';
   import ChartTooltipRow from '$lib/components/ui/chart/chart-tooltip-row.svelte';
   import { TYPE_COLOR } from '$lib/features/accounts/account-types';
-  import { clampZero, formatSessionCurrency as fmt } from '$lib/utils/format.svelte';
+  import { clampZero } from '$lib/utils/format.svelte';
   import type { AccountNode, ParentAccountInfo } from '$lib/tauri';
 
   let {
@@ -82,15 +82,14 @@
           >
             {#snippet tooltip()}
               <Chart.Tooltip hideLabel>
-                {#snippet formatter({ value, item })}
+                {#snippet formatter({ item })}
                   {@const child = node?.children.find((c) => c.guid === item.key)}
                   <ChartTooltipRow
                     color={item.color as string}
                     label={child
                       ? (child.description ?? child.name)
                       : String(item.label ?? item.key)}
-                    value={fmt(clampZero(child?.balance ?? (value as number)))}
-                    valueSuffix={child && accountBalance > 0
+                    value={child && accountBalance > 0
                       ? `${((Math.abs(clampZero(child.balance)) / accountBalance) * 100).toFixed(1)}%`
                       : undefined}
                   />

@@ -4,8 +4,8 @@
   import ChartTooltipRow from '$lib/components/ui/chart/chart-tooltip-row.svelte';
   import { Skeleton } from '$lib/components/ui/skeleton';
   import { AreaChart } from 'layerchart';
-  import { formatMonth, formatCompact, formatCurrency, formatDate } from '$lib/utils/format.svelte';
-  import { responsiveTimeTicks } from '$lib/components/ui/chart/chart-utils';
+  import { formatCurrency, formatDate } from '$lib/utils/format.svelte';
+  import { curveStepAfter } from 'd3-shape';
 
   interface TimeSeriesSeries {
     key: string;
@@ -143,14 +143,10 @@
           yNice={false}
           axis
           series={visibleSeries.map((s) => ({ key: s.key, label: s.label, color: s.color }))}
-          padding={{ top: 0, right: 10, bottom: 20, left: 40 }}
+          padding={{ top: 0, right: 10, bottom: 20, left: 50 }}
           props={{
-            xAxis: {
-              format: formatMonth,
-              ticks: responsiveTimeTicks
-            },
-            yAxis: {
-              format: formatCompact
+            area: {
+              curve: curveStepAfter
             }
           }}
         >
