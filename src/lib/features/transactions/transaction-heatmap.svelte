@@ -10,7 +10,6 @@
   import * as Card from '$lib/components/ui/card';
   import { Skeleton } from '$lib/components/ui/skeleton';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
-  import ChartTooltipRow from '$lib/components/ui/chart/chart-tooltip-row.svelte';
 
   interface HeatmapFilters {
     search?: string;
@@ -124,13 +123,12 @@
             <ChartTooltip.Root variant="none">
               {#snippet children({ data: cell })}
                 <div
-                  class="grid gap-2 rounded-lg bg-popover p-2.5 text-xs text-popover-foreground shadow-md ring-1 ring-foreground/10"
+                  class="flex gap-2 rounded-lg bg-popover p-2.5 text-xs text-popover-foreground shadow-md ring-1 ring-foreground/10"
                 >
-                  <div class="font-medium">{formatDate(cell.date)}</div>
-                  <ChartTooltipRow
-                    label="Transactions"
-                    value={plural(cell.count ?? 0, 'transaction')}
-                  />
+                  <div class="font-medium text-muted-foreground">{formatDate(cell.date)}</div>
+                  <span class="font-medium tabular-nums"
+                    >{plural(cell.count ?? 0, 'transaction')}</span
+                  >
                 </div>
               {/snippet}
             </ChartTooltip.Root>
