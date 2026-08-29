@@ -13,7 +13,7 @@
   import { fetchImportHistory } from '$lib/tauri';
   import type { ImportLogDetails } from '$lib/tauri';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
-  import { formatDate, formatNumber, plural } from '$lib/utils/format.svelte';
+  import { formatDate, formatNumber } from '$lib/utils/format.svelte';
   import ImportHistoryEntry from '$lib/features/home/import-history-entry.svelte';
   import { useTreeExpand } from '$lib/hooks/use-tree-expand.svelte';
 
