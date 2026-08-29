@@ -66,109 +66,99 @@
   }
 </script>
 
-<section class="flex flex-col gap-4">
-  <div class="flex items-baseline justify-between gap-4">
-    <h3 class="text-xl font-bold tracking-tight">Import history</h3>
-    {#if data}
-      <p class="text-sm text-muted-foreground">{plural(data.total, 'import')}</p>
-    {/if}
-  </div>
-
-  {#if loading && !data}
-    <TableSkeleton cols={5} />
-  {:else if error}
-    <ErrorCard message={error} onRetry={() => res.reload()} />
-  {:else if data}
-    {#if data.logs.length === 0}
-      <EmptyState
-        card
-        title="No imports yet"
-        description="Import a .gnucash file to start analyzing your finances."
-      >
-        {#snippet icon()}
-          <Upload aria-hidden="true" class="text-muted-foreground" />
-        {/snippet}
-      </EmptyState>
-    {:else}
-      <!-- Keep the previous table visible (dimmed) during refetches so the
+{#if loading && !data}
+  <TableSkeleton cols={5} />
+{:else if error}
+  <ErrorCard message={error} onRetry={() => res.reload()} />
+{:else if data}
+  {#if data.logs.length === 0}
+    <EmptyState
+      card
+      title="No imports yet"
+      description="Import a .gnucash file to start analyzing your finances."
+    >
+      {#snippet icon()}
+        <Upload aria-hidden="true" class="text-muted-foreground" />
+      {/snippet}
+    </EmptyState>
+  {:else}
+    <!-- Keep the previous table visible (dimmed) during refetches so the
            page doesn't jump and pagination stays in place. -->
-      <DimWrapper active={loading} class="flex flex-col gap-4">
-        <TableShell>
-          <Table.Header>
-            <Table.Row class="bg-muted/75">
-              <Table.Head class="w-8"></Table.Head>
-              <Table.Head>Date</Table.Head>
-              <Table.Head class="text-right">Added</Table.Head>
-              <Table.Head class="text-right">Updated</Table.Head>
-              <Table.Head class="text-right">Orphaned</Table.Head>
-            </Table.Row>
-          </Table.Header>
-          <Table.Body>
-            {#each data.logs as entry (entry.id)}
-              <Table.Row
-                class="cursor-pointer hover:bg-muted/50"
-                onclick={() => tree.toggle(entry.id)}
+    <DimWrapper active={loading} class="flex flex-col gap-4">
+      <TableShell>
+        <Table.Header>
+          <Table.Row class="bg-muted/75">
+            <Table.Head class="w-8"></Table.Head>
+            <Table.Head>Date</Table.Head>
+            <Table.Head class="text-right">Added</Table.Head>
+            <Table.Head class="text-right">Updated</Table.Head>
+            <Table.Head class="text-right">Orphaned</Table.Head>
+          </Table.Row>
+        </Table.Header>
+        <Table.Body>
+          {#each data.logs as entry (entry.id)}
+            <Table.Row
+              class="cursor-pointer hover:bg-muted/50"
+              onclick={() => tree.toggle(entry.id)}
+            >
+              <Table.Cell class="py-2.5">
+                <TreeChevron
+                  open={tree.expanded.has(entry.id)}
+                  ontoggle={() => tree.toggle(entry.id)}
+                />
+              </Table.Cell>
+              <Table.Cell class="py-2.5 whitespace-nowrap">
+                <span class="tabular-nums">
+                  {formatDate(entry.importedAt, {
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric',
+                    hour: 'numeric',
+                    minute: '2-digit'
+                  })}
+                </span>
+                <span
+                  class="block max-w-96 truncate text-xs text-muted-foreground/70"
+                  title={entry.filePath ?? entry.filename}
+                >
+                  {entry.filePath ?? entry.filename}
+                </span>
+              </Table.Cell>
+              <Table.Cell
+                class="py-2.5 text-right whitespace-nowrap tabular-nums {totalAdded(entry) === 0
+                  ? 'text-muted-foreground'
+                  : ''}"
               >
-                <Table.Cell class="py-2.5">
-                  <TreeChevron
-                    open={tree.expanded.has(entry.id)}
-                    ontoggle={() => tree.toggle(entry.id)}
-                  />
-                </Table.Cell>
-                <Table.Cell class="py-2.5 whitespace-nowrap">
-                  <span class="tabular-nums">
-                    {formatDate(entry.importedAt, {
-                      month: 'short',
-                      day: 'numeric',
-                      year: 'numeric',
-                      hour: 'numeric',
-                      minute: '2-digit'
-                    })}
-                  </span>
-                  <span
-                    class="block max-w-96 truncate text-xs text-muted-foreground/70"
-                    title={entry.filePath ?? entry.filename}
-                  >
-                    {entry.filePath ?? entry.filename}
-                  </span>
-                </Table.Cell>
-                <Table.Cell
-                  class="py-2.5 text-right whitespace-nowrap tabular-nums {totalAdded(entry) === 0
-                    ? 'text-muted-foreground'
-                    : ''}"
-                >
-                  {totalAdded(entry) === 0 ? '\u2014' : formatNumber(totalAdded(entry))}
-                </Table.Cell>
-                <Table.Cell
-                  class="py-2.5 text-right whitespace-nowrap tabular-nums {totalUpdated(entry) === 0
-                    ? 'text-muted-foreground'
-                    : ''}"
-                >
-                  {totalUpdated(entry) === 0 ? '\u2014' : formatNumber(totalUpdated(entry))}
-                </Table.Cell>
-                <Table.Cell
-                  class="py-2.5 text-right whitespace-nowrap tabular-nums {totalOrphaned(entry) ===
-                  0
-                    ? 'text-muted-foreground'
-                    : ''}"
-                >
-                  {totalOrphaned(entry) === 0 ? '\u2014' : formatNumber(totalOrphaned(entry))}
-                </Table.Cell>
-              </Table.Row>
-              {#if tree.expanded.has(entry.id)}
-                <ImportHistoryEntry {entry} />
-              {/if}
-            {/each}
-          </Table.Body>
-        </TableShell>
-        <PaginationNav
-          bind:page
-          totalPages={data.totalPages}
-          totalItems={data.total}
-          pageSize={appSettings.value.pageSize}
-          onPageSizeChange={handlePageSizeChange}
-        />
-      </DimWrapper>
-    {/if}
+                {totalAdded(entry) === 0 ? '\u2014' : formatNumber(totalAdded(entry))}
+              </Table.Cell>
+              <Table.Cell
+                class="py-2.5 text-right whitespace-nowrap tabular-nums {totalUpdated(entry) === 0
+                  ? 'text-muted-foreground'
+                  : ''}"
+              >
+                {totalUpdated(entry) === 0 ? '\u2014' : formatNumber(totalUpdated(entry))}
+              </Table.Cell>
+              <Table.Cell
+                class="py-2.5 text-right whitespace-nowrap tabular-nums {totalOrphaned(entry) === 0
+                  ? 'text-muted-foreground'
+                  : ''}"
+              >
+                {totalOrphaned(entry) === 0 ? '\u2014' : formatNumber(totalOrphaned(entry))}
+              </Table.Cell>
+            </Table.Row>
+            {#if tree.expanded.has(entry.id)}
+              <ImportHistoryEntry {entry} />
+            {/if}
+          {/each}
+        </Table.Body>
+      </TableShell>
+      <PaginationNav
+        bind:page
+        totalPages={data.totalPages}
+        totalItems={data.total}
+        pageSize={appSettings.value.pageSize}
+        onPageSizeChange={handlePageSizeChange}
+      />
+    </DimWrapper>
   {/if}
-</section>
+{/if}
