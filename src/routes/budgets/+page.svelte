@@ -1,6 +1,7 @@
 <script lang="ts">
+  import { goto } from '$app/navigation';
+  import { resolve } from '$app/paths';
   import { Button } from '$lib/components/ui/button';
-  import * as Dialog from '$lib/components/ui/dialog';
   import * as Select from '$lib/components/ui/select';
   import { Select as SelectPrimitive } from 'bits-ui';
   import { SearchInput } from '$lib/components/shared/search-input';
@@ -8,20 +9,12 @@
   import { dbSession } from '$lib/stores/db.svelte';
   import { appSettings } from '$lib/stores/settings.svelte';
   import { sessionCurrency, formatSessionCurrency } from '$lib/utils/format.svelte';
-  import {
-    listBudgets,
-    deleteBudget,
-    getBudgetVsActual,
-    fetchAccounts,
-    getBudgetDateRange
-  } from '$lib/tauri';
+  import { listBudgets, getBudgetVsActual, fetchAccounts, getBudgetDateRange } from '$lib/tauri';
   import { useUrlParams } from '$lib/hooks/use-url-params.svelte';
   import { useDebouncedSearch } from '$lib/hooks/use-debounced-search.svelte';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import { Plus, PiggyBank, Wallet, TrendingDown, ChevronLeft, ChevronRight } from '@lucide/svelte';
-  import type { Budget, BudgetActualRow, AccountNode } from '$lib/tauri';
-  import type { BudgetRow, BudgetGroup } from '$lib/features/budgets/budget-types';
-  import { errMsg } from '$lib/utils/error';
+  import type { BudgetActualRow, AccountNode } from '$lib/tauri';
   import { toast } from '$lib/components/ui/sonner';
   import ImportPrompt from '$lib/components/shared/import-prompt.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
@@ -36,16 +29,11 @@
   const now = new Date();
   let monthSel = $state(String(now.getMonth() + 1));
   let yearSel = $state(String(now.getFullYear()));
-  let viewMode = $state<'MONTHLY' | 'YEARLY'>('MONTHLY');
 
   let currentMonth = $derived(Number(monthSel));
   let currentYear = $derived(Number(yearSel));
 
   let showAddDialog = $state(false);
-  let editBudget = $state<Budget | null>(null);
-  let showDeleteConfirm = $state(false);
-  let deleteTargetGuid = $state<string | null>(null);
-  let deleteTargetName = $state('');
 
   let searchInput = $state('');
   let search = useDebouncedSearch(() => searchInput);
@@ -53,14 +41,6 @@
   // URL params are applied before the fetch is set up so the first load
   // already uses values from the URL.
   useUrlParams([
-    {
-      key: 'view',
-      get: () => viewMode,
-      apply: (v) => {
-        if (v === 'MONTHLY' || v === 'YEARLY') viewMode = v;
-      },
-      replace: true
-    },
     {
       key: 'year',
       get: () => yearSel,
@@ -86,18 +66,20 @@
     fetch: () =>
       Promise.all([
         listBudgets(),
-        getBudgetVsActual(currentYear, currentMonth, viewMode),
+        getBudgetVsActual(currentYear, currentMonth),
         fetchAccounts(),
         getBudgetDateRange()
       ]),
+    // Keep the selection within the transaction date range once the range
+    // (and the URL-driven selection) is known.
+    onSuccess: () => clampSelection(),
     label: 'Failed to load budgets'
   });
 
   let budgets = $derived(res.data?.[0] ?? null);
   let budgetActuals = $derived.by(() => {
-    // eslint-disable-next-line svelte/prefer-svelte-reactivity -- transient snapshot
-    const map = new Map<string, BudgetActualRow>();
-    for (const row of res.data?.[1] ?? []) map.set(row.accountGuid, row);
+    const map: Record<string, BudgetActualRow | undefined> = {};
+    for (const row of res.data?.[1] ?? []) map[row.accountGuid] = row;
     return map;
   });
   let accountsData = $derived(res.data?.[2] ?? null);
@@ -107,19 +89,24 @@
   // Dim during refetches only; the initial load shows the skeleton instead.
   let monthLoading = $derived(res.loading && res.data !== null);
 
-  let totalBudgeted = $derived([...budgetActuals.values()].reduce((s, r) => s + r.budgetAmount, 0));
-  let totalSpent = $derived([...budgetActuals.values()].reduce((s, r) => s + r.actualAmount, 0));
-  let totalRemaining = $derived([...budgetActuals.values()].reduce((s, r) => s + r.remaining, 0));
+  let totalBudgeted = $derived(
+    Object.values(budgetActuals).reduce((s, r) => s + (r?.budgetAmount ?? 0), 0)
+  );
+  let totalSpent = $derived(
+    Object.values(budgetActuals).reduce((s, r) => s + (r?.actualAmount ?? 0), 0)
+  );
+  let totalRemaining = $derived(
+    Object.values(budgetActuals).reduce((s, r) => s + (r?.remaining ?? 0), 0)
+  );
 
   let accountPaths = $derived.by(() => {
-    // eslint-disable-next-line svelte/prefer-svelte-reactivity -- transient snapshot
-    const map = new Map<string, string[]>();
+    const map: Record<string, string[]> = {};
     if (!accountsData?.trees) return map;
     function walk(nodes: AccountNode[], ancestors: string[]) {
       for (const n of nodes) {
         const display = n.description ?? n.name;
         const path = [...ancestors, display];
-        map.set(n.guid, path);
+        map[n.guid] = path;
         walk(n.children, path);
       }
     }
@@ -132,32 +119,14 @@
     return budgets
       .map((b) => ({
         budget: b,
-        actual: budgetActuals.get(b.accountGuid)
+        actual: budgetActuals[b.accountGuid]
       }))
       .filter((r) => {
         if (!search.value) return true;
-        const path = accountPaths.get(r.budget.accountGuid)?.join(' ') ?? r.budget.accountName;
+        const path = accountPaths[r.budget.accountGuid]?.join(' ') ?? r.budget.accountName;
         return path.toLowerCase().includes(search.value.toLowerCase());
       })
       .sort((a, b) => a.budget.accountName.localeCompare(b.budget.accountName));
-  });
-
-  let groups: BudgetGroup[] = $derived.by(() => {
-    // eslint-disable-next-line svelte/prefer-svelte-reactivity -- transient snapshot
-    const map = new Map<string, BudgetRow[]>();
-    for (const row of filteredRows) {
-      const path = accountPaths.get(row.budget.accountGuid);
-      let category = 'Other';
-      if (path && path.length >= 2) category = path[path.length - 2];
-      else if (path && path.length === 1) category = path[0];
-      else if (row.budget.accountName) category = row.budget.accountName;
-      const arr = map.get(category) ?? [];
-      arr.push(row);
-      map.set(category, arr);
-    }
-    return [...map.entries()]
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([category, rows]) => ({ category, rows }));
   });
 
   // Month-index arithmetic in one place: idx = y*12 + (m-1), invertible.
@@ -225,45 +194,10 @@
   let atMin = $derived(minMonthIdx !== null && monthIdx(currentYear, currentMonth) <= minMonthIdx);
   let atMax = $derived(maxMonthIdx !== null && monthIdx(currentYear, currentMonth) >= maxMonthIdx);
 
-  // Keep the selection within the transaction date range
-  $effect(() => {
-    clampSelection();
-  });
-
-  $effect(() => {
-    if (!showAddDialog) {
-      editBudget = null;
-    }
-  });
-
-  function handleEdit(b: Budget) {
-    editBudget = b;
-    showAddDialog = true;
-  }
-
-  async function handleSaveSuccess() {
+  function handleSaveSuccess(accountGuid: string) {
     res.reload();
     toast.success('Budget saved');
-  }
-
-  function handleDeleteClick(guid: string, name: string) {
-    deleteTargetGuid = guid;
-    deleteTargetName = name;
-    showDeleteConfirm = true;
-  }
-
-  async function confirmDelete() {
-    if (!deleteTargetGuid) return;
-    try {
-      await deleteBudget(deleteTargetGuid);
-      showDeleteConfirm = false;
-      deleteTargetGuid = null;
-      deleteTargetName = '';
-      res.reload();
-      toast.success('Budget deleted');
-    } catch (e: unknown) {
-      toast.error(errMsg(e, 'Failed to delete budget'));
-    }
+    goto(resolve('/budgets/[accountGuid]', { accountGuid }));
   }
 
   function shiftMonth(delta: number) {
@@ -280,20 +214,13 @@
     shiftMonth(1);
   }
 
-  function shiftYear(delta: number) {
-    let y = currentYear + delta;
-    if (minYear !== null && y < minYear) y = minYear;
-    if (maxYear !== null && y > maxYear) y = maxYear;
-    yearSel = String(y);
-  }
-
   let currency = $derived(sessionCurrency());
   const fmt = formatSessionCurrency;
 </script>
 
 <svelte:head>
   <title>Budgets — Spendo</title>
-  <meta name="description" content="Monthly and annual spending targets." />
+  <meta name="description" content="Monthly spending targets." />
 </svelte:head>
 
 {#snippet yearPicker()}
@@ -311,38 +238,40 @@
 
 {#if dbSession.value}
   <div class="flex flex-col gap-6">
-    <PageHeader
-      title="Budgets"
-      description={viewMode === 'MONTHLY' ? 'Monthly spending targets' : 'Annual spending targets'}
-    >
+    <PageHeader title="Budgets" description="Monthly spending targets">
       <div class="flex flex-wrap items-center gap-2">
-        <Button
-          onclick={() => {
-            editBudget = null;
-            showAddDialog = true;
-          }}
-        >
-          <Plus aria-hidden="true" />
-          Add Budget
-        </Button>
-
-        <div class="flex items-center gap-1 rounded-md border bg-muted/40 p-0.5">
-          <Button
-            variant={viewMode === 'MONTHLY' ? 'default' : 'ghost'}
-            size="sm"
-            class="h-7"
-            onclick={() => (viewMode = 'MONTHLY')}
-          >
-            Month
-          </Button>
-          <Button
-            variant={viewMode === 'YEARLY' ? 'default' : 'ghost'}
-            size="sm"
-            class="h-7"
-            onclick={() => (viewMode = 'YEARLY')}
-          >
-            Year
-          </Button>
+        <div class="flex items-center gap-2">
+          <ButtonGroup.Root>
+            <Button
+              variant="outline"
+              size="icon"
+              onclick={prevMonth}
+              aria-label="Previous month"
+              disabled={atMin}
+            >
+              <ChevronLeft />
+            </Button>
+            <Select.Root type="single" bind:value={monthSel} items={monthOptions}>
+              <Select.Trigger class="min-w-28 justify-center capitalize" id="month-picker">
+                <SelectPrimitive.Value />
+              </Select.Trigger>
+              <Select.Content>
+                {#each monthOptions as o (o.value)}
+                  <Select.Item value={o.value} label={o.label}>{o.label}</Select.Item>
+                {/each}
+              </Select.Content>
+            </Select.Root>
+            {@render yearPicker()}
+            <Button
+              variant="outline"
+              size="icon"
+              onclick={nextMonth}
+              aria-label="Next month"
+              disabled={atMax}
+            >
+              <ChevronRight />
+            </Button>
+          </ButtonGroup.Root>
         </div>
       </div>
     </PageHeader>
@@ -391,66 +320,8 @@
       </DimWrapper>
     {/if}
 
-    <div class="flex flex-wrap items-center justify-between gap-2">
-      <div class="flex items-center gap-2">
-        {#if viewMode === 'MONTHLY'}
-          <ButtonGroup.Root>
-            <Button
-              variant="outline"
-              size="icon"
-              onclick={prevMonth}
-              aria-label="Previous month"
-              disabled={atMin}
-            >
-              <ChevronLeft />
-            </Button>
-            <Select.Root type="single" bind:value={monthSel} items={monthOptions}>
-              <Select.Trigger class="min-w-28 justify-center capitalize" id="month-picker">
-                <SelectPrimitive.Value />
-              </Select.Trigger>
-              <Select.Content>
-                {#each monthOptions as o (o.value)}
-                  <Select.Item value={o.value} label={o.label}>{o.label}</Select.Item>
-                {/each}
-              </Select.Content>
-            </Select.Root>
-            {@render yearPicker()}
-            <Button
-              variant="outline"
-              size="icon"
-              onclick={nextMonth}
-              aria-label="Next month"
-              disabled={atMax}
-            >
-              <ChevronRight />
-            </Button>
-          </ButtonGroup.Root>
-        {:else}
-          <ButtonGroup.Root>
-            <Button
-              variant="outline"
-              size="icon"
-              onclick={() => shiftYear(-1)}
-              aria-label="Previous year"
-              disabled={minYear !== null && currentYear <= minYear}
-            >
-              <ChevronLeft />
-            </Button>
-            {@render yearPicker()}
-            <Button
-              variant="outline"
-              size="icon"
-              onclick={() => shiftYear(1)}
-              aria-label="Next year"
-              disabled={maxYear !== null && currentYear >= maxYear}
-            >
-              <ChevronRight />
-            </Button>
-          </ButtonGroup.Root>
-        {/if}
-      </div>
-
-      {#if budgets !== null && budgets.length > 0}
+    {#if budgets !== null && budgets.length > 0}
+      <div class="flex flex-wrap items-center justify-between gap-2">
         <SearchInput
           id="budgets-search"
           label="Search budgets"
@@ -458,19 +329,26 @@
           bind:value={searchInput}
           class="w-full max-w-xs"
         />
-      {/if}
-    </div>
+
+        <div class="flex items-center gap-2">
+          <Button
+            onclick={() => {
+              showAddDialog = true;
+            }}
+          >
+            <Plus aria-hidden="true" />
+            Add Budget
+          </Button>
+        </div>
+      </div>
+    {/if}
 
     <DimWrapper active={monthLoading}>
       <BudgetsTable
-        groups={budgets !== null ? groups : null}
+        rows={budgets !== null ? filteredRows : null}
         hasBudgets={budgets !== null && budgets.length > 0}
         {currency}
-        {viewMode}
-        onEdit={handleEdit}
-        onDeleteClick={handleDeleteClick}
         onAddClick={() => {
-          editBudget = null;
           showAddDialog = true;
         }}
       />
@@ -478,42 +356,16 @@
   </div>
 {:else}
   <div class="flex flex-col gap-6">
-    <PageHeader
-      title="Budgets"
-      description={viewMode === 'MONTHLY' ? 'Monthly spending targets' : 'Annual spending targets'}
-    />
+    <PageHeader title="Budgets" description="Monthly spending targets" />
     <ImportPrompt />
   </div>
 {/if}
 
 <BudgetFormDialog
   bind:open={showAddDialog}
-  budget={editBudget}
   {accountsData}
-  viewYear={currentYear}
+  budgetedAccountGuids={budgets?.map((b) => b.accountGuid) ?? []}
   {currency}
   onSave={handleSaveSuccess}
   onError={(msg) => (formError = msg)}
 />
-
-<Dialog.Root bind:open={showDeleteConfirm}>
-  <Dialog.Content showCloseButton={false}>
-    <Dialog.Header>
-      <Dialog.Title>Delete Budget</Dialog.Title>
-      <Dialog.Description>
-        Are you sure you want to delete the budget for <strong>{deleteTargetName}</strong>? This
-        action cannot be undone.
-      </Dialog.Description>
-    </Dialog.Header>
-    <Dialog.Footer>
-      <Button
-        variant="outline"
-        onclick={() => {
-          showDeleteConfirm = false;
-          deleteTargetGuid = null;
-        }}>Cancel</Button
-      >
-      <Button variant="destructive" onclick={confirmDelete}>Delete</Button>
-    </Dialog.Footer>
-  </Dialog.Content>
-</Dialog.Root>

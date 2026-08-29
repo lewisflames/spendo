@@ -102,13 +102,6 @@ pub fn clamp_page(page: i64, total_pages: i64) -> i64 {
     page.clamp(1, total_pages.max(1))
 }
 
-/// Validate a `YYYY-MM-DD` string at the IPC boundary.
-pub fn validate_date(s: &str) -> Result<(), String> {
-    chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")
-        .map(|_| ())
-        .map_err(|_| format!("Invalid date '{}': expected YYYY-MM-DD", s))
-}
-
 /// Validate that a path points at an existing `.gnucash` file.
 pub fn validate_gnucash_path(path: &str) -> Result<(), String> {
     let p = std::path::Path::new(path);
