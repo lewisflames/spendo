@@ -1,6 +1,6 @@
 [
   {
-    "label": "tauri dev",
+    "label": "tauri:dev",
     "command": "bun run tauri:dev",
     "use_new_terminal": false,
     "allow_concurrent_runs": false,
@@ -13,7 +13,7 @@
     "save": "none"
   },
   {
-    "label": "tauri build",
+    "label": "tauri:build",
     "command": "bun run tauri:build",
     "use_new_terminal": false,
     "allow_concurrent_runs": false,
