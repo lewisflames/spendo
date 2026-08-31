@@ -158,18 +158,18 @@ fn filter_clauses(
         w.push_raw(utils::VISIBLE_TX_FILTER);
     }
     if let Some(df) = date_from {
-        w.add("t.post_date >= ?", vec![Box::new(df.to_string())]);
+        w.add("t.post_date >= {}", vec![Box::new(df.to_string())]);
     }
     if let Some(dt) = date_to {
-        w.add("t.post_date <= ?", vec![Box::new(dt.to_string())]);
+        w.add("t.post_date <= {}", vec![Box::new(dt.to_string())]);
     }
     if let Some(s) = search {
         let s = utils::escape_like(s);
         w.add(
-            "(t.description LIKE '%' || ?{} ESCAPE '\\' \
-             OR t.num LIKE '%' || ?{} ESCAPE '\\' \
-             OR t.notes LIKE '%' || ?{} ESCAPE '\\' \
-             OR EXISTS(SELECT 1 FROM splits m WHERE m.tx_guid = t.guid AND m.memo LIKE '%' || ?{} ESCAPE '\\'))",
+            "(t.description LIKE '%' || {} || '%' ESCAPE '\\' \
+             OR t.num LIKE '%' || {} || '%' ESCAPE '\\' \
+             OR t.notes LIKE '%' || {} || '%' ESCAPE '\\' \
+             OR EXISTS(SELECT 1 FROM splits m WHERE m.tx_guid = t.guid AND m.memo LIKE '%' || {} || '%' ESCAPE '\\'))",
             vec![
                 Box::new(s.clone()) as Box<dyn rusqlite::types::ToSql>,
                 Box::new(s.clone()),

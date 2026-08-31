@@ -150,10 +150,10 @@ fn build_filter_conditions(
         if let Some(ref search) = f.search {
             let s = utils::escape_like(search);
             w.add(
-                "(t.description LIKE '%' || ?{} ESCAPE '\\' \
-                 OR t.num LIKE '%' || ?{} ESCAPE '\\' \
-                 OR t.notes LIKE '%' || ?{} ESCAPE '\\' \
-                 OR t.guid IN (SELECT s.tx_guid FROM splits s WHERE s.memo LIKE '%' || ?{} ESCAPE '\\'))",
+                "(t.description LIKE '%' || {} || '%' ESCAPE '\\' \
+                 OR t.num LIKE '%' || {} || '%' ESCAPE '\\' \
+                 OR t.notes LIKE '%' || {} || '%' ESCAPE '\\' \
+                 OR t.guid IN (SELECT s.tx_guid FROM splits s WHERE s.memo LIKE '%' || {} || '%' ESCAPE '\\'))",
                 vec![
                     Box::new(s.clone()) as Box<dyn rusqlite::types::ToSql>,
                     Box::new(s.clone()),
@@ -163,14 +163,14 @@ fn build_filter_conditions(
             );
         }
         if let Some(ref date_from) = f.date_from {
-            w.add("t.post_date >= ?", vec![Box::new(date_from.clone())]);
+            w.add("t.post_date >= {}", vec![Box::new(date_from.clone())]);
         }
         if let Some(ref date_to) = f.date_to {
-            w.add("t.post_date <= ?", vec![Box::new(date_to.clone())]);
+            w.add("t.post_date <= {}", vec![Box::new(date_to.clone())]);
         }
         if let Some(ref account_name) = f.account_name {
             w.add(
-                "t.guid IN (SELECT s.tx_guid FROM splits s JOIN accounts a ON a.guid = s.account_guid WHERE a.name = ?)",
+                "t.guid IN (SELECT s.tx_guid FROM splits s JOIN accounts a ON a.guid = s.account_guid WHERE a.name = {})",
                 vec![Box::new(account_name.clone())],
             );
         }
