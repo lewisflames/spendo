@@ -17,7 +17,7 @@
   import { useUrlParams, pageParam } from '$lib/hooks/use-url-params.svelte';
   import { PaginationNav } from '$lib/components/shared/pagination-nav';
   import SortHead from '$lib/components/shared/sort-head.svelte';
-  import { Pencil, Plus, Trash2, StickyNote } from '@lucide/svelte';
+  import { Pencil, Plus, Trash2, StickyNote, SlidersHorizontal } from '@lucide/svelte';
   import { errMsg } from '$lib/utils/error';
   import { toast } from '$lib/components/ui/sonner';
   import PageHeader from '$lib/components/layout/page-header.svelte';
@@ -232,7 +232,26 @@
                   {periodLabel(e)}
                 </Table.Cell>
                 <Table.Cell class="py-2.5 text-right tabular-nums">
-                  {fmt(e.amount)}
+                  <span class="inline-flex items-center justify-end gap-1.5">
+                    {fmt(e.amount)}
+                    {#if e.isOverride}
+                      <Tooltip.Root>
+                        <Tooltip.Trigger>
+                          {#snippet child({ props })}
+                            <span {...props} aria-label="Overrides default target">
+                              <SlidersHorizontal
+                                aria-hidden="true"
+                                class="size-3.5 text-muted-foreground"
+                              />
+                            </span>
+                          {/snippet}
+                        </Tooltip.Trigger>
+                        <Tooltip.Content>
+                          <p>Overrides default target of {fmt(budget!.amount)}</p>
+                        </Tooltip.Content>
+                      </Tooltip.Root>
+                    {/if}
+                  </span>
                 </Table.Cell>
                 <Table.Cell class="py-2.5 text-right tabular-nums">
                   {fmt(e.actualAmount)}
@@ -316,6 +335,7 @@
     accountGuid={accountGuid!}
     entry={editEntry}
     {currency}
+    defaultAmount={budget?.amount}
     onSave={handleSaveSuccess}
     onError={(msg) => (formError = msg)}
   />

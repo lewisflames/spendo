@@ -381,6 +381,7 @@ export interface BudgetEntry {
   year: number;
   month: number;
   amount: number;
+  isOverride: boolean;
   actualAmount: number;
   remaining: number;
   percentage: number;

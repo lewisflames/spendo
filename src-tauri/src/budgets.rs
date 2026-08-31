@@ -57,6 +57,7 @@ pub struct BudgetEntry {
     pub year: i32,
     pub month: i32,
     pub amount: f64,
+    pub is_override: bool,
     pub actual_amount: f64,
     pub remaining: f64,
     pub percentage: f64,
@@ -801,7 +802,8 @@ pub fn get_budget_detail_inner(
     for n in series_start..series_end {
         let year = (n / 12) as i32;
         let month = (n % 12) as i32 + 1;
-        let amount = overrides.get(&(year, month)).copied().unwrap_or(target);
+        let month_override = overrides.get(&(year, month)).copied();
+        let amount = month_override.unwrap_or(target);
         let actual_amount = actual_for_period(&month_actuals, n, 1);
         let rollover_balance = carryover_for_window(&overrides, target, &month_actuals, series_start, n);
         let effective = amount + rollover_balance;
@@ -815,6 +817,7 @@ pub fn get_budget_detail_inner(
             year,
             month,
             amount,
+            is_override: month_override.is_some(),
             actual_amount,
             remaining,
             percentage,
@@ -1205,6 +1208,9 @@ mod tests {
 
         // Detail: January shows the override, February the default target.
         let detail = get_budget_detail_inner(&conn, "food", 1, 10000, None, None).unwrap();
+        assert!(find_entry(&detail, 2024, 1).is_override);
+        assert!(!find_entry(&detail, 2024, 2).is_override);
+        assert!(!find_entry(&detail, 2024, 3).is_override);
         assert_close(find_entry(&detail, 2024, 1).amount, 50.0);
         assert_close(find_entry(&detail, 2024, 2).amount, 100.0);
         assert_close(find_entry(&detail, 2024, 3).amount, 100.0);
@@ -1264,6 +1270,7 @@ mod tests {
         assert_close(rows[0].rollover_balance, 150.0);
 
         let detail = get_budget_detail_inner(&conn, "food", 1, 10000, None, None).unwrap();
+        assert!(!find_entry(&detail, 2024, 1).is_override);
         assert_close(find_entry(&detail, 2024, 1).amount, 100.0);
     }
 
