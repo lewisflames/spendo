@@ -6,6 +6,7 @@
   import { setBudgetAmount, resetBudgetAmount } from '$lib/tauri';
   import { errMsg } from '$lib/utils/error';
   import { appSettings } from '$lib/stores/settings.svelte';
+  import { formatCurrency } from '$lib/utils/format.svelte';
   import type { BudgetEntry } from '$lib/tauri';
 
   let {
@@ -13,6 +14,7 @@
     accountGuid,
     entry,
     currency = 'EUR',
+    defaultAmount,
     onSave,
     onError
   }: {
@@ -20,6 +22,7 @@
     accountGuid: string;
     entry: BudgetEntry;
     currency?: string;
+    defaultAmount?: number;
     onSave?: () => void;
     onError?: (msg: string) => void;
   } = $props();
@@ -83,6 +86,11 @@
       <div class="flex flex-col gap-2">
         <span class="text-sm font-medium">Period</span>
         <p class="text-sm capitalize">{periodLabel}</p>
+        {#if entry.isOverride && defaultAmount != null}
+          <p class="text-xs text-muted-foreground">
+            This month overrides the default target of {formatCurrency(defaultAmount, currency)}.
+          </p>
+        {/if}
       </div>
 
       <div class="flex flex-col gap-2">
