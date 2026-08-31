@@ -194,6 +194,46 @@ pub fn set_budget_amount_inner(
     Ok(())
 }
 
+/// Upsert a range of months with the same override amount, overwriting any
+/// existing overrides inside the range. The whole range is written atomically.
+pub fn set_budget_amounts_inner(
+    conn: &Connection,
+    account_guid: &str,
+    start_year: i32,
+    start_month: i32,
+    end_year: i32,
+    end_month: i32,
+    amount: f64,
+) -> Result<(), String> {
+    let budget = read_budget_by_account(conn, account_guid)?;
+    if !amount.is_finite() || amount <= 0.0 {
+        return Err("Budget amount must be positive and finite".to_string());
+    }
+    if !(1..=12).contains(&start_month) || !(1..=12).contains(&end_month) {
+        return Err("Budget months must be between 1 and 12".to_string());
+    }
+    let start_n = start_year as i64 * 12 + (start_month - 1) as i64;
+    let end_n = end_year as i64 * 12 + (end_month - 1) as i64;
+    if end_n < start_n {
+        return Err("The month range must not be inverted".to_string());
+    }
+
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    for n in start_n..=end_n {
+        let year = (n / 12) as i32;
+        let month = (n % 12) as i32 + 1;
+        tx.execute(
+            "INSERT INTO budget_amounts (budget_guid, year, month, amount)
+			 VALUES (?1, ?2, ?3, ?4)
+			 ON CONFLICT (budget_guid, year, month) DO UPDATE SET amount = ?4",
+            rusqlite::params![budget.guid, year, month, amount],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Delete a single month's override so it falls back to the default target.
 pub fn reset_budget_amount_inner(
     conn: &Connection,
@@ -928,6 +968,30 @@ pub async fn set_budget_amount(
 }
 
 #[tauri::command]
+pub async fn set_budget_amounts(
+    state: State<'_, AppState>,
+    account_guid: String,
+    start_year: i32,
+    start_month: i32,
+    end_year: i32,
+    end_month: i32,
+    amount: f64,
+) -> Result<(), String> {
+    run_blocking(state.db.clone(), move |conn| {
+        set_budget_amounts_inner(
+            conn,
+            &account_guid,
+            start_year,
+            start_month,
+            end_year,
+            end_month,
+            amount,
+        )
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn reset_budget_amount(
     state: State<'_, AppState>,
     account_guid: String,
@@ -1144,6 +1208,42 @@ mod tests {
         assert_close(find_entry(&detail, 2024, 1).amount, 50.0);
         assert_close(find_entry(&detail, 2024, 2).amount, 100.0);
         assert_close(find_entry(&detail, 2024, 3).amount, 100.0);
+    }
+
+    #[test]
+    fn bulk_set_overwrites_range() {
+        let conn = setup();
+        set_budget_inner(&conn, "food", None, 100.0).unwrap();
+        set_budget_amount_inner(&conn, "food", 2024, 1, 50.0).unwrap();
+
+        // Overwrite a range spanning the existing override plus new months.
+        set_budget_amounts_inner(&conn, "food", 2024, 1, 2024, 3, 75.0).unwrap();
+        let detail = get_budget_detail_inner(&conn, "food", 1, 10000, None, None).unwrap();
+        assert_close(find_entry(&detail, 2024, 1).amount, 75.0);
+        assert_close(find_entry(&detail, 2024, 2).amount, 75.0);
+        assert_close(find_entry(&detail, 2024, 3).amount, 75.0);
+        assert_close(find_entry(&detail, 2024, 4).amount, 100.0);
+
+        // A single-month range is allowed.
+        set_budget_amounts_inner(&conn, "food", 2024, 2, 2024, 2, 90.0).unwrap();
+        let detail = get_budget_detail_inner(&conn, "food", 1, 10000, None, None).unwrap();
+        assert_close(find_entry(&detail, 2024, 2).amount, 90.0);
+    }
+
+    #[test]
+    fn bulk_set_rejects_inverted_range_and_bad_amount() {
+        let conn = setup();
+        set_budget_inner(&conn, "food", None, 100.0).unwrap();
+
+        assert!(set_budget_amounts_inner(&conn, "food", 2024, 3, 2024, 1, 75.0).is_err());
+        assert!(set_budget_amounts_inner(&conn, "food", 2024, 1, 2024, 13, 75.0).is_err());
+        assert!(set_budget_amounts_inner(&conn, "food", 2024, 1, 2024, 3, 0.0).is_err());
+
+        // Nothing was written: every month still uses the default target.
+        let detail = get_budget_detail_inner(&conn, "food", 1, 10000, None, None).unwrap();
+        for e in &detail.entries {
+            assert_close(e.amount, 100.0);
+        }
     }
 
     #[test]

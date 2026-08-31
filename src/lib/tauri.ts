@@ -425,6 +425,23 @@ export const setBudgetAmount = (
   amount: number
 ): Promise<void> => invoke('set_budget_amount', { accountGuid, year, month, amount });
 
+export const setBudgetAmounts = (
+  accountGuid: string,
+  startYear: number,
+  startMonth: number,
+  endYear: number,
+  endMonth: number,
+  amount: number
+): Promise<void> =>
+  invoke('set_budget_amounts', {
+    accountGuid,
+    startYear,
+    startMonth,
+    endYear,
+    endMonth,
+    amount
+  });
+
 export const resetBudgetAmount = (
   accountGuid: string,
   year: number,
@@ -451,7 +468,7 @@ export const getBudgetDetail = (
     sortDir: sortDir ?? null
   });
 
-interface BudgetDateRange {
+export interface BudgetDateRange {
   earliestDate: string | null;
   latestDate: string | null;
 }

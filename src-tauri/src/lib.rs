@@ -59,6 +59,7 @@ pub fn run() {
             budgets::list_budgets,
             budgets::set_budget,
             budgets::set_budget_amount,
+            budgets::set_budget_amounts,
             budgets::reset_budget_amount,
             budgets::delete_budget,
             budgets::get_budget_vs_actual,

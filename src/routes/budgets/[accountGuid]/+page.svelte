@@ -11,13 +11,13 @@
   import { dbSession } from '$lib/stores/db.svelte';
   import { appSettings, saveSettings } from '$lib/stores/settings.svelte';
   import { sessionCurrency, formatSessionCurrency } from '$lib/utils/format.svelte';
-  import { getBudgetDetail, deleteBudget } from '$lib/tauri';
+  import { getBudgetDetail, getBudgetDateRange, deleteBudget } from '$lib/tauri';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import { useTableSort } from '$lib/hooks/use-table-sort.svelte';
   import { useUrlParams, pageParam } from '$lib/hooks/use-url-params.svelte';
   import { PaginationNav } from '$lib/components/shared/pagination-nav';
   import SortHead from '$lib/components/shared/sort-head.svelte';
-  import { Pencil, Trash2, StickyNote } from '@lucide/svelte';
+  import { Pencil, Plus, Trash2, StickyNote } from '@lucide/svelte';
   import { errMsg } from '$lib/utils/error';
   import { toast } from '$lib/components/ui/sonner';
   import PageHeader from '$lib/components/layout/page-header.svelte';
@@ -27,6 +27,7 @@
   import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import BudgetEntryDialog from '$lib/features/budgets/budget-entry-dialog.svelte';
+  import BudgetOverridesDialog from '$lib/features/budgets/budget-overrides-dialog.svelte';
   import ImportPrompt from '$lib/components/shared/import-prompt.svelte';
   import { setBreadcrumb } from '$lib/stores/breadcrumb.svelte';
   import type { BudgetEntry } from '$lib/tauri';
@@ -57,15 +58,16 @@
     fetch: () => {
       const g = accountGuid;
       if (!g) return Promise.reject(new Error('No account selected'));
-      return getBudgetDetail(g, pg, pageSize, sortBy, sortDir);
+      return Promise.all([getBudgetDetail(g, pg, pageSize, sortBy, sortDir), getBudgetDateRange()]);
     },
     label: 'Failed to load budget',
     onSuccess: (result) => {
-      pg = result.page;
+      pg = result[0].page;
     }
   });
 
-  let detail = $derived(res.data);
+  let detail = $derived(res.data?.[0] ?? null);
+  let dateRange = $derived(res.data?.[1] ?? null);
   let loading = $derived(res.loading);
   let error = $derived(res.error);
   let formError = $state<string | null>(null);
@@ -73,6 +75,7 @@
   let showEditDialog = $state(false);
   let editEntry = $state<BudgetEntry | null>(null);
   let showDeleteConfirm = $state(false);
+  let showOverridesDialog = $state(false);
 
   let budget = $derived(detail?.budget ?? null);
   let entries = $derived(detail?.entries ?? []);
@@ -124,9 +127,9 @@
     return remaining < 0 ? 'text-destructive' : 'text-success';
   }
 
-  function handleSaveSuccess() {
+  function handleSaveSuccess(message = 'Budget amount saved') {
     res.reload();
-    toast.success('Budget amount saved');
+    toast.success(message);
   }
 
   async function confirmDelete() {
@@ -159,6 +162,10 @@
   <div class="flex flex-col gap-6">
     <PageHeader title={accountName} description={headerDescription}>
       <div class="flex flex-wrap items-center gap-2">
+        <Button variant="outline" onclick={() => (showOverridesDialog = true)} disabled={!budget}>
+          <Plus aria-hidden="true" />
+          Add overrides
+        </Button>
         <Button variant="destructive" onclick={() => (showDeleteConfirm = true)} disabled={!budget}>
           <Trash2 aria-hidden="true" />
           Delete
@@ -310,6 +317,17 @@
     entry={editEntry}
     {currency}
     onSave={handleSaveSuccess}
+    onError={(msg) => (formError = msg)}
+  />
+{/if}
+
+{#if budget}
+  <BudgetOverridesDialog
+    bind:open={showOverridesDialog}
+    accountGuid={accountGuid!}
+    {currency}
+    {dateRange}
+    onSave={() => handleSaveSuccess('Budget overrides saved')}
     onError={(msg) => (formError = msg)}
   />
 {/if}
