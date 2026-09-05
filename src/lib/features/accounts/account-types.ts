@@ -1,4 +1,4 @@
-export const TYPE_CATEGORY: Record<string, string> = {
+const TYPE_TO_CATEGORY: Record<string, string> = {
   ASSET: 'ASSET',
   BANK: 'ASSET',
   CASH: 'ASSET',
@@ -19,17 +19,8 @@ export const CATEGORY_ORDER = ['ASSET', 'LIABILITY', 'EQUITY', 'INCOME', 'EXPENS
 
 /** Category of an account type, falling back to the raw type when unknown. */
 export function nodeCategory(accountType: string): string {
-  return TYPE_CATEGORY[accountType] ?? accountType;
+  return TYPE_TO_CATEGORY[accountType] ?? accountType;
 }
-
-/** Singular display labels for categories (table headers, tree groupings). */
-export const CATEGORY_LABEL_SINGULAR: Record<string, string> = {
-  ASSET: 'Asset',
-  LIABILITY: 'Liability',
-  INCOME: 'Income',
-  EXPENSE: 'Expense',
-  EQUITY: 'Equity'
-};
 
 /** Plural display labels (KPI cards, section summaries). */
 export const CATEGORY_LABEL_PLURAL: Record<string, string> = {
@@ -38,15 +29,6 @@ export const CATEGORY_LABEL_PLURAL: Record<string, string> = {
   INCOME: 'Income',
   EXPENSE: 'Expenses',
   EQUITY: 'Equity'
-};
-
-/** Per-category accent colors, shared by the balance charts (treemap, tree). */
-export const CATEGORY_COLOR: Record<string, string> = {
-  ASSET: 'var(--color-success)',
-  LIABILITY: 'var(--color-destructive)',
-  EQUITY: 'var(--color-warning)',
-  INCOME: 'var(--color-chart-4)',
-  EXPENSE: 'var(--color-chart-5)'
 };
 
 /** Per-account-type accent colors for the account hierarchy tree. */

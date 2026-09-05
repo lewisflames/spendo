@@ -81,6 +81,7 @@ interface SplitInfo {
   accountType: string;
   amount: number;
   memo?: string | null;
+  accountDescription?: string | null;
 }
 
 export interface TransactionRow {
@@ -97,11 +98,12 @@ export interface AccountInfo {
   name: string;
 }
 
-interface Filters {
+export interface Filters {
   search?: string;
   dateFrom?: string;
   dateTo?: string;
   accountName?: string;
+  accountGuid?: string;
 }
 
 interface TransactionsResult {

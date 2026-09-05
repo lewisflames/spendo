@@ -55,6 +55,25 @@ export function dateParam(
   return { key, get, apply: (v) => set(v || null) };
 }
 
+/** Spec factory for a budget year (`1900-2200`) stored as string state. */
+export function yearParam(
+  key: string,
+  get: () => string,
+  set: (v: string) => void,
+  min = 1900,
+  max = 2200
+): UrlParamSpec {
+  return {
+    key,
+    get,
+    apply: (v) => {
+      const y = Number(v);
+      if (Number.isInteger(y) && y >= min && y <= max) set(String(y));
+    },
+    replace: true
+  };
+}
+
 /**
  * Two-way sync between component state and the URL query string, following the
  * pattern used by the Budgets page. Call from a component (before data-loading
