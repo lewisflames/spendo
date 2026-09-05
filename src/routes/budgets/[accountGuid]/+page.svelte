@@ -4,19 +4,20 @@
   import { resolve } from '$app/paths';
   import { Button } from '$lib/components/ui/button';
   import * as Dialog from '$lib/components/ui/dialog';
-  import * as Select from '$lib/components/ui/select';
-  import { Select as SelectPrimitive } from 'bits-ui';
-  import { Progress } from '$lib/components/ui/progress';
   import * as Table from '$lib/components/ui/table';
   import { cn } from '$lib/utils';
   import { dbSession } from '$lib/stores/db.svelte';
   import { appSettings } from '$lib/stores/settings.svelte';
-  import { sessionCurrency, formatSessionCurrency } from '$lib/utils/format.svelte';
+  import {
+    sessionCurrency,
+    formatSessionCurrency,
+    formatSignedCurrency,
+    EMPTY_DASH
+  } from '$lib/utils/format.svelte';
   import { getBudgetDetail, getBudgetDateRange, deleteBudgetYear, fetchAccounts } from '$lib/tauri';
-  import type { AccountNode } from '$lib/tauri';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
-  import { useUrlParams } from '$lib/hooks/use-url-params.svelte';
-  import { Pencil, Trash2, ChevronLeft, ChevronRight } from '@lucide/svelte';
+  import { useUrlParams, yearParam } from '$lib/hooks/use-url-params.svelte';
+  import { Pencil, Trash2 } from '@lucide/svelte';
   import { errMsg } from '$lib/utils/error';
   import { toast } from '$lib/components/ui/sonner';
   import PageHeader from '$lib/components/layout/page-header.svelte';
@@ -27,9 +28,18 @@
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import KpiCard from '$lib/components/shared/kpi-card.svelte';
   import BudgetEntryDialog from '$lib/features/budgets/budget-entry-dialog.svelte';
+  import BudgetYearStepper from '$lib/features/budgets/budget-year-stepper.svelte';
+  import PacingBar from '$lib/features/budgets/pacing-bar.svelte';
+  import {
+    accountNameMap,
+    budgetYearBounds,
+    buildYearOptions,
+    fallbackYearOptions,
+    clampYear as clampYearToRange,
+    remainingColor
+  } from '$lib/features/budgets/budget-utils';
   import ImportPrompt from '$lib/components/shared/import-prompt.svelte';
   import { setBreadcrumb } from '$lib/stores/breadcrumb.svelte';
-  import * as ButtonGroup from '$lib/components/ui/button-group';
 
   let accountGuid = $derived(page.params.accountGuid);
 
@@ -40,23 +50,24 @@
   // URL-param restore must be set up before useAsyncData so the first fetch
   // already uses the year from the URL.
   useUrlParams([
-    {
-      key: 'year',
-      get: () => yearSel,
-      apply: (v) => {
-        const y = Number(v);
-        if (Number.isInteger(y) && y >= 1900 && y <= 2200) yearSel = String(y);
-      },
-      replace: true
-    }
+    yearParam(
+      'year',
+      () => yearSel,
+      (v) => (yearSel = v)
+    )
   ]);
 
   const res = useAsyncData({
     enabled: () => !!dbSession.value && !!accountGuid,
-    fetch: () => {
+    fetch: async () => {
       const g = accountGuid;
       if (!g) return Promise.reject(new Error('No account selected'));
-      return Promise.all([getBudgetDetail(g, selectedYear), getBudgetDateRange(), fetchAccounts()]);
+      const [detail, range, accounts] = await Promise.all([
+        getBudgetDetail(g, selectedYear),
+        getBudgetDateRange(),
+        fetchAccounts()
+      ]);
+      return { detail, range, accounts };
     },
     label: 'Failed to load budget',
     onSuccess: () => clampSelection()
@@ -65,9 +76,11 @@
   // Previous data is kept by useAsyncData while refetching: only accept the
   // detail when it matches the selected year, so switching to a year without
   // a budget falls through to the empty state instead of showing stale data.
-  let detail = $derived(res.data?.[0] && res.data[0].year === selectedYear ? res.data[0] : null);
-  let dateRange = $derived(res.data?.[1] ?? null);
-  let accountsData = $derived(res.data?.[2] ?? null);
+  let detail = $derived(
+    res.data?.detail && res.data.detail.year === selectedYear ? res.data.detail : null
+  );
+  let dateRange = $derived(res.data?.range ?? null);
+  let accountsData = $derived(res.data?.accounts ?? null);
   let loading = $derived(res.loading);
   let error = $derived(res.error);
   let formError = $state<string | null>(null);
@@ -82,18 +95,7 @@
   const fmt = formatSessionCurrency;
 
   // Account display name for years without a budget row (resolved via accounts).
-  let accountNames = $derived.by(() => {
-    const map: Record<string, string> = {};
-    if (!accountsData?.trees) return map;
-    function walk(nodes: AccountNode[]) {
-      for (const n of nodes) {
-        map[n.guid] = n.description ?? n.name;
-        walk(n.children);
-      }
-    }
-    walk(accountsData.trees);
-    return map;
-  });
+  let accountNames = $derived(accountNameMap(accountsData?.trees));
 
   $effect(() => {
     setBreadcrumb([
@@ -109,33 +111,22 @@
       'Budget'
   );
 
-  let minYear = $derived(
-    dateRange?.earliestDate ? Number(dateRange.earliestDate.slice(0, 4)) : null
-  );
-  // maxYear extends one year beyond the latest transaction so next year's
-  // budget can be planned ahead (mirrors BudgetYearDialog).
-  let maxYear = $derived(
-    dateRange?.latestDate ? Number(dateRange.latestDate.slice(0, 4)) + 1 : null
-  );
+  let { minYear, maxYear } = $derived.by(() => {
+    const { minYear, maxYear: rawMax } = budgetYearBounds(dateRange);
+    // Detail page extends one year beyond the latest transaction so next
+    // year's budget can be planned ahead (mirrors BudgetYearDialog).
+    return { minYear, maxYear: rawMax !== null ? rawMax + 1 : null };
+  });
 
   let yearOptions = $derived.by(() => {
     if (minYear === null || maxYear === null) {
-      const thisYear = new Date().getFullYear();
-      return Array.from({ length: 26 }, (_, i) => {
-        const y = thisYear - 20 + i;
-        return { value: String(y), label: String(y) };
-      });
+      return fallbackYearOptions();
     }
-    return Array.from({ length: maxYear - minYear + 1 }, (_, i) => {
-      const y = minYear + i;
-      return { value: String(y), label: String(y) };
-    });
+    return buildYearOptions(minYear, maxYear);
   });
 
   function clampYear(y: number): number {
-    if (minYear !== null && y < minYear) return minYear;
-    if (maxYear !== null && y > maxYear) return maxYear;
-    return y;
+    return clampYearToRange(y, minYear, maxYear);
   }
 
   function clampSelection() {
@@ -155,10 +146,6 @@
     return new Date(2000, m - 1, 1).toLocaleDateString(appSettings.value.locale, {
       month: 'long'
     });
-  }
-
-  function remainingColor(remaining: number): string {
-    return remaining < 0 ? 'text-destructive' : 'text-success';
   }
 
   function handleSaveSuccess(message = 'Annual budget saved') {
@@ -196,36 +183,14 @@
   <div class="flex flex-col gap-6">
     <PageHeader title={accountName} description={headerDescription}>
       <div class="flex flex-wrap items-center gap-2">
-        <ButtonGroup.Root>
-          <Button
-            variant="outline"
-            size="icon"
-            onclick={() => shiftYear(-1)}
-            aria-label="Previous year"
-            disabled={atMin}
-          >
-            <ChevronLeft />
-          </Button>
-          <Select.Root type="single" bind:value={yearSel} items={yearOptions}>
-            <Select.Trigger class="min-w-20 justify-center" id="year-picker">
-              <SelectPrimitive.Value />
-            </Select.Trigger>
-            <Select.Content>
-              {#each yearOptions as o (o.value)}
-                <Select.Item value={o.value} label={o.label}>{o.label}</Select.Item>
-              {/each}
-            </Select.Content>
-          </Select.Root>
-          <Button
-            variant="outline"
-            size="icon"
-            onclick={() => shiftYear(1)}
-            aria-label="Next year"
-            disabled={atMax}
-          >
-            <ChevronRight />
-          </Button>
-        </ButtonGroup.Root>
+        <BudgetYearStepper
+          bind:yearSel
+          {yearOptions}
+          {atMin}
+          {atMax}
+          onPrev={() => shiftYear(-1)}
+          onNext={() => shiftYear(1)}
+        />
         <Button
           variant="outline"
           onclick={() => (showEditDialog = true)}
@@ -254,7 +219,7 @@
           <KpiCard title="Annual target" value={fmt(detail.amount)} valueClass="text-chart-1" />
           <KpiCard
             title="Carry-in (Jan 1)"
-            value="{summary.rolloverBalance >= 0 ? '+' : ''}{fmt(summary.rolloverBalance)}"
+            value={formatSignedCurrency(summary.rolloverBalance, currency)}
             valueClass={cn(summary.rolloverBalance < 0 ? 'text-destructive' : 'text-success')}
           />
           <KpiCard
@@ -266,7 +231,7 @@
           />
           <KpiCard
             title="Remaining"
-            value="{summary.remaining >= 0 ? '+' : ''}{fmt(summary.remaining)}"
+            value={formatSignedCurrency(summary.remaining, currency)}
             valueClass={remainingColor(summary.remaining)}
           />
         </div>
@@ -296,25 +261,15 @@
           </div>
           {#if summary.elapsedMonths > 0}
             <div class="mt-3 flex items-center gap-3">
-              <Progress
-                value={Math.min(100, Math.max(0, summary.pacingPercentage))}
-                max={100}
-                class={cn(
-                  'h-2 flex-1',
-                  summary.pacingPercentage > 100 &&
-                    'bg-destructive/20 **:data-[slot=progress-indicator]:bg-destructive'
-                )}
+              <PacingBar
+                pacingPercentage={summary.pacingPercentage}
+                actualAmount={summary.actualAmount}
+                expectedYtd={summary.expectedYtd}
+                delta={summary.delta}
+                {fmt}
+                size="md"
+                tooltip={false}
               />
-              <span
-                class={cn(
-                  'text-sm tabular-nums',
-                  summary.pacingPercentage > 100
-                    ? 'font-medium text-destructive'
-                    : 'text-muted-foreground'
-                )}
-              >
-                {Math.max(0, summary.pacingPercentage).toFixed(1)}%
-              </span>
             </div>
             <p class="mt-2 text-xs text-muted-foreground">
               Full-year progress: {Math.max(0, summary.percentage).toFixed(1)}% of {fmt(
@@ -345,14 +300,14 @@
                 <Table.Cell class="py-2.5 capitalize">{monthLabel(e.month)}</Table.Cell>
                 <Table.Cell class="py-2.5 text-right tabular-nums">
                   {#if isFuture}
-                    <span class="text-xs text-muted-foreground">&mdash;</span>
+                    <span class="text-xs text-muted-foreground">{EMPTY_DASH}</span>
                   {:else}
                     {fmt(e.actualAmount)}
                   {/if}
                 </Table.Cell>
                 <Table.Cell class="py-2.5 text-right tabular-nums">
                   {#if isFuture}
-                    <span class="text-xs text-muted-foreground">&mdash;</span>
+                    <span class="text-xs text-muted-foreground">{EMPTY_DASH}</span>
                   {:else}
                     {fmt(e.cumulativeActual)}
                   {/if}
@@ -364,36 +319,22 @@
                   class={cn('py-2.5 text-right tabular-nums', !isFuture && remainingColor(e.delta))}
                 >
                   {#if isFuture}
-                    <span class="text-xs text-muted-foreground">&mdash;</span>
-                  {:else if e.delta >= 0}
-                    +{fmt(e.delta)}
+                    <span class="text-xs text-muted-foreground">{EMPTY_DASH}</span>
                   {:else}
-                    {fmt(e.delta)}
+                    {formatSignedCurrency(e.delta, currency)}
                   {/if}
                 </Table.Cell>
                 <Table.Cell class="py-2.5">
                   {#if isFuture}
-                    <span class="text-xs text-muted-foreground">&mdash;</span>
+                    <span class="text-xs text-muted-foreground">{EMPTY_DASH}</span>
                   {:else}
-                    <div class="flex items-center gap-2">
-                      <Progress
-                        value={Math.min(100, Math.max(0, e.pacingPercentage))}
-                        max={100}
-                        class={cn(
-                          'h-1.5 w-20',
-                          e.pacingPercentage > 100 &&
-                            'bg-destructive/20 **:data-[slot=progress-indicator]:bg-destructive'
-                        )}
-                      />
-                      <span
-                        class={cn(
-                          'text-xs tabular-nums',
-                          e.pacingPercentage > 100
-                            ? 'font-medium text-destructive'
-                            : 'text-muted-foreground'
-                        )}>{Math.max(0, e.pacingPercentage).toFixed(1)}%</span
-                      >
-                    </div>
+                    <PacingBar
+                      pacingPercentage={e.pacingPercentage}
+                      actualAmount={e.cumulativeActual}
+                      expectedYtd={e.cumulativeExpected}
+                      delta={e.delta}
+                      {fmt}
+                    />
                   {/if}
                 </Table.Cell>
               </Table.Row>
@@ -430,16 +371,18 @@
 {/if}
 
 {#if accountGuid}
-  <BudgetEntryDialog
-    bind:open={showEditDialog}
-    {accountGuid}
-    year={detail?.year ?? selectedYear}
-    amount={detail?.amount ?? 0}
-    exists={detail !== null}
-    {currency}
-    onSave={handleSaveSuccess}
-    onError={(msg) => (formError = msg)}
-  />
+  {#key `${showEditDialog}-${selectedYear}`}
+    <BudgetEntryDialog
+      bind:open={showEditDialog}
+      {accountGuid}
+      year={detail?.year ?? selectedYear}
+      amount={detail?.amount ?? 0}
+      exists={detail !== null}
+      {currency}
+      onSave={handleSaveSuccess}
+      onError={(msg) => (formError = msg)}
+    />
+  {/key}
 {/if}
 
 <Dialog.Root bind:open={showDeleteConfirm}>
