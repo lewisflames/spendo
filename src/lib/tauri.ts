@@ -359,114 +359,93 @@ export interface Budget {
   accountName: string;
   accountDescription?: string;
   accountType: string;
+  year: number;
   amount: number;
   notes: string | null;
   createdAt: string;
 }
 
 export interface BudgetActualRow {
+  guid: string;
   accountGuid: string;
   accountName: string;
   accountDescription?: string;
   accountType: string;
-  hasBudget: boolean;
   budgetAmount: number;
   actualAmount: number;
   remaining: number;
   percentage: number;
   rolloverBalance: number;
+  expectedYtd: number;
+  pacingPercentage: number;
+  delta: number;
+  elapsedMonths: number;
+  effectiveTotal: number;
 }
 
-export interface BudgetEntry {
-  year: number;
+export interface MonthlySlice {
   month: number;
-  amount: number;
-  isOverride: boolean;
   actualAmount: number;
-  remaining: number;
-  percentage: number;
-  rolloverBalance: number;
+  cumulativeActual: number;
+  cumulativeExpected: number;
+  delta: number;
+  pacingPercentage: number;
 }
 
-export interface BudgetPeriodSummary {
+export interface BudgetYearSummary {
   budgetAmount: number;
+  rolloverBalance: number;
+  effectiveTotal: number;
   actualAmount: number;
+  expectedYtd: number;
   remaining: number;
   percentage: number;
-  rolloverBalance: number;
+  pacingPercentage: number;
+  delta: number;
+  elapsedMonths: number;
 }
 
 export interface BudgetDetail {
   budget: Budget;
-  entries: BudgetEntry[];
-  currentPeriod: BudgetPeriodSummary;
-  total: number;
-  page: number;
-  pageSize: number;
-  totalPages: number;
+  year: number;
+  amount: number;
+  summary: BudgetYearSummary;
+  monthlyEntries: MonthlySlice[];
 }
 
-export const listBudgets = (): Promise<Budget[]> => invoke('list_budgets');
-
-export const setBudget = (
-  accountGuid: string,
-  notes: string | undefined,
-  amount: number
-): Promise<Budget> =>
-  invoke('set_budget', {
-    accountGuid,
-    notes: notes ?? null,
-    amount
-  });
-
-export const setBudgetAmount = (
+export const setBudgetYearAmount = (
   accountGuid: string,
   year: number,
-  month: number,
-  amount: number
-): Promise<void> => invoke('set_budget_amount', { accountGuid, year, month, amount });
+  amount: number,
+  notes?: string
+): Promise<Budget> =>
+  invoke('set_budget_year_amount', { accountGuid, year, amount, notes: notes ?? null });
 
-export const setBudgetAmounts = (
+export const setBudgetYearAmounts = (
   accountGuid: string,
   startYear: number,
-  startMonth: number,
   endYear: number,
-  endMonth: number,
-  amount: number
+  amount: number,
+  notes?: string
 ): Promise<void> =>
-  invoke('set_budget_amounts', {
+  invoke('set_budget_year_amounts', {
     accountGuid,
     startYear,
-    startMonth,
     endYear,
-    endMonth,
-    amount
+    amount,
+    notes: notes ?? null
   });
 
-export const resetBudgetAmount = (
-  accountGuid: string,
-  year: number,
-  month: number
-): Promise<void> => invoke('reset_budget_amount', { accountGuid, year, month });
+export const deleteBudgetYear = (accountGuid: string, year: number): Promise<void> =>
+  invoke('delete_budget_year', { accountGuid, year });
 
-export const deleteBudget = (guid: string): Promise<void> => invoke('delete_budget', { guid });
+export const getBudgetVsActual = (year: number): Promise<BudgetActualRow[]> =>
+  invoke('get_budget_vs_actual', { year });
 
-export const getBudgetVsActual = (year: number, month: number): Promise<BudgetActualRow[]> =>
-  invoke('get_budget_vs_actual', { year, month });
-
-export const getBudgetDetail = (
-  accountGuid: string,
-  page: number,
-  pageSize: number,
-  sortBy?: string,
-  sortDir?: string
-): Promise<BudgetDetail> =>
+export const getBudgetDetail = (accountGuid: string, year: number): Promise<BudgetDetail> =>
   invoke('get_budget_detail', {
     accountGuid,
-    page,
-    pageSize,
-    sortBy: sortBy ?? null,
-    sortDir: sortDir ?? null
+    year
   });
 
 export interface BudgetDateRange {
