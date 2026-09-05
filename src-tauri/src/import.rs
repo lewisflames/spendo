@@ -91,7 +91,7 @@ pub struct ImportResult {
 
 // ── Log helpers ─────────────────────────────────────────────────────────────
 
-pub fn get_import_logs(
+fn get_import_logs(
     conn: &Connection,
     limit: i64,
     offset: i64,
@@ -328,6 +328,7 @@ impl Importable for Split {
             || existing.quantity_num != self.quantity_num
             || existing.quantity_denom != self.quantity_denom
             || existing.memo != self.memo
+            || existing.reconcile_state != self.reconcile_state
     }
 
     fn upsert(&self, conn: &Connection) -> Result<(), String> {
@@ -647,6 +648,7 @@ fn import_gnucash_inner(
             || accounts_updated != 0
             || transactions_updated != 0
             || splits_updated != 0
+            || commodities_updated != 0
             || accounts_orphaned != 0
             || transactions_orphaned != 0
             || splits_orphaned != 0
