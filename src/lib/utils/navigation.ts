@@ -16,9 +16,12 @@ export function gotoHolding(commodityGuid: string): Promise<void> {
   return goto(resolve('/portfolio/[holding]', { holding: commodityGuid }));
 }
 
-/** Navigate to an account's budget page. */
-export function openBudget(accountGuid: string): Promise<void> {
-  return goto(resolve('/budgets/[accountGuid]', { accountGuid }));
+/** Navigate to an account's budget page, preserving the selected year. */
+export function openBudget(accountGuid: string, year?: number): Promise<void> {
+  const base = resolve('/budgets/[accountGuid]', { accountGuid });
+  // Query-only year suffix on top of a resolved route.
+  // eslint-disable-next-line svelte/no-navigation-without-resolve
+  return goto(year !== undefined ? `${base}?year=${year}` : base);
 }
 
 /**
