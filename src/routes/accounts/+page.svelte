@@ -19,9 +19,9 @@
   import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
   import KpiCard from '$lib/components/shared/kpi-card.svelte';
   import KpiCardRow from '$lib/components/shared/kpi-card-row.svelte';
-  import { clampZero, formatSessionCurrency as fmt, plural } from '$lib/utils/format.svelte';
+  import { clampZero, formatSessionCurrency, plural } from '$lib/utils/format.svelte';
   import { errMsg } from '$lib/utils/error';
-  import AccountsTable from '$lib/features/accounts/accounts-table.svelte';
+  import AccountTable from '$lib/features/accounts/account-table.svelte';
   import BalanceTree from '$lib/features/accounts/balance-tree.svelte';
 
   const CATEGORY_LABEL: Record<string, string> = { ...CATEGORY_LABEL_PLURAL };
@@ -36,13 +36,7 @@
     LIABILITY: CreditCard
   };
 
-  const KPI_ICON_COLORS: Record<Category, string> = {
-    ASSET: 'text-success',
-    EQUITY: 'text-warning',
-    LIABILITY: 'text-destructive'
-  };
-
-  const KPI_VALUE_COLORS: Record<Category, string> = {
+  const KPI_COLORS: Record<Category, string> = {
     ASSET: 'text-success',
     EQUITY: 'text-warning',
     LIABILITY: 'text-destructive'
@@ -80,8 +74,8 @@
       title: CATEGORY_LABEL[cat],
       value: categoryTotal(cat),
       icon: KPI_ICONS[cat],
-      iconClass: KPI_ICON_COLORS[cat],
-      valueClass: KPI_VALUE_COLORS[cat]
+      iconClass: KPI_COLORS[cat],
+      valueClass: KPI_COLORS[cat]
     }));
   });
 
@@ -103,7 +97,7 @@
   }
 
   function displayValue(n: number): string {
-    return fmt(clampZero(n));
+    return formatSessionCurrency(clampZero(n));
   }
 </script>
 
@@ -154,7 +148,7 @@
         </EmptyState>
       {:else}
         <DimWrapper active={loading}>
-          <AccountsTable {accounts} />
+          <AccountTable rows={accounts} />
         </DimWrapper>
       {/if}
     {/if}

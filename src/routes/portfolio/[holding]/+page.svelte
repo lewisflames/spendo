@@ -16,7 +16,8 @@
     formatSignedCurrency,
     formatSessionCurrency as fmt,
     sessionCurrency,
-    formatDate
+    formatDate,
+    parseLocalDate
   } from '$lib/utils/format.svelte';
   import TimeSeriesChart from '$lib/components/shared/time-series-chart.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
@@ -75,7 +76,7 @@
     const history = data?.priceHistory;
     if (!history || history.length === 0) return null;
     const cutoff = Date.now() - 365 * 24 * 60 * 60 * 1000;
-    const window = history.filter((e) => new Date(e.date).getTime() >= cutoff);
+    const window = history.filter((e) => parseLocalDate(e.date).getTime() >= cutoff);
     const source = window.length > 0 ? window : history;
     const prices = source.map((e) => e.price);
     return { high: Math.max(...prices), low: Math.min(...prices) };
@@ -254,7 +255,7 @@
         {loading}
         emptyMessage="No price history found."
         data={data.priceHistory}
-        getX={(d: PriceHistoryEntry) => new Date(d.date)}
+        getX={(d: PriceHistoryEntry) => parseLocalDate(d.date)}
         yField="price"
         series={[{ key: 'price', label: 'Price', color: 'var(--color-chart-1)' }]}
         currency={priceCurrency}
@@ -265,7 +266,7 @@
         {loading}
         emptyMessage="No performance data available."
         data={data.valueTrend}
-        getX={(d: { date: string }) => new Date(d.date)}
+        getX={(d: { date: string }) => parseLocalDate(d.date)}
         series={[
           { key: 'marketValue', label: 'Market Value', color: 'var(--color-success)' },
           { key: 'costBasis', label: 'Cost Basis', color: 'var(--color-warning)' }

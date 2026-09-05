@@ -5,7 +5,7 @@
   import { fetchAccountBalanceTrend } from '$lib/tauri';
   import type { AccountBalancePoint } from '$lib/tauri';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
-  import { sessionCurrency } from '$lib/utils/format.svelte';
+  import { sessionCurrency, parseLocalDate } from '$lib/utils/format.svelte';
   import { TYPE_COLOR } from '$lib/features/accounts/account-types';
 
   let { guid, accountType }: { guid: string; accountType?: string } = $props();
@@ -34,7 +34,7 @@
     {loading}
     emptyMessage="No balance history found."
     {data}
-    getX={(d: AccountBalancePoint) => new Date(d.month)}
+    getX={(d: AccountBalancePoint) => parseLocalDate(d.month)}
     series={[{ key: 'balance', label: 'Balance', color }]}
     {currency}
   />

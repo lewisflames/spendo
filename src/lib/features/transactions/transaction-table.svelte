@@ -1,26 +1,54 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
   import * as Table from '$lib/components/ui/table';
-  import { formatDate as fmtDate, formatSignedCurrency, signColor } from '$lib/utils/format.svelte';
+  import { Badge } from '$lib/components/ui/badge';
+  import {
+    formatDate as fmtDate,
+    formatSignedCurrency,
+    formatSessionCurrency,
+    signColor,
+    EMPTY_DASH
+  } from '$lib/utils/format.svelte';
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import SortHead from '$lib/components/shared/sort-head.svelte';
   import { handleRowClick, openTransaction } from '$lib/utils/navigation';
-  import type { TransactionRow } from '$lib/tauri';
+  import { statusFor } from '$lib/utils/reconcile';
+  import type { DetailTransaction, TransactionRow } from '$lib/tauri';
+
+  type SortKey = 'date' | 'description' | 'amount';
+  type AccountColumn = 'transfer' | 'status' | 'amount' | 'runningBalance';
 
   let {
     transactions = [],
     currency = 'EUR',
     sortBy = null,
     sortDir = 'desc',
-    onSort
+    onSort,
+    variant = 'global',
+    visibleColumns = ['transfer', 'amount'] as AccountColumn[]
   }: {
-    transactions?: TransactionRow[];
+    transactions?: TransactionRow[] | DetailTransaction[];
     currency?: string;
-    sortBy?: 'date' | 'description' | 'amount' | null;
+    sortBy?: SortKey | null;
     sortDir?: 'asc' | 'desc';
     /** Direction handling lives with the caller's sort state; just report the key. */
-    onSort?: (key: 'date' | 'description' | 'amount') => void;
+    onSort?: (key: SortKey) => void;
+    /** `account` adds Transfer/Status/Amount/Balance columns for the ledger view. */
+    variant?: 'global' | 'account';
+    visibleColumns?: AccountColumn[];
   } = $props();
+
+  function isDetail(txn: TransactionRow | DetailTransaction): txn is DetailTransaction {
+    return variant === 'account' && 'counterAccounts' in txn;
+  }
+
+  function isVisible(id: AccountColumn): boolean {
+    return visibleColumns.includes(id);
+  }
+
+  function totalOf(txn: TransactionRow | DetailTransaction): number {
+    return isDetail(txn) ? txn.amount : (txn as TransactionRow).totalAmount;
+  }
 </script>
 
 <TableShell>
@@ -38,13 +66,34 @@
         dir={sortDir}
         onclick={() => onSort?.('description')}
       />
-      <SortHead
-        label="Total"
-        active={sortBy === 'amount'}
-        dir={sortDir}
-        onclick={() => onSort?.('amount')}
-        class="text-right"
-      />
+      {#if variant === 'global'}
+        <SortHead
+          label="Total"
+          active={sortBy === 'amount'}
+          dir={sortDir}
+          onclick={() => onSort?.('amount')}
+          class="text-right"
+        />
+      {:else}
+        {#if isVisible('transfer')}
+          <Table.Head class="text-muted-foreground">Transfer</Table.Head>
+        {/if}
+        {#if isVisible('status')}
+          <Table.Head class="text-muted-foreground">Status</Table.Head>
+        {/if}
+        {#if isVisible('amount')}
+          <SortHead
+            label="Amount"
+            active={sortBy === 'amount'}
+            dir={sortDir}
+            onclick={() => onSort?.('amount')}
+            class="text-right"
+          />
+        {/if}
+        {#if isVisible('runningBalance')}
+          <Table.Head class="text-right text-muted-foreground">Balance</Table.Head>
+        {/if}
+      {/if}
     </Table.Row>
   </Table.Header>
   <Table.Body>
@@ -66,7 +115,7 @@
             title={txn.description ?? undefined}
           >
             {#if txn.num}<span class="mr-1 text-muted-foreground">#{txn.num}</span>{/if}
-            {txn.description || '\u2014'}
+            {txn.description || EMPTY_DASH}
           </a>
           {#if txn.notes}
             <p class="truncate text-xs font-normal text-muted-foreground" title={txn.notes}>
@@ -74,13 +123,55 @@
             </p>
           {/if}
         </Table.Cell>
-        <Table.Cell
-          class="py-2.5 text-right font-medium whitespace-nowrap tabular-nums {signColor(
-            txn.totalAmount
-          )}"
-        >
-          {formatSignedCurrency(txn.totalAmount, currency)}
-        </Table.Cell>
+        {#if variant === 'global'}
+          <Table.Cell
+            class="py-2.5 text-right font-medium whitespace-nowrap tabular-nums {signColor(
+              totalOf(txn)
+            )}"
+          >
+            {formatSignedCurrency(totalOf(txn), currency)}
+          </Table.Cell>
+        {:else if isDetail(txn)}
+          {#if isVisible('transfer')}
+            <Table.Cell
+              class="max-w-xs py-2.5 text-muted-foreground"
+              title={txn.counterAccounts.join(', ')}
+            >
+              {#if txn.counterAccounts.length === 0}
+                {EMPTY_DASH}
+              {:else}
+                <div class="flex items-center gap-1">
+                  <span class="truncate">{txn.counterAccounts[0]}</span>
+                  {#if txn.counterAccounts.length > 1}
+                    <Badge variant="outline" class="shrink-0 text-[10px] leading-none"
+                      >+{txn.counterAccounts.length - 1} more</Badge
+                    >
+                  {/if}
+                </div>
+              {/if}
+            </Table.Cell>
+          {/if}
+          {#if isVisible('status')}
+            <Table.Cell class="py-2.5">
+              {@const status = statusFor(txn.reconcileState)}
+              <Badge variant={status.variant}>{status.label}</Badge>
+            </Table.Cell>
+          {/if}
+          {#if isVisible('amount')}
+            <Table.Cell
+              class="py-2.5 text-right font-medium whitespace-nowrap tabular-nums {signColor(
+                txn.amount
+              )}"
+            >
+              {formatSignedCurrency(txn.amount, currency)}
+            </Table.Cell>
+          {/if}
+          {#if isVisible('runningBalance')}
+            <Table.Cell class="py-2.5 text-right font-medium whitespace-nowrap tabular-nums">
+              {formatSessionCurrency(txn.runningBalance)}
+            </Table.Cell>
+          {/if}
+        {/if}
       </Table.Row>
     {/each}
   </Table.Body>
