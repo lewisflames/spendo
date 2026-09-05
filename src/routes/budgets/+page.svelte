@@ -134,26 +134,13 @@
   let atMin = $derived(minYear !== null && currentYear <= minYear);
   let atMax = $derived(maxYear !== null && currentYear >= maxYear);
 
-  function handleSaveSuccess(
-    accountGuid: string,
-    result?: { inserted: number; skipped: number[] }
-  ) {
+  function handleSaveSuccess(accountGuid: string, createdYear: number) {
     res.reload();
     formError = null;
-    const skipped = result?.skipped.length ?? 0;
-    const inserted = result?.inserted ?? 1;
-    if (skipped > 0 && inserted > 0) {
-      toast.success(
-        `Created ${inserted} year${inserted === 1 ? '' : 's'} — ${skipped} skipped (already had budgets)`
-      );
-    } else if (skipped > 0) {
-      toast.success(`No years created — ${skipped} already had budgets`);
-    } else {
-      toast.success('Budget saved');
-    }
+    toast.success('Budget saved');
     // Query-only year suffix on top of a resolved route.
     // eslint-disable-next-line svelte/no-navigation-without-resolve
-    goto(resolve('/budgets/[accountGuid]', { accountGuid }) + `?year=${currentYear}`);
+    goto(resolve('/budgets/[accountGuid]', { accountGuid }) + `?year=${createdYear}`);
   }
 
   function shiftYear(delta: number) {

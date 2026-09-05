@@ -29,13 +29,6 @@ pub struct Budget {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct BulkBudgetResult {
-    pub inserted: i32,
-    pub skipped: Vec<i32>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct BudgetDateRange {
     pub earliest_date: Option<String>,
     pub latest_date: Option<String>,
@@ -226,53 +219,23 @@ pub fn set_budget_year_amount_inner(
     read_budget_year(conn, account_guid, year)
 }
 
-/// Insert a range of years with the same amount, skipping years that already
-/// have a budget. The whole range is written atomically.
-pub fn set_budget_year_amounts_inner(
-    conn: &Connection,
-    account_guid: &str,
-    start_year: i32,
-    end_year: i32,
-    amount: f64,
-) -> Result<BulkBudgetResult, String> {
-    assert_expense_account(conn, account_guid)?;
-    validate_amount(amount)?;
-    validate_year(start_year)?;
-    validate_year(end_year)?;
-    if end_year < start_year {
-        return Err("The year range must not be inverted".to_string());
-    }
-    if end_year - start_year > 100 {
-        return Err("The year range is too large".to_string());
-    }
-
-    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
-    let mut skipped = Vec::new();
-    for year in start_year..=end_year {
-        let changed = tx
-            .execute(
-                "INSERT INTO budgets (guid, account_guid, year, amount, created_at)
-			 VALUES (?1, ?2, ?3, ?4, ?5)
-			 ON CONFLICT (account_guid, year) DO NOTHING",
-                rusqlite::params![
-                    Uuid::new_v4().to_string(),
-                    account_guid,
-                    year,
-                    amount,
-                    utils::iso_now()
-                ],
-            )
-            .map_err(|e| e.to_string())?;
-        if changed == 0 {
-            skipped.push(year);
-        }
-    }
-    tx.commit().map_err(|e| e.to_string())?;
-    let total = end_year - start_year + 1;
-    Ok(BulkBudgetResult {
-        inserted: total - skipped.len() as i32,
-        skipped,
-    })
+/// Years that already have a budget for the account, ascending. Used by
+/// the Add dialog to disable taken years so a new budget is always created
+/// for a single free year.
+pub fn get_budget_years_inner(conn: &Connection, account_guid: &str) -> Result<Vec<i32>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT year FROM budgets
+			 WHERE account_guid = ?1
+			 ORDER BY year",
+        )
+        .map_err(|e| e.to_string())?;
+    let years = stmt
+        .query_map([account_guid], |row| row.get::<_, i32>(0))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(years)
 }
 
 /// Delete a single year's budget. Other years for the account are kept.
@@ -791,15 +754,12 @@ pub async fn set_budget_year_amount(
 }
 
 #[tauri::command]
-pub async fn set_budget_year_amounts(
+pub async fn get_budget_years(
     state: State<'_, AppState>,
     account_guid: String,
-    start_year: i32,
-    end_year: i32,
-    amount: f64,
-) -> Result<BulkBudgetResult, String> {
+) -> Result<Vec<i32>, String> {
     run_blocking(state.db.clone(), move |conn| {
-        set_budget_year_amounts_inner(conn, &account_guid, start_year, end_year, amount)
+        get_budget_years_inner(conn, &account_guid)
     })
     .await
 }
@@ -1046,53 +1006,16 @@ mod tests {
     }
 
     #[test]
-    fn bulk_set_skips_existing_years() {
+    fn budget_years_lists_taken_years_ascending() {
         let conn = setup();
+        assert!(get_budget_years_inner(&conn, "food").unwrap().is_empty());
+        set_budget_year_amount_inner(&conn, "food", 2026, 900.0).unwrap();
         set_budget_year_amount_inner(&conn, "food", 2024, 600.0).unwrap();
-
-        // A range spanning the existing row plus new years: 2024 is kept,
-        // 2025-2026 are created.
-        let result = set_budget_year_amounts_inner(&conn, "food", 2024, 2026, 900.0).unwrap();
-        assert_eq!(result.inserted, 2);
-        assert_eq!(result.skipped, vec![2024]);
-        assert_close(
-            get_budget_detail_inner(&conn, "food", 2024).unwrap().amount,
-            600.0,
+        assert_eq!(
+            get_budget_years_inner(&conn, "food").unwrap(),
+            vec![2024, 2026]
         );
-        assert_close(
-            get_budget_detail_inner(&conn, "food", 2025).unwrap().amount,
-            900.0,
-        );
-        assert_close(
-            get_budget_detail_inner(&conn, "food", 2026).unwrap().amount,
-            900.0,
-        );
-        assert!(get_budget_detail_inner(&conn, "food", 2027).is_err());
-
-        // A single-year range over an existing year inserts nothing.
-        let result = set_budget_year_amounts_inner(&conn, "food", 2025, 2025, 1000.0).unwrap();
-        assert_eq!(result.inserted, 0);
-        assert_eq!(result.skipped, vec![2025]);
-        assert_close(
-            get_budget_detail_inner(&conn, "food", 2025).unwrap().amount,
-            900.0,
-        );
-    }
-
-    #[test]
-    fn bulk_set_rejects_inverted_range_and_bad_amount() {
-        let conn = setup();
-        set_budget_year_amount_inner(&conn, "food", 2024, 600.0).unwrap();
-
-        assert!(set_budget_year_amounts_inner(&conn, "food", 2025, 2024, 900.0).is_err());
-        assert!(set_budget_year_amounts_inner(&conn, "food", 2024, 2026, 0.0).is_err());
-
-        // Nothing was written: 2025 still has no budget.
-        assert!(get_budget_detail_inner(&conn, "food", 2025).is_err());
-        assert_close(
-            get_budget_detail_inner(&conn, "food", 2024).unwrap().amount,
-            600.0,
-        );
+        assert!(get_budget_years_inner(&conn, "unused").unwrap().is_empty());
     }
 
     #[test]
