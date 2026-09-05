@@ -23,6 +23,8 @@ pub struct DetailSplit {
     pub account_type: String,
     pub amount: f64,
     pub memo: Option<String>,
+    // Internal only: aggregated into `DetailTransaction.reconcile_state`
+    // (y wins over c). Skipped on the wire; the per-tx status is what the UI consumes.
     #[serde(skip)]
     pub reconcile_state: Option<String>,
 }
@@ -92,7 +94,7 @@ pub struct AccountDetailResult {
 }
 
 /// Ledger query parameters shared by the count and page queries.
-pub struct TxQuery<'a> {
+struct TxQuery<'a> {
     page: i64,
     page_size: i64,
     date_from: Option<&'a str>,
@@ -145,7 +147,8 @@ fn load_account_header(conn: &Connection, guid: &str) -> Result<AccountHeader, S
 }
 
 /// Shared transaction-filter WHERE builder for this module's queries. All
-/// queries here alias `transactions` as `t`.
+/// queries here alias `transactions` as `t`. Half-open dates:
+/// `>= from AND < date(to,'+1 day')`.
 fn filter_clauses(
     date_from: Option<&str>,
     date_to: Option<&str>,
@@ -161,7 +164,7 @@ fn filter_clauses(
         w.add("t.post_date >= {}", vec![Box::new(df.to_string())]);
     }
     if let Some(dt) = date_to {
-        w.add("t.post_date <= {}", vec![Box::new(dt.to_string())]);
+        w.add("t.post_date < date({}, '+1 day')", vec![Box::new(dt.to_string())]);
     }
     if let Some(s) = search {
         let s = utils::escape_like(s);
@@ -190,7 +193,7 @@ fn compute_subtree_balance(
     ctx: &FxCtx,
     sub_guids: &[String],
 ) -> Result<f64, String> {
-    let placeholders_str = sql::in_clause(sub_guids.len());
+    let in_list = sql::in_clause(sub_guids.len());
     let sub_params = sql::string_param_refs(sub_guids);
 
     let raw_balance: f64 = {
@@ -205,7 +208,7 @@ fn compute_subtree_balance(
              AND {}
              GROUP BY c.mnemonic",
             utils::RAW_AMOUNT,
-            placeholders_str,
+            in_list,
             utils::investment_types_sql(),
             utils::VISIBLE_TX_FILTER
         );
@@ -236,7 +239,7 @@ fn compute_subtree_balance(
              GROUP BY c.mnemonic",
             utils::QUANTITY_AMOUNT,
             utils::RAW_AMOUNT,
-            placeholders_str,
+            in_list,
             utils::VISIBLE_TX_FILTER,
             utils::investment_types_sql()
         );
@@ -288,15 +291,11 @@ fn compute_summary(
     sub_guids: &[String],
     search: Option<&str>,
 ) -> Result<AccountSummary, String> {
-    let placeholders_str = sql::in_clause(sub_guids.len());
+    let in_list = sql::in_clause(sub_guids.len());
     let sub_params = sql::string_param_refs(sub_guids);
 
     let w = filter_clauses(None, None, search, sub_guids.len(), false);
-    let sum_extra_sql = if w.clauses.is_empty() {
-        String::new()
-    } else {
-        format!("AND {}", w.joined())
-    };
+    let sum_extra_sql = w.and_clause("AND");
 
     let summary_sql = format!(
         "SELECT t.guid, c.mnemonic, SUM({}) as effect
@@ -309,7 +308,7 @@ fn compute_summary(
          {}
          GROUP BY t.guid, c.mnemonic",
         utils::signed_amount_expr(utils::RAW_AMOUNT, "a.account_type"),
-        placeholders_str,
+        in_list,
         utils::VISIBLE_TX_FILTER,
         sum_extra_sql
     );
@@ -352,7 +351,7 @@ fn compute_summary(
     })
 }
 
-pub fn fetch_account_detail_inner(
+fn fetch_account_detail_inner(
     conn: &Connection,
     guid: &str,
     query: TxQuery<'_>,
@@ -864,10 +863,10 @@ fn subtree_deltas_by_day(
 }
 
 /// End-of-day balance history for an account and its sub-accounts. Mirrors
-/// the net worth trend approach in `balance.rs`: all-time daily deltas are
+/// the net worth trend approach in `home.rs`: all-time daily deltas are
 /// accumulated per currency; share quantities are valued at the latest cached
 /// prices and cash currencies converted with historical FX rates.
-pub fn fetch_account_balance_trend_inner(
+fn fetch_account_balance_trend_inner(
     conn: &Connection,
     guid: &str,
 ) -> Result<Vec<AccountBalancePoint>, String> {

@@ -78,4 +78,28 @@ impl WhereBuilder {
     pub fn joined(&self) -> String {
         self.clauses.join(" AND ")
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.clauses.is_empty()
+    }
+
+    /// `AND`-prefixed clause list, or empty string when no clauses were added.
+    /// Replaces the repeated `if w.clauses.is_empty() { String::new() } else …` pattern.
+    pub fn and_clause(&self, prefix: &str) -> String {
+        if self.is_empty() {
+            String::new()
+        } else {
+            format!("{prefix} {}", self.joined())
+        }
+    }
+
+    /// `WHERE`-prefixed clause list, or empty string when no clauses were added.
+    /// Includes the leading space so call sites can write `t{where_clause}`.
+    pub fn where_clause(&self) -> String {
+        if self.is_empty() {
+            String::new()
+        } else {
+            format!(" WHERE {}", self.joined())
+        }
+    }
 }
