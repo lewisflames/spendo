@@ -35,7 +35,7 @@ No test framework configured. Rust unit tests run with `cargo test` (in `src-tau
 - **Tauri v2** desktop app. Frontend is static SvelteKit (adapter-static, SPA, no SSR). Backend is Rust in `src-tauri/src/`.
 - **All backend calls** go through `@tauri-apps/api/core` `invoke()` via `$lib/tauri.ts`. No `+server.ts` / `+page.server.ts`.
 - **Rust modules** (`src-tauri/src/`): `db`, `accounts`, `account_detail`, `transactions`, `balance`, `prices`, `import`, `home`, `reports`, `budgets`, `portfolio`, `settings`, `utils`. Cargo crate: `spendo_app_lib`.
-- **DB**: SQLite via `rusqlite`. Connection held in Tauri `State<Mutex<Connection>>`, initialized once at startup. DB file lives in Tauri's `app_data_dir` (`spendo.db`). Schema created on first use in `db::init_db`.
+- **DB**: SQLite via `rusqlite`. Connection held in Tauri `State<Mutex<Connection>>`, initialized once at startup. DB file lives in Tauri's `app_data_dir` (`spendo.db`). Schema created on first use in `db::init_db`. No migrations by design (pre-release): `SCHEMA` is the single source of truth; schema changes require a database reset (Settings → Clear all data, or delete `spendo.db`) followed by re-import.
 - **Routes**: `/`, `/accounts`, `/accounts/[guid]`, `/balance`, `/budgets`, `/pnl`, `/portfolio`, `/transactions`, `/transactions/[id]`, `/prices`, `/settings`, `/about`, `/license`.
 - **Frontend layout**: routes contain only route files (`+page.svelte` etc.). Page-specific components/types live in `$lib/features/<domain>/` (`home`, `accounts`, `budgets`, `pnl`, `portfolio`, `transactions`). Domain utilities in `$lib/utils/` (`csv`, `export`, `error`, `format.svelte.ts`, `date-utils.svelte.ts`).
 
@@ -43,7 +43,7 @@ No test framework configured. Rust unit tests run with `cargo test` (in `src-tau
 
 - Accepts **only `.gnucash` files** (GnuCash SQLite format). Users pick files via Tauri file dialog (`@tauri-apps/plugin-dialog`).
 - Import in `src-tauri/src/import.rs`: reads source DB tables (commodities, accounts, transactions, splits, prices), merges into app DB via GUID-keyed upserts (`ON CONFLICT … DO UPDATE`); source file is opened strictly read-only.
-- `clear_app_db` in `settings.rs` deletes all rows (keeps schema). Frontend calls via `clearAppDb()` in `$lib/tauri.ts`. Exposed on Settings page.
+- `clear_app_db` in `settings.rs` performs a full reset (drops all tables, including legacy ones, then recreates `SCHEMA`). Frontend calls via `clearAppDb()` in `$lib/tauri.ts`. Exposed on Settings page.
 - Price data: live prices fetched via `reqwest` + async tokio runtime. Latest price per commodity queried from DB via `get_cached_prices_map()`.
 
 ## shadcn-svelte (Nova)
