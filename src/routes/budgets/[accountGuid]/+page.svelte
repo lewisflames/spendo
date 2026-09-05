@@ -16,7 +16,7 @@
   import type { AccountNode } from '$lib/tauri';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import { useUrlParams } from '$lib/hooks/use-url-params.svelte';
-  import { Pencil, Plus, Trash2, ChevronLeft, ChevronRight } from '@lucide/svelte';
+  import { Pencil, Trash2, ChevronLeft, ChevronRight } from '@lucide/svelte';
   import { errMsg } from '$lib/utils/error';
   import { toast } from '$lib/components/ui/sonner';
   import PageHeader from '$lib/components/layout/page-header.svelte';
@@ -27,7 +27,6 @@
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import KpiCard from '$lib/components/shared/kpi-card.svelte';
   import BudgetEntryDialog from '$lib/features/budgets/budget-entry-dialog.svelte';
-  import BudgetYearDialog from '$lib/features/budgets/budget-year-dialog.svelte';
   import ImportPrompt from '$lib/components/shared/import-prompt.svelte';
   import { setBreadcrumb } from '$lib/stores/breadcrumb.svelte';
   import * as ButtonGroup from '$lib/components/ui/button-group';
@@ -75,7 +74,6 @@
 
   let showEditDialog = $state(false);
   let showDeleteConfirm = $state(false);
-  let showYearsDialog = $state(false);
 
   let budget = $derived(detail?.budget ?? null);
   let summary = $derived(detail?.summary ?? null);
@@ -114,7 +112,11 @@
   let minYear = $derived(
     dateRange?.earliestDate ? Number(dateRange.earliestDate.slice(0, 4)) : null
   );
-  let maxYear = $derived(dateRange?.latestDate ? Number(dateRange.latestDate.slice(0, 4)) : null);
+  // maxYear extends one year beyond the latest transaction so next year's
+  // budget can be planned ahead (mirrors BudgetYearDialog).
+  let maxYear = $derived(
+    dateRange?.latestDate ? Number(dateRange.latestDate.slice(0, 4)) + 1 : null
+  );
 
   let yearOptions = $derived.by(() => {
     if (minYear === null || maxYear === null) {
@@ -165,12 +167,6 @@
     toast.success(message);
   }
 
-  function handleAddSuccess(_accountGuid: string, _createdYear: number) {
-    res.reload();
-    formError = null;
-    toast.success('Budget saved');
-  }
-
   async function confirmDelete() {
     if (!accountGuid) return;
     try {
@@ -192,7 +188,7 @@
 
 {#snippet headerDescription()}
   <span class="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-    Yearly budget for this account · carryover always applied
+    Yearly budget for this account
   </span>
 {/snippet}
 
@@ -206,7 +202,7 @@
             size="icon"
             onclick={() => shiftYear(-1)}
             aria-label="Previous year"
-            disabled={!detail || atMin}
+            disabled={atMin}
           >
             <ChevronLeft />
           </Button>
@@ -225,7 +221,7 @@
             size="icon"
             onclick={() => shiftYear(1)}
             aria-label="Next year"
-            disabled={!detail || atMax}
+            disabled={atMax}
           >
             <ChevronRight />
           </Button>
@@ -236,11 +232,7 @@
           disabled={detail === null && loading}
         >
           <Pencil aria-hidden="true" />
-          {detail ? `Edit ${selectedYear} target` : `Set ${selectedYear} target`}
-        </Button>
-        <Button variant="outline" onclick={() => (showYearsDialog = true)} disabled={!accountGuid}>
-          <Plus aria-hidden="true" />
-          Add budget
+          Set target
         </Button>
         <Button variant="destructive" onclick={() => (showDeleteConfirm = true)} disabled={!detail}>
           <Trash2 aria-hidden="true" />
@@ -419,7 +411,7 @@
       >
         {#snippet action()}
           <div class="flex items-center gap-2">
-            <Button onclick={() => (showEditDialog = true)}>Set {selectedYear} budget</Button>
+            <Button onclick={() => (showEditDialog = true)}>Set budget</Button>
             <Button variant="outline" onclick={() => goto(resolve('/budgets'))}
               >Back to budgets</Button
             >
@@ -446,15 +438,6 @@
     exists={detail !== null}
     {currency}
     onSave={handleSaveSuccess}
-    onError={(msg) => (formError = msg)}
-  />
-  <BudgetYearDialog
-    bind:open={showYearsDialog}
-    {accountGuid}
-    {currency}
-    {dateRange}
-    initialYear={selectedYear}
-    onSave={handleAddSuccess}
     onError={(msg) => (formError = msg)}
   />
 {/if}
