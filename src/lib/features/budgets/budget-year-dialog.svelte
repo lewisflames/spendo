@@ -5,9 +5,9 @@
   import { Input } from '$lib/components/ui/input';
   import { Button } from '$lib/components/ui/button';
 
-  import { setBudgetYearAmounts } from '$lib/tauri';
+  import { getBudgetYears, setBudgetYearAmount } from '$lib/tauri';
   import { errMsg } from '$lib/utils/error';
-  import type { AccountNode, AccountsResult, BudgetDateRange, BulkBudgetResult } from '$lib/tauri';
+  import type { AccountNode, AccountsResult, BudgetDateRange } from '$lib/tauri';
 
   let {
     open = $bindable(false),
@@ -25,7 +25,7 @@
     currency?: string;
     dateRange?: BudgetDateRange | null;
     initialYear?: number | null;
-    onSave?: (accountGuid: string, result: BulkBudgetResult) => void;
+    onSave?: (accountGuid: string, year: number) => void;
     onError?: (msg: string) => void;
   } = $props();
 
@@ -51,15 +51,21 @@
 
   const now = new Date();
   let pickedAccountGuid = $state('');
-  let fromYear = $state(String(now.getFullYear()));
-  let toYear = $state(String(now.getFullYear()));
+  let year = $state(String(now.getFullYear()));
 
   let amount = $state(0);
 
   let loading = $state(false);
   let accountError = $state('');
   let amountError = $state('');
-  let rangeError = $state('');
+  let yearError = $state('');
+
+  // Years already budgeted for the target account. Null = unknown
+  // (no account selected yet, or not fetched).
+  let existingYears = $state<number[] | null>(null);
+  let yearsLoading = $state(false);
+
+  let target = $derived(accountGuid ?? (pickedAccountGuid || null));
 
   // Years are limited to the book's transaction range, plus one year ahead so
   // budgets can be planned for the next year.
@@ -83,44 +89,82 @@
     });
   });
 
-  let yearCount = $derived(Number(toYear) - Number(fromYear) + 1);
+  let takenSet = $derived(new Set(existingYears ?? []));
 
-  function clampYear(year: number): number {
-    if (minYear !== null && year < minYear) return minYear;
-    if (maxYear !== null && year > maxYear) return maxYear;
-    return year;
+  let freeYears = $derived(yearOptions.filter((o) => !takenSet.has(Number(o.value))));
+
+  function clampYear(y: number): number {
+    if (minYear !== null && y < minYear) return minYear;
+    if (maxYear !== null && y > maxYear) return maxYear;
+    return y;
   }
 
   // Re-initialize the form whenever the dialog opens (user interaction).
   function syncDefaults() {
     const y = clampYear(initialYear ?? new Date().getFullYear());
     pickedAccountGuid = '';
-    fromYear = String(y);
-    toYear = String(y);
+    year = String(y);
     amount = 0;
     accountError = '';
     amountError = '';
-    rangeError = '';
+    yearError = '';
+    existingYears = null;
   }
 
+  // Load taken years whenever the dialog is open and the target account is
+  // known (prop account or picked account on the list page).
+  $effect(() => {
+    if (!open || !target) {
+      return;
+    }
+    const guid = target;
+    let cancelled = false;
+    yearsLoading = true;
+    getBudgetYears(guid)
+      .then((years) => {
+        if (cancelled) return;
+        existingYears = years;
+        // Move off a taken year automatically so Save never starts invalid.
+        if (years.includes(Number(year))) {
+          const fallback = yearOptions.find((o) => !years.includes(Number(o.value)));
+          if (fallback) year = fallback.value;
+        }
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        existingYears = null;
+        onError?.(errMsg(e, 'Failed to load existing budgets'));
+      })
+      .finally(() => {
+        if (!cancelled) yearsLoading = false;
+      });
+    return () => {
+      cancelled = true;
+    };
+  });
+
   async function handleSave() {
-    const target = accountGuid ?? pickedAccountGuid;
+    const y = Number(year);
     accountError = target ? '' : 'Please select an expense account';
     amountError = amount > 0 ? '' : 'Target must be greater than zero';
-    rangeError =
-      Number(fromYear) <= Number(toYear) ? '' : 'End year must be on or after the start year';
-    if (!target || amount <= 0 || rangeError) return;
+    yearError =
+      existingYears !== null && existingYears.includes(y)
+        ? 'This account already has a budget for the selected year'
+        : '';
+    if (!target || amount <= 0 || yearError) return;
     loading = true;
     try {
-      const result = await setBudgetYearAmounts(target, Number(fromYear), Number(toYear), amount);
+      await setBudgetYearAmount(target, y, amount);
       open = false;
-      onSave?.(target, result);
+      onSave?.(target, y);
     } catch (e: unknown) {
       onError?.(errMsg(e, 'Failed to save budget'));
     } finally {
       loading = false;
     }
   }
+
+  let noFreeYears = $derived(target !== null && existingYears !== null && freeYears.length === 0);
 </script>
 
 <Dialog.Root bind:open onOpenChange={(o) => o && syncDefaults()}>
@@ -128,8 +172,8 @@
     <Dialog.Header>
       <Dialog.Title>Add Budget</Dialog.Title>
       <Dialog.Description>
-        Set the annual target for an expense account across a range of years. Only years without a
-        budget are created — existing years are kept.
+        Set the annual target for an expense account for a single year. Years that already have a
+        budget are disabled.
       </Dialog.Description>
     </Dialog.Header>
 
@@ -191,49 +235,42 @@
         {/if}
       </div>
 
-      <div class="flex flex-col gap-4">
-        <div class="flex flex-col gap-2">
-          <span class="text-sm font-medium">From year</span>
-          <Select.Root type="single" bind:value={fromYear} items={yearOptions}>
-            <Select.Trigger
-              id="from-year"
-              class="min-w-20 justify-center"
-              aria-invalid={!!rangeError}
-              aria-describedby={rangeError ? 'range-error' : undefined}
-            >
-              <SelectPrimitive.Value />
-            </Select.Trigger>
-            <Select.Content>
-              {#each yearOptions as o (o.value)}
-                <Select.Item value={o.value} label={o.label}>{o.label}</Select.Item>
-              {/each}
-            </Select.Content>
-          </Select.Root>
-        </div>
-
-        <div class="flex flex-col gap-2">
-          <span class="text-sm font-medium">To year</span>
-          <Select.Root type="single" bind:value={toYear} items={yearOptions}>
-            <Select.Trigger id="to-year" class="min-w-20 justify-center">
-              <SelectPrimitive.Value />
-            </Select.Trigger>
-            <Select.Content>
-              {#each yearOptions as o (o.value)}
-                <Select.Item value={o.value} label={o.label}>{o.label}</Select.Item>
-              {/each}
-            </Select.Content>
-          </Select.Root>
-        </div>
+      <div class="flex flex-col gap-2">
+        <span class="text-sm font-medium">Year</span>
+        <Select.Root type="single" bind:value={year} items={yearOptions}>
+          <Select.Trigger
+            id="year"
+            class="min-w-20 justify-center"
+            aria-invalid={!!yearError}
+            aria-describedby={yearError ? 'year-error' : undefined}
+          >
+            <SelectPrimitive.Value />
+          </Select.Trigger>
+          <Select.Content>
+            {#each yearOptions as o (o.value)}
+              {@const taken = takenSet.has(Number(o.value))}
+              <Select.Item value={o.value} label={o.label} disabled={taken}>
+                {o.label}{taken ? ' — has budget' : ''}
+              </Select.Item>
+            {/each}
+          </Select.Content>
+        </Select.Root>
       </div>
 
-      {#if rangeError}
-        <p id="range-error" role="alert" class="text-xs text-destructive">{rangeError}</p>
+      {#if yearError}
+        <p id="year-error" role="alert" class="text-xs text-destructive">{yearError}</p>
       {/if}
 
       <p class="text-sm text-muted-foreground">
-        {yearCount > 0
-          ? `${yearCount} year${yearCount === 1 ? '' : 's'} selected. Existing budgets are kept.`
-          : 'Select a valid year range.'}
+        {#if !target}
+          Select an account to see available years.
+        {:else if yearsLoading || existingYears === null}
+          Loading existing budgets…
+        {:else if noFreeYears}
+          This account already has a budget for every available year.
+        {:else}
+          Years with a budget are disabled and cannot be selected.
+        {/if}
       </p>
     </div>
 
@@ -244,7 +281,13 @@
           open = false;
         }}>Cancel</Button
       >
-      <Button onclick={handleSave} disabled={loading}>
+      <Button
+        onclick={handleSave}
+        disabled={loading ||
+          yearsLoading ||
+          (target !== null && existingYears === null) ||
+          noFreeYears}
+      >
         {loading ? 'Saving...' : 'Add Budget'}
       </Button>
     </Dialog.Footer>

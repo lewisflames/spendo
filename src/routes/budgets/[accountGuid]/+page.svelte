@@ -165,22 +165,10 @@
     toast.success(message);
   }
 
-  function handleBulkSaveSuccess(
-    _accountGuid: string,
-    result: { inserted: number; skipped: number[] }
-  ) {
+  function handleAddSuccess(_accountGuid: string, _createdYear: number) {
     res.reload();
     formError = null;
-    const skipped = result.skipped.length;
-    if (skipped > 0 && result.inserted > 0) {
-      toast.success(
-        `Created ${result.inserted} year${result.inserted === 1 ? '' : 's'} — ${skipped} skipped (already had budgets)`
-      );
-    } else if (skipped > 0) {
-      toast.success(`No years created — ${skipped} already had budgets`);
-    } else {
-      toast.success('Budget saved');
-    }
+    toast.success('Budget saved');
   }
 
   async function confirmDelete() {
@@ -252,7 +240,7 @@
         </Button>
         <Button variant="outline" onclick={() => (showYearsDialog = true)} disabled={!accountGuid}>
           <Plus aria-hidden="true" />
-          Add years
+          Add budget
         </Button>
         <Button variant="destructive" onclick={() => (showDeleteConfirm = true)} disabled={!detail}>
           <Trash2 aria-hidden="true" />
@@ -466,7 +454,7 @@
     {currency}
     {dateRange}
     initialYear={selectedYear}
-    onSave={handleBulkSaveSuccess}
+    onSave={handleAddSuccess}
     onError={(msg) => (formError = msg)}
   />
 {/if}

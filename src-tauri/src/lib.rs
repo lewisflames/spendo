@@ -57,7 +57,7 @@ pub fn run() {
             account_detail::fetch_account_balance_trend,
             reports::generate_pnl_report,
             budgets::set_budget_year_amount,
-            budgets::set_budget_year_amounts,
+            budgets::get_budget_years,
             budgets::delete_budget_year,
             budgets::get_budget_vs_actual,
             budgets::get_budget_detail,
