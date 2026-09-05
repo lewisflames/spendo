@@ -83,15 +83,17 @@ fn fetch_account_balances(
     // Build a CASE expression that only includes split amounts when the
     // transaction's post_date falls within the range. Using CASE inside SUM
     // instead of filtering in the LEFT JOIN ensures accounts with no matching
-    // transactions still appear (with balance 0). The upper bound is capped at
-    // the shared visibility window so a period ending today or later never
-    // includes future-dated transactions.
+    // transactions still appear (with balance 0). Half-open everywhere:
+    // `>= start AND < date(end, '+1 day')` so end-day timed rows are included.
+    // The upper bound is capped at the shared visibility window so a period
+    // ending today or later never includes future-dated transactions.
     let amount = utils::signed_amount_expr(utils::RAW_AMOUNT, "a.account_type");
+    let visible_now = utils::VISIBLE_NOW_EXPR;
     let (date_case, params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
         match (date_from, date_to) {
             (Some(f), Some(t)) => (
                 format!(
-                    "CASE WHEN t.post_date >= ?1 AND t.post_date <= min(?2, date('now', '+1 day')) THEN {amount} ELSE 0 END"
+                    "CASE WHEN t.post_date >= ?1 AND t.post_date < min(date(?2, '+1 day'), {visible_now}) THEN {amount} ELSE 0 END"
                 ),
                 vec![Box::new(f.to_string()), Box::new(t.to_string())],
             ),
@@ -103,7 +105,7 @@ fn fetch_account_balances(
                 vec![Box::new(f.to_string())],
             ),
             (None, Some(t)) => (
-                format!("CASE WHEN t.post_date <= min(?1, date('now', '+1 day')) THEN {amount} ELSE 0 END"),
+                format!("CASE WHEN t.post_date < min(date(?1, '+1 day'), {visible_now}) THEN {amount} ELSE 0 END"),
                 vec![Box::new(t.to_string())],
             ),
             (None, None) => (
@@ -220,7 +222,7 @@ fn build_tree<R>(
     result
 }
 
-pub fn generate_pnl_report_inner(
+fn generate_pnl_report_inner(
     conn: &Connection,
     date_from: &str,
     date_to: &str,

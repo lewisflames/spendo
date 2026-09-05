@@ -23,7 +23,17 @@ pub const QUANTITY_AMOUNT: &str = "CAST(s.quantity_num AS REAL) / CAST(s.quantit
 /// Visibility window applied to every "current state" query: future-dated
 /// transactions are excluded so net worth, PnL, budgets and portfolio agree
 /// across pages for the same book.
+///
+/// Canonical date contract (half-open everywhere):
+/// `from >= start AND to < date(end, '+1 day')`. Never use `<= YYYY-MM-DD`
+/// against `post_date` (`YYYY-MM-DD HH:MM:SS`) — lexicographic `<=` drops
+/// end-day timed rows. Use `< date(?, '+1 day')` or `substr(post_date,1,10)`.
 pub const VISIBLE_TX_FILTER: &str = "t.post_date < date('now', '+1 day')";
+
+/// Bare "now + 1 day" expression for queries that cap a caller-supplied upper
+/// bound (e.g. PnL `min(date(?,'+1 day'), VISIBLE_NOW)`). Must stay in sync
+/// with [`VISIBLE_TX_FILTER`].
+pub const VISIBLE_NOW_EXPR: &str = "date('now', '+1 day')";
 
 /// Escape `%`, `_` and `\` in user input for LIKE patterns used together
 /// with `ESCAPE '\'`, so searching for a literal `%` matches a literal `%`
@@ -67,6 +77,15 @@ pub fn format_month(n: i64) -> String {
 }
 
 pub fn month_number(ym: &str) -> Result<i64, String> {
+    // Accept both `YYYY-MM` (canonical) and full `YYYY-MM-DD` dates (as passed
+    // by calendar widgets) by truncating dated strings to the month prefix.
+    // Only truncate when the input actually looks like a full date; otherwise
+    // keep it whole so malformed months still error (e.g. `2024-13x`).
+    let ym = if ym.len() > 7 && ym.as_bytes().get(7) == Some(&b'-') {
+        ym.get(..7).unwrap_or(ym)
+    } else {
+        ym
+    };
     let parts: Vec<&str> = ym.split('-').collect();
     if parts.len() != 2 {
         return Err(format!("Invalid month format: {}", ym));
@@ -77,17 +96,10 @@ pub fn month_number(ym: &str) -> Result<i64, String> {
     let m: i64 = parts[1]
         .parse()
         .map_err(|_| format!("Invalid month in month string: {}", ym))?;
+    if !(1..=12).contains(&m) {
+        return Err(format!("Invalid month in month string: {}", ym));
+    }
     Ok(y * 12 + (m - 1))
-}
-
-pub fn month_range(year: i32, month: i32) -> (String, String) {
-    let this = format!("{:04}-{:02}", year, month);
-    let next = if month == 12 {
-        format!("{:04}-01", year + 1)
-    } else {
-        format!("{:04}-{:02}", year, month + 1)
-    };
-    (this, next)
 }
 
 /// Clamp a client-supplied page size into a sane range (SQLite treats negative
@@ -126,6 +138,9 @@ mod tests {
         assert_eq!(month_number("2024-01").unwrap(), 24_288);
         assert_eq!(month_number("2024-12").unwrap(), 24_299);
         assert_eq!(month_number("2025-01").unwrap(), 24_300);
+        // Full calendar dates truncate to their month prefix.
+        assert_eq!(month_number("2024-01-15").unwrap(), 24_288);
+        assert_eq!(month_number("2024-02-05").unwrap(), 24_289);
         assert!(month_number("2024").is_err());
         assert!(month_number("2024-13x").is_err());
     }
@@ -138,18 +153,6 @@ mod tests {
         }
         assert_eq!(format_month(0), "0000-01");
         assert_eq!(format_month(24), "0002-01");
-    }
-
-    #[test]
-    fn month_range_spans_into_next_year() {
-        assert_eq!(
-            month_range(2024, 1),
-            ("2024-01".to_string(), "2024-02".to_string())
-        );
-        assert_eq!(
-            month_range(2024, 12),
-            ("2024-12".to_string(), "2025-01".to_string())
-        );
     }
 
     #[test]

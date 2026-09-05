@@ -117,6 +117,9 @@ pub struct Filters {
     pub date_from: Option<String>,
     pub date_to: Option<String>,
     pub account_name: Option<String>,
+    /// Unique account filter (preferred over `account_name`, which can collide
+    /// for same-named accounts under different parents).
+    pub account_guid: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -138,7 +141,10 @@ pub struct HeatmapPoint {
 }
 
 /// Shared transaction-list WHERE builder. `param_offset` reserves leading
-/// placeholder indices already used by the surrounding query.
+/// placeholder indices already used by the surrounding query. Half-open dates:
+/// `>= from AND < date(to,'+1 day')`. Mirrors `account_detail::filter_clauses`
+/// (which searches split memos via EXISTS); this variant uses `IN` — keep the
+/// two in sync when changing date/search semantics.
 fn build_filter_conditions(
     filters: &Option<Filters>,
     param_offset: usize,
@@ -166,9 +172,17 @@ fn build_filter_conditions(
             w.add("t.post_date >= {}", vec![Box::new(date_from.clone())]);
         }
         if let Some(ref date_to) = f.date_to {
-            w.add("t.post_date <= {}", vec![Box::new(date_to.clone())]);
+            w.add(
+                "t.post_date < date({}, '+1 day')",
+                vec![Box::new(date_to.clone())],
+            );
         }
-        if let Some(ref account_name) = f.account_name {
+        if let Some(ref account_guid) = f.account_guid {
+            w.add(
+                "t.guid IN (SELECT s.tx_guid FROM splits s WHERE s.account_guid = {})",
+                vec![Box::new(account_guid.clone())],
+            );
+        } else if let Some(ref account_name) = f.account_name {
             w.add(
                 "t.guid IN (SELECT s.tx_guid FROM splits s JOIN accounts a ON a.guid = s.account_guid WHERE a.name = {})",
                 vec![Box::new(account_name.clone())],
@@ -264,7 +278,7 @@ fn fetch_splits_for_txns(conn: &Connection, guids: &[String]) -> Result<SplitMap
     Ok((map, totals))
 }
 
-pub fn fetch_account_names_inner(conn: &Connection) -> Result<Vec<AccountInfo>, String> {
+fn fetch_account_names_inner(conn: &Connection) -> Result<Vec<AccountInfo>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT DISTINCT a.name
@@ -313,7 +327,7 @@ fn map_tx_rows(conn: &Connection, rows: Vec<TxRow>) -> Result<Vec<TransactionRow
         .collect())
 }
 
-pub fn fetch_transactions_inner(
+fn fetch_transactions_inner(
     conn: &Connection,
     page: i64,
     page_size: i64,
@@ -321,12 +335,12 @@ pub fn fetch_transactions_inner(
     sort_by: Option<&str>,
     sort_dir: Option<&str>,
 ) -> Result<TransactionsResult, String> {
+    // Clamp here (not just at the command boundary) so direct `_inner`
+    // callers/tests can never divide by zero in `total_pages` or emit a
+    // negative LIMIT/OFFSET.
+    let page_size = utils::clamp_page_size(page_size);
     let w = build_filter_conditions(&filters, 0);
-    let where_clause = if w.clauses.is_empty() {
-        String::new()
-    } else {
-        format!(" WHERE {}", w.joined())
-    };
+    let where_clause = w.where_clause();
 
     let count_sql = format!("SELECT COUNT(*) as cnt FROM transactions t{where_clause}");
     let mut count_stmt = conn.prepare(&count_sql).map_err(|e| e.to_string())?;
@@ -367,8 +381,8 @@ pub fn fetch_transactions_inner(
         all_txns.sort_by(|a, b| {
             let cmp = a
                 .total_amount
-                .partial_cmp(&b.total_amount)
-                .unwrap_or(std::cmp::Ordering::Equal);
+                .total_cmp(&b.total_amount)
+                .then_with(|| a.guid.cmp(&b.guid));
             if ascending {
                 cmp
             } else {
@@ -442,16 +456,12 @@ pub fn fetch_transactions_inner(
 
 /// Per-day transaction counts for the activity heatmap, honoring the same
 /// filters and visibility window as the ledger list.
-pub fn fetch_transaction_heatmap_inner(
+fn fetch_transaction_heatmap_inner(
     conn: &Connection,
     filters: Option<Filters>,
 ) -> Result<Vec<HeatmapPoint>, String> {
     let w = build_filter_conditions(&filters, 0);
-    let where_clause = if w.clauses.is_empty() {
-        String::new()
-    } else {
-        format!(" WHERE {}", w.joined())
-    };
+    let where_clause = w.where_clause();
 
     let sql = format!(
         "SELECT substr(t.post_date, 1, 10) AS day, COUNT(*) AS cnt
@@ -543,7 +553,7 @@ fn neighbor_guid(
         .map_err(|e| e.to_string())
 }
 
-pub fn fetch_transaction_inner(
+fn fetch_transaction_inner(
     conn: &Connection,
     guid: &str,
 ) -> Result<Option<TransactionDetailResult>, String> {

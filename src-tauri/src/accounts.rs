@@ -41,7 +41,7 @@ pub struct AccountsResult {
     pub total_accounts: i64,
 }
 
-const TYPE_CATEGORY: [(&str, &str); 14] = [
+const TYPE_TO_CATEGORY: [(&str, &str); 14] = [
     ("ASSET", "ASSET"),
     ("BANK", "ASSET"),
     ("CASH", "ASSET"),
@@ -58,8 +58,8 @@ const TYPE_CATEGORY: [(&str, &str); 14] = [
     ("EQUITY", "EQUITY"),
 ];
 
-fn get_category(account_type: &str) -> &str {
-    TYPE_CATEGORY
+fn category_for_type(account_type: &str) -> &str {
+    TYPE_TO_CATEGORY
         .iter()
         .find(|(ty, _)| *ty == account_type)
         .map_or(account_type, |(_, cat)| cat)
@@ -79,10 +79,13 @@ struct AccountRow {
     tx_count: i64,
 }
 
-pub fn fetch_accounts_inner(
+fn fetch_accounts_inner(
     conn: &Connection,
     as_of_date: Option<&str>,
 ) -> Result<AccountsResult, String> {
+    // Half-open everywhere: `post_date` is `YYYY-MM-DD HH:MM:SS`, so
+    // `< date(?,'+1 day')` includes the whole as-of day. `None` means current
+    // state (today), matching `VISIBLE_TX_FILTER` semantics.
     let date_expr: String = match as_of_date {
         Some(d) => d.to_string(),
         None => Utc::now().format("%Y-%m-%d").to_string(),
@@ -102,7 +105,7 @@ pub fn fetch_accounts_inner(
                         COUNT(DISTINCT s.tx_guid) as tx_count
                  FROM splits s
                  JOIN transactions t ON t.guid = s.tx_guid
-                 WHERE t.post_date < ?1
+                 WHERE t.post_date < date(?1, '+1 day')
                  GROUP BY s.account_guid
                ) b ON b.account_guid = a.guid
                WHERE a.account_type != 'ROOT'
@@ -179,7 +182,7 @@ pub fn fetch_accounts_inner(
         };
         node_map.insert(row.guid.clone(), node);
 
-        let category = get_category(&row.account_type).to_string();
+        let category = category_for_type(&row.account_type).to_string();
         let entry = by_type.entry(category).or_insert(TypeSummary {
             count: 0,
             total_balance: 0.0,
