@@ -14,7 +14,8 @@
     dateTo = $bindable(''),
     accountName = $bindable(''),
     accounts = [],
-    extra = undefined
+    extra = undefined,
+    idPrefix = 'txn'
   }: {
     search?: string;
     dateFrom?: string;
@@ -24,6 +25,8 @@
     accounts?: AccountInfo[];
     /** Optional trailing controls (e.g. a columns toggle), right-aligned. */
     extra?: Snippet;
+    /** Prefix for input IDs so multiple filter bars can mount on one page. */
+    idPrefix?: string;
   } = $props();
 
   let hasFilters = $derived(
@@ -41,7 +44,7 @@
 
 <div class="flex flex-wrap items-end gap-2">
   <SearchInput
-    id="txn-search"
+    id="{idPrefix}-search"
     label="Search description, notes, memo, number"
     placeholder="Search description, notes, memo, number..."
     bind:value={search}
@@ -49,20 +52,20 @@
   />
 
   <div class="flex flex-col gap-1">
-    <label for="txn-from" class="text-xs text-muted-foreground">From</label>
-    <DatePicker id="txn-from" bind:value={dateFrom} placeholder="Start date" />
+    <label for="{idPrefix}-from" class="text-xs text-muted-foreground">From</label>
+    <DatePicker id="{idPrefix}-from" bind:value={dateFrom} placeholder="Start date" />
   </div>
 
   <div class="flex flex-col gap-1">
-    <label for="txn-to" class="text-xs text-muted-foreground">To</label>
-    <DatePicker id="txn-to" bind:value={dateTo} placeholder="End date" />
+    <label for="{idPrefix}-to" class="text-xs text-muted-foreground">To</label>
+    <DatePicker id="{idPrefix}-to" bind:value={dateTo} placeholder="End date" />
   </div>
 
   {#if showAccountSelect}
     <div class="flex flex-col gap-1">
-      <label for="txn-account" class="text-xs text-muted-foreground">Account</label>
+      <label for="{idPrefix}-account" class="text-xs text-muted-foreground">Account</label>
       <Select.Root type="single" bind:value={accountName}>
-        <Select.Trigger id="txn-account" class="min-w-36">
+        <Select.Trigger id="{idPrefix}-account" class="min-w-36">
           <SelectPrimitive.Value placeholder="All accounts" />
         </Select.Trigger>
         <Select.Content>

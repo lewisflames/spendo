@@ -1,12 +1,7 @@
 <script lang="ts">
   import { dbSession } from '$lib/stores/db.svelte';
   import { generatePnlReport } from '$lib/tauri';
-  import {
-    formatDateRange,
-    signColor,
-    fmtPct,
-    formatSessionCurrency
-  } from '$lib/utils/format.svelte';
+  import { signColor, formatSessionCurrency } from '$lib/utils/format.svelte';
   import { TrendingUp, TrendingDown, ArrowLeftRight, Download } from '@lucide/svelte';
   import { Button } from '$lib/components/ui/button';
   import { downloadCsv } from '$lib/utils/csv';
@@ -29,8 +24,7 @@
   import { useUrlParams } from '$lib/hooks/use-url-params.svelte';
   import { CalendarDate } from '@internationalized/date';
   import type { DateRange } from 'bits-ui';
-  import type { ProfitLossRow } from '$lib/tauri';
-  import type { PnLTreeNode } from '$lib/features/pnl/pnl-types';
+  import { buildTree, flattenTree, collectParentGuids } from '$lib/features/pnl/pnl-utils';
 
   // Date state + URL-param restore must be set up before useAsyncData so the
   // first fetch already uses values from the URL.
@@ -85,43 +79,6 @@
 
   const fmt = formatSessionCurrency;
 
-  /** Rows arrive parent-before-child with depth-first indents; a single
-   * forward pass with an ancestry stack rebuilds the tree in order. */
-  function buildTree(rows: ProfitLossRow[]): PnLTreeNode[] {
-    const root: PnLTreeNode[] = [];
-    const stack: { indent: number; node: PnLTreeNode }[] = [];
-
-    for (const row of rows) {
-      const node: PnLTreeNode = { row, children: [] };
-      while (stack.length > 0 && stack[stack.length - 1].indent >= row.indent) {
-        stack.pop();
-      }
-      if (stack.length === 0) {
-        root.push(node);
-      } else {
-        stack[stack.length - 1].node.children.push(node);
-      }
-      stack.push({ indent: row.indent, node });
-    }
-
-    return root;
-  }
-
-  function flattenTree(
-    nodes: PnLTreeNode[],
-    expanded: Set<string>,
-    depth = 0
-  ): { node: PnLTreeNode; depth: number }[] {
-    const result: { node: PnLTreeNode; depth: number }[] = [];
-    for (const n of nodes) {
-      result.push({ node: n, depth });
-      if (n.children.length > 0 && expanded.has(n.row.accountGuid)) {
-        result.push(...flattenTree(n.children, expanded, depth + 1));
-      }
-    }
-    return result;
-  }
-
   let tree = useTreeExpand();
   let appliedExpandKey = '';
 
@@ -140,17 +97,6 @@
       tree.expandAll([...collectParentGuids(incomeTree), ...collectParentGuids(expenseTree)]);
     }
   });
-
-  function collectParentGuids(nodes: PnLTreeNode[]): string[] {
-    const guids: string[] = [];
-    for (const n of nodes) {
-      if (n.children.length > 0) {
-        guids.push(n.row.accountGuid);
-        guids.push(...collectParentGuids(n.children));
-      }
-    }
-    return guids;
-  }
 
   let visibleIncomeRows = $derived(flattenTree(incomeTree, tree.expanded));
   let visibleExpenseRows = $derived(flattenTree(expenseTree, tree.expanded));
@@ -235,9 +181,6 @@
       {tree}
       {visibleIncomeRows}
       {visibleExpenseRows}
-      {fmt}
-      {fmtPct}
-      {formatDateRange}
     />
   {:else}
     <ImportPrompt />

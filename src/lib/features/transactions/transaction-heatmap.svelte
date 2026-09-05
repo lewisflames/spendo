@@ -4,21 +4,14 @@
   import { Calendar, Chart, Layer, Rect, Tooltip as ChartTooltip } from 'layerchart';
   import { dbSession } from '$lib/stores/db.svelte';
   import { fetchTransactionHeatmap } from '$lib/tauri';
-  import type { HeatmapPoint } from '$lib/tauri';
+  import type { Filters, HeatmapPoint } from '$lib/tauri';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import { formatDate, parseLocalDate, plural } from '$lib/utils/format.svelte';
   import * as Card from '$lib/components/ui/card';
   import { Skeleton } from '$lib/components/ui/skeleton';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
 
-  interface HeatmapFilters {
-    search?: string;
-    dateFrom?: string;
-    dateTo?: string;
-    accountName?: string;
-  }
-
-  let { filters }: { filters: HeatmapFilters } = $props();
+  let { filters }: { filters: Filters } = $props();
 
   const res = useAsyncData({
     enabled: () => !!dbSession.value,

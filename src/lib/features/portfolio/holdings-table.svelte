@@ -14,12 +14,15 @@
   import { STALE_PRICE_DAYS, priceStaleDays } from './price-utils';
   import { handleRowClick, gotoHolding } from '$lib/utils/navigation';
   import { useDebouncedSearch } from '$lib/hooks/use-debounced-search.svelte';
+  import { useTableSort } from '$lib/hooks/use-table-sort.svelte';
+  import { useColumnVisibility } from '$lib/hooks/use-column-visibility.svelte';
   import {
+    formatCurrency,
     formatDate,
     signColor,
     fmtPct,
     formatSignedCurrency,
-    formatSessionCurrency
+    EMPTY_DASH
   } from '$lib/utils/format.svelte';
 
   type SortKey =
@@ -49,10 +52,20 @@
     loading?: boolean;
   } = $props();
 
-  let sortBy = $state<SortKey | null>(null);
-  let sortDir = $state<'asc' | 'desc'>('desc');
+  let sort = useTableSort<SortKey>({ sortBy: 'marketValue', sortDir: 'desc' }, [
+    'shares',
+    'avgCost',
+    'price',
+    'marketValue',
+    'costBasis',
+    'gainLoss',
+    'alloc'
+  ]);
+  let sortBy = $derived(sort.sortBy);
+  let sortDir = $derived(sort.sortDir);
 
-  let visibleColumns = $state<ColumnId[]>([...DEFAULT_COLUMNS]);
+  const cols = useColumnVisibility<ColumnId>(DEFAULT_COLUMNS);
+  let visibleColumns = $derived(cols.visibleColumns);
 
   let queryInput = $state('');
   let query = useDebouncedSearch(
@@ -71,25 +84,24 @@
   let skeletonCols = $derived(visibleColumns.length + 1);
 
   function isVisible(id: ColumnId): boolean {
-    return visibleColumns.includes(id);
+    return cols.isVisible(id);
   }
 
   function setVisible(id: ColumnId, checked: boolean) {
-    if (checked) {
-      if (!visibleColumns.includes(id)) visibleColumns = [...visibleColumns, id];
-    } else {
-      visibleColumns = visibleColumns.filter((c) => c !== id);
-      // Don't leave an invisible sort in effect.
-      if (sortBy === id) sortBy = null;
-    }
+    cols.setVisible(
+      id,
+      checked,
+      COLUMNS.map((c) => c.id)
+    );
+    // Don't leave an invisible sort in effect (default back to market value).
+    if (!checked && sortBy === id) sort.toggle('marketValue');
   }
 
   function resetColumns() {
-    visibleColumns = [...DEFAULT_COLUMNS];
+    cols.resetColumns();
   }
 
   let sortedHoldings = $derived.by(() => {
-    if (!sortBy) return filteredHoldings;
     const dir = sortDir === 'asc' ? 1 : -1;
     return [...filteredHoldings].sort((a, b) => {
       // Nulls (missing data) always sort to the bottom.
@@ -126,16 +138,9 @@
     });
   });
 
-  function toggleSort(key: SortKey) {
-    if (sortBy === key) {
-      sortDir = sortDir === 'asc' ? 'desc' : 'asc';
-    } else {
-      sortBy = key;
-      sortDir = key === 'name' ? 'asc' : 'desc';
-    }
+  function fmt(n: number): string {
+    return formatCurrency(n, currency);
   }
-
-  const fmt = formatSessionCurrency;
 </script>
 
 {#if loading}
@@ -188,14 +193,14 @@
             label="Holding"
             active={sortBy === 'name'}
             dir={sortDir}
-            onclick={() => toggleSort('name')}
+            onclick={() => sort.toggle('name')}
           />
           {#if isVisible('shares')}
             <SortHead
               label="Shares"
               active={sortBy === 'shares'}
               dir={sortDir}
-              onclick={() => toggleSort('shares')}
+              onclick={() => sort.toggle('shares')}
               class="text-right"
             />
           {/if}
@@ -204,7 +209,7 @@
               label="Avg Cost"
               active={sortBy === 'avgCost'}
               dir={sortDir}
-              onclick={() => toggleSort('avgCost')}
+              onclick={() => sort.toggle('avgCost')}
               class="text-right"
             />
           {/if}
@@ -213,7 +218,7 @@
               label="Price"
               active={sortBy === 'price'}
               dir={sortDir}
-              onclick={() => toggleSort('price')}
+              onclick={() => sort.toggle('price')}
               class="text-right"
             />
           {/if}
@@ -222,7 +227,7 @@
               label="Market Value"
               active={sortBy === 'marketValue'}
               dir={sortDir}
-              onclick={() => toggleSort('marketValue')}
+              onclick={() => sort.toggle('marketValue')}
               class="text-right"
             />
           {/if}
@@ -231,7 +236,7 @@
               label="Cost Basis"
               active={sortBy === 'costBasis'}
               dir={sortDir}
-              onclick={() => toggleSort('costBasis')}
+              onclick={() => sort.toggle('costBasis')}
               class="text-right"
             />
           {/if}
@@ -240,7 +245,7 @@
               label="Gain / Loss"
               active={sortBy === 'gainLoss'}
               dir={sortDir}
-              onclick={() => toggleSort('gainLoss')}
+              onclick={() => sort.toggle('gainLoss')}
               class="text-right"
             />
           {/if}
@@ -249,7 +254,7 @@
               label="Alloc"
               active={sortBy === 'alloc'}
               dir={sortDir}
-              onclick={() => toggleSort('alloc')}
+              onclick={() => sort.toggle('alloc')}
               class="text-right"
             />
           {/if}
@@ -259,7 +264,7 @@
         {#if filteredHoldings.length === 0}
           <Table.Row>
             <Table.Cell class="h-24 text-center text-muted-foreground" colspan={skeletonCols}>
-              No holdings match “{query}”.
+              No holdings match “{query.value}”.
             </Table.Cell>
           </Table.Row>
         {:else}
@@ -298,7 +303,7 @@
               {/if}
               {#if isVisible('avgCost')}
                 <Table.Cell class="py-2.5 text-right tabular-nums">
-                  {h.shares > 0 ? fmt(h.avgCostPerShare) : '\u2014'}
+                  {h.shares > 0 ? fmt(h.avgCostPerShare) : EMPTY_DASH}
                 </Table.Cell>
               {/if}
               {#if isVisible('price')}
@@ -313,7 +318,7 @@
                       {fmt(h.price)}
                     </span>
                   {:else}
-                    —
+                    {EMPTY_DASH}
                   {/if}
                 </Table.Cell>
               {/if}

@@ -1,10 +1,8 @@
 <script lang="ts">
   import { page } from '$app/state';
   import { resolve } from '$app/paths';
-  import * as Table from '$lib/components/ui/table';
   import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
   import { PaginationNav } from '$lib/components/shared/pagination-nav';
-  import { Badge } from '$lib/components/ui/badge';
   import { Button } from '$lib/components/ui/button';
   import { Skeleton } from '$lib/components/ui/skeleton';
   import {
@@ -16,21 +14,16 @@
     LoaderCircle,
     Columns3
   } from '@lucide/svelte';
-  import SortHead from '$lib/components/shared/sort-head.svelte';
   import { dbSession } from '$lib/stores/db.svelte';
   import { appSettings, saveSettings } from '$lib/stores/settings.svelte';
   import { setBreadcrumb } from '$lib/stores/breadcrumb.svelte';
   import { fetchAccountDetail } from '$lib/tauri';
   import {
     clampZero,
-    formatDate as fmtDate,
     formatSessionCurrency as fmt,
-    formatSignedCurrency,
     sessionCurrency,
-    signColor,
     plural
   } from '$lib/utils/format.svelte';
-  import { statusFor } from '$lib/utils/reconcile';
   import { errMsg } from '$lib/utils/error';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
   import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
@@ -48,17 +41,17 @@
   } from '$lib/hooks/use-url-params.svelte';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import { useTableSort } from '$lib/hooks/use-table-sort.svelte';
-  import { handleRowClick, openTransaction } from '$lib/utils/navigation';
+  import { useColumnVisibility } from '$lib/hooks/use-column-visibility.svelte';
   import TransactionFilters from '$lib/features/transactions/transaction-filters.svelte';
+  import TransactionTable from '$lib/features/transactions/transaction-table.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import KpiCard from '$lib/components/shared/kpi-card.svelte';
   import KpiCardRow from '$lib/components/shared/kpi-card-row.svelte';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
   import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
-  import TableShell from '$lib/components/shared/table-shell.svelte';
   import BalanceTrendChart from '$lib/features/accounts/balance-trend-chart.svelte';
   import BalancePie from '$lib/features/accounts/balance-pie.svelte';
-  import SubaccountsTable from '$lib/features/accounts/subaccounts-table.svelte';
+  import AccountTable from '$lib/features/accounts/account-table.svelte';
 
   let guid = $derived(page.params.guid);
   let pageSize = $derived(appSettings.value.pageSize);
@@ -81,23 +74,8 @@
 
   const DEFAULT_COLUMNS: ColumnId[] = ['transfer', 'amount'];
 
-  let visibleColumns = $state<ColumnId[]>([...DEFAULT_COLUMNS]);
-
-  function isVisible(id: ColumnId): boolean {
-    return visibleColumns.includes(id);
-  }
-
-  function setVisible(id: ColumnId, checked: boolean) {
-    if (checked) {
-      if (!visibleColumns.includes(id)) visibleColumns = [...visibleColumns, id];
-    } else {
-      visibleColumns = visibleColumns.filter((c) => c !== id);
-    }
-  }
-
-  function resetColumns() {
-    visibleColumns = [...DEFAULT_COLUMNS];
-  }
+  const cols = useColumnVisibility<ColumnId>(DEFAULT_COLUMNS);
+  let visibleColumns = $derived(cols.visibleColumns);
 
   let skeletonCols = $derived(visibleColumns.length + 2);
 
@@ -344,7 +322,7 @@
 
     <!-- Sub-accounts -->
     {#if subAccounts.length > 0}
-      <SubaccountsTable nodes={subAccounts} />
+      <AccountTable rows={subAccounts} showType nameHeader="Subaccount" />
     {/if}
 
     <!-- Filters -->
@@ -362,15 +340,17 @@
           <DropdownMenu.Content align="end">
             {#each COLUMNS as col (col.id)}
               <DropdownMenu.CheckboxItem
-                checked={isVisible(col.id)}
-                onCheckedChange={(checked) => setVisible(col.id, checked)}
+                checked={cols.isVisible(col.id)}
+                onCheckedChange={(checked) => cols.setVisible(col.id, checked)}
                 closeOnSelect={false}
               >
                 {col.label}
               </DropdownMenu.CheckboxItem>
             {/each}
             <DropdownMenu.Separator />
-            <DropdownMenu.Item onclick={resetColumns}>Reset to default</DropdownMenu.Item>
+            <DropdownMenu.Item onclick={() => cols.resetColumns()}
+              >Reset to default</DropdownMenu.Item
+            >
           </DropdownMenu.Content>
         </DropdownMenu.Root>
       {/snippet}
@@ -399,116 +379,15 @@
         <!-- Keep the previous table visible (dimmed) during refetches so the
              page doesn't jump and pagination stays in place. -->
         <DimWrapper active={loading} class="flex flex-col gap-4">
-          <TableShell>
-            <Table.Header>
-              <Table.Row class="bg-muted/75">
-                <SortHead
-                  label="Date"
-                  active={sort.sortBy === 'date'}
-                  dir={sort.sortDir}
-                  onclick={() => sort.toggle('date')}
-                />
-                <SortHead
-                  label="Description"
-                  active={sort.sortBy === 'description'}
-                  dir={sort.sortDir}
-                  onclick={() => sort.toggle('description')}
-                />
-                {#if isVisible('transfer')}
-                  <Table.Head class="text-muted-foreground">Transfer</Table.Head>
-                {/if}
-                {#if isVisible('status')}
-                  <Table.Head class="text-muted-foreground">Status</Table.Head>
-                {/if}
-                {#if isVisible('amount')}
-                  <SortHead
-                    label="Amount"
-                    active={sort.sortBy === 'amount'}
-                    dir={sort.sortDir}
-                    onclick={() => sort.toggle('amount')}
-                    class="text-right"
-                  />
-                {/if}
-                {#if isVisible('runningBalance')}
-                  <Table.Head class="text-right text-muted-foreground">Balance</Table.Head>
-                {/if}
-              </Table.Row>
-            </Table.Header>
-            <Table.Body>
-              {#each d.transactions as txn (txn.guid)}
-                <Table.Row
-                  class="cursor-pointer hover:bg-muted/50"
-                  onclick={(e) => handleRowClick(e, () => openTransaction(txn.guid))}
-                >
-                  <Table.Cell class="py-2.5 whitespace-nowrap text-muted-foreground">
-                    {fmtDate(txn.postDate)}
-                  </Table.Cell>
-                  <Table.Cell class="max-w-md py-2.5 font-medium">
-                    <!-- Accessible link target for keyboard/middle-click; the
-                         row click is a convenience shortcut. Its event must
-                         keep bubbling so SvelteKit's router can intercept it. -->
-                    <a
-                      class="block truncate"
-                      href={resolve('/transactions/[id]', { id: txn.guid })}
-                      title={txn.description ?? undefined}
-                    >
-                      {#if txn.num}<span class="mr-1 text-muted-foreground">#{txn.num}</span>{/if}
-                      {txn.description || '\u2014'}
-                    </a>
-                    {#if txn.notes}
-                      <p
-                        class="truncate text-xs font-normal text-muted-foreground"
-                        title={txn.notes}
-                      >
-                        {txn.notes}
-                      </p>
-                    {/if}
-                  </Table.Cell>
-                  {#if isVisible('transfer')}
-                    <Table.Cell
-                      class="max-w-xs py-2.5 text-muted-foreground"
-                      title={txn.counterAccounts.join(', ')}
-                    >
-                      {#if txn.counterAccounts.length === 0}
-                        —
-                      {:else}
-                        <div class="flex items-center gap-1">
-                          <span class="truncate">{txn.counterAccounts[0]}</span>
-                          {#if txn.counterAccounts.length > 1}
-                            <Badge variant="outline" class="shrink-0 text-[10px] leading-none"
-                              >+{txn.counterAccounts.length - 1} more</Badge
-                            >
-                          {/if}
-                        </div>
-                      {/if}
-                    </Table.Cell>
-                  {/if}
-                  {#if isVisible('status')}
-                    <Table.Cell class="py-2.5">
-                      {@const status = statusFor(txn.reconcileState)}
-                      <Badge variant={status.variant}>{status.label}</Badge>
-                    </Table.Cell>
-                  {/if}
-                  {#if isVisible('amount')}
-                    <Table.Cell
-                      class="py-2.5 text-right font-medium whitespace-nowrap tabular-nums {signColor(
-                        txn.amount
-                      )}"
-                    >
-                      {formatSignedCurrency(txn.amount, currency)}
-                    </Table.Cell>
-                  {/if}
-                  {#if isVisible('runningBalance')}
-                    <Table.Cell
-                      class="py-2.5 text-right font-medium whitespace-nowrap tabular-nums"
-                    >
-                      {fmt(txn.runningBalance)}
-                    </Table.Cell>
-                  {/if}
-                </Table.Row>
-              {/each}
-            </Table.Body>
-          </TableShell>
+          <TransactionTable
+            transactions={d.transactions}
+            {currency}
+            sortBy={sort.sortBy}
+            sortDir={sort.sortDir}
+            onSort={(key) => sort.toggle(key)}
+            variant="account"
+            {visibleColumns}
+          />
 
           <PaginationNav
             bind:page={pg}

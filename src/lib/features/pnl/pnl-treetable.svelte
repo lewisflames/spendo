@@ -1,7 +1,7 @@
 <script lang="ts">
   import * as Table from '$lib/components/ui/table';
   import { resolve } from '$app/paths';
-  import { signColor } from '$lib/utils/format.svelte';
+  import { formatSessionCurrency as fmt, fmtPct, formatDateRange } from '$lib/utils/format.svelte';
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
   import TreeChevron from '$lib/components/shared/tree-chevron.svelte';
@@ -11,6 +11,7 @@
   import type { ProfitLossReport } from '$lib/tauri';
   import type { SvelteSet } from 'svelte/reactivity';
   import type { PnLTreeNode } from './pnl-types';
+  import { changePct, varianceColor } from './pnl-utils';
 
   let {
     loading,
@@ -19,10 +20,7 @@
     pnlData,
     tree,
     visibleIncomeRows,
-    visibleExpenseRows,
-    fmt,
-    fmtPct,
-    formatDateRange
+    visibleExpenseRows
   }: {
     loading: boolean;
     error: string | null;
@@ -31,16 +29,7 @@
     tree: { expanded: SvelteSet<string>; toggle: (guid: string) => void };
     visibleIncomeRows: { node: PnLTreeNode; depth: number }[];
     visibleExpenseRows: { node: PnLTreeNode; depth: number }[];
-    fmt: (n: number) => string;
-    fmtPct: (n: number | null) => string;
-    formatDateRange: (from: string, to: string) => string;
   } = $props();
-
-  function pct(current: number, previous: number): number | null {
-    if (previous !== 0) return ((current - previous) / previous) * 100;
-    if (current !== 0) return 0;
-    return null;
-  }
 
   // Backend convention (src-tauri/src/reports.rs): income and expense totals
   // are both positive; net = income - expenses.
@@ -64,8 +53,6 @@
         {@const variance = row.currentAmount - row.previousAmount}
         {@const hasChildren = item.node.children.length > 0}
         {@const isExpanded = tree.expanded.has(row.accountGuid)}
-        {@const posClass = signColor(1, positiveGood)}
-        {@const negClass = signColor(-1, positiveGood)}
         <Table.Row class={item.depth === 0 ? 'bg-muted/50' : ''}>
           <Table.Cell class="p-0">
             <div class="flex items-center gap-1 py-1.5" style={treeIndentStyle(item.depth)}>
@@ -90,13 +77,13 @@
           </Table.Cell>
           <Table.Cell
             class={'py-1.5 text-right text-sm tabular-nums ' +
-              (variance !== 0 ? (variance > 0 ? posClass : negClass) : '')}
+              (variance !== 0 ? varianceColor(variance, positiveGood) : '')}
           >
             {variance >= 0 ? '+' : ''}{fmt(variance)}
           </Table.Cell>
           <Table.Cell
             class={'py-1.5 text-right text-sm tabular-nums ' +
-              (row.changePct !== null ? (row.changePct >= 0 ? posClass : negClass) : '')}
+              (row.changePct !== null ? varianceColor(row.changePct, positiveGood) : '')}
           >
             {fmtPct(row.changePct)}
           </Table.Cell>
@@ -112,9 +99,7 @@
       positiveGood: boolean
     )}
       {@const variance = current - previous}
-      {@const changePct = pct(current, previous)}
-      {@const posClass = signColor(1, positiveGood)}
-      {@const negClass = signColor(-1, positiveGood)}
+      {@const pct = changePct(current, previous)}
       <Table.Row class="border-t border-b bg-muted/75 font-semibold">
         <Table.Cell
           class="py-2 text-xs font-semibold tracking-wider text-muted-foreground uppercase"
@@ -131,15 +116,15 @@
         </Table.Cell>
         <Table.Cell
           class={'py-2 text-right text-sm tabular-nums ' +
-            (variance !== 0 ? (variance > 0 ? posClass : negClass) : '')}
+            (variance !== 0 ? varianceColor(variance, positiveGood) : '')}
         >
           {variance >= 0 ? '+' : ''}{fmt(variance)}
         </Table.Cell>
         <Table.Cell
           class={'py-2 text-right text-sm tabular-nums ' +
-            (changePct !== null ? (changePct >= 0 ? posClass : negClass) : '')}
+            (pct !== null ? varianceColor(pct, positiveGood) : '')}
         >
-          {fmtPct(changePct)}
+          {fmtPct(pct)}
         </Table.Cell>
       </Table.Row>
     {/snippet}
