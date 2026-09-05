@@ -8,7 +8,14 @@
 
   import { getBudgetYears, setBudgetYearAmount } from '$lib/tauri';
   import { errMsg } from '$lib/utils/error';
-  import type { AccountNode, AccountsResult, BudgetDateRange } from '$lib/tauri';
+  import type { AccountsResult, BudgetDateRange } from '$lib/tauri';
+  import {
+    flattenExpenseAccounts,
+    budgetYearBounds,
+    buildYearOptions,
+    fallbackYearOptions,
+    clampYear as clampYearToRange
+  } from './budget-utils';
 
   let {
     open = $bindable(false),
@@ -29,22 +36,6 @@
     onSave?: (accountGuid: string, year: number) => void;
     onError?: (msg: string) => void;
   } = $props();
-
-  function flattenExpenseAccounts(
-    nodes: AccountNode[]
-  ): { guid: string; name: string; description: string | null }[] {
-    const result: { guid: string; name: string; description: string | null }[] = [];
-    function walk(list: AccountNode[]) {
-      for (const n of list) {
-        if (!n.placeholder && n.accountType === 'EXPENSE') {
-          result.push({ guid: n.guid, name: n.name, description: n.description });
-        }
-        if (n.children.length > 0) walk(n.children);
-      }
-    }
-    walk(nodes);
-    return result;
-  }
 
   let expenseAccounts = $derived(
     accountsData?.trees ? flattenExpenseAccounts(accountsData.trees) : []
@@ -70,24 +61,16 @@
 
   // Years are limited to the book's transaction range, plus one year ahead so
   // budgets can be planned for the next year.
-  let minYear = $derived(
-    dateRange?.earliestDate ? Number(dateRange.earliestDate.slice(0, 4)) : null
-  );
-  let maxYear = $derived(
-    dateRange?.latestDate ? Number(dateRange.latestDate.slice(0, 4)) + 1 : null
-  );
+  let { minYear, maxYear } = $derived.by(() => {
+    const { minYear, maxYear: rawMax } = budgetYearBounds(dateRange);
+    return { minYear, maxYear: rawMax !== null ? rawMax + 1 : null };
+  });
 
   let yearOptions = $derived.by(() => {
     if (minYear !== null && maxYear !== null) {
-      return Array.from({ length: maxYear - minYear + 1 }, (_, i) => {
-        const y = minYear + i;
-        return { value: String(y), label: String(y) };
-      });
+      return buildYearOptions(minYear, maxYear);
     }
-    return Array.from({ length: 21 }, (_, i) => {
-      const y = now.getFullYear() - 10 + i;
-      return { value: String(y), label: String(y) };
-    });
+    return fallbackYearOptions(now.getFullYear(), 10);
   });
 
   let takenSet = $derived(new Set(existingYears ?? []));
@@ -95,9 +78,7 @@
   let freeYears = $derived(yearOptions.filter((o) => !takenSet.has(Number(o.value))));
 
   function clampYear(y: number): number {
-    if (minYear !== null && y < minYear) return minYear;
-    if (maxYear !== null && y > maxYear) return maxYear;
-    return y;
+    return clampYearToRange(y, minYear, maxYear);
   }
 
   // Re-initialize the form whenever the dialog opens (user interaction).

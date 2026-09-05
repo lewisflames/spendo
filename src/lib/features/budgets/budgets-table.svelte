@@ -1,16 +1,18 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import * as Table from '$lib/components/ui/table';
-  import * as Tooltip from '$lib/components/ui/tooltip';
   import { cn } from '$lib/utils';
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
-  import { formatCurrency } from '$lib/utils/format.svelte';
+  import { formatCurrency, formatSignedCurrency } from '$lib/utils/format.svelte';
+  import { EMPTY_DASH } from '$lib/utils/format.svelte';
   import { handleRowClick, openBudget } from '$lib/utils/navigation';
   import { Plus } from '@lucide/svelte';
   import { Button } from '$lib/components/ui/button';
-  import { Progress } from '$lib/components/ui/progress';
   import type { BudgetActualRow } from '$lib/tauri';
+  import PacingBar from './pacing-bar.svelte';
+  import { remainingColor } from './budget-utils';
 
   let {
     rows,
@@ -30,8 +32,8 @@
     return formatCurrency(n, currency);
   }
 
-  function remainingColor(remaining: number): string {
-    return remaining < 0 ? 'text-destructive' : 'text-success';
+  function fmtSigned(n: number): string {
+    return formatSignedCurrency(n, currency);
   }
 </script>
 
@@ -70,11 +72,20 @@
     <Table.Body>
       {#each rows as item (item.guid)}
         <Table.Row
-          class="cursor-pointer"
+          class="cursor-pointer hover:bg-muted/50"
           onclick={(e) => handleRowClick(e, () => openBudget(item.accountGuid, year))}
         >
           <Table.Cell class="py-2.5">
-            {item.accountDescription ?? item.accountName}
+            <!-- Accessible link target for keyboard/middle-click; the row click
+                 is a convenience shortcut. -->
+            <a
+              class="block min-w-0 font-medium hover:underline"
+              href="{resolve('/budgets/[accountGuid]', {
+                accountGuid: item.accountGuid
+              })}?year={year}"
+            >
+              {item.accountDescription ?? item.accountName}
+            </a>
           </Table.Cell>
           <Table.Cell class="py-2.5 text-right tabular-nums">
             {fmt(item.budgetAmount)}
@@ -82,9 +93,7 @@
           <Table.Cell
             class={cn('py-2.5 text-right tabular-nums', remainingColor(item.rolloverBalance))}
           >
-            {item.rolloverBalance >= 0
-              ? `+${fmt(item.rolloverBalance)}`
-              : fmt(item.rolloverBalance)}
+            {fmtSigned(item.rolloverBalance)}
           </Table.Cell>
           <Table.Cell class="py-2.5 text-right tabular-nums">
             {fmt(item.actualAmount)}
@@ -93,52 +102,24 @@
             {#if item.elapsedMonths > 0}
               {fmt(item.expectedYtd)}
             {:else}
-              <span class="text-xs text-muted-foreground">&mdash;</span>
+              <span class="text-xs text-muted-foreground">{EMPTY_DASH}</span>
             {/if}
           </Table.Cell>
           <Table.Cell class="py-2.5">
             {#if item.elapsedMonths > 0}
-              <Tooltip.Root>
-                <Tooltip.Trigger>
-                  {#snippet child({ props })}
-                    <span {...props} class="flex items-center gap-2">
-                      <Progress
-                        value={Math.min(100, Math.max(0, item.pacingPercentage))}
-                        max={100}
-                        class={cn(
-                          'h-1.5 w-20',
-                          item.pacingPercentage > 100 &&
-                            'bg-destructive/20 **:data-[slot=progress-indicator]:bg-destructive'
-                        )}
-                      />
-                      <span
-                        class={cn(
-                          'text-xs tabular-nums',
-                          item.pacingPercentage > 100
-                            ? 'font-medium text-destructive'
-                            : 'text-muted-foreground'
-                        )}>{Math.max(0, item.pacingPercentage).toFixed(1)}%</span
-                      >
-                    </span>
-                  {/snippet}
-                </Tooltip.Trigger>
-                <Tooltip.Content>
-                  <p>
-                    {fmt(item.actualAmount)} spent of {fmt(item.expectedYtd)} expected
-                    {#if item.delta >= 0}
-                      ({fmt(item.delta)} under)
-                    {:else}
-                      ({fmt(-item.delta)} over)
-                    {/if}
-                  </p>
-                </Tooltip.Content>
-              </Tooltip.Root>
+              <PacingBar
+                pacingPercentage={item.pacingPercentage}
+                actualAmount={item.actualAmount}
+                expectedYtd={item.expectedYtd}
+                delta={item.delta}
+                {fmt}
+              />
             {:else}
-              <span class="text-xs text-muted-foreground">&mdash;</span>
+              <span class="text-xs text-muted-foreground">{EMPTY_DASH}</span>
             {/if}
           </Table.Cell>
           <Table.Cell class={cn('py-2.5 text-right tabular-nums', remainingColor(item.remaining))}>
-            {item.remaining >= 0 ? `+${fmt(item.remaining)}` : fmt(item.remaining)}
+            {fmtSigned(item.remaining)}
           </Table.Cell>
         </Table.Row>
       {/each}
