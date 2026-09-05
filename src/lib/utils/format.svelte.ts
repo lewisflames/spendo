@@ -43,23 +43,9 @@ export function signColor(value: number, positiveGood = true): string {
 }
 
 export function fmtPct(n: number | null | undefined): string {
-  if (n === null || n === undefined) return '—';
+  if (n === null || n === undefined) return EMPTY_DASH;
   const sign = n >= 0 ? '+' : '';
   return `${sign}${n.toFixed(1)}%`;
-}
-
-export function balanceColor(balance: number, category: string): string {
-  const b = clampZero(balance);
-  if (category === 'ASSET') {
-    return b >= 0 ? 'text-success' : 'text-destructive';
-  }
-  if (category === 'EQUITY') {
-    return b >= 0 ? 'text-warning' : 'text-destructive';
-  }
-  if (category === 'LIABILITY') {
-    return b >= 0 ? 'text-destructive' : 'text-success';
-  }
-  return b >= 0 ? 'text-success' : 'text-destructive';
 }
 
 /** Snap float dust (e.g. -0.004 from FX math) to a clean zero for display. */
@@ -104,26 +90,32 @@ export function formatSessionCurrency(n: number): string {
 /**
  * Parse date-only strings (`YYYY-MM-DD`) as local dates. The ES spec parses
  * them as UTC midnight, which renders as the previous day west of UTC.
+ * Also accepts `YYYY-MM` (first of month, local) for trend charts.
  */
 export function parseLocalDate(date: string | Date): Date {
   if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
     return new Date(`${date}T00:00:00`);
   }
+  if (typeof date === 'string' && /^\d{4}-\d{2}$/.test(date)) {
+    return new Date(`${date}-01T00:00:00`);
+  }
   return new Date(date);
+}
+
+/** Display placeholder for missing values; keeps table layout stable. */
+export const EMPTY_DASH = '—';
+
+/** Calendar year of an ISO date string without UTC-shift risk. */
+export function yearOf(isoDate: string): number {
+  const year = Number.parseInt(isoDate.slice(0, 4), 10);
+  if (Number.isInteger(year)) return year;
+  return parseLocalDate(isoDate).getFullYear();
 }
 
 export function formatDate(date: string | Date, opts?: Intl.DateTimeFormatOptions): string {
   const d = parseLocalDate(date);
   const o = opts ?? { month: 'short', day: 'numeric', year: 'numeric' };
   return cachedDateTimeFormat(appSettings.value.locale, o).format(d);
-}
-
-export function formatMonth(date: string | Date): string {
-  const d = parseLocalDate(date);
-  return cachedDateTimeFormat(appSettings.value.locale, {
-    month: 'short',
-    year: '2-digit'
-  }).format(d);
 }
 
 /** English pluralization for counts, e.g. `plural(3, 'account')` -> "3 accounts". */
@@ -136,13 +128,9 @@ export function plural(n: number, word: string): string {
  * placeholders keep the layout stable when either bound is missing.
  */
 export function formatDateRange(from?: string | null, to?: string | null): string {
-  const start = from ? formatDate(from, { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
-  const end = to ? formatDate(to, { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
+  const start = from
+    ? formatDate(from, { month: 'short', day: 'numeric', year: 'numeric' })
+    : EMPTY_DASH;
+  const end = to ? formatDate(to, { month: 'short', day: 'numeric', year: 'numeric' }) : EMPTY_DASH;
   return `${start} – ${end}`;
-}
-
-export function formatCompact(n: number): string {
-  if (Math.abs(n) >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
-  if (Math.abs(n) >= 1_000) return (n / 1_000).toFixed(1) + 'K';
-  return n.toFixed(0);
 }
