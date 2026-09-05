@@ -107,7 +107,6 @@ CREATE TABLE IF NOT EXISTS budgets (
 	account_guid TEXT NOT NULL REFERENCES accounts(guid) ON DELETE CASCADE,
 	year INTEGER NOT NULL,
 	amount REAL NOT NULL,
-	notes TEXT,
 	created_at TEXT NOT NULL,
 	UNIQUE (account_guid, year)
 );

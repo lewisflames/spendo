@@ -1,7 +1,6 @@
 <script lang="ts">
   import * as Dialog from '$lib/components/ui/dialog';
   import { Input } from '$lib/components/ui/input';
-  import { Textarea } from '$lib/components/ui/textarea';
   import { Button } from '$lib/components/ui/button';
 
   import { setBudgetYearAmount } from '$lib/tauri';
@@ -12,7 +11,6 @@
     accountGuid,
     year,
     amount: initialAmount,
-    notes: initialNotes = '',
     exists = true,
     currency = 'EUR',
     onSave,
@@ -22,7 +20,6 @@
     accountGuid: string;
     year: number;
     amount: number;
-    notes?: string | null;
     exists?: boolean;
     currency?: string;
     onSave?: () => void;
@@ -30,7 +27,6 @@
   } = $props();
 
   let amount = $state(0);
-  let notes = $state('');
 
   let loading = $state(false);
   let amountError = $state('');
@@ -39,7 +35,6 @@
   // it always reflects the target year.
   function syncFromEntry() {
     amount = initialAmount;
-    notes = initialNotes ?? '';
     amountError = '';
   }
 
@@ -48,7 +43,7 @@
     if (amount <= 0) return;
     loading = true;
     try {
-      await setBudgetYearAmount(accountGuid, year, amount, notes.trim() || undefined);
+      await setBudgetYearAmount(accountGuid, year, amount);
       open = false;
       onSave?.();
     } catch (e: unknown) {
@@ -98,16 +93,6 @@
         {#if amountError}
           <p id="amount-error" role="alert" class="text-xs text-destructive">{amountError}</p>
         {/if}
-      </div>
-
-      <div class="flex flex-col gap-2">
-        <label for="notes" class="text-sm font-medium">Notes</label>
-        <Textarea
-          id="notes"
-          bind:value={notes}
-          placeholder="Optional notes about this budget"
-          class="min-h-20"
-        />
       </div>
     </div>
 

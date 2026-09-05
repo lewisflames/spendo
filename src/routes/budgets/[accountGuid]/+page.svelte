@@ -16,7 +16,7 @@
   import type { AccountNode } from '$lib/tauri';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import { useUrlParams } from '$lib/hooks/use-url-params.svelte';
-  import { Pencil, Plus, Trash2, StickyNote, ChevronLeft, ChevronRight } from '@lucide/svelte';
+  import { Pencil, Plus, Trash2, ChevronLeft, ChevronRight } from '@lucide/svelte';
   import { errMsg } from '$lib/utils/error';
   import { toast } from '$lib/components/ui/sonner';
   import PageHeader from '$lib/components/layout/page-header.svelte';
@@ -161,7 +161,26 @@
 
   function handleSaveSuccess(message = 'Annual budget saved') {
     res.reload();
+    formError = null;
     toast.success(message);
+  }
+
+  function handleBulkSaveSuccess(
+    _accountGuid: string,
+    result: { inserted: number; skipped: number[] }
+  ) {
+    res.reload();
+    formError = null;
+    const skipped = result.skipped.length;
+    if (skipped > 0 && result.inserted > 0) {
+      toast.success(
+        `Created ${result.inserted} year${result.inserted === 1 ? '' : 's'} — ${skipped} skipped (already had budgets)`
+      );
+    } else if (skipped > 0) {
+      toast.success(`No years created — ${skipped} already had budgets`);
+    } else {
+      toast.success('Budget saved');
+    }
   }
 
   async function confirmDelete() {
@@ -185,10 +204,7 @@
 
 {#snippet headerDescription()}
   <span class="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-    {#if budget?.notes}
-      <StickyNote aria-hidden="true" class="inline size-3.5 shrink-0 text-muted-foreground" />
-    {/if}
-    {budget?.notes ?? 'Yearly budget for this account · carryover always applied'}
+    Yearly budget for this account · carryover always applied
   </span>
 {/snippet}
 
@@ -439,7 +455,6 @@
     {accountGuid}
     year={detail?.year ?? selectedYear}
     amount={detail?.amount ?? 0}
-    notes={detail?.budget.notes ?? ''}
     exists={detail !== null}
     {currency}
     onSave={handleSaveSuccess}
@@ -451,7 +466,7 @@
     {currency}
     {dateRange}
     initialYear={selectedYear}
-    onSave={() => handleSaveSuccess('Budget saved')}
+    onSave={handleBulkSaveSuccess}
     onError={(msg) => (formError = msg)}
   />
 {/if}

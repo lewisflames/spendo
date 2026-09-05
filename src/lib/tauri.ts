@@ -361,7 +361,6 @@ export interface Budget {
   accountType: string;
   year: number;
   amount: number;
-  notes: string | null;
   createdAt: string;
 }
 
@@ -413,27 +412,28 @@ export interface BudgetDetail {
   monthlyEntries: MonthlySlice[];
 }
 
+export interface BulkBudgetResult {
+  inserted: number;
+  skipped: number[];
+}
+
 export const setBudgetYearAmount = (
   accountGuid: string,
   year: number,
-  amount: number,
-  notes?: string
-): Promise<Budget> =>
-  invoke('set_budget_year_amount', { accountGuid, year, amount, notes: notes ?? null });
+  amount: number
+): Promise<Budget> => invoke('set_budget_year_amount', { accountGuid, year, amount });
 
 export const setBudgetYearAmounts = (
   accountGuid: string,
   startYear: number,
   endYear: number,
-  amount: number,
-  notes?: string
-): Promise<void> =>
+  amount: number
+): Promise<BulkBudgetResult> =>
   invoke('set_budget_year_amounts', {
     accountGuid,
     startYear,
     endYear,
-    amount,
-    notes: notes ?? null
+    amount
   });
 
 export const deleteBudgetYear = (accountGuid: string, year: number): Promise<void> =>
