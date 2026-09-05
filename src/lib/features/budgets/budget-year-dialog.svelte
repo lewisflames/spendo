@@ -3,12 +3,11 @@
   import * as Select from '$lib/components/ui/select';
   import { Select as SelectPrimitive } from 'bits-ui';
   import { Input } from '$lib/components/ui/input';
-  import { Textarea } from '$lib/components/ui/textarea';
   import { Button } from '$lib/components/ui/button';
 
   import { setBudgetYearAmounts } from '$lib/tauri';
   import { errMsg } from '$lib/utils/error';
-  import type { AccountNode, AccountsResult, BudgetDateRange } from '$lib/tauri';
+  import type { AccountNode, AccountsResult, BudgetDateRange, BulkBudgetResult } from '$lib/tauri';
 
   let {
     open = $bindable(false),
@@ -26,7 +25,7 @@
     currency?: string;
     dateRange?: BudgetDateRange | null;
     initialYear?: number | null;
-    onSave?: (accountGuid: string) => void;
+    onSave?: (accountGuid: string, result: BulkBudgetResult) => void;
     onError?: (msg: string) => void;
   } = $props();
 
@@ -56,7 +55,6 @@
   let toYear = $state(String(now.getFullYear()));
 
   let amount = $state(0);
-  let notes = $state('');
 
   let loading = $state(false);
   let accountError = $state('');
@@ -100,7 +98,6 @@
     fromYear = String(y);
     toYear = String(y);
     amount = 0;
-    notes = '';
     accountError = '';
     amountError = '';
     rangeError = '';
@@ -115,15 +112,9 @@
     if (!target || amount <= 0 || rangeError) return;
     loading = true;
     try {
-      await setBudgetYearAmounts(
-        target,
-        Number(fromYear),
-        Number(toYear),
-        amount,
-        notes.trim() || undefined
-      );
+      const result = await setBudgetYearAmounts(target, Number(fromYear), Number(toYear), amount);
       open = false;
-      onSave?.(target);
+      onSave?.(target, result);
     } catch (e: unknown) {
       onError?.(errMsg(e, 'Failed to save budget'));
     } finally {
@@ -137,8 +128,8 @@
     <Dialog.Header>
       <Dialog.Title>Add Budget</Dialog.Title>
       <Dialog.Description>
-        Set the annual target for an expense account across a range of years. Years without a budget
-        stay empty, and carryover skips them.
+        Set the annual target for an expense account across a range of years. Only years without a
+        budget are created — existing years are kept.
       </Dialog.Description>
     </Dialog.Header>
 
@@ -241,19 +232,9 @@
 
       <p class="text-sm text-muted-foreground">
         {yearCount > 0
-          ? `${yearCount} year${yearCount === 1 ? '' : 's'} will be set to the target.`
+          ? `${yearCount} year${yearCount === 1 ? '' : 's'} selected. Existing budgets are kept.`
           : 'Select a valid year range.'}
       </p>
-
-      <div class="flex flex-col gap-2">
-        <label for="notes" class="text-sm font-medium">Notes</label>
-        <Textarea
-          id="notes"
-          bind:value={notes}
-          placeholder="Optional notes about this budget"
-          class="min-h-20"
-        />
-      </div>
     </div>
 
     <Dialog.Footer>

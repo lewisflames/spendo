@@ -68,7 +68,7 @@
   // Dim during refetches only; the initial load shows the skeleton instead.
   let yearLoading = $derived(res.loading && res.data !== null);
 
-  let totalBudgeted = $derived((rows ?? []).reduce((s, r) => s + r.effectiveTotal, 0));
+  let totalEffective = $derived((rows ?? []).reduce((s, r) => s + r.effectiveTotal, 0));
   let totalSpent = $derived((rows ?? []).reduce((s, r) => s + r.actualAmount, 0));
   let totalRemaining = $derived((rows ?? []).reduce((s, r) => s + r.remaining, 0));
 
@@ -134,9 +134,23 @@
   let atMin = $derived(minYear !== null && currentYear <= minYear);
   let atMax = $derived(maxYear !== null && currentYear >= maxYear);
 
-  function handleSaveSuccess(accountGuid: string) {
+  function handleSaveSuccess(
+    accountGuid: string,
+    result?: { inserted: number; skipped: number[] }
+  ) {
     res.reload();
-    toast.success('Budget saved');
+    formError = null;
+    const skipped = result?.skipped.length ?? 0;
+    const inserted = result?.inserted ?? 1;
+    if (skipped > 0 && inserted > 0) {
+      toast.success(
+        `Created ${inserted} year${inserted === 1 ? '' : 's'} — ${skipped} skipped (already had budgets)`
+      );
+    } else if (skipped > 0) {
+      toast.success(`No years created — ${skipped} already had budgets`);
+    } else {
+      toast.success('Budget saved');
+    }
     // Query-only year suffix on top of a resolved route.
     // eslint-disable-next-line svelte/no-navigation-without-resolve
     goto(resolve('/budgets/[accountGuid]', { accountGuid }) + `?year=${currentYear}`);
@@ -218,11 +232,7 @@
       <KpiCardRow />
     {:else}
       <DimWrapper active={yearLoading} class="grid grid-cols-1 gap-6 sm:grid-cols-3">
-        <KpiCard
-          title="Budgeted (incl. carryover)"
-          value={fmt(totalBudgeted)}
-          valueClass="text-chart-1"
-        >
+        <KpiCard title="Effective budget" value={fmt(totalEffective)} valueClass="text-chart-1">
           {#snippet icon()}
             <Wallet aria-hidden="true" class="size-4 text-chart-1" />
           {/snippet}
@@ -230,12 +240,15 @@
         <KpiCard
           title="Spent"
           value={fmt(totalSpent)}
-          valueClass={cn(totalSpent > totalBudgeted ? 'text-destructive' : 'text-success')}
+          valueClass={cn(totalSpent > totalEffective ? 'text-destructive' : 'text-success')}
         >
           {#snippet icon()}
             <TrendingDown
               aria-hidden="true"
-              class={cn('size-4', totalSpent > totalBudgeted ? 'text-destructive' : 'text-success')}
+              class={cn(
+                'size-4',
+                totalSpent > totalEffective ? 'text-destructive' : 'text-success'
+              )}
             />
           {/snippet}
         </KpiCard>

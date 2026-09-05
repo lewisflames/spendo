@@ -24,8 +24,14 @@ pub struct Budget {
     pub account_type: String,
     pub year: i32,
     pub amount: f64,
-    pub notes: Option<String>,
     pub created_at: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BulkBudgetResult {
+    pub inserted: i32,
+    pub skipped: Vec<i32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -102,8 +108,7 @@ fn row_to_budget(row: &rusqlite::Row) -> rusqlite::Result<Budget> {
         account_type: row.get(4)?,
         year: row.get(5)?,
         amount: row.get(6)?,
-        notes: row.get(7)?,
-        created_at: row.get(8)?,
+        created_at: row.get(7)?,
     })
 }
 
@@ -164,7 +169,7 @@ fn full_year_percentage(actual: f64, effective: f64) -> f64 {
 
 fn budget_select_sql() -> &'static str {
     "SELECT b.guid, b.account_guid, a.name, a.description, a.account_type,
-	        b.year, b.amount, b.notes, b.created_at
+	        b.year, b.amount, b.created_at
 	 FROM budgets b
 	 JOIN accounts a ON a.guid = b.account_guid
 	 WHERE b.account_guid = ?1 AND b.year = ?2"
@@ -194,28 +199,26 @@ fn assert_expense_account(conn: &Connection, account_guid: &str) -> Result<(), S
     Ok(())
 }
 
-/// Upsert a single year's budget amount (with per-year notes).
+/// Upsert a single year's budget amount.
 pub fn set_budget_year_amount_inner(
     conn: &Connection,
     account_guid: &str,
     year: i32,
     amount: f64,
-    notes: Option<&str>,
 ) -> Result<Budget, String> {
     assert_expense_account(conn, account_guid)?;
     validate_amount(amount)?;
     validate_year(year)?;
     conn.execute(
-        "INSERT INTO budgets (guid, account_guid, year, amount, notes, created_at)
-		 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        "INSERT INTO budgets (guid, account_guid, year, amount, created_at)
+		 VALUES (?1, ?2, ?3, ?4, ?5)
 		 ON CONFLICT (account_guid, year)
-		 DO UPDATE SET amount = excluded.amount, notes = excluded.notes",
+		 DO UPDATE SET amount = excluded.amount",
         rusqlite::params![
             Uuid::new_v4().to_string(),
             account_guid,
             year,
             amount,
-            notes,
             utils::iso_now()
         ],
     )
@@ -223,16 +226,15 @@ pub fn set_budget_year_amount_inner(
     read_budget_year(conn, account_guid, year)
 }
 
-/// Upsert a range of years with the same amount (and notes), overwriting any
-/// existing rows inside the range. The whole range is written atomically.
+/// Insert a range of years with the same amount, skipping years that already
+/// have a budget. The whole range is written atomically.
 pub fn set_budget_year_amounts_inner(
     conn: &Connection,
     account_guid: &str,
     start_year: i32,
     end_year: i32,
     amount: f64,
-    notes: Option<&str>,
-) -> Result<(), String> {
+) -> Result<BulkBudgetResult, String> {
     assert_expense_account(conn, account_guid)?;
     validate_amount(amount)?;
     validate_year(start_year)?;
@@ -245,25 +247,32 @@ pub fn set_budget_year_amounts_inner(
     }
 
     let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    let mut skipped = Vec::new();
     for year in start_year..=end_year {
-        tx.execute(
-            "INSERT INTO budgets (guid, account_guid, year, amount, notes, created_at)
-			 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-			 ON CONFLICT (account_guid, year)
-			 DO UPDATE SET amount = excluded.amount, notes = excluded.notes",
-            rusqlite::params![
-                Uuid::new_v4().to_string(),
-                account_guid,
-                year,
-                amount,
-                notes,
-                utils::iso_now()
-            ],
-        )
-        .map_err(|e| e.to_string())?;
+        let changed = tx
+            .execute(
+                "INSERT INTO budgets (guid, account_guid, year, amount, created_at)
+			 VALUES (?1, ?2, ?3, ?4, ?5)
+			 ON CONFLICT (account_guid, year) DO NOTHING",
+                rusqlite::params![
+                    Uuid::new_v4().to_string(),
+                    account_guid,
+                    year,
+                    amount,
+                    utils::iso_now()
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+        if changed == 0 {
+            skipped.push(year);
+        }
     }
     tx.commit().map_err(|e| e.to_string())?;
-    Ok(())
+    let total = end_year - start_year + 1;
+    Ok(BulkBudgetResult {
+        inserted: total - skipped.len() as i32,
+        skipped,
+    })
 }
 
 /// Delete a single year's budget. Other years for the account are kept.
@@ -774,10 +783,9 @@ pub async fn set_budget_year_amount(
     account_guid: String,
     year: i32,
     amount: f64,
-    notes: Option<String>,
 ) -> Result<Budget, String> {
     run_blocking(state.db.clone(), move |conn| {
-        set_budget_year_amount_inner(conn, &account_guid, year, amount, notes.as_deref())
+        set_budget_year_amount_inner(conn, &account_guid, year, amount)
     })
     .await
 }
@@ -789,17 +797,9 @@ pub async fn set_budget_year_amounts(
     start_year: i32,
     end_year: i32,
     amount: f64,
-    notes: Option<String>,
-) -> Result<(), String> {
+) -> Result<BulkBudgetResult, String> {
     run_blocking(state.db.clone(), move |conn| {
-        set_budget_year_amounts_inner(
-            conn,
-            &account_guid,
-            start_year,
-            end_year,
-            amount,
-            notes.as_deref(),
-        )
+        set_budget_year_amounts_inner(conn, &account_guid, start_year, end_year, amount)
     })
     .await
 }
@@ -904,8 +904,8 @@ mod tests {
     fn carryover_skips_years_without_budget() {
         let conn = setup();
         // Only 2022 and 2024 have budgets; 2023 has none and is skipped.
-        set_budget_year_amount_inner(&conn, "food", 2022, 1200.0, None).unwrap();
-        set_budget_year_amount_inner(&conn, "food", 2024, 1200.0, None).unwrap();
+        set_budget_year_amount_inner(&conn, "food", 2022, 1200.0).unwrap();
+        set_budget_year_amount_inner(&conn, "food", 2024, 1200.0).unwrap();
         add_spend(&conn, "t1", "2022-05-10", "food", 600.0);
         add_spend(&conn, "t2", "2023-06-10", "food", 9999.0);
 
@@ -927,8 +927,8 @@ mod tests {
     fn carryover_window_starts_at_first_budget_year() {
         let conn = setup();
         // Transactions in 2021 predate the first budget and are ignored.
-        set_budget_year_amount_inner(&conn, "food", 2022, 1200.0, None).unwrap();
-        set_budget_year_amount_inner(&conn, "food", 2023, 1200.0, None).unwrap();
+        set_budget_year_amount_inner(&conn, "food", 2022, 1200.0).unwrap();
+        set_budget_year_amount_inner(&conn, "food", 2023, 1200.0).unwrap();
         add_spend(&conn, "t0", "2021-05-10", "food", 5000.0);
         add_spend(&conn, "t1", "2022-05-10", "food", 600.0);
 
@@ -945,8 +945,8 @@ mod tests {
     #[test]
     fn carryover_includes_descendant_transactions() {
         let conn = setup();
-        set_budget_year_amount_inner(&conn, "dining", 2023, 2400.0, None).unwrap();
-        set_budget_year_amount_inner(&conn, "dining", 2024, 2400.0, None).unwrap();
+        set_budget_year_amount_inner(&conn, "dining", 2023, 2400.0).unwrap();
+        set_budget_year_amount_inner(&conn, "dining", 2024, 2400.0).unwrap();
         // First transaction is on the child account, March 2023, spending 300.
         add_spend(&conn, "t1", "2023-03-15", "restaurant", 300.0);
 
@@ -961,8 +961,8 @@ mod tests {
     #[test]
     fn overspending_reduces_carryover() {
         let conn = setup();
-        set_budget_year_amount_inner(&conn, "food", 2024, 1200.0, None).unwrap();
-        set_budget_year_amount_inner(&conn, "food", 2025, 1200.0, None).unwrap();
+        set_budget_year_amount_inner(&conn, "food", 2024, 1200.0).unwrap();
+        set_budget_year_amount_inner(&conn, "food", 2025, 1200.0).unwrap();
         // Overspend in the first year: 1500 against a 1200 budget.
         add_spend(&conn, "t1", "2024-01-05", "food", 1500.0);
 
@@ -975,7 +975,7 @@ mod tests {
     #[test]
     fn no_transactions_yields_zero_carryover() {
         let conn = setup();
-        set_budget_year_amount_inner(&conn, "unused", 2024, 960.0, None).unwrap();
+        set_budget_year_amount_inner(&conn, "unused", 2024, 960.0).unwrap();
 
         let rows = get_budget_vs_actual_inner(&conn, 2024).unwrap();
         assert_close(rows[0].budget_amount, 960.0);
@@ -992,8 +992,8 @@ mod tests {
     #[test]
     fn budgets_are_per_year() {
         let conn = setup();
-        set_budget_year_amount_inner(&conn, "food", 2024, 600.0, None).unwrap();
-        set_budget_year_amount_inner(&conn, "food", 2025, 1200.0, None).unwrap();
+        set_budget_year_amount_inner(&conn, "food", 2024, 600.0).unwrap();
+        set_budget_year_amount_inner(&conn, "food", 2025, 1200.0).unwrap();
         add_spend(&conn, "t1", "2024-01-05", "food", 600.0);
         add_spend(&conn, "t2", "2025-02-10", "food", 1400.0);
 
@@ -1009,7 +1009,7 @@ mod tests {
         // 2024: 0 + 2025: 1200 − 1400 = −200 once 2026 is created.
         let rows = get_budget_vs_actual_inner(&conn, 2026).unwrap();
         assert!(rows.is_empty());
-        set_budget_year_amount_inner(&conn, "food", 2026, 1200.0, None).unwrap();
+        set_budget_year_amount_inner(&conn, "food", 2026, 1200.0).unwrap();
         let rows = get_budget_vs_actual_inner(&conn, 2026).unwrap();
         assert_close(rows[0].rollover_balance, -200.0);
 
@@ -1023,16 +1023,12 @@ mod tests {
     #[test]
     fn upsert_overwrites_same_year() {
         let conn = setup();
-        let created =
-            set_budget_year_amount_inner(&conn, "food", 2024, 600.0, Some("first")).unwrap();
+        let created = set_budget_year_amount_inner(&conn, "food", 2024, 600.0).unwrap();
         assert_eq!(created.year, 2024);
         assert_close(created.amount, 600.0);
-        assert_eq!(created.notes.as_deref(), Some("first"));
 
-        let updated =
-            set_budget_year_amount_inner(&conn, "food", 2024, 900.0, Some("second")).unwrap();
+        let updated = set_budget_year_amount_inner(&conn, "food", 2024, 900.0).unwrap();
         assert_close(updated.amount, 900.0);
-        assert_eq!(updated.notes.as_deref(), Some("second"));
 
         // Still a single row for the year.
         let count: i64 = conn
@@ -1050,15 +1046,18 @@ mod tests {
     }
 
     #[test]
-    fn bulk_set_overwrites_year_range() {
+    fn bulk_set_skips_existing_years() {
         let conn = setup();
-        set_budget_year_amount_inner(&conn, "food", 2024, 600.0, None).unwrap();
+        set_budget_year_amount_inner(&conn, "food", 2024, 600.0).unwrap();
 
-        // Overwrite a range spanning the existing row plus new years.
-        set_budget_year_amounts_inner(&conn, "food", 2024, 2026, 900.0, None).unwrap();
+        // A range spanning the existing row plus new years: 2024 is kept,
+        // 2025-2026 are created.
+        let result = set_budget_year_amounts_inner(&conn, "food", 2024, 2026, 900.0).unwrap();
+        assert_eq!(result.inserted, 2);
+        assert_eq!(result.skipped, vec![2024]);
         assert_close(
             get_budget_detail_inner(&conn, "food", 2024).unwrap().amount,
-            900.0,
+            600.0,
         );
         assert_close(
             get_budget_detail_inner(&conn, "food", 2025).unwrap().amount,
@@ -1070,21 +1069,23 @@ mod tests {
         );
         assert!(get_budget_detail_inner(&conn, "food", 2027).is_err());
 
-        // A single-year range is allowed.
-        set_budget_year_amounts_inner(&conn, "food", 2025, 2025, 1000.0, None).unwrap();
+        // A single-year range over an existing year inserts nothing.
+        let result = set_budget_year_amounts_inner(&conn, "food", 2025, 2025, 1000.0).unwrap();
+        assert_eq!(result.inserted, 0);
+        assert_eq!(result.skipped, vec![2025]);
         assert_close(
             get_budget_detail_inner(&conn, "food", 2025).unwrap().amount,
-            1000.0,
+            900.0,
         );
     }
 
     #[test]
     fn bulk_set_rejects_inverted_range_and_bad_amount() {
         let conn = setup();
-        set_budget_year_amount_inner(&conn, "food", 2024, 600.0, None).unwrap();
+        set_budget_year_amount_inner(&conn, "food", 2024, 600.0).unwrap();
 
-        assert!(set_budget_year_amounts_inner(&conn, "food", 2025, 2024, 900.0, None).is_err());
-        assert!(set_budget_year_amounts_inner(&conn, "food", 2024, 2026, 0.0, None).is_err());
+        assert!(set_budget_year_amounts_inner(&conn, "food", 2025, 2024, 900.0).is_err());
+        assert!(set_budget_year_amounts_inner(&conn, "food", 2024, 2026, 0.0).is_err());
 
         // Nothing was written: 2025 still has no budget.
         assert!(get_budget_detail_inner(&conn, "food", 2025).is_err());
@@ -1097,8 +1098,8 @@ mod tests {
     #[test]
     fn delete_year_removes_only_that_year() {
         let conn = setup();
-        set_budget_year_amount_inner(&conn, "food", 2024, 600.0, None).unwrap();
-        set_budget_year_amount_inner(&conn, "food", 2025, 1200.0, None).unwrap();
+        set_budget_year_amount_inner(&conn, "food", 2024, 600.0).unwrap();
+        set_budget_year_amount_inner(&conn, "food", 2025, 1200.0).unwrap();
         add_spend(&conn, "t1", "2024-01-05", "food", 600.0);
 
         // 2025 carry with the 2024 row: 600 − 600 = 0.
@@ -1120,7 +1121,7 @@ mod tests {
     #[test]
     fn detail_missing_year_errors() {
         let conn = setup();
-        set_budget_year_amount_inner(&conn, "food", 2024, 600.0, None).unwrap();
+        set_budget_year_amount_inner(&conn, "food", 2024, 600.0).unwrap();
         let err = get_budget_detail_inner(&conn, "food", 2025).unwrap_err();
         assert_eq!(err, "No budget for this year");
     }
@@ -1128,8 +1129,8 @@ mod tests {
     #[test]
     fn detail_has_twelve_monthly_slices_with_pacing() {
         let conn = setup();
-        set_budget_year_amount_inner(&conn, "food", 2022, 1200.0, None).unwrap();
-        set_budget_year_amount_inner(&conn, "food", 2023, 1200.0, None).unwrap();
+        set_budget_year_amount_inner(&conn, "food", 2022, 1200.0).unwrap();
+        set_budget_year_amount_inner(&conn, "food", 2023, 1200.0).unwrap();
         add_spend(&conn, "t1", "2022-05-10", "food", 600.0);
         add_spend(&conn, "t2", "2023-01-15", "food", 100.0);
         add_spend(&conn, "t3", "2023-02-15", "food", 100.0);
@@ -1158,7 +1159,7 @@ mod tests {
     #[test]
     fn pacing_uses_expected_ytd() {
         let conn = setup();
-        set_budget_year_amount_inner(&conn, "food", 2023, 1200.0, None).unwrap();
+        set_budget_year_amount_inner(&conn, "food", 2023, 1200.0).unwrap();
         // No spending: pacing must be 0 and delta equals expected YTD.
         // Front-loaded: annual × elapsed/12 + carry (carry is 0 here).
         let rows = get_budget_vs_actual_inner(&conn, 2023).unwrap();
@@ -1172,8 +1173,8 @@ mod tests {
     #[test]
     fn front_loaded_carry_counts_in_full() {
         let conn = setup();
-        set_budget_year_amount_inner(&conn, "food", 2022, 1200.0, None).unwrap();
-        set_budget_year_amount_inner(&conn, "food", 2023, 1200.0, None).unwrap();
+        set_budget_year_amount_inner(&conn, "food", 2022, 1200.0).unwrap();
+        set_budget_year_amount_inner(&conn, "food", 2023, 1200.0).unwrap();
         add_spend(&conn, "t1", "2022-05-10", "food", 600.0);
 
         // 2023: annual 1200, carry 600. Front-loaded January expects
@@ -1187,10 +1188,10 @@ mod tests {
     #[test]
     fn invalid_year_and_amount_rejected() {
         let conn = setup();
-        set_budget_year_amount_inner(&conn, "food", 2024, 1200.0, None).unwrap();
-        assert!(set_budget_year_amount_inner(&conn, "food", 1800, 500.0, None).is_err());
-        assert!(set_budget_year_amount_inner(&conn, "food", 2024, 0.0, None).is_err());
-        assert!(set_budget_year_amount_inner(&conn, "food", 2025, 500.0, None).is_ok());
+        set_budget_year_amount_inner(&conn, "food", 2024, 1200.0).unwrap();
+        assert!(set_budget_year_amount_inner(&conn, "food", 1800, 500.0).is_err());
+        assert!(set_budget_year_amount_inner(&conn, "food", 2024, 0.0).is_err());
+        assert!(set_budget_year_amount_inner(&conn, "food", 2025, 500.0).is_ok());
         assert!(get_budget_vs_actual_inner(&conn, 1800).is_err());
         assert!(get_budget_detail_inner(&conn, "food", 1800).is_err());
     }
@@ -1198,7 +1199,7 @@ mod tests {
     #[test]
     fn non_expense_accounts_rejected() {
         let conn = setup();
-        assert!(set_budget_year_amount_inner(&conn, "root", 2024, 500.0, None).is_err());
-        assert!(set_budget_year_amount_inner(&conn, "missing", 2024, 500.0, None).is_err());
+        assert!(set_budget_year_amount_inner(&conn, "root", 2024, 500.0).is_err());
+        assert!(set_budget_year_amount_inner(&conn, "missing", 2024, 500.0).is_err());
     }
 }
