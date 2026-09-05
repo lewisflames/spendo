@@ -6,45 +6,44 @@ GnuCash financial data importer/explorer. Rust backend (`rusqlite`) + static Sve
 
 ## Commands
 
-| Action      | Command                                        |
-| ----------- | ---------------------------------------------- |
-| Dev server  | `bun run dev`                                  |
-| Build       | `bun run build`                                |
-| Preview     | `bun run preview`                              |
-| Prepare     | `bun run prepare` (svelte-kit sync)            |
-| Type-check  | `bun run check` (runs `svelte-kit sync` first) |
-| Lint        | `bun run lint` (prettier --check + eslint)     |
-| Format      | `bun run format` (prettier --write)            |
-| Tauri dev   | `bun run tauri:dev`                            |
-| Tauri build | `bun run tauri:build`                          |
+| Action      | Command                                                                                  |
+| ----------- | ---------------------------------------------------------------------------------------- |
+| Dev server  | `bun run dev` (`vite dev`)                                                               |
+| Build       | `bun run build` (`vite build`)                                                           |
+| Prepare     | `bun run prepare` (svelte-kit sync)                                                      |
+| Type-check  | `bun run check` (runs `svelte-kit sync` first)                                           |
+| Lint        | `bun run lint` (`prettier --check . && eslint .`)                                        |
+| Format      | `bun run format` (`prettier --write .`)                                                  |
+| Tauri dev   | `bun run tauri:dev` (runs `generate-icons` first)                                        |
+| Tauri build | `bun run tauri:build` (runs `generate-icons` first, `tauri build --features production`) |
 
-No test framework configured. Rust unit tests run with `cargo test` (in `src-tauri/`); frontend is verified via `bun run check` + `bun run lint`.
+No `preview` script (no `vite preview` wrapper). No frontend test framework. Rust unit tests (colocated in `src-tauri/src/` modules) run with `cargo test` (in `src-tauri/`); frontend is verified via `bun run check` + `bun run lint`.
 
 ## Code style
 
 - **Svelte 5 runes**: `$props()`, `$derived()`, `$state()` — no `export let` or `on:click`; use `onclick`, `{@render children()}`
-- **Prettier**: tabs, single quotes, no trailing commas, print width 100. Tailwind class sorting via `prettier-plugin-tailwindcss`
+- **Prettier**: 2-space indent (Prettier default; no `useTabs` in `.prettierrc`), single quotes, no trailing commas, print width 100. Tailwind class sorting via `prettier-plugin-tailwindcss`
 - **Tailwind v4**: `@import 'tailwindcss'` (Vite plugin, no PostCSS). Stylesheet at `src/app.css`.
 - **TypeScript**: strict mode, `rewriteRelativeImportExtensions` enabled, `moduleResolution: "bundler"`
-- **`compilerOptions.experimental.async: true`** — top-level `await` allowed in components
+- **`compilerOptions.experimental.async: true` in `svelte.config.js`** — top-level `await` allowed in components
 - **Icons**: Lucide (`@lucide/svelte`)
-- **Rust backend**: `serde` with `#[serde(rename_all = "camelCase")]` on all response structs
+- **Rust backend**: `serde` with `#[serde(rename_all = "camelCase")]` on all serialized response structs
 
 ## Architecture
 
 - **Tauri v2** desktop app. Frontend is static SvelteKit (adapter-static, SPA, no SSR). Backend is Rust in `src-tauri/src/`.
 - **All backend calls** go through `@tauri-apps/api/core` `invoke()` via `$lib/tauri.ts`. No `+server.ts` / `+page.server.ts`.
-- **Rust modules** (`src-tauri/src/`): `db`, `accounts`, `account_detail`, `transactions`, `balance`, `prices`, `import`, `home`, `reports`, `budgets`, `portfolio`, `settings`, `utils`. Cargo crate: `spendo_app_lib`.
-- **DB**: SQLite via `rusqlite`. Connection held in Tauri `State<Mutex<Connection>>`, initialized once at startup. DB file lives in Tauri's `app_data_dir` (`spendo.db`). Schema created on first use in `db::init_db`. No migrations by design (pre-release): `SCHEMA` is the single source of truth; schema changes require a database reset (Settings → Clear all data, or delete `spendo.db`) followed by re-import.
-- **Routes**: `/`, `/accounts`, `/accounts/[guid]`, `/balance`, `/budgets`, `/pnl`, `/portfolio`, `/transactions`, `/transactions/[id]`, `/prices`, `/settings`, `/about`, `/license`.
-- **Frontend layout**: routes contain only route files (`+page.svelte` etc.). Page-specific components/types live in `$lib/features/<domain>/` (`home`, `accounts`, `budgets`, `pnl`, `portfolio`, `transactions`). Domain utilities in `$lib/utils/` (`csv`, `export`, `error`, `format.svelte.ts`, `date-utils.svelte.ts`).
+- **Rust modules** (`src-tauri/src/`): `db`, `accounts`, `account_detail`, `transactions`, `prices`, `import`, `home`, `reports`, `budgets`, `portfolio`, `settings`, `utils`, plus support modules `fx`, `sql`, `tree`, `yahoo`. Cargo crate: `spendo_app_lib`.
+- **DB**: SQLite via `rusqlite`. Connection held as `Arc<Mutex<Connection>>` in Tauri state (`AppState` also carries `db_path`), initialized once at startup. DB file lives in Tauri's `app_data_dir` (`spendo.db`). Schema created on first use in `db::init_db`. No migrations by design (pre-release): `SCHEMA` is the single source of truth; schema changes require a database reset (Settings → Clear all data, or delete `spendo.db`) followed by re-import.
+- **Routes**: `/`, `/accounts`, `/accounts/[guid]`, `/budgets`, `/budgets/[accountGuid]`, `/pnl`, `/portfolio`, `/portfolio/[holding]`, `/transactions`, `/transactions/[id]`, `/settings`, `/about` (plus dev-only `/dev/force-test`).
+- **Frontend layout**: routes contain only route files (`+page.svelte` etc.). Page-specific components/types live in `$lib/features/<domain>/` (`home`, `accounts`, `budgets`, `pnl`, `portfolio`, `transactions`). Domain utilities in `$lib/utils/` (`csv`, `export`, `error`, `format.svelte.ts`, `date-utils.svelte.ts`, plus `navigation.ts`, `reconcile.ts`).
 
 ## Data / imports
 
 - Accepts **only `.gnucash` files** (GnuCash SQLite format). Users pick files via Tauri file dialog (`@tauri-apps/plugin-dialog`).
-- Import in `src-tauri/src/import.rs`: reads source DB tables (commodities, accounts, transactions, splits, prices), merges into app DB via GUID-keyed upserts (`ON CONFLICT … DO UPDATE`); source file is opened strictly read-only.
+- Import in `src-tauri/src/import.rs`: reads source DB tables (commodities, accounts, transactions, splits — `prices` are NOT imported from the source book), merges into app DB via GUID-keyed upserts (`ON CONFLICT … DO UPDATE`) plus an orphan sweep (rows absent from the source are deleted); source file is opened strictly read-only.
 - `clear_app_db` in `settings.rs` performs a full reset (drops all tables, including legacy ones, then recreates `SCHEMA`). Frontend calls via `clearAppDb()` in `$lib/tauri.ts`. Exposed on Settings page.
-- Price data: live prices fetched via `reqwest` + async tokio runtime. Latest price per commodity queried from DB via `get_cached_prices_map()`.
+- Price data: live prices fetched from Yahoo (`yahoo.rs` + `fx.rs`) via `reqwest` + async tokio runtime. Latest price per commodity queried from DB via `get_cached_prices_map()`.
 
 ## shadcn-svelte (Nova)
 
@@ -73,9 +72,9 @@ No test framework configured. Rust unit tests run with `cargo test` (in `src-tau
 
 ## Frontend conventions
 
-- **Navigation**: row-click navigation goes through `$lib/utils/navigation.ts` (`handleRowClick(e, go)`, `openTransaction`, `openAccount`, `gotoHolding`) — never copy per-table click guards; keep real `<a>` elements for keyboard/middle-click.
+- **Navigation**: row-click navigation goes through `$lib/utils/navigation.ts` (`handleRowClick(e, go)` + `isPlainRowClick`, `openTransaction`, `openAccount`, `gotoHolding`, `openBudget`) — never copy per-table click guards; keep real `<a>` elements for keyboard/middle-click.
 - **Sorting**: table sort state uses `useTableSort<K>(defaults, descFirst)` from `$lib/hooks/`.
-- **URL state**: compose specs from the factories in `use-url-params.svelte.ts` (`pageParam`, `debouncedSearchParam`, `dateParam`); free-form specs only when no factory fits.
+- **URL state**: compose specs from the factories in `use-url-params.svelte.ts` (`pageParam`, `debouncedSearchParam`, `dateParam`, `yearParam`); free-form specs only when no factory fits.
 - **Search inputs**: always debounce through `useDebouncedSearch`.
 - **Formatting**: dates parse through `parseLocalDate` (date-only strings are local, not UTC); counts use `plural(n, 'word')`; ranges use `formatDateRange`. Route titles come from `$lib/routes.ts` (`routeTitle`).
 - **Barrels**: named exports only in `index.ts` re-export files (no default+named duplication).
