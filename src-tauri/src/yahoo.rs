@@ -124,7 +124,10 @@ struct YahooQuote {
     close: Vec<Option<f64>>,
 }
 
-fn urlencoding(s: &str) -> String {
+/// RFC 3986 percent-encoding for Yahoo path segments (unreserved set kept
+/// verbatim, everything else `%XX` over UTF-8 bytes). Hand-rolled to avoid a
+/// new dependency for a single call site; covered by unit tests below.
+fn percent_encode(s: &str) -> String {
     let mut result = String::new();
     for b in s.bytes() {
         match b {
@@ -144,7 +147,7 @@ pub async fn fetch_single_yahoo_history(
     period1: Option<i64>,
     period2: i64,
 ) -> Result<Vec<(i64, f64)>, String> {
-    let encoded = urlencoding(symbol);
+    let encoded = percent_encode(symbol);
     let url = if let Some(p1) = period1 {
         format!(
             "https://query1.finance.yahoo.com/v8/finance/chart/{}?interval=1d&period1={}&period2={}",
@@ -231,8 +234,15 @@ mod tests {
     }
 
     #[test]
-    fn quote_currency_from_symbol_shape() {
-        assert_eq!(quote_currency_for_symbol("AAPL", "NASDAQ", "EUR"), "USD");
+    fn percent_encode_leaves_unreserved_verbatim() {
+        assert_eq!(percent_encode("AAPL"), "AAPL");
+        assert_eq!(percent_encode("BRK.B"), "BRK.B");
+        assert_eq!(percent_encode("BTC-EUR"), "BTC-EUR");
+        assert_eq!(percent_encode("A/B C"), "A%2FB%20C");
+    }
+
+    #[test]
+    fn quote_currency_from_symbol_shape() {        assert_eq!(quote_currency_for_symbol("AAPL", "NASDAQ", "EUR"), "USD");
         assert_eq!(quote_currency_for_symbol("SIE.DE", "XETRA", "USD"), "EUR");
         assert_eq!(quote_currency_for_symbol("BP.L", "LSE", "EUR"), "GBP");
         assert_eq!(quote_currency_for_symbol("7203.T", "JPX", "EUR"), "JPY");

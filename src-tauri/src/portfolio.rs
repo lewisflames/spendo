@@ -188,19 +188,19 @@ fn build_holdings(
     // Universe of displayable commodities. When filtering for one GUID, the
     // split row itself carries the metadata; otherwise enumerate the book.
     #[derive(Clone)]
-    struct Meta {
+    struct CommodityMeta {
         mnemonic: String,
         full_name: Option<String>,
         namespace: String,
     }
 
-    let mut meta_by_guid: HashMap<String, Meta> = HashMap::new();
+    let mut meta_by_guid: HashMap<String, CommodityMeta> = HashMap::new();
     let mut with_splits: HashSet<String> = HashSet::new();
     for r in &rows {
         with_splits.insert(r.commodity_guid.clone());
         meta_by_guid
             .entry(r.commodity_guid.clone())
-            .or_insert_with(|| Meta {
+            .or_insert_with(|| CommodityMeta {
                 mnemonic: r.mnemonic.clone(),
                 full_name: r.full_name.clone(),
                 namespace: r.namespace.clone(),
@@ -209,12 +209,12 @@ fn build_holdings(
     if let Some(guid) = filter {
         // Filtered mode starts from a single GUID that may have no splits at
         // all, so its metadata comes straight from the commodities table.
-        let meta: Meta = conn
+        let meta: CommodityMeta = conn
             .query_row(
                 "SELECT mnemonic, fullname, namespace FROM commodities WHERE guid = ?1",
                 [guid],
                 |row| {
-                    Ok(Meta {
+                    Ok(CommodityMeta {
                         mnemonic: row.get(0)?,
                         full_name: row.get(1)?,
                         namespace: row.get(2)?,
@@ -230,7 +230,7 @@ fn build_holdings(
         meta_by_guid.insert(guid.to_string(), meta);
     } else {
         for c in list_commodities(conn)? {
-            meta_by_guid.entry(c.guid.clone()).or_insert_with(|| Meta {
+            meta_by_guid.entry(c.guid.clone()).or_insert_with(|| CommodityMeta {
                 mnemonic: c.mnemonic,
                 full_name: c.full_name,
                 namespace: c.namespace,

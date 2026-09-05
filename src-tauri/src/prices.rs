@@ -134,7 +134,7 @@ fn normalize_price(
     Ok(price * fx::get_fx_rate_at(conn, quote_currency, report_guid, date)?)
 }
 
-pub fn get_latest_live_prices(conn: &Connection) -> Result<Vec<PriceEntry>, String> {
+fn get_latest_live_prices(conn: &Connection) -> Result<Vec<PriceEntry>, String> {
     Ok(latest_n_prices_raw(conn, 1)?
         .into_iter()
         .map(|(mnemonic, price, date, currency)| PriceEntry {
@@ -187,7 +187,7 @@ pub fn get_price_history(
     Ok(rows)
 }
 
-pub(crate) struct PricePreRead {
+pub(crate) struct PriceFetchPlan {
     commodities: Vec<CommodityInfo>,
     already_fetched: HashSet<String>,
     latest_dates: HashMap<String, String>,
@@ -198,7 +198,7 @@ pub(crate) struct PricePreRead {
     existing_live_prices: Vec<PriceEntry>,
 }
 
-pub(crate) struct PriceWriteData {
+pub(crate) struct PendingPriceWrites {
     symbol_map: HashMap<String, String>,
     yahoo_history: HashMap<String, Vec<(i64, f64)>>,
     assigned: HashSet<String>,
@@ -209,7 +209,7 @@ pub(crate) struct PriceWriteData {
     fx_prices: Vec<(String, Vec<(i64, f64)>)>,
 }
 
-fn read_price_data(conn: &Connection) -> Result<PricePreRead, String> {
+fn read_price_data(conn: &Connection) -> Result<PriceFetchPlan, String> {
     let commodities = list_commodities(conn)?;
 
     let already_fetched: HashSet<String> = {
@@ -248,7 +248,7 @@ fn read_price_data(conn: &Connection) -> Result<PricePreRead, String> {
 
     let existing_live_prices = get_latest_live_prices(conn).unwrap_or_default();
 
-    Ok(PricePreRead {
+    Ok(PriceFetchPlan {
         commodities,
         already_fetched,
         latest_dates,
@@ -271,16 +271,34 @@ fn date_to_period1(d: &str) -> Option<i64> {
 }
 
 /// Insert one price per day for a commodity, replacing any existing same-day rows.
+/// Single range DELETE (instead of N per-day deletes); the per-day guid
+/// (`commodity-date`) keeps the subsequent INSERTs idempotent.
 fn write_history_prices(
     conn: &Connection,
     commodity_guid: &str,
     currency_guid: &str,
     history: &[(i64, f64)],
 ) -> Result<(), String> {
+    if history.is_empty() {
+        return Ok(());
+    }
     let now = utils::iso_now();
-    let mut delete_stmt = conn
-        .prepare("DELETE FROM prices WHERE commodity_guid = ?1 AND date LIKE ?2 || '%'")
-        .map_err(|e| e.to_string())?;
+    let dates: Vec<String> = history
+        .iter()
+        .map(|(ts, _)| {
+            chrono::DateTime::from_timestamp(*ts, 0)
+                .map(|dt| dt.format("%Y-%m-%d").to_string())
+                .unwrap_or_else(|| now.clone())
+        })
+        .collect();
+    let (min_date, max_date) = dates.iter().fold((dates[0].clone(), dates[0].clone()), |(mn, mx), d| {
+        (mn.min(d.clone()), mx.max(d.clone()))
+    });
+    conn.execute(
+        "DELETE FROM prices WHERE commodity_guid = ?1 AND substr(date, 1, 10) BETWEEN ?2 AND ?3",
+        rusqlite::params![commodity_guid, min_date, max_date],
+    )
+    .map_err(|e| e.to_string())?;
 
     let insert_sql = format!(
         "INSERT OR REPLACE INTO prices (guid, commodity_guid, currency_guid, value_num, value_denom, date)
@@ -288,15 +306,7 @@ fn write_history_prices(
     );
     let mut insert = conn.prepare(&insert_sql).map_err(|e| e.to_string())?;
 
-    for (ts, price) in history {
-        let date_str = chrono::DateTime::from_timestamp(*ts, 0)
-            .map(|dt| dt.format("%Y-%m-%d").to_string())
-            .unwrap_or_else(|| now.clone());
-
-        delete_stmt
-            .execute(rusqlite::params![commodity_guid, date_str])
-            .map_err(|e| e.to_string())?;
-
+    for ((_, price), date_str) in history.iter().zip(dates.iter()) {
         let price_guid = format!("{}-{}", commodity_guid, date_str);
         let value_num = (*price * PRICE_SCALE as f64).round() as i64;
         insert
@@ -312,8 +322,8 @@ fn write_history_prices(
     Ok(())
 }
 
-fn write_price_data(conn: &Connection, data: &PriceWriteData) -> Result<(), String> {
-    let PriceWriteData {
+fn write_price_data(conn: &Connection, data: &PendingPriceWrites) -> Result<(), String> {
+    let PendingPriceWrites {
         symbol_map,
         yahoo_history,
         assigned,
@@ -399,8 +409,8 @@ fn register_symbol(
     }
 }
 
-pub async fn fetch_prices_inner(pre: PricePreRead) -> Result<(PricesResult, PriceWriteData), String> {
-    let PricePreRead {
+async fn fetch_prices_remote(pre: PriceFetchPlan) -> Result<(PricesResult, PendingPriceWrites), String> {
+    let PriceFetchPlan {
         commodities,
         already_fetched,
         latest_dates,
@@ -616,7 +626,7 @@ pub async fn fetch_prices_inner(pre: PricePreRead) -> Result<(PricesResult, Pric
             fetched_at: now,
             errors,
         },
-        PriceWriteData {
+        PendingPriceWrites {
             symbol_map,
             yahoo_history,
             assigned,
@@ -710,7 +720,7 @@ pub fn latest_quote_currencies(conn: &Connection) -> Result<HashMap<String, Stri
 pub async fn refresh_prices(state: State<'_, AppState>) -> Result<PricesResult, String> {
     let pre = db::run_blocking(state.db.clone(), read_price_data).await?;
 
-    let (result, write_data) = fetch_prices_inner(pre).await?;
+    let (result, write_data) = fetch_prices_remote(pre).await?;
 
     db::run_blocking(state.db.clone(), move |conn| {
         // Single transaction so prices + refresh_log commit atomically; a

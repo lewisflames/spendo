@@ -86,6 +86,10 @@ pub struct BudgetYearSummary {
 #[serde(rename_all = "camelCase")]
 pub struct BudgetDetail {
     pub budget: Budget,
+    // Duplicates `budget.year` / `budget.amount` for backward compatibility
+    // with existing frontend callers (`tauri.ts` `BudgetDetail`). New code
+    // should read `budget.year` / `budget.amount`; these mirrors always equal
+    // them (see `get_budget_detail_inner` construction below).
     pub year: i32,
     pub amount: f64,
     pub summary: BudgetYearSummary,
@@ -168,6 +172,22 @@ fn budget_select_sql() -> &'static str {
 	 WHERE b.account_guid = ?1 AND b.year = ?2"
 }
 
+/// Shared `WITH RECURSIVE descendants` CTE for budget actuals queries.
+/// `roots_filter` scopes the seed rows, e.g. `WHERE b.year = 2024` for the
+/// yearly overview or no filter for all-time carryover. All callers use the
+/// half-open window `>= ? AND < ?` plus `VISIBLE_TX_FILTER`.
+fn descendants_cte(roots_filter: &str) -> String {
+    format!(
+        "WITH RECURSIVE
+         descendants(budget_account_guid, descendant_guid) AS (
+             SELECT DISTINCT b.account_guid, b.account_guid FROM budgets b {roots_filter}
+             UNION ALL
+             SELECT d.budget_account_guid, a.guid
+             FROM descendants d JOIN accounts a ON a.parent_guid = d.descendant_guid
+         )"
+    )
+}
+
 fn read_budget_year(conn: &Connection, account_guid: &str, year: i32) -> Result<Budget, String> {
     let mut stmt = conn.prepare(budget_select_sql()).map_err(|e| e.to_string())?;
     stmt.query_row(rusqlite::params![account_guid, year], row_to_budget)
@@ -193,7 +213,7 @@ fn assert_expense_account(conn: &Connection, account_guid: &str) -> Result<(), S
 }
 
 /// Upsert a single year's budget amount.
-pub fn set_budget_year_amount_inner(
+fn set_budget_year_amount_inner(
     conn: &Connection,
     account_guid: &str,
     year: i32,
@@ -222,7 +242,7 @@ pub fn set_budget_year_amount_inner(
 /// Years that already have a budget for the account, ascending. Used by
 /// the Add dialog to disable taken years so a new budget is always created
 /// for a single free year.
-pub fn get_budget_years_inner(conn: &Connection, account_guid: &str) -> Result<Vec<i32>, String> {
+fn get_budget_years_inner(conn: &Connection, account_guid: &str) -> Result<Vec<i32>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT year FROM budgets
@@ -239,7 +259,7 @@ pub fn get_budget_years_inner(conn: &Connection, account_guid: &str) -> Result<V
 }
 
 /// Delete a single year's budget. Other years for the account are kept.
-pub fn delete_budget_year_inner(
+fn delete_budget_year_inner(
     conn: &Connection,
     account_guid: &str,
     year: i32,
@@ -361,13 +381,7 @@ fn compute_cumulative_carryovers(
     }
 
     let sql = format!(
-        "WITH RECURSIVE
-         descendants(budget_account_guid, descendant_guid) AS (
-             SELECT DISTINCT b.account_guid, b.account_guid FROM budgets b
-             UNION ALL
-             SELECT d.budget_account_guid, a.guid
-             FROM descendants d JOIN accounts a ON a.parent_guid = d.descendant_guid
-         )
+        "{}
          SELECT d.budget_account_guid, substr(t.post_date, 1, 4), c.mnemonic,
                 COALESCE(SUM({}), 0)
          FROM descendants d
@@ -377,6 +391,7 @@ fn compute_cumulative_carryovers(
          JOIN commodities c ON c.guid = a2.commodity_guid
          WHERE t.post_date >= ?1 AND t.post_date < ?2 AND {}
          GROUP BY d.budget_account_guid, 2, 3",
+        descendants_cte(""),
         utils::signed_amount_expr(utils::RAW_AMOUNT, "a2.account_type"),
         utils::VISIBLE_TX_FILTER
     );
@@ -430,7 +445,7 @@ fn compute_cumulative_carryovers(
     Ok(carryovers)
 }
 
-pub fn get_budget_vs_actual_inner(
+fn get_budget_vs_actual_inner(
     conn: &Connection,
     year: i32,
 ) -> Result<Vec<BudgetActualRow>, String> {
@@ -440,14 +455,7 @@ pub fn get_budget_vs_actual_inner(
 
     let mut stmt = conn
         .prepare(&format!(
-            "WITH RECURSIVE
-			 descendants(budget_account_guid, descendant_guid) AS (
-				 SELECT DISTINCT b.account_guid, b.account_guid FROM budgets b WHERE b.year = {year}
-				 UNION ALL
-				 SELECT d.budget_account_guid, a.guid
-				 FROM descendants d
-				 JOIN accounts a ON a.parent_guid = d.descendant_guid
-			 )
+            "{}
 			 SELECT b.guid, b.account_guid, a.name, a.description, a.account_type,
 			        b.amount,
 			        c.mnemonic,
@@ -467,6 +475,7 @@ pub fn get_budget_vs_actual_inner(
 			  WHERE a.account_type = 'EXPENSE' AND b.year = ?3
 			  GROUP BY b.guid, c.mnemonic
 			  ORDER BY a.name",
+            descendants_cte(&format!("WHERE b.year = {year}")),
             utils::RAW_AMOUNT,
             utils::VISIBLE_TX_FILTER
         ))
@@ -593,7 +602,7 @@ pub fn get_budget_vs_actual_inner(
     Ok(rows)
 }
 
-pub fn get_budget_detail_inner(
+fn get_budget_detail_inner(
     conn: &Connection,
     account_guid: &str,
     year: i32,
@@ -667,18 +676,14 @@ pub fn get_budget_detail_inner(
     let mut cum = 0.0;
     for (m, actual_m) in monthly {
         cum += actual_m;
-        let cum_expected = annual_amount * (m as f64) / 12.0 + carry;
-        let pacing = if cum_expected > 0.0 {
-            (cum.max(0.0) / cum_expected) * 100.0
-        } else {
-            0.0
-        };
+        // Reuse the front-loaded pacing rule: annual prorated, carry in full.
+        let (cum_expected, pacing, delta) = pacing_stats(annual_amount, carry, cum, m);
         monthly_entries.push(MonthlySlice {
             month: m,
             actual_amount: actual_m,
             cumulative_actual: cum,
             cumulative_expected: cum_expected,
-            delta: cum_expected - cum,
+            delta,
             pacing_percentage: pacing,
         });
     }
@@ -703,36 +708,30 @@ pub fn get_budget_detail_inner(
     })
 }
 
-/// Book-wide earliest visible transaction date (`YYYY-MM-DD`). Shared by the
-/// global query and the budget date range so both answers can never diverge.
-fn earliest_visible_tx_date(conn: &Connection) -> Result<Option<String>, String> {
+/// Book-wide visible transaction window (`YYYY-MM-DD`). Single `MIN,MAX`
+/// query so earliest/latest can never diverge.
+fn visible_tx_window(conn: &Connection) -> Result<(Option<String>, Option<String>), String> {
     conn.query_row(
         &format!(
-            "SELECT substr(MIN(t.post_date), 1, 10) FROM transactions t WHERE {}",
+            "SELECT substr(MIN(t.post_date), 1, 10), substr(MAX(t.post_date), 1, 10) FROM transactions t WHERE {}",
             utils::VISIBLE_TX_FILTER
         ),
         [],
-        |row| row.get(0),
+        |row| Ok((row.get(0)?, row.get(1)?)),
     )
     .map_err(|e| e.to_string())
 }
 
-pub fn get_budget_date_range_inner(conn: &Connection) -> Result<BudgetDateRange, String> {
-    let earliest = earliest_visible_tx_date(conn)?;
-
-    let latest: Option<String> = conn
-        .query_row(
-            &format!(
-                "SELECT substr(MAX(t.post_date), 1, 10) FROM transactions t WHERE {}",
-                utils::VISIBLE_TX_FILTER
-            ),
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|e| e.to_string())?;
+fn get_budget_date_range_inner(conn: &Connection) -> Result<BudgetDateRange, String> {
+    let (earliest, latest) = visible_tx_window(conn)?;
 
     let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
-    let latest_date = latest.map(|l| if l >= today { l } else { today.clone() });
+    // Clamp the upper bound to today so an empty book still offers the
+    // current year in the picker.
+    let latest_date = match latest {
+        Some(l) if l >= today => Some(l),
+        _ => Some(today.clone()),
+    };
 
     Ok(BudgetDateRange {
         earliest_date: earliest,

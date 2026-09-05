@@ -92,7 +92,12 @@ pub fn currency_guid_map(conn: &Connection) -> HashMap<String, String> {
 
 /// Latest FX rate per currency (1 unit of currency = N units of report currency),
 /// optionally as of a date. Rates live in the `prices` table as CURRENCY commodities
-/// quoted in the report currency. Missing rates (not errors) degrade to 1.0 at call sites.
+/// quoted in the report currency.
+///
+/// Missing-rate contract: not an error — callers degrade to 1.0 parity via
+/// `convert()`/`unwrap_or(1.0)`. That keeps books with partial FX history usable,
+/// but a missing row silently skews totals. Price refresh surfaces FX failures
+/// as `PriceError`s; money queries intentionally do not fail the whole report.
 pub fn get_fx_map(conn: &Connection, as_of: Option<&str>) -> Result<HashMap<String, f64>, String> {
     let Some(report_guid) = get_report_currency_guid(conn) else {
         return Ok(HashMap::new());
