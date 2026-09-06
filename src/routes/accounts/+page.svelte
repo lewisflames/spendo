@@ -21,7 +21,7 @@
   import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
   import KpiCard from '$lib/components/shared/kpi-card.svelte';
   import KpiCardRow from '$lib/components/shared/kpi-card-row.svelte';
-  import { DatePicker } from '$lib/components/shared/date-picker';
+  import { AsOfPicker } from '$lib/components/shared/as-of-picker';
   import MissingFxWarning from '$lib/features/reports/missing-fx-warning.svelte';
   import { clampZero, formatSessionCurrency, signColor, plural } from '$lib/utils/format.svelte';
   import { errMsg } from '$lib/utils/error';
@@ -51,8 +51,8 @@
   useUrlParams([
     dateParam(
       'asOf',
-      () => asOf || null,
-      (v) => v && (asOf = v)
+      () => (asOf === todayStr() ? null : asOf || null),
+      (v) => (asOf = v ?? todayStr())
     )
   ]);
 
@@ -132,7 +132,7 @@
       title="Accounts"
       description={data ? `Chart of accounts · ${plural(data.totalAccounts, 'account')}` : ''}
     >
-      <DatePicker bind:value={asOf} />
+      <AsOfPicker bind:value={asOf} />
       <Button variant="outline" onclick={handleExportCsv} disabled={accounts.length === 0}>
         <Download aria-hidden="true" class="size-3" />
         Export

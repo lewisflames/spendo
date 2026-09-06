@@ -305,7 +305,8 @@ export const fetchAccountDetail = (
   dateTo?: string,
   search?: string,
   sortBy?: string,
-  sortDir?: string
+  sortDir?: string,
+  asOf?: string
 ): Promise<AccountDetailResult> =>
   invoke('fetch_account_detail', {
     guid,
@@ -315,7 +316,8 @@ export const fetchAccountDetail = (
     dateTo,
     search,
     sortBy: sortBy ?? null,
-    sortDir: sortDir ?? null
+    sortDir: sortDir ?? null,
+    asOf: asOf ?? null
   });
 
 export const fetchAccountBalanceTrend = (guid: string): Promise<AccountBalancePoint[]> =>

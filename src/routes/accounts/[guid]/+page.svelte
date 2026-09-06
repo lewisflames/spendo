@@ -20,6 +20,7 @@
   import {
     clampZero,
     formatSessionCurrency as fmt,
+    formatDate,
     sessionCurrency,
     plural
   } from '$lib/utils/format.svelte';
@@ -45,6 +46,8 @@
   import TransactionTable from '$lib/features/transactions/transaction-table.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import PageHeaderSkeleton from '$lib/components/shared/page-header-skeleton.svelte';
+  import { AsOfPicker } from '$lib/components/shared/as-of-picker';
+  import { todayStr } from '$lib/utils/date-utils.svelte';
   import KpiCard from '$lib/components/shared/kpi-card.svelte';
   import KpiCardRow from '$lib/components/shared/kpi-card-row.svelte';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
@@ -86,6 +89,9 @@
   let searchInput = $state('');
   let dateFrom = $state('');
   let dateTo = $state('');
+  // Point-in-time view for balances (header/KPIs/children/pie/trend). The
+  // transaction ledger keeps its own From/To filters independently.
+  let asOf = $state(todayStr());
 
   let search = useDebouncedSearch(() => searchInput);
 
@@ -112,8 +118,18 @@
       'to',
       () => dateTo || null,
       (v) => (dateTo = v ?? '')
+    ),
+    dateParam(
+      'asOf',
+      () => (asOf === todayStr() ? null : asOf || null),
+      (v) => (asOf = v ?? todayStr())
     )
   ]);
+
+  // As-of view state for balances. A future as-of silently shows current
+  // balances backend-side (future txs excluded), so disclose like /accounts.
+  let isToday = $derived(!asOf || asOf === todayStr());
+  let isFutureAsOf = $derived(!!asOf && asOf > todayStr());
 
   const res = useAsyncData({
     enabled: () => !!dbSession.value && !!guid,
@@ -128,7 +144,8 @@
         dateTo || undefined,
         search.value || undefined,
         sortBy,
-        sortDir
+        sortDir,
+        asOf || undefined
       );
     },
     label: 'Failed to load account transactions',
@@ -161,7 +178,8 @@
   let prevSortKey = '';
 
   // Reset query state on account switch and page 1 on sort change. Declared
-  // before the fetch effect so it runs first in the same flush.
+  // before the fetch effect so it runs first in the same flush. `asOf` is
+  // intentionally left URL-driven (entering from the list starts at today).
   $effect(() => {
     if (!dbSession.value) {
       prevNavKey = '';
@@ -260,7 +278,11 @@
           {#if d.summary.totalTransactions > 0}
             · {plural(d.summary.totalTransactions, 'txn')}
           {/if}
+          {#if !isToday}
+            · as of {formatDate(asOf)}
+          {/if}
         {/snippet}
+        <AsOfPicker bind:value={asOf} />
         <Button
           variant="outline"
           onclick={handleExportCsv}
@@ -301,6 +323,16 @@
           {/snippet}
         </KpiCard>
       </div>
+      {#if !isToday}
+        <p class="text-xs text-muted-foreground">
+          Balances as of {formatDate(asOf)} — the transaction list below keeps its own From/To filters.
+        </p>
+      {/if}
+      {#if isFutureAsOf}
+        <p class="text-xs text-muted-foreground">
+          Future date selected — future transactions are excluded, so this shows current balances.
+        </p>
+      {/if}
     {/if}
 
     <!-- Balance over time + composition -->
@@ -308,12 +340,12 @@
       {#if hasPieData && subtreeNode}
         <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
           <div class="lg:col-span-2">
-            <BalanceTrendChart {guid} accountType={data?.account.accountType} />
+            <BalanceTrendChart {guid} accountType={data?.account.accountType} {asOf} />
           </div>
           <BalancePie node={subtreeNode} parent={parentInfo} {loading} />
         </div>
       {:else}
-        <BalanceTrendChart {guid} accountType={data?.account.accountType} />
+        <BalanceTrendChart {guid} accountType={data?.account.accountType} {asOf} />
       {/if}
     {/if}
 
