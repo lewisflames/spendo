@@ -43,7 +43,7 @@ pub struct AccountsResult {
     /// Cumulative income minus expenses as of the requested date.
     pub retained_earnings: f64,
     /// Market minus cost for priced investments (0 for unpriced holdings,
-    /// which fall back to cost basis and are listed in `missing_prices`).
+    /// which contribute zero and are listed in `missing_prices`).
     pub unrealized_gains: f64,
     /// `assets - (liabilities + equity + unrealized + retained)`; near zero
     /// when balanced. Mirrors the old balance-sheet check.
@@ -189,7 +189,11 @@ fn fetch_accounts_inner(
                     missing_prices_map
                         .entry(mnemonic.clone())
                         .or_insert(row.commodity_guid.clone());
-                    balance = fx::convert(balance, mnemonic, &report_currency, &fx_map);
+                    // Unpriced securities contribute zero (matching home net
+                    // worth and portfolio market value): cost basis is excluded
+                    // until a cached price exists, and the holding is flagged
+                    // via `missing_prices`.
+                    balance = 0.0;
                 }
             }
         } else if let Some(ref mnemonic) = row.commodity_mnemonic {
@@ -434,4 +438,77 @@ pub async fn fetch_accounts(
         fetch_accounts_inner(conn, as_of_date.as_deref())
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::init_db;
+
+    fn setup_investments() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        init_db(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO commodities (guid, mnemonic, namespace) VALUES
+             ('c-eur', 'EUR', 'CURRENCY'),
+             ('c-aapl', 'AAPL', 'NASDAQ'),
+             ('c-xyz', 'XYZ', 'NASDAQ')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO accounts (guid, name, account_type, parent_guid, placeholder, commodity_guid) VALUES
+             ('root', 'Root', 'ROOT', NULL, 0, 'c-eur'),
+             ('assets', 'Assets', 'ASSET', 'root', 1, 'c-eur'),
+             ('checking', 'Checking', 'BANK', 'assets', 0, 'c-eur'),
+             ('broker', 'Broker', 'STOCK', 'assets', 0, 'c-aapl'),
+             ('vault', 'Vault', 'STOCK', 'assets', 0, 'c-xyz')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO transactions (guid, post_date) VALUES
+             ('t-cash', '2024-01-10'), ('t-aapl', '2024-02-01'), ('t-xyz', '2024-02-15')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO splits (guid, tx_guid, account_guid, value_num, value_denom, quantity_num, quantity_denom) VALUES
+             ('s-cash', 't-cash', 'checking', 50000, 100, 50000, 100),
+             ('s-aapl', 't-aapl', 'broker', 100000, 100, 10, 1),
+             ('s-xyz', 't-xyz', 'vault', 70000, 100, 5, 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO prices (guid, commodity_guid, currency_guid, value_num, value_denom, date)
+             VALUES ('c-aapl-2024-03-01', 'c-aapl', 'c-eur', 15000, 100, '2024-03-01')",
+            [],
+        )
+        .unwrap();
+        conn
+    }
+
+    #[test]
+    fn priced_investments_use_market_and_unpriced_contribute_zero() {
+        let conn = setup_investments();
+        let result = fetch_accounts_inner(&conn, None).unwrap();
+
+        // Cash 500 + AAPL market 1500 + unpriced XYZ 0.
+        assert_eq!(result.by_type.get("ASSET").unwrap().total_balance, 2000.0);
+        // Market 1500 - cost 1000.
+        assert_eq!(result.unrealized_gains, 500.0);
+        assert_eq!(result.missing_prices.len(), 1);
+        assert_eq!(result.missing_prices[0].mnemonic, "XYZ");
+
+        let (_, subtree, _) = fetch_children_and_subtree(&conn, "assets", None).unwrap();
+        assert_eq!(subtree.unwrap().balance, 2000.0);
+    }
+
+    #[test]
+    fn investment_balances_respect_as_of() {
+        let conn = setup_investments();
+        let result = fetch_accounts_inner(&conn, Some("2024-01-15")).unwrap();
+        assert_eq!(result.by_type.get("ASSET").unwrap().total_balance, 500.0);
+    }
 }
