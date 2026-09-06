@@ -2,6 +2,7 @@
   import { parseDate, type DateValue } from '@internationalized/date';
   import { CalendarIcon } from '@lucide/svelte';
   import * as Popover from '$lib/components/ui/popover';
+  import { Button } from '$lib/components/ui/button';
   import { Calendar } from '$lib/components/ui/calendar';
   import { formatDate } from '$lib/utils/format.svelte';
   import { appSettings } from '$lib/stores/settings.svelte';
@@ -42,14 +43,10 @@
 <Popover.Root bind:open>
   <Popover.Trigger {id} class={className}>
     {#snippet child({ props })}
-      <button
-        {...props}
-        type="button"
-        class="flex h-8 items-center gap-1.5 rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm transition-colors outline-none dark:bg-input/30"
-      >
+      <Button {...props} type="button" variant="outline">
         <CalendarIcon aria-hidden="true" class="size-4 shrink-0 text-muted-foreground" />
         <span class="text-muted-foreground">{display}</span>
-      </button>
+      </Button>
     {/snippet}
   </Popover.Trigger>
   <Popover.Content class="w-auto p-0" align="start">
