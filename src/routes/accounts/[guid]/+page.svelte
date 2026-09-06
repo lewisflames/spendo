@@ -1,7 +1,7 @@
 <script lang="ts">
   import { page } from '$app/state';
   import { resolve } from '$app/paths';
-  import { dbSession } from '$lib/stores/db.svelte';
+  import { dbBootstrapping, dbSession } from '$lib/stores/db.svelte';
   import { appSettings, applyPageSize } from '$lib/stores/settings.svelte';
   import { setBreadcrumb } from '$lib/stores/breadcrumb.svelte';
   import { fetchAccountDetail } from '$lib/tauri';
@@ -208,9 +208,9 @@
   <meta name="description" content="Account transactions and balance." />
 </svelte:head>
 
-{#if dbSession.value}
+{#if dbSession.value || dbBootstrapping.value}
   <div class="flex flex-col gap-6">
-    {#if loading && !data}
+    {#if (loading || dbBootstrapping.value) && !data}
       <PageHeaderSkeleton />
     {:else if data}
       <AccountDetailHeader
@@ -224,7 +224,7 @@
       />
     {/if}
 
-    {#if loading && !data}
+    {#if (loading || dbBootstrapping.value) && !data}
       <KpiCardRow />
     {:else if data}
       <AccountKpiCards summary={data.summary} {currentBalance} {isToday} {asOf} />

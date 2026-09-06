@@ -4,7 +4,7 @@
   import { resolve } from '$app/paths';
   import { Button } from '$lib/components/ui/button';
   import * as Dialog from '$lib/components/ui/dialog';
-  import { dbSession } from '$lib/stores/db.svelte';
+  import { dbBootstrapping, dbSession } from '$lib/stores/db.svelte';
   import { sessionCurrency } from '$lib/utils/format.svelte';
   import {
     fetchBudgetDetail,
@@ -151,7 +151,7 @@
   <TableSkeleton cols={6} rows={6} />
 {/snippet}
 
-{#if dbSession.value}
+{#if dbSession.value || dbBootstrapping.value}
   <div class="flex flex-col gap-6">
     <PageHeader title={accountName} description={headerDescription}>
       <div class="flex flex-wrap items-center gap-2">

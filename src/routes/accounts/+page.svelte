@@ -3,7 +3,7 @@
   import { Button } from '$lib/components/ui/button';
   import { toast } from '$lib/components/ui/sonner';
   import { downloadCsv } from '$lib/utils/csv';
-  import { dbSession } from '$lib/stores/db.svelte';
+  import { dbBootstrapping, dbSession } from '$lib/stores/db.svelte';
   import { fetchAccounts } from '$lib/tauri';
   import {
     CATEGORY_ORDER,
@@ -122,7 +122,7 @@
   <meta name="description" content="Chart of accounts." />
 </svelte:head>
 
-{#if dbSession.value}
+{#if dbSession.value || dbBootstrapping.value}
   <div class="flex flex-col gap-6">
     <PageHeader
       title="Accounts"
@@ -135,7 +135,7 @@
       </Button>
     </PageHeader>
 
-    {#if loading && !data}
+    {#if (loading || dbBootstrapping.value) && !data}
       <KpiCardRow count={4} />
 
       <TableSkeleton cols={3} />

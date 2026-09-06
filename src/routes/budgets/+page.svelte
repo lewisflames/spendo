@@ -2,7 +2,7 @@
   import { Button } from '$lib/components/ui/button';
   import { SearchInput } from '$lib/components/shared/search-input';
   import { cn } from '$lib/utils';
-  import { dbSession } from '$lib/stores/db.svelte';
+  import { dbBootstrapping, dbSession } from '$lib/stores/db.svelte';
   import { sessionCurrency, formatSessionCurrency } from '$lib/utils/format.svelte';
   import { fetchBudgetVsActual, fetchAccounts, fetchBudgetDateRange } from '$lib/tauri';
   import { openBudget } from '$lib/utils/navigation';
@@ -104,7 +104,7 @@
   <meta name="description" content="Yearly spending targets." />
 </svelte:head>
 
-{#if dbSession.value}
+{#if dbSession.value || dbBootstrapping.value}
   <div class="flex flex-col gap-6">
     <PageHeader title="Budgets" description="Yearly spending targets · carryover always applied">
       <div class="flex flex-wrap items-center gap-2">

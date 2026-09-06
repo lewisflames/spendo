@@ -47,7 +47,8 @@
     dbSession,
     activeBookPath,
     clearSession,
-    setActiveBookPath
+    setActiveBookPath,
+    setDbSession
   } from '$lib/stores/db.svelte';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
 
@@ -89,7 +90,7 @@
     switching = true;
     try {
       const result = await openBook(selected);
-      dbSession.value = { summary: result.summary };
+      setDbSession(result.summary);
       setActiveBookPath(selected);
       toast.success(`Opened ${await basename(selected)}`);
     } catch (e: unknown) {
@@ -117,7 +118,7 @@
     switching = true;
     try {
       const result = await createBookAt(file, currency);
-      dbSession.value = { summary: result.summary };
+      setDbSession(result.summary);
       setActiveBookPath(file);
       toast.success(`Book created (${currency})`);
     } catch (e: unknown) {
@@ -144,7 +145,7 @@
     switching = true;
     try {
       const result = await saveBookAs(file);
-      dbSession.value = { summary: result.summary };
+      setDbSession(result.summary);
       setActiveBookPath(file);
       toast.success(`Book saved as ${await basename(file)}`);
     } catch (e: unknown) {
@@ -167,7 +168,7 @@
     savingCurrency = true;
     try {
       const result = await setBaseCurrency(v);
-      dbSession.value = { summary: result.summary };
+      setDbSession(result.summary);
       toast.success(`Base currency set to ${v}`);
     } catch (e: unknown) {
       toast.error(errMsg(e, 'Failed to set base currency'));

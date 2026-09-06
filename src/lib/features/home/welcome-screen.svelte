@@ -4,7 +4,7 @@
   import * as Select from '$lib/components/ui/select';
   import { Select as SelectPrimitive } from 'bits-ui';
   import { Wallet, FolderPlus, FolderOpen, LoaderCircle } from '@lucide/svelte';
-  import { dbSession, setActiveBookPath } from '$lib/stores/db.svelte';
+  import { setActiveBookPath, setDbSession } from '$lib/stores/db.svelte';
   import { appSettings } from '$lib/stores/settings.svelte';
   import { BOOK_CURRENCIES, defaultCurrencyForLocale } from '$lib/utils/currency';
   import { ensureSpendoExtension } from '$lib/utils/book';
@@ -38,7 +38,7 @@
     busy = 'new';
     try {
       const result = await createBookAt(file, currency);
-      dbSession.value = { summary: result.summary };
+      setDbSession(result.summary);
       setActiveBookPath(file);
       toast.success(`Book created (${currency})`);
     } catch (e: unknown) {
@@ -65,7 +65,7 @@
     busy = 'open';
     try {
       const result = await openBook(selected);
-      dbSession.value = { summary: result.summary };
+      setDbSession(result.summary);
       setActiveBookPath(selected);
       toast.success(`Opened ${await basename(selected)}`);
     } catch (e: unknown) {

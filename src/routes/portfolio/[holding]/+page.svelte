@@ -5,7 +5,7 @@
   import * as Card from '$lib/components/ui/card';
   import { Button } from '$lib/components/ui/button';
   import { Download, Tag } from '@lucide/svelte';
-  import { dbSession } from '$lib/stores/db.svelte';
+  import { dbBootstrapping, dbSession } from '$lib/stores/db.svelte';
   import { fetchHoldingDetail, fetchSymbolOverrides } from '$lib/tauri';
   import type { HoldingTransaction, PriceHistoryEntry } from '$lib/tauri';
   import { toast } from '$lib/components/ui/sonner';
@@ -106,12 +106,12 @@
   <meta name="description" content="Holding detail: price history, value trend and accounts." />
 </svelte:head>
 
-{#if !dbSession.value}
+{#if !dbSession.value && !dbBootstrapping.value}
   <div class="flex flex-col gap-6">
     <PageHeader title={name} description="Investment holding detail" />
     <ImportPrompt />
   </div>
-{:else if loading && !data}
+{:else if dbBootstrapping.value || (loading && !data)}
   <div class="flex flex-col gap-6">
     <PageHeaderSkeleton />
     <KpiCardRow count={6} />

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
-  import { dbSession } from '$lib/stores/db.svelte';
+  import { dbBootstrapping, dbSession } from '$lib/stores/db.svelte';
   import { fetchPnlReport, fetchPnlTrend } from '$lib/tauri';
   import { signColor, formatSessionCurrency, EMPTY_DASH } from '$lib/utils/format.svelte';
   import { TrendingUp, TrendingDown, ArrowLeftRight, Download } from '@lucide/svelte';
@@ -151,7 +151,7 @@
     </Button>
   </PageHeader>
 
-  {#if dbSession.value}
+  {#if dbSession.value || dbBootstrapping.value}
     {#if !range.rangeValid}
       <p role="alert" class="text-sm text-destructive">
         Start date must not be after end date — adjust the period to generate the report.
@@ -163,7 +163,7 @@
         title="Total Income"
         value={pnlData ? fmt(pnlData.totalIncome) : EMPTY_DASH}
         valueClass={pnlData ? 'text-success' : ''}
-        loading={!pnlData && loading}
+        loading={!pnlData && (loading || dbBootstrapping.value)}
       >
         {#snippet icon()}
           <TrendingUp aria-hidden="true" class="size-4 text-success" />
@@ -173,7 +173,7 @@
         title="Total Expenses"
         value={pnlData ? fmt(pnlData.totalExpenses) : EMPTY_DASH}
         valueClass={pnlData ? 'text-destructive' : ''}
-        loading={!pnlData && loading}
+        loading={!pnlData && (loading || dbBootstrapping.value)}
       >
         {#snippet icon()}
           <TrendingDown aria-hidden="true" class="size-4 text-destructive" />
@@ -183,7 +183,7 @@
         title="Net Income"
         value={pnlData ? fmt(pnlData.netIncome) : EMPTY_DASH}
         valueClass={pnlData ? signColor(pnlData.netIncome) : ''}
-        loading={!pnlData && loading}
+        loading={!pnlData && (loading || dbBootstrapping.value)}
       >
         {#snippet icon()}
           <ArrowLeftRight
@@ -209,7 +209,7 @@
     </div>
 
     <PnlTreetable
-      {loading}
+      loading={loading || dbBootstrapping.value}
       {error}
       onRetry={() => res.reload()}
       {pnlData}

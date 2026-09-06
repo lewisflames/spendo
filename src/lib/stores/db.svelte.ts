@@ -9,8 +9,24 @@ export const dbSession = $state<{ value: DbSession | null }>({ value: null });
 /** Active `.spendo` file, or `null` while book-less (fresh install). */
 export const activeBookPath = $state<{ value: string | null }>({ value: null });
 
-/** True while the first session fetch is in flight; lets pages tell bootstrapping apart from empty. */
+/** True while any session fetch is in flight (bootstrap or refresh). */
 export const dbSessionLoading = $state<{ value: boolean }>({ value: true });
+
+/**
+ * True only during the first bootstrap fetch. Stays false for later
+ * force-refreshes (home revalidates on every visit), so shell/redirect logic
+ * can tell a cold start apart from a refresh without flapping.
+ */
+export const dbBootstrapping = $state<{ value: boolean }>({ value: true });
+
+/**
+ * Single write path for the session so every flow (bootstrap, open/new/save,
+ * import, reimport, revert) goes through one place. Pass `null` to return to
+ * the empty state.
+ */
+export function setDbSession(summary: DataSummary | null) {
+  dbSession.value = summary ? { summary } : null;
+}
 
 let bootstrapped = false;
 let inflight: Promise<void> | null = null;
@@ -19,16 +35,26 @@ let inflight: Promise<void> | null = null;
  * Populate `dbSession` from the backend. Called by the layout once at startup
  * so deep-linked pages (e.g. Settings) see real state, and by the home page
  * with `force` to refresh on every visit.
+ *
+ * Concurrent callers share one in-flight fetch (layout bootstrap + home
+ * refresh on first paint); refreshes never touch `dbBootstrapping`.
  */
 export function ensureDbSessionLoaded(force = false): Promise<void> {
-  if (!force && (bootstrapped || inflight)) {
-    return inflight ?? Promise.resolve();
+  if (inflight) {
+    return inflight;
   }
+  if (!force && bootstrapped) {
+    return Promise.resolve();
+  }
+  const isBootstrap = !bootstrapped;
   bootstrapped = true;
   dbSessionLoading.value = true;
+  if (isBootstrap) {
+    dbBootstrapping.value = true;
+  }
   const p = fetchHomeData()
     .then((result) => {
-      dbSession.value = result.hasData && result.summary ? { summary: result.summary } : null;
+      setDbSession(result.hasData ? result.summary : null);
     })
     .catch((e) => {
       // A failed bootstrap must not stick: allow a later call to retry so a
@@ -37,14 +63,19 @@ export function ensureDbSessionLoaded(force = false): Promise<void> {
       throw e;
     });
   inflight = p.finally(() => {
-    inflight = null;
+    if (inflight === p) {
+      inflight = null;
+    }
     dbSessionLoading.value = false;
+    if (isBootstrap) {
+      dbBootstrapping.value = false;
+    }
   });
   return inflight;
 }
 
 export function clearSession() {
-  dbSession.value = null;
+  setDbSession(null);
   // The (empty) book stays open — welcome offers New/Open from here.
 }
 

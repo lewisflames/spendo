@@ -1,7 +1,12 @@
 <script lang="ts">
   import { Button } from '$lib/components/ui/button';
   import { RefreshCw, LoaderCircle, Calendar, Building2, Receipt } from '@lucide/svelte';
-  import { dbSession, dbSessionLoading, ensureDbSessionLoaded } from '$lib/stores/db.svelte';
+  import {
+    dbSession,
+    dbSessionLoading,
+    ensureDbSessionLoaded,
+    setDbSession
+  } from '$lib/stores/db.svelte';
   import { reimportLast } from '$lib/tauri';
   import { formatDateRange } from '$lib/utils/format.svelte';
   import { toastPriceResult } from '$lib/features/portfolio/price-utils';
@@ -32,7 +37,7 @@
     reimporting = true;
     try {
       const result = await reimportLast();
-      dbSession.value = { summary: result.summary };
+      setDbSession(result.summary);
       if (
         result.accountsAdded ||
         result.transactionsAdded ||
