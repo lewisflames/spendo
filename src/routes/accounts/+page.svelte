@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Landmark, PiggyBank, CreditCard, Download } from '@lucide/svelte';
+  import { Landmark, PiggyBank, CreditCard, TrendingUp, Download } from '@lucide/svelte';
   import { Button } from '$lib/components/ui/button';
   import { toast } from '$lib/components/ui/sonner';
   import { downloadCsv } from '$lib/utils/csv';
@@ -11,6 +11,8 @@
     nodeCategory
   } from '$lib/features/accounts/account-types';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
+  import { useUrlParams, dateParam } from '$lib/hooks/use-url-params.svelte';
+  import { todayStr } from '$lib/utils/date-utils.svelte';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
   import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
   import ImportPrompt from '$lib/components/shared/import-prompt.svelte';
@@ -19,7 +21,9 @@
   import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
   import KpiCard from '$lib/components/shared/kpi-card.svelte';
   import KpiCardRow from '$lib/components/shared/kpi-card-row.svelte';
-  import { clampZero, formatSessionCurrency, plural } from '$lib/utils/format.svelte';
+  import { DatePicker } from '$lib/components/shared/date-picker';
+  import MissingFxWarning from '$lib/features/reports/missing-fx-warning.svelte';
+  import { clampZero, formatSessionCurrency, signColor, plural } from '$lib/utils/format.svelte';
   import { errMsg } from '$lib/utils/error';
   import AccountTable from '$lib/features/accounts/account-table.svelte';
   import BalanceTree from '$lib/features/accounts/balance-tree.svelte';
@@ -42,9 +46,19 @@
     LIABILITY: 'text-destructive'
   };
 
+  let asOf = $state(todayStr());
+
+  useUrlParams([
+    dateParam(
+      'asOf',
+      () => asOf || null,
+      (v) => v && (asOf = v)
+    )
+  ]);
+
   const res = useAsyncData({
-    enabled: () => !!dbSession.value,
-    fetch: fetchAccounts,
+    enabled: () => !!dbSession.value && !!asOf,
+    fetch: () => fetchAccounts(asOf || undefined),
     label: 'Failed to load accounts'
   });
 
@@ -79,6 +93,12 @@
     }));
   });
 
+  let retainedEarnings = $derived(data?.retainedEarnings ?? 0);
+  let balanced = $derived(data !== null && Math.abs(data?.balanceCheck ?? 0) < 0.005);
+  // Future-dated transactions are excluded backend-side, so a future as-of
+  // date silently shows current balances — disclose instead of clamping.
+  let isFutureAsOf = $derived(!!asOf && asOf > todayStr());
+
   function handleExportCsv() {
     if (accounts.length === 0) return;
     try {
@@ -112,6 +132,7 @@
       title="Accounts"
       description={data ? `Chart of accounts · ${plural(data.totalAccounts, 'account')}` : ''}
     >
+      <DatePicker bind:value={asOf} />
       <Button variant="outline" onclick={handleExportCsv} disabled={accounts.length === 0}>
         <Download aria-hidden="true" class="size-3" />
         Export
@@ -126,7 +147,7 @@
       <ErrorCard message={error} onRetry={() => res.reload()} />
     {:else if data}
       <!-- Summary cards by account category -->
-      <DimWrapper active={loading} class="grid grid-cols-1 gap-6 sm:grid-cols-3">
+      <DimWrapper active={loading} class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
         {#each kpiCards as card (card.key)}
           <KpiCard title={card.title} value={displayValue(card.value)} valueClass={card.valueClass}>
             {#snippet icon()}
@@ -135,7 +156,22 @@
             {/snippet}
           </KpiCard>
         {/each}
+        <KpiCard
+          title="Retained Earnings"
+          value={displayValue(retainedEarnings)}
+          valueClass={signColor(retainedEarnings)}
+        >
+          {#snippet icon()}
+            <TrendingUp aria-hidden="true" class="size-4 text-muted-foreground" />
+          {/snippet}
+        </KpiCard>
       </DimWrapper>
+
+      <MissingFxWarning
+        missing={data.missingFx}
+        missingPrices={data.missingPrices}
+        reportCurrency={data.reportCurrency}
+      />
 
       <!-- Balance composition tree -->
       <BalanceTree data={data?.trees ?? []} {loading} />
@@ -150,6 +186,22 @@
         <DimWrapper active={loading}>
           <AccountTable rows={accounts} />
         </DimWrapper>
+      {/if}
+
+      {#if !loading && !error}
+        {#if isFutureAsOf}
+          <p class="text-xs text-muted-foreground">
+            Future date selected — future transactions are excluded, so this shows current balances.
+          </p>
+        {/if}
+        <p class="text-xs text-muted-foreground">
+          {#if balanced}
+            Balanced · Assets = Liabilities + Equity (incl. unrealized gains) + Retained earnings.
+          {:else}
+            Out of balance by {formatSessionCurrency(data.balanceCheck)} — usually a missing FX rate,
+            an unpriced security, or currency translation in a book without trading accounts.
+          {/if}
+        </p>
       {/if}
     {/if}
   </div>

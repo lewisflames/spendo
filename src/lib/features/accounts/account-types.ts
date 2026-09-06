@@ -12,7 +12,8 @@ const TYPE_TO_CATEGORY: Record<string, string> = {
   PAYABLE: 'LIABILITY',
   INCOME: 'INCOME',
   EXPENSE: 'EXPENSE',
-  EQUITY: 'EQUITY'
+  EQUITY: 'EQUITY',
+  TRADING: 'EQUITY'
 };
 
 export const CATEGORY_ORDER = ['ASSET', 'LIABILITY', 'EQUITY', 'INCOME', 'EXPENSE'];

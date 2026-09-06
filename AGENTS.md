@@ -35,15 +35,15 @@ No `preview` script (no `vite preview` wrapper). No frontend test framework. Rus
 - **All backend calls** go through `@tauri-apps/api/core` `invoke()` via `$lib/tauri.ts`. No `+server.ts` / `+page.server.ts`.
 - **Rust modules** (`src-tauri/src/`): `db`, `accounts`, `account_detail`, `transactions`, `prices`, `import`, `home`, `reports`, `budgets`, `portfolio`, `settings`, `utils`, plus support modules `fx`, `sql`, `tree`, `yahoo`. Cargo crate: `spendo_app_lib`.
 - **DB**: SQLite via `rusqlite`. Connection held as `Arc<Mutex<Connection>>` in Tauri state (`AppState` also carries `db_path`), initialized once at startup. DB file lives in Tauri's `app_data_dir` (`spendo.db`). Schema created on first use in `db::init_db`. No migrations by design (pre-release): `SCHEMA` is the single source of truth; schema changes require a database reset (Settings → Clear all data, or delete `spendo.db`) followed by re-import.
-- **Routes**: `/`, `/accounts`, `/accounts/[guid]`, `/budgets`, `/budgets/[accountGuid]`, `/pnl`, `/portfolio`, `/portfolio/[holding]`, `/transactions`, `/transactions/[id]`, `/settings`, `/about` (plus dev-only `/dev/force-test`).
-- **Frontend layout**: routes contain only route files (`+page.svelte` etc.). Page-specific components/types live in `$lib/features/<domain>/` (`home`, `accounts`, `budgets`, `pnl`, `portfolio`, `transactions`). Domain utilities in `$lib/utils/` (`csv`, `export`, `error`, `format.svelte.ts`, `date-utils.svelte.ts`, plus `navigation.ts`, `reconcile.ts`).
+- **Routes**: `/`, `/accounts`, `/accounts/[guid]`, `/budgets`, `/budgets/[accountGuid]`, `/reports/pnl`, `/portfolio`, `/portfolio/[holding]`, `/transactions`, `/transactions/[id]`, `/settings`, `/about` (plus dev-only `/dev/force-test`). `/accounts` is the single balance-sheet view (as-of picker + accounting identity); `/reports` holds only period reports (P&L).
+- **Frontend layout**: routes contain only route files (`+page.svelte` etc.). Page-specific components/types live in `$lib/features/<domain>/` (`home`, `accounts`, `budgets`, `pnl`, `reports`, `portfolio`, `transactions`). Domain utilities in `$lib/utils/` (`csv`, `export`, `error`, `format.svelte.ts`, `date-utils.svelte.ts`, plus `navigation.ts`, `reconcile.ts`).
 
 ## Data / imports
 
 - Accepts **only `.gnucash` files** (GnuCash SQLite format). Users pick files via Tauri file dialog (`@tauri-apps/plugin-dialog`).
 - Import in `src-tauri/src/import.rs`: reads source DB tables (commodities, accounts, transactions, splits — `prices` are NOT imported from the source book), merges into app DB via GUID-keyed upserts (`ON CONFLICT … DO UPDATE`) plus an orphan sweep (rows absent from the source are deleted); source file is opened strictly read-only.
 - `clear_app_db` in `settings.rs` performs a full reset (drops all tables, including legacy ones, then recreates `SCHEMA`). Frontend calls via `clearAppDb()` in `$lib/tauri.ts`. Exposed on Settings page.
-- Price data: live prices fetched from Yahoo (`yahoo.rs` + `fx.rs`) via `reqwest` + async tokio runtime. Latest price per commodity queried from DB via `get_cached_prices_map()`.
+- Price data: live prices fetched from Yahoo only (`yahoo.rs` + `fx.rs`) via `reqwest` + async tokio runtime; never imported from the source book. Per-commodity Yahoo symbol overrides live in the app-local `symbol_overrides` table (`set/delete_symbol_override` in `prices.rs`, edited on the holding detail page). Latest price per commodity queried from DB via `get_cached_prices_map()`.
 
 ## shadcn-svelte (Nova)
 

@@ -117,6 +117,11 @@ CREATE TABLE IF NOT EXISTS refresh_log (
 );
 
 CREATE INDEX IF NOT EXISTS idx_budgets_account_year ON budgets(account_guid, year);
+
+CREATE TABLE IF NOT EXISTS symbol_overrides (
+	commodity_guid TEXT PRIMARY KEY,
+	symbol TEXT NOT NULL
+);
 ";
 
 pub fn get_db_path(app_data_dir: &Path) -> PathBuf {
@@ -148,17 +153,18 @@ pub fn connect_source_db(db_path: &PathBuf) -> Result<Connection> {
 /// migrations — Settings → Clear all data, then re-import.
 pub fn clear_db(conn: &Connection) -> Result<()> {
     conn.execute_batch(
-        "PRAGMA foreign_keys = OFF;
-         DROP TABLE IF EXISTS budget_amounts;
-         DROP TABLE IF EXISTS budgets;
-         DROP TABLE IF EXISTS prices;
-         DROP TABLE IF EXISTS splits;
-         DROP TABLE IF EXISTS transactions;
-         DROP TABLE IF EXISTS accounts;
-         DROP TABLE IF EXISTS commodities;
-         DROP TABLE IF EXISTS import_log;
-         DROP TABLE IF EXISTS refresh_log;
-         PRAGMA foreign_keys = ON;",
+         "PRAGMA foreign_keys = OFF;
+          DROP TABLE IF EXISTS budget_amounts;
+          DROP TABLE IF EXISTS budgets;
+          DROP TABLE IF EXISTS prices;
+          DROP TABLE IF EXISTS splits;
+          DROP TABLE IF EXISTS transactions;
+          DROP TABLE IF EXISTS accounts;
+          DROP TABLE IF EXISTS commodities;
+          DROP TABLE IF EXISTS import_log;
+          DROP TABLE IF EXISTS refresh_log;
+          DROP TABLE IF EXISTS symbol_overrides;
+          PRAGMA foreign_keys = ON;",
     )?;
     init_db(conn)
 }
@@ -193,6 +199,7 @@ mod tests {
             "prices",
             "refresh_log",
             "splits",
+            "symbol_overrides",
             "transactions",
         ] {
             assert!(tables.contains(&expected.to_string()), "missing {expected}");

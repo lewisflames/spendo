@@ -1,4 +1,15 @@
-pub const CREDIT_NORMAL: [&str; 5] = ["INCOME", "LIABILITY", "EQUITY", "CREDIT", "PAYABLE"];
+/// Account types displayed with reversed sign (credit balances read positive).
+/// TRADING is included: GnuCash trading books accumulate currency/commodity
+/// trading gains as net credits, and the balance-sheet identity only holds if
+/// they are negated like other credit-normal types (see `reports.rs`).
+pub const CREDIT_NORMAL: [&str; 6] = [
+    "INCOME",
+    "LIABILITY",
+    "EQUITY",
+    "CREDIT",
+    "PAYABLE",
+    "TRADING",
+];
 
 pub const INVESTMENT_TYPES: [&str; 3] = ["STOCK", "MUTUAL", "FUND"];
 

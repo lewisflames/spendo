@@ -8,8 +8,10 @@
   import { Button } from '$lib/components/ui/button';
   import { Briefcase, TrendingUp, TrendingDown, Download, Tag, LineChart } from '@lucide/svelte';
   import { dbSession } from '$lib/stores/db.svelte';
-  import { fetchHoldingDetail } from '$lib/tauri';
+  import { fetchHoldingDetail, listSymbolOverrides } from '$lib/tauri';
   import type { HoldingTransaction, PortfolioHolding, PriceHistoryEntry } from '$lib/tauri';
+  import { toast } from '$lib/components/ui/sonner';
+  import SymbolOverrideDialog from '$lib/features/portfolio/symbol-override-dialog.svelte';
   import {
     signColor,
     fmtPct,
@@ -57,6 +59,22 @@
 
   let holding = $derived(data?.holding ?? null);
   let name = $derived(holding ? holdingLabel(holding) : 'Holding');
+
+  const overridesRes = useAsyncData({
+    enabled: () => !!dbSession.value,
+    fetch: listSymbolOverrides,
+    label: 'Failed to load Yahoo symbol overrides'
+  });
+
+  let overrideSymbol = $derived(
+    overridesRes.data?.find((o) => o.commodityGuid === holdingGuid)?.symbol ?? null
+  );
+  let symbolDialogOpen = $state(false);
+
+  function handleSymbolSave() {
+    overridesRes.reload();
+    toast.success('Yahoo symbol saved — refresh prices in Portfolio to apply it');
+  }
   let currency = $derived(sessionCurrency());
   // Price history is stored in its original quote currency, so the chart and
   // its range stats are labeled in that currency rather than the report one.
@@ -246,6 +264,36 @@
         {/snippet}
       </KpiCard>
     </div>
+
+    <!-- Yahoo symbol override (Yahoo-only pricing; app-local, read-only safe) -->
+    <Card.Root>
+      <Card.Content class="flex flex-wrap items-center justify-between gap-3 py-4">
+        <div class="flex flex-col gap-1">
+          <span class="text-sm font-medium">Yahoo Finance symbol</span>
+          <span class="text-xs text-muted-foreground">
+            {#if overrideSymbol}
+              Override: <span class="font-mono font-medium text-foreground">{overrideSymbol}</span>
+            {:else}
+              Automatic detection
+            {/if}
+            {#if h.price === null}
+              · No price yet — check the symbol, then refresh prices in Portfolio.
+            {/if}
+          </span>
+        </div>
+        <Button variant="outline" size="sm" onclick={() => (symbolDialogOpen = true)}>
+          Edit symbol
+        </Button>
+      </Card.Content>
+    </Card.Root>
+    <SymbolOverrideDialog
+      bind:open={symbolDialogOpen}
+      commodityGuid={holdingGuid ?? ''}
+      mnemonic={h.mnemonic}
+      currentSymbol={overrideSymbol}
+      onSave={handleSymbolSave}
+      onError={(msg) => toast.error(msg)}
+    />
 
     <!-- Charts -->
     <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">

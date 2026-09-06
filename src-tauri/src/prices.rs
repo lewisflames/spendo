@@ -187,6 +187,67 @@ pub fn get_price_history(
     Ok(rows)
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SymbolOverride {
+    pub commodity_guid: String,
+    pub mnemonic: String,
+    pub namespace: String,
+    pub full_name: Option<String>,
+    pub symbol: Option<String>,
+}
+
+/// Normalize free-text Yahoo symbols: trim + ASCII-uppercase (`aapl` →
+/// `AAPL`, `btc-eur` → `BTC-EUR`). Rejects empty, overlong (>32) or values
+/// containing whitespace, `/`, `?` or `#` (URL path breakers).
+fn normalize_symbol(input: &str) -> Result<String, String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err("Symbol must not be empty".to_string());
+    }
+    if trimmed.len() > 32 {
+        return Err("Symbol must be 32 characters or fewer".to_string());
+    }
+    if trimmed
+        .chars()
+        .any(|c| c.is_whitespace() || matches!(c, '/' | '?' | '#'))
+    {
+        return Err("Symbol must not contain spaces, '/', '?' or '#'".to_string());
+    }
+    Ok(trimmed.to_ascii_uppercase())
+}
+
+/// commodity_guid -> override symbol. Tolerates pre-migration DBs (missing
+/// table) by returning an empty map; `init_db` creates the table on startup.
+fn symbol_override_map(conn: &Connection) -> HashMap<String, String> {
+    let mut stmt = match conn.prepare("SELECT commodity_guid, symbol FROM symbol_overrides") {
+        Ok(s) => s,
+        Err(_) => return HashMap::new(),
+    };
+    let rows = match stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    }) {
+        Ok(r) => r,
+        Err(_) => return HashMap::new(),
+    };
+    rows.flatten().collect()
+}
+
+fn list_symbol_overrides_inner(conn: &Connection) -> Result<Vec<SymbolOverride>, String> {
+    let commodities = list_commodities(conn)?;
+    let overrides = symbol_override_map(conn);
+    Ok(commodities
+        .into_iter()
+        .map(|c| SymbolOverride {
+            commodity_guid: c.guid.clone(),
+            mnemonic: c.mnemonic,
+            namespace: c.namespace,
+            full_name: c.full_name,
+            symbol: overrides.get(&c.guid).cloned(),
+        })
+        .collect())
+}
+
 pub(crate) struct PriceFetchPlan {
     commodities: Vec<CommodityInfo>,
     already_fetched: HashSet<String>,
@@ -196,6 +257,7 @@ pub(crate) struct PriceFetchPlan {
     currencies: Vec<(String, String)>,
     currency_guid_map: HashMap<String, String>,
     existing_live_prices: Vec<PriceEntry>,
+    overrides: HashMap<String, String>,
 }
 
 pub(crate) struct PendingPriceWrites {
@@ -247,6 +309,7 @@ fn read_price_data(conn: &Connection) -> Result<PriceFetchPlan, String> {
     let currency_guid_map = fx::currency_guid_map(conn);
 
     let existing_live_prices = get_latest_live_prices(conn).unwrap_or_default();
+    let overrides = symbol_override_map(conn);
 
     Ok(PriceFetchPlan {
         commodities,
@@ -257,6 +320,7 @@ fn read_price_data(conn: &Connection) -> Result<PriceFetchPlan, String> {
         currencies,
         currency_guid_map,
         existing_live_prices,
+        overrides,
     })
 }
 
@@ -419,6 +483,7 @@ async fn fetch_prices_remote(pre: PriceFetchPlan) -> Result<(PricesResult, Pendi
         currencies,
         currency_guid_map,
         existing_live_prices,
+        overrides,
     } = pre;
 
     let mut assigned: HashSet<String> = HashSet::new();
@@ -447,6 +512,19 @@ async fn fetch_prices_remote(pre: PriceFetchPlan) -> Result<(PricesResult, Pendi
     for c in &commodities {
         let period1_for_c: Option<i64> = latest_dates.get(&c.guid).and_then(|d| date_to_period1(d));
 
+        // Per-commodity free-text override wins verbatim (single Yahoo fetch,
+        // no heuristic suffix expansion).
+        if let Some(ov) = overrides.get(&c.guid) {
+            register_symbol(
+                &mut symbol_map,
+                &mut all_symbols,
+                &mut symbol_period1,
+                ov.clone(),
+                c.mnemonic.clone(),
+                period1_for_c,
+            );
+            continue;
+        }
         let candidates = derive_yahoo_symbols(&c.mnemonic, &c.namespace, &crypto_suffix);
         for sym in candidates {
             register_symbol(
@@ -582,7 +660,10 @@ async fn fetch_prices_remote(pre: PriceFetchPlan) -> Result<(PricesResult, Pendi
 
     for c in &commodities {
         if !assigned.contains(&c.mnemonic) && !already_fetched.contains(&c.guid) {
-            let candidates = derive_yahoo_symbols(&c.mnemonic, &c.namespace, &crypto_suffix);
+            let candidates = match overrides.get(&c.guid) {
+                Some(ov) => vec![ov.clone()],
+                None => derive_yahoo_symbols(&c.mnemonic, &c.namespace, &crypto_suffix),
+            };
             let first_error = candidates
                 .iter()
                 .find_map(|sym| yahoo_errors.get(sym))
@@ -717,6 +798,66 @@ pub fn latest_quote_currencies(conn: &Connection) -> Result<HashMap<String, Stri
 }
 
 #[tauri::command]
+pub async fn list_symbol_overrides(
+    state: State<'_, AppState>,
+) -> Result<Vec<SymbolOverride>, String> {
+    db::run_blocking(state.db.clone(), list_symbol_overrides_inner).await
+}
+
+#[tauri::command]
+pub async fn set_symbol_override(
+    state: State<'_, AppState>,
+    commodity_guid: String,
+    symbol: String,
+) -> Result<SymbolOverride, String> {
+    let normalized = normalize_symbol(&symbol)?;
+    db::run_blocking(state.db.clone(), move |conn| {
+        // Guard against typos: the commodity must exist and be priceable
+        // (non-CURRENCY, non-template).
+        let (mnemonic, namespace, full_name): (String, String, Option<String>) = conn
+            .query_row(
+                "SELECT mnemonic, namespace, fullname FROM commodities WHERE guid = ?1",
+                [&commodity_guid],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .map_err(|_| format!("Unknown commodity: {commodity_guid}"))?;
+        if namespace == "CURRENCY" || namespace == "template" {
+            return Err("Symbol overrides apply to securities only".to_string());
+        }
+        conn.execute(
+            "INSERT INTO symbol_overrides (commodity_guid, symbol) VALUES (?1, ?2)
+             ON CONFLICT(commodity_guid) DO UPDATE SET symbol = excluded.symbol",
+            rusqlite::params![commodity_guid, normalized],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(SymbolOverride {
+            commodity_guid,
+            mnemonic,
+            namespace,
+            full_name,
+            symbol: Some(normalized),
+        })
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn delete_symbol_override(
+    state: State<'_, AppState>,
+    commodity_guid: String,
+) -> Result<(), String> {
+    db::run_blocking(state.db.clone(), move |conn| {
+        conn.execute(
+            "DELETE FROM symbol_overrides WHERE commodity_guid = ?1",
+            [&commodity_guid],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn refresh_prices(state: State<'_, AppState>) -> Result<PricesResult, String> {
     let pre = db::run_blocking(state.db.clone(), read_price_data).await?;
 
@@ -746,4 +887,69 @@ pub async fn refresh_prices(state: State<'_, AppState>) -> Result<PricesResult, 
     .await?;
 
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::init_db;
+
+    fn setup_commodities() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        init_db(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO commodities (guid, mnemonic, namespace, fullname) VALUES
+             ('c-aapl', 'AAPL', 'NASDAQ', 'Apple'),
+             ('c-eur', 'EUR', 'CURRENCY', NULL)",
+            [],
+        )
+        .unwrap();
+        conn
+    }
+
+    #[test]
+    fn normalize_symbol_uppercases_and_trims() {
+        assert_eq!(normalize_symbol("  aapl ").unwrap(), "AAPL");
+        assert_eq!(normalize_symbol("btc-eur").unwrap(), "BTC-EUR");
+        assert_eq!(normalize_symbol("^GSPC").unwrap(), "^GSPC");
+        assert!(normalize_symbol("").is_err());
+        assert!(normalize_symbol("   ").is_err());
+        assert!(normalize_symbol("AA PL").is_err());
+        assert!(normalize_symbol("A/B").is_err());
+        assert!(normalize_symbol(&"A".repeat(33)).is_err());
+    }
+
+    #[test]
+    fn override_map_empty_without_rows() {
+        let conn = setup_commodities();
+        assert!(symbol_override_map(&conn).is_empty());
+        let list = list_symbol_overrides_inner(&conn).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].commodity_guid, "c-aapl");
+        assert_eq!(list[0].symbol, None);
+    }
+
+    #[test]
+    fn override_upsert_round_trip() {
+        let conn = setup_commodities();
+        conn.execute(
+            "INSERT INTO symbol_overrides (commodity_guid, symbol) VALUES ('c-aapl', 'AAPL')",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            symbol_override_map(&conn).get("c-aapl").cloned(),
+            Some("AAPL".to_string())
+        );
+        conn.execute(
+            "INSERT INTO symbol_overrides (commodity_guid, symbol) VALUES ('c-aapl', 'AAPL.DE')
+             ON CONFLICT(commodity_guid) DO UPDATE SET symbol = excluded.symbol",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            symbol_override_map(&conn).get("c-aapl").cloned(),
+            Some("AAPL.DE".to_string())
+        );
+    }
 }

@@ -10,7 +10,7 @@ export const ROUTE_TITLES: Record<string, string> = {
   '/settings': 'Settings',
   '/about': 'About',
   '/budgets': 'Budgets',
-  '/pnl': 'Profit & Loss',
+  '/reports/pnl': 'Profit & Loss',
   '/portfolio': 'Portfolio'
 };
 
@@ -21,5 +21,6 @@ export function routeTitle(pathname: string): string {
   if (pathname.startsWith('/budgets/')) return ROUTE_TITLES['/budgets'];
   if (pathname.startsWith('/portfolio/')) return ROUTE_TITLES['/portfolio'];
   if (pathname.startsWith('/transactions/')) return ROUTE_TITLES['/transactions'];
+  if (pathname.startsWith('/reports/')) return 'Reports';
   return 'Home';
 }

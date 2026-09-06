@@ -72,6 +72,15 @@ export interface AccountsResult {
   trees: AccountNode[];
   byType: Record<string, TypeSummary>;
   totalAccounts: number;
+  reportCurrency: string;
+  /** Cumulative income minus expenses as of the requested date. */
+  retainedEarnings: number;
+  /** Market minus cost for priced investments. */
+  unrealizedGains: number;
+  /** Assets − (liabilities + equity + unrealized + retained); ~0 when balanced. */
+  balanceCheck: number;
+  missingFx: string[];
+  missingPrices: MissingPrice[];
 }
 
 interface SplitInfo {
@@ -329,6 +338,7 @@ export interface ProfitLossReport {
   dateTo: string;
   prevDateFrom: string;
   prevDateTo: string;
+  reportCurrency: string;
   incomeRows: ProfitLossRow[];
   incomeRootGuid: string | null;
   totalIncome: number;
@@ -338,6 +348,7 @@ export interface ProfitLossReport {
   totalExpenses: number;
   totalExpensesPrev: number;
   netIncome: number;
+  missingFx: string[];
 }
 
 export const generatePnlReport = (
@@ -352,6 +363,37 @@ export const generatePnlReport = (
     prevDateFrom: prevDateFrom ?? null,
     prevDateTo: prevDateTo ?? null
   });
+
+export interface PnlTrendPoint {
+  /** YYYY-MM */
+  month: string;
+  income: number;
+  expenses: number;
+}
+
+export const generatePnlTrend = (dateFrom: string, dateTo: string): Promise<PnlTrendPoint[]> =>
+  invoke('generate_pnl_trend', { dateFrom, dateTo });
+
+export interface MissingPrice {
+  mnemonic: string;
+  commodityGuid: string | null;
+}
+
+export interface SymbolOverride {
+  commodityGuid: string;
+  mnemonic: string;
+  namespace: string;
+  fullName: string | null;
+  symbol: string | null;
+}
+
+export const listSymbolOverrides = (): Promise<SymbolOverride[]> => invoke('list_symbol_overrides');
+
+export const setSymbolOverride = (commodityGuid: string, symbol: string): Promise<SymbolOverride> =>
+  invoke('set_symbol_override', { commodityGuid, symbol });
+
+export const deleteSymbolOverride = (commodityGuid: string): Promise<void> =>
+  invoke('delete_symbol_override', { commodityGuid });
 
 // ── Budgets ──
 

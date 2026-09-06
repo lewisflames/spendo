@@ -39,9 +39,29 @@ pub struct AccountsResult {
     pub trees: Vec<AccountNode>,
     pub by_type: HashMap<String, TypeSummary>,
     pub total_accounts: i64,
+    pub report_currency: String,
+    /// Cumulative income minus expenses as of the requested date.
+    pub retained_earnings: f64,
+    /// Market minus cost for priced investments (0 for unpriced holdings,
+    /// which fall back to cost basis and are listed in `missing_prices`).
+    pub unrealized_gains: f64,
+    /// `assets - (liabilities + equity + unrealized + retained)`; near zero
+    /// when balanced. Mirrors the old balance-sheet check.
+    pub balance_check: f64,
+    pub missing_fx: Vec<String>,
+    pub missing_prices: Vec<AccountMissingPrice>,
 }
 
-const TYPE_TO_CATEGORY: [(&str, &str); 14] = [
+/// A security held in the book with no cached price. Same wire shape as the
+/// reports-side type so the shared `MissingFxWarning` component applies.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountMissingPrice {
+    pub mnemonic: String,
+    pub commodity_guid: Option<String>,
+}
+
+const TYPE_TO_CATEGORY: [(&str, &str); 15] = [
     ("ASSET", "ASSET"),
     ("BANK", "ASSET"),
     ("CASH", "ASSET"),
@@ -56,6 +76,7 @@ const TYPE_TO_CATEGORY: [(&str, &str); 14] = [
     ("INCOME", "INCOME"),
     ("EXPENSE", "EXPENSE"),
     ("EQUITY", "EQUITY"),
+    ("TRADING", "EQUITY"),
 ];
 
 fn category_for_type(account_type: &str) -> &str {
@@ -74,6 +95,7 @@ struct AccountRow {
     description: Option<String>,
     placeholder: bool,
     commodity_mnemonic: Option<String>,
+    commodity_guid: Option<String>,
     balance: f64,
     quantity: f64,
     tx_count: i64,
@@ -85,14 +107,16 @@ fn fetch_accounts_inner(
 ) -> Result<AccountsResult, String> {
     // Half-open everywhere: `post_date` is `YYYY-MM-DD HH:MM:SS`, so
     // `< date(?,'+1 day')` includes the whole as-of day. `None` means current
-    // state (today), matching `VISIBLE_TX_FILTER` semantics.
+    // state (today), matching `VISIBLE_TX_FILTER` semantics. The upper bound
+    // is capped at the shared visibility window so a future as-of never leaks
+    // future transactions (mirrors `reports.rs`).
     let date_expr: String = match as_of_date {
         Some(d) => d.to_string(),
         None => Utc::now().format("%Y-%m-%d").to_string(),
     };
 
     let sql = &format!("SELECT a.guid, a.name, a.account_type, a.parent_guid, a.code, a.description, a.placeholder,
-                      c.mnemonic as commodity_mnemonic,
+                      c.mnemonic as commodity_mnemonic, c.guid as commodity_guid,
                       COALESCE(b.balance, 0) as balance,
                       COALESCE(b.quantity, 0) as quantity,
                       COALESCE(b.tx_count, 0) as tx_count
@@ -105,7 +129,7 @@ fn fetch_accounts_inner(
                         COUNT(DISTINCT s.tx_guid) as tx_count
                  FROM splits s
                  JOIN transactions t ON t.guid = s.tx_guid
-                 WHERE t.post_date < date(?1, '+1 day')
+                 WHERE t.post_date < min(date(?1, '+1 day'), date('now', '+1 day'))
                  GROUP BY s.account_guid
                ) b ON b.account_guid = a.guid
                WHERE a.account_type != 'ROOT'
@@ -126,9 +150,10 @@ fn fetch_accounts_inner(
                 description: row.get(5)?,
                 placeholder: row.get::<_, i64>(6)? != 0,
                 commodity_mnemonic: row.get(7)?,
-                balance: row.get(8)?,
-                quantity: row.get(9)?,
-                tx_count: row.get(10)?,
+                commodity_guid: row.get(8)?,
+                balance: row.get(9)?,
+                quantity: row.get(10)?,
+                tx_count: row.get(11)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -141,6 +166,21 @@ fn fetch_accounts_inner(
 
     let mut node_map: HashMap<String, AccountNode> = HashMap::new();
     let mut by_type: HashMap<String, TypeSummary> = HashMap::new();
+    let mut missing_fx_set: HashSet<String> = HashSet::new();
+    let mut missing_prices_map: HashMap<String, Option<String>> = HashMap::new();
+    let mut unrealized_gains = 0.0;
+
+    // Zero balances convert to zero at any rate and never warn (mirrors
+    // `reports.rs`): only non-zero converted amounts can flag gaps.
+    let mut note_missing_fx = |mnemonic: &str, signed: f64| {
+        if signed != 0.0
+            && !report_currency.is_empty()
+            && mnemonic != report_currency
+            && !fx_map.contains_key(mnemonic)
+        {
+            missing_fx_set.insert(mnemonic.to_string());
+        }
+    };
 
     for row in &rows {
         let mut balance = if utils::is_credit_normal(&row.account_type) {
@@ -159,12 +199,24 @@ fn fetch_accounts_inner(
                     } else {
                         row.quantity
                     };
-                    balance = adjusted * price;
+                    let market = adjusted * price;
+                    // Cost leg converts silently (never an FX warning): the
+                    // holding is either priced (market dominates) or flagged
+                    // via `missing_prices`.
+                    let cost = fx::convert(balance, mnemonic, &report_currency, &fx_map);
+                    unrealized_gains += market - cost;
+                    balance = market;
+                } else {
+                    missing_prices_map
+                        .entry(mnemonic.clone())
+                        .or_insert(row.commodity_guid.clone());
+                    balance = fx::convert(balance, mnemonic, &report_currency, &fx_map);
                 }
             }
         } else if let Some(ref mnemonic) = row.commodity_mnemonic {
             // Cash-type (and income/expense/equity) accounts hold their own currency:
             // convert to the report currency for aggregation.
+            note_missing_fx(mnemonic, balance);
             balance = fx::convert(balance, mnemonic, &report_currency, &fx_map);
         }
 
@@ -247,10 +299,31 @@ fn fetch_accounts_inner(
 
     let total_accounts = rows.len() as i64;
 
+    let total_of = |key: &str| by_type.get(key).map(|s| s.total_balance).unwrap_or(0.0);
+    let retained_earnings = total_of("INCOME") - total_of("EXPENSE");
+    let balance_check =
+        total_of("ASSET") - (total_of("LIABILITY") + total_of("EQUITY") + unrealized_gains + retained_earnings);
+    let mut missing_fx: Vec<String> = missing_fx_set.into_iter().collect();
+    missing_fx.sort();
+    let mut missing_prices: Vec<AccountMissingPrice> = missing_prices_map
+        .into_iter()
+        .map(|(mnemonic, commodity_guid)| AccountMissingPrice {
+            mnemonic,
+            commodity_guid,
+        })
+        .collect();
+    missing_prices.sort_by(|a, b| a.mnemonic.cmp(&b.mnemonic));
+
     Ok(AccountsResult {
         trees: root_nodes,
         by_type,
         total_accounts,
+        report_currency,
+        retained_earnings,
+        unrealized_gains,
+        balance_check,
+        missing_fx,
+        missing_prices,
     })
 }
 

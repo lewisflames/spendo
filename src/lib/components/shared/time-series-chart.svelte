@@ -3,7 +3,7 @@
   import * as Chart from '$lib/components/ui/chart';
   import ChartTooltipRow from '$lib/components/ui/chart/chart-tooltip-row.svelte';
   import { Skeleton } from '$lib/components/ui/skeleton';
-  import { AreaChart } from 'layerchart';
+  import { AreaChart, BarChart } from 'layerchart';
   import { formatCurrency, formatDate } from '$lib/utils/format.svelte';
   import { curveStepAfter } from 'd3-shape';
 
@@ -30,7 +30,8 @@
     series,
     yField,
     currency,
-    tooltipTotals
+    tooltipTotals,
+    variant = 'area'
   }: {
     title: string;
     description?: string;
@@ -42,6 +43,7 @@
     yField?: string;
     currency: string;
     tooltipTotals?: TimeSeriesTooltipTotal[];
+    variant?: 'area' | 'bar';
   } = $props();
 
   let dateRange = $state('All');
@@ -134,30 +136,53 @@
         config={chartConfig satisfies Chart.ChartConfig}
         class="aspect-auto h-72 w-full"
       >
-        <AreaChart
-          data={filteredData}
-          x={getX}
-          y={yField}
-          seriesLayout="overlap"
-          yBaseline={null}
-          yNice={false}
-          axis
-          series={visibleSeries.map((s) => ({ key: s.key, label: s.label, color: s.color }))}
-          padding={{ top: 0, right: 10, bottom: 20, left: 50 }}
-          props={{
-            area: {
-              curve: curveStepAfter
-            }
-          }}
-        >
-          {#snippet tooltip()}
-            <Chart.Tooltip
-              labelFormatter={(v) => formatDate(v as string | Date)}
-              valueFormatter={(v) => formatCurrency(v as number, currency)}
-              footer={tooltipTotals ? tooltipFooter : undefined}
-            />
-          {/snippet}
-        </AreaChart>
+        {#if variant === 'bar'}
+          <BarChart
+            data={filteredData}
+            x={getX}
+            y={yField}
+            seriesLayout="group"
+            yNice={false}
+            axis
+            series={visibleSeries.map((s) => ({ key: s.key, label: s.label, color: s.color }))}
+            padding={{ top: 0, right: 10, bottom: 20, left: 50 }}
+            bandPadding={0.4}
+            groupPadding={0.15}
+          >
+            {#snippet tooltip()}
+              <Chart.Tooltip
+                labelFormatter={(v) => formatDate(v as string | Date)}
+                valueFormatter={(v) => formatCurrency(v as number, currency)}
+                footer={tooltipTotals ? tooltipFooter : undefined}
+              />
+            {/snippet}
+          </BarChart>
+        {:else}
+          <AreaChart
+            data={filteredData}
+            x={getX}
+            y={yField}
+            seriesLayout="overlap"
+            yBaseline={null}
+            yNice={false}
+            axis
+            series={visibleSeries.map((s) => ({ key: s.key, label: s.label, color: s.color }))}
+            padding={{ top: 0, right: 10, bottom: 20, left: 50 }}
+            props={{
+              area: {
+                curve: curveStepAfter
+              }
+            }}
+          >
+            {#snippet tooltip()}
+              <Chart.Tooltip
+                labelFormatter={(v) => formatDate(v as string | Date)}
+                valueFormatter={(v) => formatCurrency(v as number, currency)}
+                footer={tooltipTotals ? tooltipFooter : undefined}
+              />
+            {/snippet}
+          </AreaChart>
+        {/if}
       </Chart.Container>
     {/if}
   </Card.Content>

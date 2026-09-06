@@ -1,7 +1,8 @@
 <script lang="ts">
   import * as Card from '$lib/components/ui/card';
   import { Skeleton } from '$lib/components/ui/skeleton';
-  import { Briefcase, TrendingUp, TrendingDown, RefreshCw } from '@lucide/svelte';
+  import { Briefcase, TrendingUp, TrendingDown, RefreshCw, TriangleAlert } from '@lucide/svelte';
+  import { resolve } from '$app/paths';
   import { dbSession } from '$lib/stores/db.svelte';
   import { fetchPortfolioData, refreshPrices } from '$lib/tauri';
   import {
@@ -37,12 +38,15 @@
   let currency = $derived(sessionCurrency());
 
   let refreshingPrices = $state(false);
+  let priceErrors = $state<{ mnemonic: string; error: string }[]>([]);
 
   async function handleRefreshPrices() {
     if (!dbSession.value || refreshingPrices) return;
     refreshingPrices = true;
+    priceErrors = [];
     try {
       const result = await refreshPrices();
+      priceErrors = result.errors;
       if (result.errors.length > 0) {
         toast.warning(`Prices refreshed with ${plural(result.errors.length, 'error')}`);
       } else {
@@ -129,6 +133,42 @@
     <ErrorCard message={res.error} onRetry={() => res.reload()} />
   {:else if res.data}
     {@const d = res.data}
+    {@const guidByMnemonic = new Map(d.holdings.map((h) => [h.mnemonic, h.commodityGuid]))}
+
+    {#if priceErrors.length > 0}
+      <div
+        role="alert"
+        class="flex items-start gap-2.5 rounded-lg border border-warning/40 bg-warning/10 px-3.5 py-2.5 text-sm"
+      >
+        <TriangleAlert aria-hidden="true" class="mt-0.5 size-4 shrink-0 text-warning" />
+        <div class="flex min-w-0 flex-col gap-1.5">
+          <p class="text-muted-foreground">
+            <span class="font-medium text-foreground">
+              {plural(priceErrors.length, 'price')} could not be fetched
+            </span>
+            — open the holding and set its Yahoo symbol explicitly.
+          </p>
+          <ul class="flex flex-col gap-1">
+            {#each priceErrors as err (err.mnemonic)}
+              <li class="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
+                <span class="font-mono font-medium text-foreground">{err.mnemonic}</span>
+                <span class="min-w-0 truncate text-muted-foreground">{err.error}</span>
+                {#if guidByMnemonic.get(err.mnemonic)}
+                  <a
+                    href={resolve('/portfolio/[holding]', {
+                      holding: guidByMnemonic.get(err.mnemonic) ?? ''
+                    })}
+                    class="font-medium underline"
+                  >
+                    Fix symbol
+                  </a>
+                {/if}
+              </li>
+            {/each}
+          </ul>
+        </div>
+      </div>
+    {/if}
 
     {#if d.holdings.length > 0}
       <!-- KPI summary cards -->

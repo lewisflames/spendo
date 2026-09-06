@@ -11,6 +11,14 @@ export function calendarDateToStr(cd: CalendarDate): string {
   return cd.toString();
 }
 
+/** Local today as `YYYY-MM-DD` (single source for as-of defaults/guards). */
+export function todayStr(): string {
+  const d = new Date();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+
 export function last12MonthsRange(): { start: CalendarDate; end: CalendarDate } {
   const now = new Date();
   const end = new Date(now.getFullYear(), now.getMonth(), 0);
@@ -30,6 +38,45 @@ export function computePrevRange(from: string, to: string): { prevFrom: string; 
   const prevTo = fromD.subtract({ days: 1 });
   const prevFrom = prevTo.subtract({ days: lengthDays - 1 });
   return { prevFrom: calendarDateToStr(prevFrom), prevTo: calendarDateToStr(prevTo) };
+}
+
+/** Last day of a 1-based month (leap-year aware). */
+export function daysInMonth(year: number, month: number): number {
+  return new Date(year, month, 0).getDate();
+}
+
+/** Full calendar year: Jan 1 – Dec 31. */
+export function getYearRange(year: number): { start: CalendarDate; end: CalendarDate } {
+  return {
+    start: new CalendarDate(year, 1, 1),
+    end: new CalendarDate(year, 12, 31)
+  };
+}
+
+/** Full calendar quarter (q is 1-4): first day of start month – last day of end month. */
+export function getQuarterRange(
+  year: number,
+  q: number
+): { start: CalendarDate; end: CalendarDate } {
+  const quarter = Math.min(4, Math.max(1, Math.trunc(q)));
+  const startMonth = (quarter - 1) * 3 + 1;
+  const endMonth = startMonth + 2;
+  return {
+    start: new CalendarDate(year, startMonth, 1),
+    end: new CalendarDate(year, endMonth, daysInMonth(year, endMonth))
+  };
+}
+
+/** Full calendar month: 1st – last day. Month is 1-12, clamped. */
+export function getMonthRange(
+  year: number,
+  month: number
+): { start: CalendarDate; end: CalendarDate } {
+  const m = Math.min(12, Math.max(1, Math.trunc(month)));
+  return {
+    start: new CalendarDate(year, m, 1),
+    end: new CalendarDate(year, m, daysInMonth(year, m))
+  };
 }
 
 function getThisMonthRange(): { start: CalendarDate; end: CalendarDate } {

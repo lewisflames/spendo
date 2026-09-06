@@ -24,6 +24,15 @@ export function openBudget(accountGuid: string, year?: number): Promise<void> {
   return goto(year !== undefined ? `${base}?year=${year}` : base);
 }
 
+/** Navigate to the transactions list filtered to a report period. */
+export function openReportTransactions(dateFrom: string, dateTo: string): Promise<void> {
+  const base = resolve('/transactions');
+  const query = `from=${encodeURIComponent(dateFrom)}&to=${encodeURIComponent(dateTo)}`;
+  // Query-only date suffix on top of a resolved route.
+  // eslint-disable-next-line svelte/no-navigation-without-resolve
+  return goto(`${base}?${query}`);
+}
+
 /**
  * Row-click navigation guard shared by every clickable table row. Ignores
  * clicks with modifier keys (open in new tab etc.) and clicks on interactive
