@@ -6,7 +6,7 @@
   import { CalendarIcon, ChevronLeft, ChevronRight } from '@lucide/svelte';
   import type { DateRange } from 'bits-ui';
   import type { DatePreset } from '$lib/utils/date-utils.svelte';
-  import { getMonthRange } from '$lib/utils/date-utils.svelte';
+  import { getMonthRange, getMonthRangeSpan } from '$lib/utils/date-utils.svelte';
   import { dbSession } from '$lib/stores/db.svelte';
   import { appSettings } from '$lib/stores/settings.svelte';
   import {
@@ -31,6 +31,10 @@
 
   let open = $state(false);
   let visibleYear = $state<number>(new Date().getFullYear());
+  // First click of a two-click month-range pick; survives year stepping so
+  // ranges can span years. Hover previews the pending span.
+  let anchor = $state<{ y: number; m: number } | null>(null);
+  let hover = $state<{ y: number; m: number } | null>(null);
 
   let summary = $derived(dbSession.value?.summary ?? null);
   let bounds = $derived(
@@ -48,17 +52,25 @@
   );
 
   // Keep the year stepper on the committed value whenever the popover opens.
+  // A fresh open also clears any pending month-range pick.
   $effect(() => {
     if (open) {
       untrack(() => {
         const endYear = (value?.end as CalendarDate | undefined)?.year ?? new Date().getFullYear();
         visibleYear = Math.min(maxYear, Math.max(minYear, endYear));
+        anchor = null;
+        hover = null;
       });
+    } else {
+      anchor = null;
+      hover = null;
     }
   });
 
   function applyPreset(preset: DatePreset) {
     value = preset.getRange();
+    anchor = null;
+    hover = null;
     open = false;
   }
 
@@ -79,6 +91,8 @@
     const end = value?.end as CalendarDate | undefined;
     if (!start || !end) return;
     value = shiftPeriodRange(start, end, direction);
+    anchor = null;
+    hover = null;
   }
 
   let canStepPrev = $derived.by(() => {
@@ -94,12 +108,35 @@
     return !isAtPresent(start, end);
   });
 
+  function absMonth(y: number, m: number): number {
+    return y * 12 + (m - 1);
+  }
+
   function clickMonth(y: number, m: number) {
-    value = getMonthRange(y, m);
+    // Two-click month-range pick: first click anchors, second click commits
+    // the whole-month span (same month twice = single month).
+    if (!anchor) {
+      anchor = { y, m };
+      hover = { y, m };
+      return;
+    }
+    value = getMonthRangeSpan(anchor.y, anchor.m, y, m);
+    anchor = null;
+    hover = null;
     open = false;
   }
 
+  function monthInPendingSpan(y: number, m: number): boolean {
+    if (!anchor) return false;
+    const other = hover ?? anchor;
+    const lo = Math.min(absMonth(anchor.y, anchor.m), absMonth(other.y, other.m));
+    const hi = Math.max(absMonth(anchor.y, anchor.m), absMonth(other.y, other.m));
+    const cur = absMonth(y, m);
+    return cur >= lo && cur <= hi;
+  }
+
   function monthSelected(y: number, m: number): boolean {
+    if (monthInPendingSpan(y, m)) return true;
     const start = value?.start as CalendarDate | undefined;
     const end = value?.end as CalendarDate | undefined;
     if (!start || !end) return false;
@@ -179,17 +216,33 @@
         <ChevronRight aria-hidden="true" />
       </Button>
     </div>
-    <div class="grid grid-cols-3 gap-1" role="group" aria-label="Choose a month">
+    <div
+      class="grid grid-cols-3 gap-1"
+      role="group"
+      aria-label="Choose a month range"
+      onmouseleave={() => {
+        hover = anchor;
+      }}
+    >
       {#each monthNames as name, i (name + i)}
         <Button
           size="sm"
           variant={monthSelected(visibleYear, i + 1) ? 'secondary' : 'ghost'}
           aria-pressed={monthSelected(visibleYear, i + 1)}
           onclick={() => clickMonth(visibleYear, i + 1)}
+          onmouseenter={() => {
+            hover = { y: visibleYear, m: i + 1 };
+          }}
+          onfocus={() => {
+            hover = { y: visibleYear, m: i + 1 };
+          }}
         >
           {name}
         </Button>
       {/each}
     </div>
+    <p class="text-xs text-muted-foreground">
+      {anchor ? 'Select end month' : 'Select start month, then end month'}
+    </p>
   </Popover.Content>
 </Popover.Root>

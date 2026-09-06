@@ -30,8 +30,17 @@ export function last12MonthsRange(): { start: CalendarDate; end: CalendarDate } 
 }
 
 export function computePrevRange(from: string, to: string): { prevFrom: string; prevTo: string } {
-  const fromD = parseDate(from.slice(0, 10));
-  const toD = parseDate(to.slice(0, 10));
+  const fromStr = from.slice(0, 10);
+  const toStr = to.slice(0, 10);
+  // Whole calendar years compare against the whole previous year (day-count
+  // arithmetic would drift by a day across leap boundaries).
+  const yearMatch = /^(\d{4})-01-01$/.exec(fromStr);
+  if (yearMatch && toStr === `${yearMatch[1]}-12-31`) {
+    const prevYear = Number(yearMatch[1]) - 1;
+    return { prevFrom: `${prevYear}-01-01`, prevTo: `${prevYear}-12-31` };
+  }
+  const fromD = parseDate(fromStr);
+  const toD = parseDate(toStr);
   // Same-length window immediately before `from` (whole-day arithmetic keeps
   // the previous period exactly as long as the current one).
   const lengthDays = toD.compare(fromD) + 1;
@@ -79,6 +88,29 @@ export function getMonthRange(
   };
 }
 
+/**
+ * Span of whole calendar months from one month to another (inclusive).
+ * Order-insensitive so range picks work in either direction and across years;
+ * months are clamped like `getMonthRange`.
+ */
+export function getMonthRangeSpan(
+  aYear: number,
+  aMonth: number,
+  bYear: number,
+  bMonth: number
+): { start: CalendarDate; end: CalendarDate } {
+  const aY = Math.trunc(aYear);
+  const bY = Math.trunc(bYear);
+  const aM = Math.min(12, Math.max(1, Math.trunc(aMonth)));
+  const bM = Math.min(12, Math.max(1, Math.trunc(bMonth)));
+  const [fromY, fromM, toY, toM] =
+    aY * 12 + aM <= bY * 12 + bM ? [aY, aM, bY, bM] : [bY, bM, aY, aM];
+  return {
+    start: new CalendarDate(fromY, fromM, 1),
+    end: new CalendarDate(toY, toM, daysInMonth(toY, toM))
+  };
+}
+
 /** Long month name for a 1-based month in the given locale. */
 export function monthName(month: number, locale: string): string {
   return new Date(2000, month - 1, 1).toLocaleDateString(locale, { month: 'long' });
@@ -91,33 +123,18 @@ function getThisMonthRange(): { start: CalendarDate; end: CalendarDate } {
   return { start, end: new CalendarDate(now.getFullYear(), now.getMonth() + 1, endDate) };
 }
 
-function getPreviousMonthRange(): { start: CalendarDate; end: CalendarDate } {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const end = new Date(now.getFullYear(), now.getMonth(), 0);
-  return {
-    start: new CalendarDate(start.getFullYear(), start.getMonth() + 1, start.getDate()),
-    end: new CalendarDate(end.getFullYear(), end.getMonth() + 1, end.getDate())
-  };
-}
-
 function getThisQuarterRange(): { start: CalendarDate; end: CalendarDate } {
   const now = new Date();
   return getQuarterRange(now.getFullYear(), Math.floor(now.getMonth() / 3) + 1);
 }
 
-function getYearToDateRange(): { start: CalendarDate; end: CalendarDate } {
-  const now = new Date();
-  return {
-    start: new CalendarDate(now.getFullYear(), 1, 1),
-    end: new CalendarDate(now.getFullYear(), now.getMonth() + 1, now.getDate())
-  };
+function getThisYearRange(): { start: CalendarDate; end: CalendarDate } {
+  return getYearRange(new Date().getFullYear());
 }
 
 export const PNL_PRESETS: DatePreset[] = [
   { label: 'This month', getRange: getThisMonthRange },
-  { label: 'Last month', getRange: getPreviousMonthRange },
   { label: 'This quarter', getRange: getThisQuarterRange },
-  { label: 'Year to date', getRange: getYearToDateRange },
+  { label: 'This year', getRange: getThisYearRange },
   { label: 'Last 12 months', getRange: last12MonthsRange }
 ];
