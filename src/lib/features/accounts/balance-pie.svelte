@@ -38,8 +38,23 @@
   });
 
   let parentLabel = $derived(parent?.description ?? parent?.name ?? '');
-  let centerLabel = $derived(parentSharePct !== null ? `of ${parentLabel}` : null);
-  let centerValue = $derived(parentSharePct !== null ? `${parentSharePct.toFixed(1)}%` : null);
+  let selfLabel = $derived(node?.description ?? node?.name ?? '');
+  // Top-level accounts have no parent: show 100% relative to itself so the
+  // donut hole is never empty for a meaningful balance.
+  let centerLabel = $derived(
+    parentSharePct !== null
+      ? `of ${parentLabel}`
+      : accountBalance >= 0.005 && node
+        ? `of ${selfLabel}`
+        : null
+  );
+  let centerValue = $derived(
+    parentSharePct !== null
+      ? `${parentSharePct.toFixed(1)}%`
+      : accountBalance >= 0.005 && node
+        ? '100.0%'
+        : null
+  );
 </script>
 
 <AllocationPie
