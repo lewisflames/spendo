@@ -49,16 +49,7 @@ pub struct AccountsResult {
     /// when balanced. Mirrors the old balance-sheet check.
     pub balance_check: f64,
     pub missing_fx: Vec<String>,
-    pub missing_prices: Vec<AccountMissingPrice>,
-}
-
-/// A security held in the book with no cached price. Same wire shape as the
-/// reports-side type so the shared `MissingFxWarning` component applies.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AccountMissingPrice {
-    pub mnemonic: String,
-    pub commodity_guid: Option<String>,
+    pub missing_prices: Vec<fx::MissingPrice>,
 }
 
 const TYPE_TO_CATEGORY: [(&str, &str); 15] = [
@@ -170,18 +161,6 @@ fn fetch_accounts_inner(
     let mut missing_prices_map: HashMap<String, Option<String>> = HashMap::new();
     let mut unrealized_gains = 0.0;
 
-    // Zero balances convert to zero at any rate and never warn (mirrors
-    // `reports.rs`): only non-zero converted amounts can flag gaps.
-    let mut note_missing_fx = |mnemonic: &str, signed: f64| {
-        if signed != 0.0
-            && !report_currency.is_empty()
-            && mnemonic != report_currency
-            && !fx_map.contains_key(mnemonic)
-        {
-            missing_fx_set.insert(mnemonic.to_string());
-        }
-    };
-
     for row in &rows {
         let mut balance = if utils::is_credit_normal(&row.account_type) {
             -row.balance
@@ -216,8 +195,13 @@ fn fetch_accounts_inner(
         } else if let Some(ref mnemonic) = row.commodity_mnemonic {
             // Cash-type (and income/expense/equity) accounts hold their own currency:
             // convert to the report currency for aggregation.
-            note_missing_fx(mnemonic, balance);
-            balance = fx::convert(balance, mnemonic, &report_currency, &fx_map);
+            balance = fx::convert_tracked(
+                balance,
+                mnemonic,
+                &report_currency,
+                &fx_map,
+                Some(&mut missing_fx_set),
+            );
         }
 
         let node = AccountNode {
@@ -305,9 +289,9 @@ fn fetch_accounts_inner(
         total_of("ASSET") - (total_of("LIABILITY") + total_of("EQUITY") + unrealized_gains + retained_earnings);
     let mut missing_fx: Vec<String> = missing_fx_set.into_iter().collect();
     missing_fx.sort();
-    let mut missing_prices: Vec<AccountMissingPrice> = missing_prices_map
+    let mut missing_prices: Vec<fx::MissingPrice> = missing_prices_map
         .into_iter()
-        .map(|(mnemonic, commodity_guid)| AccountMissingPrice {
+        .map(|(mnemonic, commodity_guid)| fx::MissingPrice {
             mnemonic,
             commodity_guid,
         })

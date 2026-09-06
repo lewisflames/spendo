@@ -374,8 +374,15 @@ fn normalize_post_date(raw: &str) -> String {
     if digits.len() == 8 {
         return date;
     }
-    // Remaining pairs are HH, MM, SS… joined back with colons.
-    let time = digits.as_bytes()[8..]
+    // Remaining pairs are HH, MM, SS… joined back with colons. An odd-length
+    // tail (e.g. 9 digits) would emit a 1-char component (`"2024-01-15 1"`)
+    // that sorts/compares wrong, so pass it through for the caller to handle.
+    let tail = &digits[8..];
+    if !tail.len().is_multiple_of(2) || tail.len() < 6 {
+        return clean.to_string();
+    }
+    let time = tail
+        .as_bytes()
         .chunks(2)
         .map(|pair| std::str::from_utf8(pair).unwrap_or(""))
         .collect::<Vec<_>>()
@@ -445,36 +452,50 @@ fn non_empty(s: Option<String>) -> Option<String> {
 
 // ── Orphan helpers ──────────────────────────────────────────────────────────
 
-const VALID_TABLES: &[&str] = &["commodities", "accounts", "transactions", "splits"];
-
-fn validate_table(table: &str) -> Result<(), String> {
-    if VALID_TABLES.contains(&table) {
-        Ok(())
-    } else {
-        Err(format!("Invalid table name: {}", table))
-    }
-}
-
 /// Materialize source GUIDs into a TEMP table so orphan detection can use an
 /// anti-join instead of a giant `IN (...)` list (SQLite caps bound parameters
-/// at ~32k, which real books exceed).
+/// at ~32k, which real books exceed). Inserts run in one txn instead of one
+/// autocommit per GUID.
 fn populate_source_guids(conn: &Connection, name: &str, guids: &[String]) -> Result<(), String> {
     conn.execute_batch(&format!(
         "DROP TABLE IF EXISTS {name};
          CREATE TEMP TABLE {name} (guid TEXT NOT NULL PRIMARY KEY);"
     ))
     .map_err(|e| e.to_string())?;
-    let mut stmt = conn
-        .prepare(&format!("INSERT OR IGNORE INTO {name} (guid) VALUES (?1)"))
+    conn.execute_batch("BEGIN")
         .map_err(|e| e.to_string())?;
-    for guid in guids {
-        stmt.execute([guid]).map_err(|e| e.to_string())?;
+    let result = (|| -> Result<(), String> {
+        let mut stmt = conn
+            .prepare(&format!("INSERT OR IGNORE INTO {name} (guid) VALUES (?1)"))
+            .map_err(|e| e.to_string())?;
+        for guid in guids {
+            stmt.execute([guid]).map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    })();
+    match result {
+        Ok(()) => {
+            conn.execute_batch("COMMIT").map_err(|e| e.to_string())?;
+            Ok(())
+        }
+        Err(e) => {
+            conn.execute_batch("ROLLBACK").ok();
+            Err(e)
+        }
     }
-    Ok(())
+}
+
+fn drop_source_guid_tables(conn: &Connection) {
+    let _ = conn.execute_batch(
+        "DROP TABLE IF EXISTS tmp_src_commodities;
+         DROP TABLE IF EXISTS tmp_src_accounts;
+         DROP TABLE IF EXISTS tmp_src_transactions;
+         DROP TABLE IF EXISTS tmp_src_splits;",
+    );
 }
 
 fn count_orphaned(conn: &Connection, table: &str, src_table: &str) -> Result<i64, String> {
-    validate_table(table)?;
+    db::validate_data_table(table)?;
     let sql =
         format!("SELECT COUNT(*) FROM {table} WHERE guid NOT IN (SELECT guid FROM {src_table})");
     conn.query_row(&sql, [], |row| row.get(0))
@@ -482,11 +503,179 @@ fn count_orphaned(conn: &Connection, table: &str, src_table: &str) -> Result<i64
 }
 
 fn delete_orphans(conn: &Connection, table: &str, src_table: &str) -> Result<i64, String> {
-    validate_table(table)?;
+    db::validate_data_table(table)?;
     let sql = format!("DELETE FROM {table} WHERE guid NOT IN (SELECT guid FROM {src_table})");
     conn.execute(&sql, [])
         .map(|n| n as i64)
         .map_err(|e| e.to_string())
+}
+
+// ── Merge ───────────────────────────────────────────────────────────────────
+
+/// Destination rows keyed by GUID, loaded once per import for diffing.
+struct ExistingData {
+    commodities: HashMap<String, Commodity>,
+    accounts: HashMap<String, Account>,
+    transactions: HashMap<String, Transaction>,
+    splits: HashMap<String, Split>,
+}
+
+impl ExistingData {
+    fn load(conn: &Connection) -> Result<Self, String> {
+        Ok(Self {
+            commodities: read_commodity(conn)?
+                .into_iter()
+                .map(|c| (c.guid.clone(), c))
+                .collect(),
+            accounts: read_account(conn)?.into_iter().map(|a| (a.guid.clone(), a)).collect(),
+            transactions: read_transaction(conn)?
+                .into_iter()
+                .map(|t| (t.guid.clone(), t))
+                .collect(),
+            splits: read_split(conn)?.into_iter().map(|s| (s.guid.clone(), s)).collect(),
+        })
+    }
+}
+
+/// Added/updated/orphaned tallies for one import merge, shared by the merge
+/// steps and the history row.
+#[derive(Default)]
+struct MergeCounts {
+    commodities_added: i64,
+    commodities_updated: i64,
+    accounts_added: i64,
+    accounts_updated: i64,
+    transactions_added: i64,
+    transactions_updated: i64,
+    splits_added: i64,
+    splits_updated: i64,
+    commodities_orphaned: i64,
+    accounts_orphaned: i64,
+    transactions_orphaned: i64,
+    splits_orphaned: i64,
+}
+
+impl MergeCounts {
+    fn has_changes(&self) -> bool {
+        self.accounts_added != 0
+            || self.transactions_added != 0
+            || self.splits_added != 0
+            || self.commodities_added != 0
+            || self.accounts_updated != 0
+            || self.transactions_updated != 0
+            || self.splits_updated != 0
+            || self.commodities_updated != 0
+            || self.accounts_orphaned != 0
+            || self.transactions_orphaned != 0
+            || self.splits_orphaned != 0
+            || self.commodities_orphaned != 0
+    }
+
+    fn history_detail(&self, filename: &str, source_path: &str, sha256: &str) -> String {
+        serde_json::json!({
+            "filename": filename,
+            "filePath": source_path,
+            "sha256": sha256,
+            "accountsAdded": self.accounts_added,
+            "transactionsAdded": self.transactions_added,
+            "splitsAdded": self.splits_added,
+            "commoditiesAdded": self.commodities_added,
+            "accountsUpdated": self.accounts_updated,
+            "transactionsUpdated": self.transactions_updated,
+            "splitsUpdated": self.splits_updated,
+            "accountsOrphaned": self.accounts_orphaned,
+            "transactionsOrphaned": self.transactions_orphaned,
+            "splitsOrphaned": self.splits_orphaned,
+            "commoditiesOrphaned": self.commodities_orphaned,
+        })
+        .to_string()
+    }
+}
+
+fn capture_snapshot(conn: &Connection, table: &'static str, guid: &str) -> Result<history::Snapshot<'static>, String> {
+    Ok(history::Snapshot {
+        table_name: table,
+        row_guid: guid.to_string(),
+        before_json: history::snapshot_row(conn, table, guid)?,
+    })
+}
+
+/// Snapshot added rows as absent (revert deletes them) and changed rows with
+/// their current image (revert restores it); unchanged rows are skipped.
+fn capture_changed<T: Importable>(
+    conn: &Connection,
+    table: &'static str,
+    src: &[T],
+    existing: &HashMap<String, T>,
+    snapshots: &mut Vec<history::Snapshot<'static>>,
+) -> Result<(), String> {
+    for r in src {
+        match existing.get(r.guid()) {
+            None => snapshots.push(capture_snapshot(conn, table, r.guid())?),
+            Some(ex) if r.has_changes(ex) => snapshots.push(capture_snapshot(conn, table, r.guid())?),
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// Snapshot destination rows absent from the source (the merge deletes them).
+fn capture_orphaned<T: Importable>(
+    conn: &Connection,
+    table: &'static str,
+    src: &[T],
+    existing: &HashMap<String, T>,
+    snapshots: &mut Vec<history::Snapshot<'static>>,
+) -> Result<(), String> {
+    let src_guids: HashSet<&str> = src.iter().map(|r| r.guid()).collect();
+    for guid in existing.keys() {
+        if !src_guids.contains(guid.as_str()) {
+            snapshots.push(capture_snapshot(conn, table, guid)?);
+        }
+    }
+    Ok(())
+}
+
+/// Capture before-images for every row the merge is about to touch so the
+/// single history row can revert this import.
+fn capture_import_snapshots(
+    conn: &Connection,
+    src: &SourceData,
+    existing: &ExistingData,
+) -> Result<Vec<history::Snapshot<'static>>, String> {
+    let mut snapshots = Vec::new();
+    capture_changed(conn, "commodities", &src.commodities, &existing.commodities, &mut snapshots)?;
+    capture_changed(conn, "accounts", &src.accounts, &existing.accounts, &mut snapshots)?;
+    capture_changed(conn, "transactions", &src.transactions, &existing.transactions, &mut snapshots)?;
+    capture_changed(conn, "splits", &src.splits, &existing.splits, &mut snapshots)?;
+    capture_orphaned(conn, "commodities", &src.commodities, &existing.commodities, &mut snapshots)?;
+    capture_orphaned(conn, "accounts", &src.accounts, &existing.accounts, &mut snapshots)?;
+    capture_orphaned(conn, "transactions", &src.transactions, &existing.transactions, &mut snapshots)?;
+    capture_orphaned(conn, "splits", &src.splits, &existing.splits, &mut snapshots)?;
+    Ok(snapshots)
+}
+
+/// Upsert source rows over the destination, then delete orphans.
+fn apply_merge(
+    conn: &Connection,
+    src: &SourceData,
+    existing: &ExistingData,
+    counts: &mut MergeCounts,
+) -> Result<(), String> {
+    (counts.commodities_added, counts.commodities_updated) =
+        process_entities(conn, &src.commodities, &existing.commodities)?;
+    (counts.accounts_added, counts.accounts_updated) =
+        process_entities(conn, &src.accounts, &existing.accounts)?;
+    (counts.transactions_added, counts.transactions_updated) =
+        process_entities(conn, &src.transactions, &existing.transactions)?;
+    (counts.splits_added, counts.splits_updated) =
+        process_entities(conn, &src.splits, &existing.splits)?;
+
+    delete_orphans(conn, "splits", "tmp_src_splits")?;
+    delete_orphans(conn, "transactions", "tmp_src_transactions")?;
+    delete_orphans(conn, "accounts", "tmp_src_accounts")?;
+    delete_orphans(conn, "commodities", "tmp_src_commodities")?;
+    Ok(())
 }
 
 // ── Import ──────────────────────────────────────────────────────────────────
@@ -514,165 +703,36 @@ fn import_gnucash_inner(
     populate_source_guids(dest_conn, "tmp_src_transactions", &tx_guids)?;
     populate_source_guids(dest_conn, "tmp_src_splits", &split_guids)?;
 
-    let commodities_orphaned = count_orphaned(dest_conn, "commodities", "tmp_src_commodities")?;
-    let accounts_orphaned = count_orphaned(dest_conn, "accounts", "tmp_src_accounts")?;
-    let transactions_orphaned = count_orphaned(dest_conn, "transactions", "tmp_src_transactions")?;
-    let splits_orphaned = count_orphaned(dest_conn, "splits", "tmp_src_splits")?;
-
-    let mut commodities_added = 0i64;
-    let mut commodities_updated = 0i64;
-    let mut accounts_added = 0i64;
-    let mut accounts_updated = 0i64;
-    let mut transactions_added = 0i64;
-    let mut transactions_updated = 0i64;
-    let mut splits_added = 0i64;
-    let mut splits_updated = 0i64;
+    let mut counts = MergeCounts::default();
 
     let tx_result = (|| -> Result<(), String> {
         dest_conn
             .execute_batch("BEGIN TRANSACTION")
             .map_err(|e| e.to_string())?;
 
-        let existing_commodities: HashMap<String, Commodity> = read_commodity(dest_conn)?
-            .into_iter()
-            .map(|c| (c.guid.clone(), c))
-            .collect();
-        let existing_accounts: HashMap<String, Account> = read_account(dest_conn)?
-            .into_iter()
-            .map(|a| (a.guid.clone(), a))
-            .collect();
-        let existing_txns: HashMap<String, Transaction> = read_transaction(dest_conn)?
-            .into_iter()
-            .map(|t| (t.guid.clone(), t))
-            .collect();
-        let existing_splits: HashMap<String, Split> = read_split(dest_conn)?
-            .into_iter()
-            .map(|s| (s.guid.clone(), s))
-            .collect();
+        // Counts live inside the txn so the numbers in the history row match
+        // the deletes they report.
+        counts.commodities_orphaned =
+            count_orphaned(dest_conn, "commodities", "tmp_src_commodities")?;
+        counts.accounts_orphaned =
+            count_orphaned(dest_conn, "accounts", "tmp_src_accounts")?;
+        counts.transactions_orphaned =
+            count_orphaned(dest_conn, "transactions", "tmp_src_transactions")?;
+        counts.splits_orphaned = count_orphaned(dest_conn, "splits", "tmp_src_splits")?;
 
-        // Capture before-images for every row the merge is about to touch so
-        // the single history row can revert this import. Added rows snapshot
-        // as absent (`None` — revert deletes them); updated and orphaned rows
-        // snapshot their current image (revert restores it). Unchanged rows
-        // are skipped: the merge leaves them alone.
-        let mut snapshots: Vec<history::Snapshot> = Vec::new();
-        let mut capture =
-            |table: &'static str, guid: &str| -> Result<(), String> {
-                snapshots.push(history::Snapshot {
-                    table_name: table,
-                    row_guid: guid.to_string(),
-                    before_json: history::snapshot_row(dest_conn, table, guid)?,
-                });
-                Ok(())
-            };
-        for r in &src.commodities {
-            match existing_commodities.get(r.guid()) {
-                None => capture("commodities", r.guid())?,
-                Some(ex) if r.has_changes(ex) => capture("commodities", r.guid())?,
-                _ => {}
-            }
-        }
-        for r in &src.accounts {
-            match existing_accounts.get(r.guid()) {
-                None => capture("accounts", r.guid())?,
-                Some(ex) if r.has_changes(ex) => capture("accounts", r.guid())?,
-                _ => {}
-            }
-        }
-        for r in &src.transactions {
-            match existing_txns.get(r.guid()) {
-                None => capture("transactions", r.guid())?,
-                Some(ex) if r.has_changes(ex) => capture("transactions", r.guid())?,
-                _ => {}
-            }
-        }
-        for r in &src.splits {
-            match existing_splits.get(r.guid()) {
-                None => capture("splits", r.guid())?,
-                Some(ex) if r.has_changes(ex) => capture("splits", r.guid())?,
-                _ => {}
-            }
-        }
-        let src_commodity_guids: HashSet<&str> =
-            src.commodities.iter().map(|r| r.guid()).collect();
-        let src_account_guids: HashSet<&str> =
-            src.accounts.iter().map(|r| r.guid()).collect();
-        let src_tx_guids: HashSet<&str> =
-            src.transactions.iter().map(|r| r.guid()).collect();
-        let src_split_guids: HashSet<&str> = src.splits.iter().map(|r| r.guid()).collect();
-        for guid in existing_commodities.keys() {
-            if !src_commodity_guids.contains(guid.as_str()) {
-                capture("commodities", guid)?;
-            }
-        }
-        for guid in existing_accounts.keys() {
-            if !src_account_guids.contains(guid.as_str()) {
-                capture("accounts", guid)?;
-            }
-        }
-        for guid in existing_txns.keys() {
-            if !src_tx_guids.contains(guid.as_str()) {
-                capture("transactions", guid)?;
-            }
-        }
-        for guid in existing_splits.keys() {
-            if !src_split_guids.contains(guid.as_str()) {
-                capture("splits", guid)?;
-            }
-        }
+        let existing = ExistingData::load(dest_conn)?;
+        let snapshots = capture_import_snapshots(dest_conn, &src, &existing)?;
+        apply_merge(dest_conn, &src, &existing, &mut counts)?;
 
-        (commodities_added, commodities_updated) =
-            process_entities(dest_conn, &src.commodities, &existing_commodities)?;
-        (accounts_added, accounts_updated) =
-            process_entities(dest_conn, &src.accounts, &existing_accounts)?;
-        (transactions_added, transactions_updated) =
-            process_entities(dest_conn, &src.transactions, &existing_txns)?;
-        (splits_added, splits_updated) =
-            process_entities(dest_conn, &src.splits, &existing_splits)?;
-
-        delete_orphans(dest_conn, "splits", "tmp_src_splits")?;
-        delete_orphans(dest_conn, "transactions", "tmp_src_transactions")?;
-        delete_orphans(dest_conn, "accounts", "tmp_src_accounts")?;
-        delete_orphans(dest_conn, "commodities", "tmp_src_commodities")?;
-
-        let has_changes = accounts_added != 0
-            || transactions_added != 0
-            || splits_added != 0
-            || commodities_added != 0
-            || accounts_updated != 0
-            || transactions_updated != 0
-            || splits_updated != 0
-            || commodities_updated != 0
-            || accounts_orphaned != 0
-            || transactions_orphaned != 0
-            || splits_orphaned != 0
-            || commodities_orphaned != 0;
-
-        if has_changes {
-            let detail = serde_json::json!({
-                "filename": filename,
-                "filePath": source_path,
-                "sha256": sha256,
-                "accountsAdded": accounts_added,
-                "transactionsAdded": transactions_added,
-                "splitsAdded": splits_added,
-                "commoditiesAdded": commodities_added,
-                "accountsUpdated": accounts_updated,
-                "transactionsUpdated": transactions_updated,
-                "splitsUpdated": splits_updated,
-                "accountsOrphaned": accounts_orphaned,
-                "transactionsOrphaned": transactions_orphaned,
-                "splitsOrphaned": splits_orphaned,
-                "commoditiesOrphaned": commodities_orphaned,
-            });
+        if counts.has_changes() {
             history::insert_change_entry(
                 dest_conn,
                 "import",
                 &format!("Imported {filename}"),
                 "import",
-                transactions_added + transactions_updated + transactions_orphaned,
-                accounts_added + accounts_updated + accounts_orphaned,
-                Some(&detail.to_string()),
+                counts.transactions_added + counts.transactions_updated + counts.transactions_orphaned,
+                counts.accounts_added + counts.accounts_updated + counts.accounts_orphaned,
+                Some(&counts.history_detail(filename, source_path, sha256)),
                 &snapshots,
             )?;
         }
@@ -683,18 +743,14 @@ fn import_gnucash_inner(
 
         // Temp tables live on the long-lived connection; drop them now instead
         // of letting them linger until the next import recreates them.
-        let _ = dest_conn.execute_batch(
-            "DROP TABLE IF EXISTS tmp_src_commodities;
-             DROP TABLE IF EXISTS tmp_src_accounts;
-             DROP TABLE IF EXISTS tmp_src_transactions;
-             DROP TABLE IF EXISTS tmp_src_splits;",
-        );
+        drop_source_guid_tables(dest_conn);
 
         Ok(())
     })();
 
     if let Err(e) = tx_result {
         dest_conn.execute_batch("ROLLBACK").ok();
+        drop_source_guid_tables(dest_conn);
         return Err(e);
     }
 
@@ -711,17 +767,17 @@ fn import_gnucash_inner(
         .map_err(|e| e.to_string())?;
 
     Ok(ImportResult {
-        accounts_added,
-        transactions_added,
-        splits_added,
-        commodities_added,
-        accounts_updated,
-        transactions_updated,
-        splits_updated,
-        accounts_orphaned,
-        transactions_orphaned,
-        splits_orphaned,
-        commodities_orphaned,
+        accounts_added: counts.accounts_added,
+        transactions_added: counts.transactions_added,
+        splits_added: counts.splits_added,
+        commodities_added: counts.commodities_added,
+        accounts_updated: counts.accounts_updated,
+        transactions_updated: counts.transactions_updated,
+        splits_updated: counts.splits_updated,
+        accounts_orphaned: counts.accounts_orphaned,
+        transactions_orphaned: counts.transactions_orphaned,
+        splits_orphaned: counts.splits_orphaned,
+        commodities_orphaned: counts.commodities_orphaned,
         total_accounts,
         total_transactions,
         summary,
@@ -845,6 +901,9 @@ mod tests {
         assert_eq!(normalize_post_date("not-a-date"), "not-a-date");
         assert_eq!(normalize_post_date(""), "");
         assert_eq!(normalize_post_date("2024-01"), "2024-01");
+        // Odd-length time tails would emit a 1-char component — pass through.
+        assert_eq!(normalize_post_date("202401151"), "202401151");
+        assert_eq!(normalize_post_date("2024011510"), "2024011510");
     }
 
     /// End-to-end: import a minimal GnuCash source into a book with local-only

@@ -8,6 +8,15 @@ use crate::fx;
 use crate::tree;
 use crate::utils;
 
+/// Reject malformed `as_of` dates before they reach SQL: `date('bad',
+/// '+1 day')` is NULL, and `< NULL` is never true, so every balance would
+/// silently report zero instead of erroring.
+fn validate_as_of(as_of: &str) -> Result<(), String> {
+    chrono::NaiveDate::parse_from_str(as_of, "%Y-%m-%d")
+        .map(|_| ())
+        .map_err(|_| format!("Invalid as_of date (expected YYYY-MM-DD): {as_of}"))
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProfitLossRow {
@@ -251,28 +260,6 @@ fn fetch_monthly_buckets(
     Ok(rows)
 }
 
-/// Last calendar day of a `YYYY-MM` month, for month-end FX lookups.
-fn month_end(month: &str) -> Result<String, String> {
-    let mut parts = month.split('-');
-    let (Some(y), Some(m)) = (parts.next(), parts.next()) else {
-        return Err(format!("Invalid month: {month}"));
-    };
-    if parts.next().is_some() {
-        return Err(format!("Invalid month: {month}"));
-    }
-    let y: i32 = y.parse().map_err(|_| format!("Invalid month: {month}"))?;
-    let m: u32 = m.parse().map_err(|_| format!("Invalid month: {month}"))?;
-    let first_next = if m == 12 {
-        chrono::NaiveDate::from_ymd_opt(y + 1, 1, 1)
-    } else {
-        chrono::NaiveDate::from_ymd_opt(y, m + 1, 1)
-    }
-    .ok_or_else(|| format!("Invalid month: {month}"))?;
-    Ok((first_next - chrono::Duration::days(1))
-        .format("%Y-%m-%d")
-        .to_string())
-}
-
 /// A monthly bucket converted to report currency at its month-end rate.
 struct ConvertedBucket {
     guid: String,
@@ -304,12 +291,12 @@ fn convert_buckets(
             continue;
         }
         if !maps.contains_key(&b.month) {
-            let end = month_end(&b.month)?;
+            let end = utils::month_end(&b.month)?;
             maps.insert(b.month.clone(), fx_history.map_for_date(&end));
         }
         let fx_at = &maps[&b.month];
         let amount = match b.commodity.as_deref() {
-            Some(m) => convert_amount(b.raw, m, &report, fx_at, Some(&mut missing)),
+            Some(m) => fx::convert_tracked(b.raw, m, &report, fx_at, Some(&mut missing)),
             None => b.raw,
         };
         out.push(ConvertedBucket {
@@ -368,43 +355,13 @@ fn roll_up_buckets(buckets: &[ConvertedBucket]) -> Vec<RawAccountBalance> {
     rows
 }
 
-/// Convert `amount` from `from` to the report currency, degrading to 1.0
-/// parity for currencies without a rate. Pass `missing` to record gaps
-/// (report warnings) or `None` for the silent investment cost leg, which is
-/// either priced (market dominates) or flagged via `missing_prices` instead.
-fn convert_amount(
-    amount: f64,
-    from: &str,
-    report: &str,
-    fx_map: &HashMap<String, f64>,
-    missing: Option<&mut HashSet<String>>,
-) -> f64 {
-    // A zero balance converts to zero at any rate, so it can never skew a
-    // total — don't flag its currency.
-    if amount == 0.0 {
-        return amount;
-    }
-    if report.is_empty() || from == report {
-        return amount;
-    }
-    match fx_map.get(from) {
-        Some(rate) => amount * rate,
-        None => {
-            if let Some(set) = missing {
-                set.insert(from.to_string());
-            }
-            amount
-        }
-    }
-}
-
-fn walk_tree<R>(
+fn walk_tree<T>(
     rows_by_guid: &HashMap<&str, &RawAccountBalance>,
     children: &HashMap<String, Vec<String>>,
     guid: &str,
     indent: i32,
-    result: &mut Vec<R>,
-    push_row: &impl Fn(&RawAccountBalance, i32, f64) -> R,
+    result: &mut Vec<T>,
+    push_row: &impl Fn(&RawAccountBalance, i32, f64) -> T,
     visited: &mut HashSet<String>,
 ) -> f64 {
     if !visited.insert(guid.to_string()) {
@@ -486,24 +443,8 @@ pub struct BalanceSheetReport {
     pub unrealized_gains: f64,
     pub balance_check: f64,
     pub missing_fx: Vec<String>,
-    pub missing_prices: Vec<MissingPrice>,
+    pub missing_prices: Vec<fx::MissingPrice>,
 }
-
-const ASSET_TYPES: &[&str] = &[
-    "ASSET",
-    "BANK",
-    "CASH",
-    "STOCK",
-    "MUTUAL",
-    "FUND",
-    "CURRENCY",
-    "RECEIVABLE",
-];
-const LIABILITY_TYPES: &[&str] = &["LIABILITY", "CREDIT", "PAYABLE"];
-// TRADING accounts (GnuCash currency/commodity trading books) accumulate
-// trading gains/losses, which are equity-like. They must appear somewhere:
-// silently dropping any type breaks the accounting identity.
-const EQUITY_TYPES: &[&str] = &["EQUITY", "TRADING"];
 
 struct ComputedBalance {
     guid: String,
@@ -519,16 +460,6 @@ struct ComputedBalance {
     unrealized: f64,
 }
 
-/// A security held in the book with no cached Yahoo price. Distinct from a
-/// missing FX rate: refreshing only helps if the symbol resolves, otherwise
-/// the user must set an explicit symbol override on the holding.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MissingPrice {
-    pub mnemonic: String,
-    pub commodity_guid: Option<String>,
-}
-
 /// Cumulative balances as of `as_of` with investment mark-to-market (mirrors
 /// `accounts.rs`) and FX conversion. Returns rows, sorted missing-FX list,
 /// sorted missing-price list and report currency.
@@ -539,7 +470,7 @@ fn compute_balances_as_of(
     (
         Vec<ComputedBalance>,
         Vec<String>,
-        Vec<MissingPrice>,
+        Vec<fx::MissingPrice>,
         String,
     ),
     String,
@@ -641,7 +572,7 @@ fn compute_balances_as_of(
                 Some(price) => {
                     let market = signed_qty * price;
                     let cost = match commodity.as_deref() {
-                        Some(m) => convert_amount(signed_balance, m, &report, &fx_map, None),
+                        Some(m) => fx::convert_tracked(signed_balance, m, &report, &fx_map, None),
                         None => signed_balance,
                     };
                     (market, market - cost)
@@ -653,7 +584,7 @@ fn compute_balances_as_of(
                     if let Some(m) = commodity.as_deref() {
                         missing_prices.entry(m.to_string()).or_insert(commodity_guid);
                         (
-                            convert_amount(signed_balance, m, &report, &fx_map, None),
+                            fx::convert_tracked(signed_balance, m, &report, &fx_map, None),
                             0.0,
                         )
                     } else {
@@ -663,7 +594,7 @@ fn compute_balances_as_of(
             }
         } else {
             let cost = match commodity.as_deref() {
-                Some(m) => convert_amount(signed_balance, m, &report, &fx_map, Some(&mut missing)),
+                Some(m) => fx::convert_tracked(signed_balance, m, &report, &fx_map, Some(&mut missing)),
                 None => signed_balance,
             };
             (cost, 0.0)
@@ -682,9 +613,9 @@ fn compute_balances_as_of(
 
     let mut missing: Vec<String> = missing.into_iter().collect();
     missing.sort();
-    let mut missing_prices: Vec<MissingPrice> = missing_prices
+    let mut missing_prices: Vec<fx::MissingPrice> = missing_prices
         .into_iter()
-        .map(|(mnemonic, commodity_guid)| MissingPrice {
+        .map(|(mnemonic, commodity_guid)| fx::MissingPrice {
             mnemonic,
             commodity_guid,
         })
@@ -693,10 +624,14 @@ fn compute_balances_as_of(
     Ok((out, missing, missing_prices, report))
 }
 
+// No live IPC command calls this (`/accounts` is the balance-sheet view);
+// kept for the accounting-identity tests below.
+#[allow(dead_code)]
 fn generate_balance_sheet_inner(
     conn: &Connection,
     as_of: &str,
 ) -> Result<BalanceSheetReport, String> {
+    validate_as_of(as_of)?;
     let (rows, missing_fx, missing_prices, report_currency) =
         compute_balances_as_of(conn, as_of)?;
 
@@ -723,9 +658,9 @@ fn generate_balance_sheet_inner(
             amount: total,
         }
     };
-    let asset_rows = build_tree(&raw_view, ASSET_TYPES, push_raw);
-    let liability_rows = build_tree(&raw_view, LIABILITY_TYPES, push_raw);
-    let mut equity_rows = build_tree(&raw_view, EQUITY_TYPES, push_raw);
+    let asset_rows = build_tree(&raw_view, &utils::ASSET_TYPES, push_raw);
+    let liability_rows = build_tree(&raw_view, &utils::LIABILITY_TYPES, push_raw);
+    let mut equity_rows = build_tree(&raw_view, &utils::EQUITY_TYPES, push_raw);
 
     // Unrealized mark-to-market gains rolled up like every other total:
     // per-account values double count children, so sum top-level rows only.
@@ -818,7 +753,7 @@ fn pnl_change_pct(current: f64, previous: f64) -> Option<f64> {
     }
 }
 
-fn generate_pnl_report_inner(
+fn fetch_pnl_report_inner(
     conn: &Connection,
     date_from: &str,
     date_to: &str,
@@ -987,7 +922,7 @@ pub struct PnlTrendPoint {
 /// trend chart. Shares the monthly-bucket engine (and month-end FX) with the
 /// statement, so chart and table always agree. Months without activity are
 /// zero-filled for a continuous series.
-fn generate_pnl_trend_inner(
+fn fetch_pnl_trend_inner(
     conn: &Connection,
     date_from: &str,
     date_to: &str,
@@ -1021,7 +956,7 @@ fn generate_pnl_trend_inner(
 }
 
 #[tauri::command]
-pub async fn generate_pnl_report(
+pub async fn fetch_pnl_report(
     state: State<'_, AppState>,
     date_from: String,
     date_to: String,
@@ -1029,7 +964,7 @@ pub async fn generate_pnl_report(
     prev_date_to: Option<String>,
 ) -> Result<ProfitLossReport, String> {
     run_blocking(state.db.clone(), move |conn| {
-        generate_pnl_report_inner(
+        fetch_pnl_report_inner(
             conn,
             &date_from,
             &date_to,
@@ -1041,24 +976,13 @@ pub async fn generate_pnl_report(
 }
 
 #[tauri::command]
-pub async fn generate_pnl_trend(
+pub async fn fetch_pnl_trend(
     state: State<'_, AppState>,
     date_from: String,
     date_to: String,
 ) -> Result<Vec<PnlTrendPoint>, String> {
     run_blocking(state.db.clone(), move |conn| {
-        generate_pnl_trend_inner(conn, &date_from, &date_to)
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn generate_balance_sheet(
-    state: State<'_, AppState>,
-    as_of: String,
-) -> Result<BalanceSheetReport, String> {
-    run_blocking(state.db.clone(), move |conn| {
-        generate_balance_sheet_inner(conn, &as_of)
+        fetch_pnl_trend_inner(conn, &date_from, &date_to)
     })
     .await
 }
@@ -1254,18 +1178,8 @@ mod tests {
     fn pnl_rejects_inverted_range() {
         let conn = setup_balance_sheet();
         assert!(
-            generate_pnl_report_inner(&conn, "2024-04-01", "2024-01-01", None, None).is_err()
+            fetch_pnl_report_inner(&conn, "2024-04-01", "2024-01-01", None, None).is_err()
         );
-    }
-
-    #[test]
-    fn month_end_returns_last_calendar_day() {
-        assert_eq!(month_end("2024-02").unwrap(), "2024-02-29");
-        assert_eq!(month_end("2023-02").unwrap(), "2023-02-28");
-        assert_eq!(month_end("2024-12").unwrap(), "2024-12-31");
-        assert_eq!(month_end("2024-01").unwrap(), "2024-01-31");
-        assert!(month_end("2024-13").is_err());
-        assert!(month_end("not-a-month").is_err());
     }
 
     #[test]
@@ -1307,7 +1221,7 @@ mod tests {
         // period-end rate (1.0) would report 2200 with the fixture salary;
         // month-end bucketing reports 2150. Fixture salary adds 2000 EUR in
         // February on top of the 150 USD consulting income.
-        let report = generate_pnl_report_inner(
+        let report = fetch_pnl_report_inner(
             &conn,
             "2024-01-01",
             "2024-02-29",
@@ -1328,7 +1242,7 @@ mod tests {
     #[test]
     fn pnl_trend_buckets_months_and_zero_fills() {
         let conn = setup_balance_sheet();
-        let points = generate_pnl_trend_inner(&conn, "2024-01-01", "2024-03-31").unwrap();
+        let points = fetch_pnl_trend_inner(&conn, "2024-01-01", "2024-03-31").unwrap();
         assert_eq!(points.len(), 3);
         assert_eq!(points[0].month, "2024-01");
         assert_eq!(points[0].income, 0.0);
@@ -1342,7 +1256,7 @@ mod tests {
     #[test]
     fn pnl_trend_rejects_inverted_range() {
         let conn = setup_balance_sheet();
-        assert!(generate_pnl_trend_inner(&conn, "2024-04-01", "2024-01-01").is_err());
+        assert!(fetch_pnl_trend_inner(&conn, "2024-04-01", "2024-01-01").is_err());
     }
 
     #[test]
@@ -1356,7 +1270,7 @@ mod tests {
     #[test]
     fn pnl_totals_and_prev_merge() {
         let conn = setup_balance_sheet();
-        let report = generate_pnl_report_inner(
+        let report = fetch_pnl_report_inner(
             &conn,
             "2024-02-01",
             "2024-03-31",
@@ -1405,7 +1319,7 @@ mod tests {
             [],
         )
         .unwrap();
-        let report = generate_pnl_report_inner(
+        let report = fetch_pnl_report_inner(
             &conn,
             "2024-02-01",
             "2024-03-31",
@@ -1463,7 +1377,7 @@ mod tests {
             )
             .unwrap();
         }
-        let report = generate_pnl_report_inner(
+        let report = fetch_pnl_report_inner(
             &conn,
             "2024-02-01",
             "2024-02-29",

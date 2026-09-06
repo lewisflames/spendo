@@ -1,5 +1,6 @@
 use rusqlite::{Connection, OptionalExtension};
-use std::collections::HashMap;
+use serde::Serialize;
+use std::collections::{HashMap, HashSet};
 
 use crate::utils;
 
@@ -31,10 +32,12 @@ pub fn get_report_currency_guid(conn: &Connection) -> Option<String> {
                  FROM splits s
                  JOIN accounts a ON a.guid = s.account_guid
                  JOIN commodities c ON c.guid = a.commodity_guid
-                 WHERE c.namespace = 'CURRENCY'
+                 JOIN transactions t ON t.guid = s.tx_guid
+                 WHERE c.namespace = 'CURRENCY' AND {}
                  GROUP BY c.guid
                  ORDER BY SUM(ABS({})) DESC
                  LIMIT 1",
+                utils::VISIBLE_TX_FILTER,
                 utils::RAW_AMOUNT
             ),
             [],
@@ -160,17 +163,68 @@ pub fn get_fx_rate_at(
 }
 
 /// Convert an amount from its own currency to the report currency.
+/// Missing rates degrade to 1.0 parity (see `convert_tracked`).
 pub fn convert(
     amount: f64,
     from_currency: &str,
     report_currency: &str,
     fx: &HashMap<String, f64>,
 ) -> f64 {
-    if from_currency == report_currency {
-        amount
-    } else {
-        amount * fx.get(from_currency).copied().unwrap_or(1.0)
+    convert_tracked(amount, from_currency, report_currency, fx, None)
+}
+
+/// Convert an amount from its own currency to the report currency, degrading
+/// to 1.0 parity for currencies without a rate. Pass `missing` to record gaps
+/// (report warnings) or `None` for silent legs — e.g. investment cost, which
+/// is either priced (market dominates) or flagged via `missing_prices`.
+pub fn convert_tracked(
+    amount: f64,
+    from_currency: &str,
+    report_currency: &str,
+    fx: &HashMap<String, f64>,
+    missing: Option<&mut HashSet<String>>,
+) -> f64 {
+    // A zero balance converts to zero at any rate, so it can never skew a
+    // total — don't flag its currency.
+    if amount == 0.0 {
+        return amount;
     }
+    if report_currency.is_empty() || from_currency == report_currency {
+        return amount;
+    }
+    match fx.get(from_currency) {
+        Some(rate) => amount * rate,
+        None => {
+            if let Some(set) = missing {
+                set.insert(from_currency.to_string());
+            }
+            amount
+        }
+    }
+}
+
+/// Convert an amount whose currency may be absent (e.g. splits on accounts
+/// with no commodity): `None` passes through unconverted.
+pub fn convert_optional(
+    amount: f64,
+    commodity: Option<&str>,
+    report_currency: &str,
+    fx: &HashMap<String, f64>,
+) -> f64 {
+    match commodity {
+        Some(mn) => convert(amount, mn, report_currency, fx),
+        None => amount,
+    }
+}
+
+/// A security held in the book with no cached price. Distinct from a missing
+/// FX rate: refreshing only helps if the symbol resolves, otherwise the user
+/// must set an explicit symbol override on the holding.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MissingPrice {
+    pub mnemonic: String,
+    pub commodity_guid: Option<String>,
 }
 
 /// Date-ordered FX rate history loaded once per request, replacing repeated

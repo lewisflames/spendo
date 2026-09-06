@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 pub struct AppState {
     pub db: Arc<Mutex<Connection>>,
     /// Absolute path of the active book file. `None` while on the in-memory
-    /// placeholder (no book opened or created yet) — see `books::get_active_book`.
+    /// placeholder (no book opened or created yet) — see `books::fetch_active_book`.
     pub db_path: Mutex<Option<PathBuf>>,
     /// Tauri app-data dir: legacy `spendo.db` location + `last_book.json` sidecar.
     pub app_data_dir: PathBuf,
@@ -15,6 +15,19 @@ pub struct AppState {
 /// `books::validate_spendo_db` can tell our files apart from GnuCash source
 /// books (which share table names like `accounts`/`splits`) and random SQLite.
 pub const SPENDO_APP_ID: i32 = 0x5350_4e44; // 'SPND'
+
+/// User-data tables shared by the history snapshots and the import orphan
+/// sweep. Interpolating table names into SQL is only safe through this
+/// allowlist — never inline a table name without `validate_data_table`.
+pub(crate) const DATA_TABLES: &[&str] = &["commodities", "accounts", "transactions", "splits"];
+
+pub(crate) fn validate_data_table(table: &str) -> Result<(), String> {
+    if DATA_TABLES.contains(&table) {
+        Ok(())
+    } else {
+        Err(format!("Invalid table name: {table}"))
+    }
+}
 
 /// Run a closure with the DB connection on a blocking thread. Every DB-touching
 /// command must go through here so the tokio runtime threads are never blocked

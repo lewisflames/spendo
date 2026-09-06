@@ -65,11 +65,11 @@ pub fn get_summary(conn: &Connection) -> Result<DataSummary, String> {
         let mut stmt = conn
             .prepare(&format!(
                 "SELECT c.mnemonic,
-                        COALESCE(SUM(CASE WHEN a.account_type IN ('ASSET','BANK','CASH','CURRENCY','RECEIVABLE')
+                        COALESCE(SUM(CASE WHEN a.account_type IN ({})
                             THEN {} ELSE 0 END), 0) as cash_assets,
                         COALESCE(SUM(CASE WHEN a.account_type IN ({})
                             THEN {} ELSE 0 END), 0) as shares,
-                        COALESCE(SUM(CASE WHEN a.account_type IN ('LIABILITY','CREDIT','PAYABLE')
+                        COALESCE(SUM(CASE WHEN a.account_type IN ({})
                             THEN {} ELSE 0 END), 0) as liabilities
                  FROM splits s
                  JOIN accounts a ON a.guid = s.account_guid
@@ -77,9 +77,11 @@ pub fn get_summary(conn: &Connection) -> Result<DataSummary, String> {
                  JOIN transactions t ON t.guid = s.tx_guid
                  WHERE {}
                  GROUP BY c.mnemonic",
+                utils::cash_like_types_sql(),
                 utils::RAW_AMOUNT,
                 utils::investment_types_sql(),
                 utils::QUANTITY_AMOUNT,
+                utils::liability_types_sql(),
                 utils::RAW_AMOUNT,
                 utils::VISIBLE_TX_FILTER
             ))
