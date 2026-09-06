@@ -26,7 +26,6 @@
   import KpiCardRow from '$lib/components/shared/kpi-card-row.svelte';
   import BudgetEntryDialog from '$lib/features/budgets/budget-entry-dialog.svelte';
   import BudgetSummaryCards from '$lib/features/budgets/budget-summary-cards.svelte';
-  import BudgetPacingCard from '$lib/features/budgets/budget-pacing-card.svelte';
   import BudgetMonthlyTable from '$lib/features/budgets/budget-monthly-table.svelte';
   import BudgetYearStepper from '$lib/features/budgets/budget-year-stepper.svelte';
   import { accountNameMap } from '$lib/features/budgets/budget-utils';
@@ -187,7 +186,6 @@
     {#if detail !== null && summary !== null}
       <DimWrapper active={loading} class="flex flex-col gap-6">
         <BudgetSummaryCards {summary} annualTarget={detail.budget.amount} {currency} />
-        <BudgetPacingCard {summary} />
         <BudgetMonthlyTable
           entries={monthlyEntries}
           elapsedMonths={summary.elapsedMonths}
