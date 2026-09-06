@@ -7,6 +7,7 @@
   import { toast } from '$lib/components/ui/sonner';
   import { open } from '@tauri-apps/plugin-dialog';
   import { basename } from '@tauri-apps/api/path';
+  import { plural } from '$lib/utils/format.svelte';
 
   let {
     label = 'Import from GnuCash',
@@ -38,9 +39,15 @@
       const result = await importGnucash(selected, filename);
       dbSession.value = { summary: result.summary };
       toast.success(`Imported ${filename}`);
-      toast.info(
-        'Prices are not imported — refresh prices in Portfolio to load them from Yahoo Finance.'
-      );
+      const priceErrors = result.prices?.errors ?? [];
+      const priceCount = result.prices?.prices.length ?? 0;
+      if (priceErrors.length > 0) {
+        toast.warning(
+          `Prices refreshed with ${plural(priceErrors.length, 'error')} — open Portfolio to fix symbols.`
+        );
+      } else if (priceCount > 0) {
+        toast.success('Prices refreshed from Yahoo Finance');
+      }
     } catch (e: unknown) {
       const msg = errMsg(e, 'Import failed');
       if (onError) {
