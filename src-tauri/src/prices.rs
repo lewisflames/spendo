@@ -86,9 +86,9 @@ pub fn list_commodities(conn: &Connection) -> Result<Vec<CommodityInfo>, String>
     Ok(rows)
 }
 
-fn latest_n_prices_raw(
+fn nth_price_raw(
     conn: &Connection,
-    rn_filter: u32,
+    rn: u32,
 ) -> Result<Vec<(String, f64, String, String)>, String> {
     // (mnemonic, price, date, quote_currency_mnemonic)
     let mut stmt = conn
@@ -109,7 +109,7 @@ fn latest_n_prices_raw(
         .map_err(|e| e.to_string())?;
 
     let rows = stmt
-        .query_map([rn_filter], |row| {
+        .query_map([rn], |row| {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
         })
         .map_err(|e| e.to_string())?
@@ -135,7 +135,7 @@ fn normalize_price(
 }
 
 fn get_latest_live_prices(conn: &Connection) -> Result<Vec<PriceEntry>, String> {
-    Ok(latest_n_prices_raw(conn, 1)?
+    Ok(nth_price_raw(conn, 1)?
         .into_iter()
         .map(|(mnemonic, price, date, currency)| PriceEntry {
             mnemonic,
@@ -233,7 +233,7 @@ fn symbol_override_map(conn: &Connection) -> HashMap<String, String> {
     rows.flatten().collect()
 }
 
-fn list_symbol_overrides_inner(conn: &Connection) -> Result<Vec<SymbolOverride>, String> {
+fn fetch_symbol_overrides_inner(conn: &Connection) -> Result<Vec<SymbolOverride>, String> {
     let commodities = list_commodities(conn)?;
     let overrides = symbol_override_map(conn);
     Ok(commodities
@@ -476,23 +476,29 @@ fn register_symbol(
 pub(crate) async fn fetch_prices_remote(
     pre: PriceFetchPlan,
 ) -> Result<(PricesResult, PendingPriceWrites), String> {
-    let PriceFetchPlan {
-        commodities,
-        already_fetched,
-        latest_dates,
-        report_currency_guid,
-        report_currency,
-        currencies,
-        currency_guid_map,
-        existing_live_prices,
-        overrides,
-    } = pre;
-
-    let mut assigned: HashSet<String> = HashSet::new();
     let now = utils::iso_now();
+    let symbols = plan_symbols(&pre)?;
+    let outcome = fetch_all_histories(&symbols).await;
+    Ok(assemble_result(pre, symbols, outcome, now))
+}
 
+/// Everything the fetch phase needs: Yahoo symbols per commodity (+FX pairs),
+/// earliest `period1` per symbol, and the shared `period2`.
+struct SymbolPlan {
+    /// Yahoo symbol -> commodity mnemonic.
+    mnemonic_by_symbol: HashMap<String, String>,
+    all_symbols: Vec<String>,
+    /// Earliest period1 per Yahoo symbol (across commodities sharing it).
+    symbol_period1: HashMap<String, Option<i64>>,
+    /// (symbol, currency_mnemonic, is_inverse) FX pairs.
+    fx_symbols: Vec<(String, String, bool)>,
+    crypto_suffix: String,
+    period2: i64,
+}
+
+fn plan_symbols(pre: &PriceFetchPlan) -> Result<SymbolPlan, String> {
     // Crypto pairs quote in the report currency when supported, else EUR (converted via FX at read time).
-    let crypto_suffix = match &report_currency {
+    let crypto_suffix = match &pre.report_currency {
         Some(r) if SUPPORTED_CRYPTO_FIAT.contains(&r.as_str()) => format!("-{}", r),
         _ => "-EUR".to_string(),
     };
@@ -506,19 +512,20 @@ pub(crate) async fn fetch_prices_remote(
         .and_utc()
         .timestamp();
 
-    let mut symbol_map: HashMap<String, String> = HashMap::new();
+    let mut mnemonic_by_symbol: HashMap<String, String> = HashMap::new();
     let mut all_symbols: Vec<String> = vec![];
     // Earliest period1 per Yahoo symbol (across all commodities sharing that symbol)
     let mut symbol_period1: HashMap<String, Option<i64>> = HashMap::new();
 
-    for c in &commodities {
-        let period1_for_c: Option<i64> = latest_dates.get(&c.guid).and_then(|d| date_to_period1(d));
+    for c in &pre.commodities {
+        let period1_for_c: Option<i64> =
+            pre.latest_dates.get(&c.guid).and_then(|d| date_to_period1(d));
 
         // Per-commodity free-text override wins verbatim (single Yahoo fetch,
         // no heuristic suffix expansion).
-        if let Some(ov) = overrides.get(&c.guid) {
+        if let Some(ov) = pre.overrides.get(&c.guid) {
             register_symbol(
-                &mut symbol_map,
+                &mut mnemonic_by_symbol,
                 &mut all_symbols,
                 &mut symbol_period1,
                 ov.clone(),
@@ -530,7 +537,7 @@ pub(crate) async fn fetch_prices_remote(
         let candidates = derive_yahoo_symbols(&c.mnemonic, &c.namespace, &crypto_suffix);
         for sym in candidates {
             register_symbol(
-                &mut symbol_map,
+                &mut mnemonic_by_symbol,
                 &mut all_symbols,
                 &mut symbol_period1,
                 sym,
@@ -544,21 +551,21 @@ pub(crate) async fn fetch_prices_remote(
     // Yahoo convention: "USDEUR=X" = price of 1 USD in EUR. Fetch both directions
     // and prefer the direct quote, falling back to the inverted pair.
     let mut fx_symbols: Vec<(String, String, bool)> = vec![]; // (symbol, currency_mnemonic, is_inverse)
-    if let Some(report_mnemonic) = &report_currency {
-        for (guid, mnemonic) in &currencies {
+    if let Some(report_mnemonic) = &pre.report_currency {
+        for (guid, mnemonic) in &pre.currencies {
             if mnemonic == report_mnemonic {
                 continue;
             }
             let primary = format!("{}{}=X", mnemonic, report_mnemonic);
             let inverse = format!("{}{}=X", report_mnemonic, mnemonic);
             let period1_for_currency: Option<i64> =
-                latest_dates.get(guid).and_then(|d| date_to_period1(d));
-            if !symbol_map.contains_key(&primary) && !all_symbols.contains(&primary) {
+                pre.latest_dates.get(guid).and_then(|d| date_to_period1(d));
+            if !mnemonic_by_symbol.contains_key(&primary) && !all_symbols.contains(&primary) {
                 all_symbols.push(primary.clone());
                 symbol_period1.insert(primary.clone(), period1_for_currency);
                 fx_symbols.push((primary, mnemonic.clone(), false));
             }
-            if !symbol_map.contains_key(&inverse) && !all_symbols.contains(&inverse) {
+            if !mnemonic_by_symbol.contains_key(&inverse) && !all_symbols.contains(&inverse) {
                 all_symbols.push(inverse.clone());
                 symbol_period1.insert(inverse.clone(), period1_for_currency);
                 fx_symbols.push((inverse, mnemonic.clone(), true));
@@ -570,16 +577,34 @@ pub(crate) async fn fetch_prices_remote(
     all_symbols.sort();
     all_symbols.dedup();
 
+    Ok(SymbolPlan {
+        mnemonic_by_symbol,
+        all_symbols,
+        symbol_period1,
+        fx_symbols,
+        crypto_suffix,
+        period2,
+    })
+}
+
+/// Fetched Yahoo histories and per-symbol failures.
+struct FetchOutcome {
+    yahoo_history: HashMap<String, Vec<(i64, f64)>>,
+    yahoo_errors: HashMap<String, String>,
+}
+
+/// Fetch all planned symbols concurrently with a concurrency limit.
+async fn fetch_all_histories(symbols: &SymbolPlan) -> FetchOutcome {
     let mut yahoo_history: HashMap<String, Vec<(i64, f64)>> = HashMap::new();
     let mut yahoo_errors: HashMap<String, String> = HashMap::new();
 
     // Fetch prices concurrently with a concurrency limit
     let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_FETCHES));
     let mut handles = Vec::new();
-    for sym in &all_symbols {
+    for sym in &symbols.all_symbols {
         let sym = sym.clone();
-        let p1 = symbol_period1.get(&sym).copied().flatten();
-        let p2 = period2;
+        let p1 = symbols.symbol_period1.get(&sym).copied().flatten();
+        let p2 = symbols.period2;
         let permit = std::sync::Arc::clone(&semaphore);
         handles.push(tokio::spawn(async move {
             // A closed semaphore would mean the runtime is shutting down; map
@@ -606,6 +631,44 @@ pub(crate) async fn fetch_prices_remote(
         }
     }
 
+    FetchOutcome {
+        yahoo_history,
+        yahoo_errors,
+    }
+}
+
+/// Fold fetched histories into the user-facing result and the DB write set:
+/// direct-quote FX wins over inverted pairs; commodities with neither fresh
+/// nor previously-fetched prices surface errors (`already_fetched` only
+/// suppresses the error — the stale price is kept).
+fn assemble_result(
+    pre: PriceFetchPlan,
+    symbols: SymbolPlan,
+    outcome: FetchOutcome,
+    now: String,
+) -> (PricesResult, PendingPriceWrites) {
+    let PriceFetchPlan {
+        commodities,
+        already_fetched,
+        report_currency_guid,
+        report_currency,
+        currencies,
+        currency_guid_map,
+        existing_live_prices,
+        overrides,
+        ..
+    } = pre;
+    let SymbolPlan {
+        mnemonic_by_symbol,
+        fx_symbols,
+        crypto_suffix,
+        ..
+    } = symbols;
+    let FetchOutcome {
+        yahoo_history,
+        yahoo_errors,
+    } = outcome;
+
     // FX rates in report currency per currency mnemonic.
     let mut fx_primary_done: HashSet<String> = HashSet::new();
     let mut fx_history: HashMap<String, Vec<(i64, f64)>> = HashMap::new();
@@ -625,10 +688,11 @@ pub(crate) async fn fetch_prices_remote(
         }
     }
 
+    let mut assigned: HashSet<String> = HashSet::new();
     let mut latest_prices: Vec<PriceEntry> = vec![];
     let mut errors: Vec<PriceError> = vec![];
 
-    for (sym, mnemonic) in &symbol_map {
+    for (sym, mnemonic) in &mnemonic_by_symbol {
         if let Some(history) = yahoo_history.get(sym) {
             if let Some((_, latest_price)) = history.last() {
                 let namespace = commodities
@@ -703,14 +767,14 @@ pub(crate) async fn fetch_prices_remote(
 
     let fx_prices: Vec<(String, Vec<(i64, f64)>)> = fx_history.into_iter().collect();
 
-    Ok((
+    (
         PricesResult {
             prices: latest_prices,
             fetched_at: now,
             errors,
         },
         PendingPriceWrites {
-            symbol_map,
+            symbol_map: mnemonic_by_symbol,
             yahoo_history,
             assigned,
             report_currency_guid,
@@ -719,67 +783,58 @@ pub(crate) async fn fetch_prices_remote(
             commodities,
             fx_prices,
         },
-    ))
+    )
 }
 
 pub fn get_cached_prices_map(conn: &Connection) -> Result<HashMap<String, f64>, String> {
-    let rows = latest_n_prices_raw(conn, 1)?;
-    if rows.is_empty() {
-        return Ok(HashMap::new());
-    }
-    let (report_guid, report_mnemonic) = report_currency_pair(conn);
-    let map: HashMap<String, f64> = rows
+    Ok(latest_prices_normalized(conn, 1)?
         .into_iter()
-        .map(|(m, p, d, quote)| {
-            Ok((
-                m,
-                normalize_price(p, &quote, &d, &report_guid, &report_mnemonic, conn)?,
-            ))
-        })
-        .collect::<Result<HashMap<_, _>, String>>()?;
-    Ok(map)
+        .map(|(mnemonic, price, _, _)| (mnemonic, price))
+        .collect())
 }
 
 pub fn get_cached_prices_with_date_map(
     conn: &Connection,
-) -> Result<HashMap<String, (f64, Option<String>)>, String> {
-    let rows = latest_n_prices_raw(conn, 1)?;
-    let (report_guid, report_mnemonic) = report_currency_pair(conn);
-    let map: HashMap<String, (f64, Option<String>)> = rows
+) -> Result<HashMap<String, (f64, String)>, String> {
+    Ok(latest_prices_normalized(conn, 1)?
         .into_iter()
-        .map(|(m, p, d, quote)| {
-            Ok((
-                m,
-                (
-                    normalize_price(p, &quote, &d, &report_guid, &report_mnemonic, conn)?,
-                    Some(d),
-                ),
-            ))
-        })
-        .collect::<Result<HashMap<_, _>, String>>()?;
-    Ok(map)
+        .map(|(mnemonic, price, date, _)| (mnemonic, (price, date)))
+        .collect())
 }
 
 /// Second-latest price per commodity, normalized to the report currency at that
 /// price's own date. Powers day-change comparisons in the portfolio table.
 pub fn get_cached_prev_prices_map(
     conn: &Connection,
-) -> Result<HashMap<String, (f64, Option<String>)>, String> {
-    let rows = latest_n_prices_raw(conn, 2)?;
-    let (report_guid, report_mnemonic) = report_currency_pair(conn);
-    let map: HashMap<String, (f64, Option<String>)> = rows
+) -> Result<HashMap<String, (f64, String)>, String> {
+    Ok(latest_prices_normalized(conn, 2)?
         .into_iter()
+        .map(|(mnemonic, price, date, _)| (mnemonic, (price, date)))
+        .collect())
+}
+
+/// Latest-price rows normalized to the report currency:
+/// (mnemonic, price, price date, quote mnemonic). Single window-function scan
+/// shared by every cached-price map above.
+fn latest_prices_normalized(
+    conn: &Connection,
+    rn: u32,
+) -> Result<Vec<(String, f64, String, String)>, String> {
+    let rows = nth_price_raw(conn, rn)?;
+    if rows.is_empty() {
+        return Ok(vec![]);
+    }
+    let (report_guid, report_mnemonic) = report_currency_pair(conn);
+    rows.into_iter()
         .map(|(m, p, d, quote)| {
             Ok((
                 m,
-                (
-                    normalize_price(p, &quote, &d, &report_guid, &report_mnemonic, conn)?,
-                    Some(d),
-                ),
+                normalize_price(p, &quote, &d, &report_guid, &report_mnemonic, conn)?,
+                d,
+                quote,
             ))
         })
-        .collect::<Result<HashMap<_, _>, String>>()?;
-    Ok(map)
+        .collect()
 }
 
 fn report_currency_pair(conn: &Connection) -> (String, String) {
@@ -793,17 +848,17 @@ fn report_currency_pair(conn: &Connection) -> (String, String) {
 /// used as the cost-basis currency proxy for stock accounts. One query instead
 /// of one lookup per commodity.
 pub fn latest_quote_currencies(conn: &Connection) -> Result<HashMap<String, String>, String> {
-    Ok(latest_n_prices_raw(conn, 1)?
+    Ok(nth_price_raw(conn, 1)?
         .into_iter()
         .map(|(mnemonic, _, _, quote)| (mnemonic, quote))
         .collect())
 }
 
 #[tauri::command]
-pub async fn list_symbol_overrides(
+pub async fn fetch_symbol_overrides(
     state: State<'_, AppState>,
 ) -> Result<Vec<SymbolOverride>, String> {
-    db::run_blocking(state.db.clone(), list_symbol_overrides_inner).await
+    db::run_blocking(state.db.clone(), fetch_symbol_overrides_inner).await
 }
 
 #[tauri::command]
@@ -942,7 +997,7 @@ mod tests {
     fn override_map_empty_without_rows() {
         let conn = setup_commodities();
         assert!(symbol_override_map(&conn).is_empty());
-        let list = list_symbol_overrides_inner(&conn).unwrap();
+        let list = fetch_symbol_overrides_inner(&conn).unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].commodity_guid, "c-aapl");
         assert_eq!(list[0].symbol, None);

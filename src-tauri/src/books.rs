@@ -109,11 +109,9 @@ fn escape_path_for_sql(path: &Path) -> String {
 }
 
 /// Remove a previous file at the Save As target (`VACUUM INTO` refuses to
-/// overwrite) plus any stale WAL sidecars.
+/// overwrite) plus any stale WAL sidecars (`<file>-wal`/`<file>-shm`).
 fn remove_target(path: &Path) {
     std::fs::remove_file(path).ok();
-    std::fs::remove_file(path.with_extension("spendo-wal")).ok();
-    // Sidecar names are `<file>-wal`/`<file>-shm`, not extension swaps.
     let name = format!("{}-wal", path.display());
     std::fs::remove_file(name).ok();
     let name = format!("{}-shm", path.display());
@@ -150,7 +148,7 @@ async fn activate_book(
 /// install before any New/Open). Locks only the path mutex — a PathBuf clone
 /// with no DB access — so no blocking-thread hop is needed.
 #[tauri::command]
-pub async fn get_active_book(state: State<'_, AppState>) -> Result<ActiveBook, String> {
+pub async fn fetch_active_book(state: State<'_, AppState>) -> Result<ActiveBook, String> {
     let guard = state.db_path.lock().map_err(|e| e.to_string())?;
     Ok(ActiveBook {
         path: guard
@@ -206,8 +204,11 @@ pub async fn save_book_as(
         }
     }
     remove_target(&new_path);
-    // VACUUM INTO must run on the live connection, then the fresh file is
-    // opened and swapped in atomically on the blocking thread.
+    // SAFETY: `VACUUM INTO` must run on the live connection, so this is the
+    // one intentional exception to "file I/O before the DB lock". It runs on
+    // the blocking thread via `run_swap_blocking` (never blocking a tokio
+    // worker); the UI may briefly stall on very large books while SQLite
+    // copies the file, then the fresh file is opened and swapped atomically.
     let escaped = escape_path_for_sql(&new_path);
     let fresh_path = new_path.clone();
     let summary = db::run_swap_blocking(state.db.clone(), move |conn| {
@@ -339,6 +340,15 @@ mod tests {
 
         assert!(create_book_at_inner(&path, "EURO").is_err());
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn escape_path_for_sql_doubles_single_quotes() {
+        let path = PathBuf::from("/tmp/o'brien.spendo");
+        assert_eq!(
+            escape_path_for_sql(&path),
+            "/tmp/o''brien.spendo".to_string()
+        );
     }
 
     #[test]

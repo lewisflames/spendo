@@ -309,7 +309,7 @@ fn build_holdings(
         .map(|(guid, group)| {
             let price_info = prices_with_date_map.get(&group.mnemonic);
             let price = price_info.map(|p| p.0);
-            let price_date = price_info.and_then(|p| p.1.clone());
+            let price_date = price_info.map(|p| p.1.clone());
             let prev_price = prev_prices_map
                 .get(&group.mnemonic)
                 .map(|p| p.0)
@@ -354,6 +354,32 @@ fn build_value_trend(
     conn: &Connection,
     filter: Option<&str>,
 ) -> Result<Vec<PortfolioValuePoint>, String> {
+    let inputs = load_trend_inputs(conn, filter)?;
+    if inputs.events.is_empty() {
+        return Ok(vec![]);
+    }
+    let first_date_str = inputs.events[0]
+        .post_date
+        .get(..10)
+        .ok_or_else(|| format!("Invalid first date: {}", inputs.events[0].post_date))?;
+    let first_date = NaiveDate::parse_from_str(first_date_str, "%Y-%m-%d")
+        .map_err(|e| format!("Invalid first date: {e}"))?;
+    let end_date = Utc::now().date_naive();
+    accumulate_trend(&inputs, sample_trend_dates(first_date, end_date))
+}
+
+/// Ordered inputs for the value trend: dated split/price events plus the maps
+/// to value them in the report currency.
+struct TrendInputs {
+    events: Vec<SplitEvent>,
+    price_events: Vec<PriceEvent>,
+    fx_history: fx::FxHistory,
+    report_currency: String,
+    guid_to_mnemonic: HashMap<String, String>,
+    guid_to_quote: HashMap<String, String>,
+}
+
+fn load_trend_inputs(conn: &Connection, filter: Option<&str>) -> Result<TrendInputs, String> {
     // Load split events ordered by date (optionally one commodity only)
     let mut events_sql = format!(
         "SELECT a.commodity_guid, t.post_date,
@@ -390,10 +416,6 @@ fn build_value_trend(
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
-
-    if events.is_empty() {
-        return Ok(vec![]);
-    }
 
     // Load price records ordered by date (with their quote currency)
     let mut prices_sql = format!(
@@ -470,10 +492,48 @@ fn build_value_trend(
         guid_to_quote.insert(guid.clone(), quote);
     }
 
-    let first_date_str = &events[0].post_date[..10];
-    let first_date = NaiveDate::parse_from_str(first_date_str, "%Y-%m-%d")
-        .map_err(|e| format!("Invalid first date: {e}"))?;
-    let end_date = Utc::now().date_naive();
+    Ok(TrendInputs {
+        events,
+        price_events,
+        fx_history,
+        report_currency,
+        guid_to_mnemonic,
+        guid_to_quote,
+    })
+}
+
+/// Sample long histories instead of emitting one point per day: the per-day
+/// work is O(commodities) but the unbounded payload dominates. Always ends at
+/// `end` so the trend stops at the current value.
+fn sample_trend_dates(first: NaiveDate, end: NaiveDate) -> Vec<NaiveDate> {
+    let total_days = (end - first).num_days().max(0);
+    let stride = i64::max(1, (total_days as f64 / TREND_SAMPLE_TARGET as f64).ceil() as i64);
+
+    let mut sample_dates: Vec<NaiveDate> = Vec::new();
+    let mut cursor = first;
+    while cursor <= end {
+        sample_dates.push(cursor);
+        cursor += chrono::Duration::days(stride);
+    }
+    // Always include today so the trend ends at the current value.
+    if sample_dates.last().copied() != Some(end) {
+        sample_dates.push(end);
+    }
+    sample_dates
+}
+
+/// Walk the sampled dates, advancing splits/prices and valuing the running
+/// position in the report currency per date.
+fn accumulate_trend(
+    inputs: &TrendInputs,
+    sample_dates: Vec<NaiveDate>,
+) -> Result<Vec<PortfolioValuePoint>, String> {
+    let events = &inputs.events;
+    let price_events = &inputs.price_events;
+    let fx_history = &inputs.fx_history;
+    let report_currency = inputs.report_currency.as_str();
+    let guid_to_mnemonic = &inputs.guid_to_mnemonic;
+    let guid_to_quote = &inputs.guid_to_quote;
 
     let mut running_shares: HashMap<String, f64> = HashMap::new();
     let mut running_cost: HashMap<String, f64> = HashMap::new();
@@ -482,28 +542,18 @@ fn build_value_trend(
     let mut price_idx: usize = 0;
     let mut trend: Vec<PortfolioValuePoint> = vec![];
 
-    // Sample long histories instead of emitting one point per day: the
-    // per-day work is O(commodities) but the unbounded payload dominates.
-    let total_days = (end_date - first_date).num_days().max(0);
-    let stride = i64::max(1, (total_days as f64 / TREND_SAMPLE_TARGET as f64).ceil() as i64);
-
-    let mut sample_dates: Vec<NaiveDate> = Vec::new();
-    let mut cursor = first_date;
-    while cursor <= end_date {
-        sample_dates.push(cursor);
-        cursor += chrono::Duration::days(stride);
-    }
-    // Always include today so the trend ends at the current value.
-    if sample_dates.last().copied() != Some(end_date) {
-        sample_dates.push(end_date);
-    }
-
     for day in sample_dates {
         let date_str = day.format("%Y-%m-%d").to_string();
 
         // Advance splits on or before this date (cost accumulates in the
         // commodity's own quote currency)
-        while event_idx < events.len() && &events[event_idx].post_date[..10] <= date_str.as_str() {
+        while event_idx < events.len() {
+            let prefix = events[event_idx].post_date.get(..10).ok_or_else(|| {
+                format!("Invalid post_date: {}", events[event_idx].post_date)
+            })?;
+            if prefix > date_str.as_str() {
+                break;
+            }
             let e = &events[event_idx];
             *running_shares
                 .entry(e.commodity_guid.clone())

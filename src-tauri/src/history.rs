@@ -2,7 +2,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 use tauri::State;
 
-use crate::db::{run_blocking, AppState};
+use crate::db::{run_blocking, validate_data_table, AppState};
 use crate::home::{get_summary, DataSummary};
 use crate::utils;
 
@@ -53,16 +53,6 @@ pub(crate) struct Snapshot<'a> {
     pub(crate) before_json: Option<String>,
 }
 
-const VALID_TABLES: &[&str] = &["commodities", "accounts", "transactions", "splits"];
-
-fn validate_table(table: &str) -> Result<(), String> {
-    if VALID_TABLES.contains(&table) {
-        Ok(())
-    } else {
-        Err(format!("Invalid table name: {table}"))
-    }
-}
-
 /// Read a live row and serialize it for `change_snapshots.before_json`.
 /// Returns `Ok(None)` when the row does not exist (an add — revert deletes).
 /// Keys mirror column names so `restore_snapshot_row` can map them back.
@@ -71,7 +61,7 @@ pub(crate) fn snapshot_row(
     table: &str,
     guid: &str,
 ) -> Result<Option<String>, String> {
-    validate_table(table)?;
+    validate_data_table(table)?;
     let sql = match table {
         "commodities" => {
             "SELECT guid, mnemonic, namespace, fullname FROM commodities WHERE guid = ?1"
@@ -170,7 +160,7 @@ fn int_field(v: &serde_json::Value, key: &str) -> Result<i64, String> {
 /// Re-insert (or overwrite) a row from its before-image. Callers order phases:
 /// parents before children so FK references resolve.
 fn restore_snapshot_row(conn: &Connection, table: &str, before: &str) -> Result<(), String> {
-    validate_table(table)?;
+    validate_data_table(table)?;
     let v: serde_json::Value =
         serde_json::from_str(before).map_err(|e| format!("Corrupt history snapshot: {e}"))?;
     match table {
@@ -284,7 +274,7 @@ pub(crate) fn insert_change_entry(
             )
             .map_err(|e| e.to_string())?;
         for s in snapshots {
-            validate_table(s.table_name)?;
+            validate_data_table(s.table_name)?;
             stmt.execute(params![entry_id, s.table_name, s.row_guid, s.before_json])
                 .map_err(|e| e.to_string())?;
         }
@@ -364,10 +354,8 @@ pub(crate) fn fetch_change_history_inner(
     page: i64,
     page_size: i64,
 ) -> Result<ChangeHistoryPage, String> {
-    let page_size = utils::clamp_page_size(page_size);
     let total = count_change_entries(conn)?;
-    let total_pages = utils::total_pages(total, page_size);
-    let safe_page = utils::clamp_page(page, total_pages);
+    let (page_size, total_pages, safe_page, _) = utils::paginate(total, page, page_size);
     let entries = if table_exists(conn, "change_log") {
         get_change_entries(conn, page_size, (safe_page - 1) * page_size)?
     } else {
@@ -418,7 +406,7 @@ pub(crate) fn revert_history_entry_inner(conn: &Connection, id: i64) -> Result<(
 
         // Phase 1: drop rows the operation added (children before parents).
         for table in ["splits", "transactions", "accounts", "commodities"] {
-            validate_table(table)?;
+            validate_data_table(table)?;
             let sql = format!(
                 "DELETE FROM {table} WHERE guid IN (
                     SELECT row_guid FROM change_snapshots
@@ -540,12 +528,12 @@ pub async fn revert_history_entry(
     state: State<'_, AppState>,
     id: i64,
 ) -> Result<RevertResult, String> {
-    let (reverted_id, revert_id) =
-        run_blocking(state.db.clone(), move |conn| {
-            revert_history_entry_inner(conn, id)
-        })
-        .await?;
-    let summary = run_blocking(state.db.clone(), |conn| get_summary(conn)).await?;
+    let (reverted_id, revert_id, summary) = run_blocking(state.db.clone(), move |conn| {
+        let (reverted_id, revert_id) = revert_history_entry_inner(conn, id)?;
+        let summary = get_summary(conn)?;
+        Ok::<_, String>((reverted_id, revert_id, summary))
+    })
+    .await?;
     Ok(RevertResult {
         reverted_id,
         revert_id,

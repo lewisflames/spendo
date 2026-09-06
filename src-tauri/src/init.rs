@@ -16,7 +16,7 @@ pub(crate) fn normalize_mnemonic(raw: &str) -> Result<String, String> {
 
 /// Insert the base-currency commodity + ROOT account into a fresh database.
 /// Takes an already-normalized mnemonic; owns its transaction. Shared by
-/// `create_empty_book` (active book) and `books::create_book_at` (new file).
+/// `create_empty_book_inner` (tests) and `books::create_book_at` (new file).
 pub(crate) fn seed_empty_book(conn: &Connection, mnemonic: &str) -> Result<(), String> {
     let commodity_guid = uuid::Uuid::new_v4().to_string();
     let root_guid = uuid::Uuid::new_v4().to_string();
@@ -44,6 +44,9 @@ pub(crate) fn seed_empty_book(conn: &Connection, mnemonic: &str) -> Result<(), S
     conn.execute_batch("COMMIT").map_err(|e| e.to_string())
 }
 
+// No live IPC command calls this (books are created via `create_book_at`);
+// kept for the init tests below.
+#[allow(dead_code)]
 fn create_empty_book_inner(conn: &Connection, currency: &str) -> Result<HomeDataResult, String> {
     let mnemonic = normalize_mnemonic(currency)?;
 
@@ -60,17 +63,6 @@ fn create_empty_book_inner(conn: &Connection, currency: &str) -> Result<HomeData
         has_data: true,
         summary: Some(get_summary(conn)?),
     })
-}
-
-#[tauri::command]
-pub async fn create_empty_book(
-    state: State<'_, AppState>,
-    currency: String,
-) -> Result<HomeDataResult, String> {
-    run_blocking(state.db.clone(), move |conn| {
-        create_empty_book_inner(conn, &currency)
-    })
-    .await
 }
 
 fn set_base_currency_inner(conn: &Connection, currency: &str) -> Result<HomeDataResult, String> {

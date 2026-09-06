@@ -428,7 +428,7 @@ fn fetch_account_detail_inner(
         transactions: tx_page.transactions,
         total: tx_page.total,
         page: tx_page.safe_page,
-        page_size: query.page_size,
+        page_size: tx_page.page_size,
         total_pages: tx_page.total_pages,
         subtree,
         parent,
@@ -442,6 +442,7 @@ struct TxPage {
     total: i64,
     safe_page: i64,
     total_pages: i64,
+    page_size: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -497,8 +498,7 @@ fn load_tx_page(
         .query_row(count_params.as_slice(), |row| row.get(0))
         .map_err(|e| e.to_string())?;
 
-    let total_pages = utils::total_pages(total, page_size);
-    let safe_page = utils::clamp_page(page, total_pages);
+    let (page_size, total_pages, safe_page, _) = utils::paginate(total, page, page_size);
 
     // Transactions with per-currency effects; the running balance is
     // accumulated in report currency in Rust so multi-currency subtrees
@@ -626,6 +626,7 @@ fn load_tx_page(
         total,
         safe_page,
         total_pages,
+        page_size,
     })
 }
 
@@ -835,7 +836,7 @@ pub async fn fetch_account_detail(
             &guid,
             TxQuery {
                 page,
-                page_size: utils::clamp_page_size(page_size),
+                page_size,
                 date_from: date_from.as_deref(),
                 date_to: date_to.as_deref(),
                 search: search.as_deref(),
@@ -851,13 +852,16 @@ pub async fn fetch_account_detail(
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountBalancePoint {
-    pub month: String,
+    /// Day as `YYYY-MM-DD` (named `date` like the other trend points).
+    pub date: String,
     pub balance: f64,
 }
 
 /// Per-(day, currency) signed split-value deltas for the account subtree.
 /// Amounts carry GnuCash display signs (credit-normal accounts negated) via
 /// `signed_amount_expr`, so running sums can be aggregated as-is.
+/// Half-open dates (`>= start AND < date(end, '+1 day')`): `post_date` carries
+/// `HH:MM:SS`, so `<= YYYY-MM-DD` would drop end-day timed rows.
 fn subtree_deltas_by_day(
     conn: &Connection,
     sub_guids: &[String],
@@ -873,8 +877,8 @@ fn subtree_deltas_by_day(
          JOIN accounts a ON a.guid = s.account_guid
          JOIN commodities c ON c.guid = a.commodity_guid
          JOIN transactions t ON t.guid = s.tx_guid
-         WHERE s.account_guid IN ({}) {} 
-           AND t.post_date >= ?{} AND t.post_date <= ?{}
+         WHERE s.account_guid IN ({}) {}
+           AND t.post_date >= ?{} AND t.post_date < date(?{}, '+1 day')
          GROUP BY t.post_date, c.mnemonic
          ORDER BY t.post_date ASC",
         amount_expr,
@@ -958,7 +962,7 @@ fn fetch_account_balance_trend_inner(
 
     if days.is_empty() {
         return Ok(vec![AccountBalancePoint {
-            month: end_date,
+            date: end_date,
             balance: 0.0,
         }]);
     }
@@ -988,7 +992,7 @@ fn fetch_account_balance_trend_inner(
             .map(|(mn, q)| unified_prices.get(mn).unwrap_or(&0.0) * q)
             .sum();
         trend.push(AccountBalancePoint {
-            month: day,
+            date: day,
             balance: cash_total + shares_total,
         });
     }
@@ -1073,11 +1077,11 @@ mod tests {
             trend,
             vec![
                 AccountBalancePoint {
-                    month: "2024-01-10".into(),
+                    date: "2024-01-10".into(),
                     balance: 100.0
                 },
                 AccountBalancePoint {
-                    month: "2024-02-05".into(),
+                    date: "2024-02-05".into(),
                     balance: 70.0
                 },
             ]
@@ -1086,7 +1090,7 @@ mod tests {
         // Root includes the credit card; its spend shows as negative.
         let trend = fetch_account_balance_trend_inner(&conn, "root").unwrap();
         let last = trend.last().unwrap();
-        assert_eq!(last.month, "2024-02-20");
+        assert_eq!(last.date, "2024-02-20");
         assert_eq!(last.balance, 30.0);
     }
 
@@ -1257,11 +1261,11 @@ mod tests {
             trend,
             vec![
                 AccountBalancePoint {
-                    month: "2024-01-10".into(),
+                    date: "2024-01-10".into(),
                     balance: 100.0
                 },
                 AccountBalancePoint {
-                    month: "2024-02-05".into(),
+                    date: "2024-02-05".into(),
                     balance: 70.0
                 },
             ]

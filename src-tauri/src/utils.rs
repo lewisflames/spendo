@@ -13,10 +13,43 @@ pub const CREDIT_NORMAL: [&str; 6] = [
 
 pub const INVESTMENT_TYPES: [&str; 3] = ["STOCK", "MUTUAL", "FUND"];
 
+/// Cash-like balance-sheet types: everything asset-side except investments
+/// (which are marked to market separately).
+pub const CASH_LIKE_TYPES: [&str; 5] = ["ASSET", "BANK", "CASH", "CURRENCY", "RECEIVABLE"];
+/// Full asset-side types: cash-like plus investments.
+pub const ASSET_TYPES: [&str; 8] = [
+    "ASSET",
+    "BANK",
+    "CASH",
+    "STOCK",
+    "MUTUAL",
+    "FUND",
+    "CURRENCY",
+    "RECEIVABLE",
+];
+pub const LIABILITY_TYPES: [&str; 3] = ["LIABILITY", "CREDIT", "PAYABLE"];
+/// TRADING books accumulate currency/commodity trading gains as net credits,
+/// so they roll up with equity (see `CREDIT_NORMAL`).
+pub const EQUITY_TYPES: [&str; 2] = ["EQUITY", "TRADING"];
+
 /// `'STOCK','MUTUAL','FUND'` fragment for SQL `IN (...)` lists, derived from
 /// [`INVESTMENT_TYPES`] so query filters can never drift from Rust-side checks.
 pub fn investment_types_sql() -> String {
-    INVESTMENT_TYPES
+    types_sql(&INVESTMENT_TYPES)
+}
+
+/// [`CASH_LIKE_TYPES`] as an SQL `IN (...)` fragment.
+pub fn cash_like_types_sql() -> String {
+    types_sql(&CASH_LIKE_TYPES)
+}
+
+/// [`LIABILITY_TYPES`] as an SQL `IN (...)` fragment.
+pub fn liability_types_sql() -> String {
+    types_sql(&LIABILITY_TYPES)
+}
+
+fn types_sql(types: &[&str]) -> String {
+    types
         .iter()
         .map(|t| format!("'{t}'"))
         .collect::<Vec<_>>()
@@ -87,6 +120,28 @@ pub fn format_month(n: i64) -> String {
     format!("{:04}-{:02}", y, m + 1)
 }
 
+/// Last calendar day of a `YYYY-MM` month, for month-end FX lookups.
+pub fn month_end(month: &str) -> Result<String, String> {
+    let mut parts = month.split('-');
+    let (Some(y), Some(m)) = (parts.next(), parts.next()) else {
+        return Err(format!("Invalid month: {month}"));
+    };
+    if parts.next().is_some() {
+        return Err(format!("Invalid month: {month}"));
+    }
+    let y: i32 = y.parse().map_err(|_| format!("Invalid month: {month}"))?;
+    let m: u32 = m.parse().map_err(|_| format!("Invalid month: {month}"))?;
+    let first_next = if m == 12 {
+        chrono::NaiveDate::from_ymd_opt(y + 1, 1, 1)
+    } else {
+        chrono::NaiveDate::from_ymd_opt(y, m + 1, 1)
+    }
+    .ok_or_else(|| format!("Invalid month: {month}"))?;
+    Ok((first_next - chrono::Duration::days(1))
+        .format("%Y-%m-%d")
+        .to_string())
+}
+
 pub fn month_number(ym: &str) -> Result<i64, String> {
     // Accept both `YYYY-MM` (canonical) and full `YYYY-MM-DD` dates (as passed
     // by calendar widgets) by truncating dated strings to the month prefix.
@@ -123,6 +178,18 @@ pub fn clamp_page_size(page_size: i64) -> i64 {
 /// requests can neither produce a negative offset nor an empty page.
 pub fn clamp_page(page: i64, total_pages: i64) -> i64 {
     page.clamp(1, total_pages.max(1))
+}
+
+/// Single entry point for paginated queries: clamps `page_size` first (so
+/// direct `_inner` callers/tests can never divide by zero or emit a negative
+/// LIMIT/OFFSET), then derives `total_pages`, the clamped page and offset.
+/// Returns `(clamped_page_size, total_pages, safe_page, offset)`.
+pub fn paginate(total: i64, page: i64, page_size: i64) -> (i64, i64, i64, i64) {
+    let page_size = clamp_page_size(page_size);
+    let total_pages = total_pages(total, page_size);
+    let safe_page = clamp_page(page, total_pages);
+    let offset = (safe_page - 1) * page_size;
+    (page_size, total_pages, safe_page, offset)
 }
 
 /// Validate that a path points at an existing `.gnucash` file.
@@ -175,10 +242,34 @@ mod tests {
     }
 
     #[test]
+    fn month_end_returns_last_calendar_day() {
+        assert_eq!(month_end("2024-02").unwrap(), "2024-02-29");
+        assert_eq!(month_end("2023-02").unwrap(), "2023-02-28");
+        assert_eq!(month_end("2024-12").unwrap(), "2024-12-31");
+        assert_eq!(month_end("2024-01").unwrap(), "2024-01-31");
+        assert!(month_end("2024-13").is_err());
+        assert!(month_end("not-a-month").is_err());
+    }
+
+    #[test]
     fn total_pages_always_at_least_one() {
         assert_eq!(total_pages(0, 50), 1);
         assert_eq!(total_pages(1, 50), 1);
         assert_eq!(total_pages(51, 50), 2);
         assert_eq!(total_pages(100, 50), 2);
+    }
+
+    #[test]
+    fn paginate_clamps_and_never_divides_by_zero() {
+        // Zero/negative/huge sizes clamp to 1..=500.
+        let (size, pages, safe, offset) = paginate(0, 1, 0);
+        assert_eq!((size, pages, safe, offset), (1, 1, 1, 0));
+        let (size, pages, safe, offset) = paginate(100, 99, 50);
+        assert_eq!(size, 50);
+        assert_eq!(pages, 2);
+        assert_eq!(safe, 2);
+        assert_eq!(offset, 50);
+        let (size, _, _, _) = paginate(10, 1, 10_000);
+        assert_eq!(size, 500);
     }
 }

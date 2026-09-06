@@ -20,10 +20,10 @@ pub async fn clear_app_db(state: State<'_, AppState>) -> Result<(), String> {
 
 /// Reads only the precomputed active-book path — no DB access. While no book
 /// is open yet (fresh install) it falls back to the legacy default path so
-/// the UI still has something to display; prefer `books::get_active_book`
+/// the UI still has something to display; prefer `books::fetch_active_book`
 /// when nullability matters.
 #[tauri::command]
-pub async fn get_data_info(state: State<'_, AppState>) -> Result<DataInfo, String> {
+pub async fn fetch_data_info(state: State<'_, AppState>) -> Result<DataInfo, String> {
     let guard = state.db_path.lock().map_err(|e| e.to_string())?;
     let path = guard
         .clone()
