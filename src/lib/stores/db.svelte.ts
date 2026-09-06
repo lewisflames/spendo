@@ -6,6 +6,9 @@ interface DbSession {
 
 export const dbSession = $state<{ value: DbSession | null }>({ value: null });
 
+/** True while the first session fetch is in flight; lets pages tell bootstrapping apart from empty. */
+export const dbSessionLoading = $state<{ value: boolean }>({ value: true });
+
 let bootstrapped = false;
 let inflight: Promise<void> | null = null;
 
@@ -19,6 +22,7 @@ export function ensureDbSessionLoaded(force = false): Promise<void> {
     return inflight ?? Promise.resolve();
   }
   bootstrapped = true;
+  dbSessionLoading.value = true;
   const p = fetchHomeData()
     .then((result) => {
       dbSession.value = result.hasData && result.summary ? { summary: result.summary } : null;
@@ -31,6 +35,7 @@ export function ensureDbSessionLoaded(force = false): Promise<void> {
     });
   inflight = p.finally(() => {
     inflight = null;
+    dbSessionLoading.value = false;
   });
   return inflight;
 }

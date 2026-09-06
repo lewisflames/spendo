@@ -4,7 +4,6 @@
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import * as Card from '$lib/components/ui/card';
-  import { Skeleton } from '$lib/components/ui/skeleton';
   import { Button } from '$lib/components/ui/button';
   import { Briefcase, TrendingUp, TrendingDown, Download, Tag, LineChart } from '@lucide/svelte';
   import { dbSession } from '$lib/stores/db.svelte';
@@ -23,8 +22,10 @@
   } from '$lib/utils/format.svelte';
   import TimeSeriesChart from '$lib/components/shared/time-series-chart.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
+  import PageHeaderSkeleton from '$lib/components/shared/page-header-skeleton.svelte';
   import KpiCard from '$lib/components/shared/kpi-card.svelte';
   import KpiCardRow from '$lib/components/shared/kpi-card-row.svelte';
+  import ChartSkeleton from '$lib/components/shared/chart-skeleton.svelte';
   import ImportPrompt from '$lib/components/shared/import-prompt.svelte';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
@@ -140,18 +141,11 @@
   </div>
 {:else if loading && !data}
   <div class="flex flex-col gap-6">
-    <KpiCardRow />
+    <PageHeaderSkeleton />
+    <KpiCardRow count={6} />
     <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
-      <Card.Root>
-        <Card.Content>
-          <Skeleton class="h-72 w-full" />
-        </Card.Content>
-      </Card.Root>
-      <Card.Root>
-        <Card.Content>
-          <Skeleton class="h-72 w-full" />
-        </Card.Content>
-      </Card.Root>
+      <ChartSkeleton withFilters />
+      <ChartSkeleton withFilters />
     </div>
     <TableSkeleton cols={6} rows={3} />
   </div>

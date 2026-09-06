@@ -6,6 +6,7 @@
   import { resolve } from '$app/paths';
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
+  import ToolbarSkeleton from '$lib/components/shared/toolbar-skeleton.svelte';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
   import SortHead from '$lib/components/shared/sort-head.svelte';
   import { SearchInput } from '$lib/components/shared/search-input';
@@ -144,7 +145,11 @@
 </script>
 
 {#if loading}
-  <TableSkeleton cols={skeletonCols} rows={4} />
+  <!-- Same wrapper as the loaded toolbar + table so neither pops in late. -->
+  <div class="flex flex-col gap-3">
+    <ToolbarSkeleton />
+    <TableSkeleton cols={skeletonCols} rows={4} />
+  </div>
 {:else if holdings.length === 0}
   <EmptyState card title="No holdings" description="No securities found in your GnuCash file.">
     {#snippet icon()}

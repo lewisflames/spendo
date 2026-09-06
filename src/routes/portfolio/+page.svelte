@@ -1,6 +1,4 @@
 <script lang="ts">
-  import * as Card from '$lib/components/ui/card';
-  import { Skeleton } from '$lib/components/ui/skeleton';
   import { Briefcase, TrendingUp, TrendingDown, RefreshCw, TriangleAlert } from '@lucide/svelte';
   import { resolve } from '$app/paths';
   import { dbSession } from '$lib/stores/db.svelte';
@@ -15,6 +13,7 @@
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import KpiCard from '$lib/components/shared/kpi-card.svelte';
   import KpiCardRow from '$lib/components/shared/kpi-card-row.svelte';
+  import ChartSkeleton from '$lib/components/shared/chart-skeleton.svelte';
   import ImportPrompt from '$lib/components/shared/import-prompt.svelte';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
   import { Button } from '$lib/components/ui/button';
@@ -120,14 +119,12 @@
   {#if !dbSession.value}
     <ImportPrompt />
   {:else if loading && !res.data}
-    <!-- KPI skeletons -->
     <KpiCardRow />
-    <!-- Chart skeleton -->
-    <Card.Root>
-      <Card.Content>
-        <Skeleton class="h-72 w-full" />
-      </Card.Content>
-    </Card.Root>
+    <!-- Skeleton grid matches the loaded performance + allocation layout. -->
+    <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
+      <ChartSkeleton class="lg:col-span-2" withFilters />
+      <ChartSkeleton />
+    </div>
     <HoldingsTable loading {currency} holdings={[]} />
   {:else if res.error}
     <ErrorCard message={res.error} onRetry={() => res.reload()} />

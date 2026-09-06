@@ -24,7 +24,7 @@
     {#each Array(rows) as _, i (i)}
       <Table.Row>
         {#each Array(cols) as _, j (j)}
-          <Table.Cell><Skeleton class="h-4 w-20" /></Table.Cell>
+          <Table.Cell class="py-2.5"><Skeleton class="h-4 w-20" /></Table.Cell>
         {/each}
       </Table.Row>
     {/each}

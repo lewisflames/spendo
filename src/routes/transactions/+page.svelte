@@ -11,6 +11,7 @@
   import { PaginationNav } from '$lib/components/shared/pagination-nav';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
+  import { Skeleton } from '$lib/components/ui/skeleton';
   import ImportPrompt from '$lib/components/shared/import-prompt.svelte';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
   import { errMsg } from '$lib/utils/error';
@@ -203,7 +204,18 @@
     />
 
     {#if loading && !data}
-      <TableSkeleton cols={4} />
+      <!-- Same wrapper as the loaded DimWrapper content so the pagination
+           placeholder holds its height and nothing jumps on first load. -->
+      <div class="flex flex-col gap-4">
+        <TableSkeleton cols={3} />
+        <div class="flex items-center justify-between">
+          <Skeleton class="h-5 w-32" />
+          <div class="flex items-center gap-2">
+            <Skeleton class="h-8 w-24" />
+            <Skeleton class="h-8 w-16" />
+          </div>
+        </div>
+      </div>
     {:else if error}
       <ErrorCard message={error} onRetry={() => res.reload()} />
     {:else if data}

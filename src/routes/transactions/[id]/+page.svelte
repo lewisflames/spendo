@@ -4,7 +4,6 @@
   import * as Table from '$lib/components/ui/table';
   import { Badge } from '$lib/components/ui/badge';
   import { Button } from '$lib/components/ui/button';
-  import { Skeleton } from '$lib/components/ui/skeleton';
   import {
     ArrowLeft,
     ArrowLeftRight,
@@ -34,6 +33,7 @@
   import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
   import ImportPrompt from '$lib/components/shared/import-prompt.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
+  import PageHeaderSkeleton from '$lib/components/shared/page-header-skeleton.svelte';
   import KpiCardRow from '$lib/components/shared/kpi-card-row.svelte';
   import KpiCard from '$lib/components/shared/kpi-card.svelte';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
@@ -103,13 +103,8 @@
 {#if dbSession.value}
   <div class="flex flex-col gap-6">
     {#if loading && !detail}
-      <div class="flex items-center justify-between gap-4">
-        <div class="flex flex-col gap-1">
-          <Skeleton class="h-8 w-64" />
-          <Skeleton class="h-4 w-40" />
-        </div>
-      </div>
-      <KpiCardRow />
+      <PageHeaderSkeleton />
+      <KpiCardRow gridClass="sm:grid-cols-2 lg:grid-cols-3" />
       <TableSkeleton cols={4} rows={3} />
     {:else if error}
       <ErrorCard message={error} onRetry={() => res.reload()} />

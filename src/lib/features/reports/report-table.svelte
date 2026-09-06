@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import * as Table from '$lib/components/ui/table';
+  import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
@@ -10,6 +11,7 @@
     loading,
     error,
     onRetry,
+    hasData,
     isEmpty,
     emptyMessage,
     emptyTitle = 'No data',
@@ -21,6 +23,8 @@
     loading: boolean;
     error: string | null;
     onRetry?: () => void;
+    /** True once the report has loaded (keeps the table mounted + dimmed on refetch). */
+    hasData: boolean;
     /** True when the report loaded but has nothing to show. */
     isEmpty: boolean;
     emptyMessage: string;
@@ -34,17 +38,21 @@
   } = $props();
 </script>
 
-{#if loading}
+{#if loading && !hasData}
   <TableSkeleton cols={skeletonCols} rows={skeletonRows} />
 {:else if error}
   <ErrorCard message={error} {onRetry} />
 {:else if isEmpty}
   <EmptyState card title={emptyTitle} description={emptyMessage} />
 {:else}
-  <TableShell>
-    {@render header()}
-    <Table.Body>
-      {@render children()}
-    </Table.Body>
-  </TableShell>
+  <!-- Keep the previous table visible (dimmed) during refetches so the
+       page doesn't jump and expand/collapse state stays in place. -->
+  <DimWrapper active={loading}>
+    <TableShell>
+      {@render header()}
+      <Table.Body>
+        {@render children()}
+      </Table.Body>
+    </TableShell>
+  </DimWrapper>
 {/if}

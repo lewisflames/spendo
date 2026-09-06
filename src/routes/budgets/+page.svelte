@@ -15,6 +15,7 @@
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import KpiCard from '$lib/components/shared/kpi-card.svelte';
   import KpiCardRow from '$lib/components/shared/kpi-card-row.svelte';
+  import ToolbarSkeleton from '$lib/components/shared/toolbar-skeleton.svelte';
   import BudgetYearDialog from '$lib/features/budgets/budget-year-dialog.svelte';
   import BudgetYearStepper from '$lib/features/budgets/budget-year-stepper.svelte';
   import {
@@ -198,7 +199,9 @@
       </DimWrapper>
     {/if}
 
-    {#if rows !== null && rows.length > 0}
+    {#if rows === null}
+      <ToolbarSkeleton />
+    {:else if rows.length > 0}
       <div class="flex flex-wrap items-center justify-between gap-2">
         <SearchInput
           id="budgets-search"
