@@ -47,5 +47,6 @@ export const TYPE_COLOR: Record<string, string> = {
   PAYABLE: 'var(--color-orange-500)',
   INCOME: 'var(--color-green-500)',
   EXPENSE: 'var(--color-amber-500)',
-  EQUITY: 'var(--color-yellow-500)'
+  EQUITY: 'var(--color-yellow-500)',
+  TRADING: 'var(--color-lime-500)'
 };

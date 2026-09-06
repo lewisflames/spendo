@@ -5,14 +5,17 @@
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
-  import { formatCurrency, formatSignedCurrency } from '$lib/utils/format.svelte';
-  import { EMPTY_DASH } from '$lib/utils/format.svelte';
+  import {
+    formatCurrency,
+    formatSignedCurrency,
+    signColor,
+    EMPTY_DASH
+  } from '$lib/utils/format.svelte';
   import { handleRowClick, openBudget } from '$lib/utils/navigation';
   import { Plus } from '@lucide/svelte';
   import { Button } from '$lib/components/ui/button';
   import type { BudgetActualRow } from '$lib/tauri';
   import PacingBar from './pacing-bar.svelte';
-  import { remainingColor } from './budget-utils';
 
   let {
     rows,
@@ -90,9 +93,7 @@
           <Table.Cell class="py-2.5 text-right tabular-nums">
             {fmt(item.budgetAmount)}
           </Table.Cell>
-          <Table.Cell
-            class={cn('py-2.5 text-right tabular-nums', remainingColor(item.rolloverBalance))}
-          >
+          <Table.Cell class={cn('py-2.5 text-right tabular-nums', signColor(item.rolloverBalance))}>
             {fmtSigned(item.rolloverBalance)}
           </Table.Cell>
           <Table.Cell class="py-2.5 text-right tabular-nums">
@@ -118,7 +119,7 @@
               <span class="text-xs text-muted-foreground">{EMPTY_DASH}</span>
             {/if}
           </Table.Cell>
-          <Table.Cell class={cn('py-2.5 text-right tabular-nums', remainingColor(item.remaining))}>
+          <Table.Cell class={cn('py-2.5 text-right tabular-nums', signColor(item.remaining))}>
             {fmtSigned(item.remaining)}
           </Table.Cell>
         </Table.Row>

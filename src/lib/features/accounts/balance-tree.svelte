@@ -6,7 +6,6 @@
     type HierarchyPointNode
   } from 'd3-hierarchy';
   import { resolve } from '$app/paths';
-  import { SvelteSet } from 'svelte/reactivity';
   import { Chart, Group, Layer, Link, Tooltip as ChartTooltip } from 'layerchart';
   import { Tree } from 'layerchart/hierarchy';
   import * as Card from '$lib/components/ui/card';
@@ -41,12 +40,10 @@
 
   // Distinct account types present in the tree, in traversal order, for the legend.
   let legendTypes = $derived.by(() => {
-    const seen = new SvelteSet<string>();
     const types: string[] = [];
     const walk = (nodes: AccountNode[]): void => {
       for (const node of nodes) {
-        if (!seen.has(node.accountType)) {
-          seen.add(node.accountType);
+        if (!types.includes(node.accountType)) {
           types.push(node.accountType);
         }
         if (node.children.length > 0) walk(node.children);
@@ -126,13 +123,13 @@
                           {#if node.data.guid}
                             <a
                               href={resolve('/accounts/[guid]', { guid: node.data.guid })}
-                              class="block h-full w-full cursor-pointer rounded-full border hover:scale-120"
+                              class="block h-full w-full cursor-pointer rounded-full border hover:scale-110"
                               style={`background-color: ${nodeFill(node)}; border-color: ${color};`}
                               aria-label={label}
                             ></a>
                           {:else}
                             <div
-                              class="h-full w-full rounded-full border hover:scale-120"
+                              class="h-full w-full rounded-full border hover:scale-110"
                               style={`background-color: ${nodeFill(node)}; border-color: ${color};`}
                             ></div>
                           {/if}

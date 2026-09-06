@@ -1,7 +1,7 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
   import { dbSession } from '$lib/stores/db.svelte';
-  import { generatePnlReport, generatePnlTrend } from '$lib/tauri';
+  import { fetchPnlReport, fetchPnlTrend } from '$lib/tauri';
   import { signColor, formatSessionCurrency, EMPTY_DASH } from '$lib/utils/format.svelte';
   import { TrendingUp, TrendingDown, ArrowLeftRight, Download } from '@lucide/svelte';
   import { Button } from '$lib/components/ui/button';
@@ -19,7 +19,7 @@
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import { useReportDateRange } from '$lib/hooks/use-report-date-range.svelte';
   import { computePrevRange, PNL_PRESETS } from '$lib/utils/date-utils.svelte';
-  import DateRangePicker from '$lib/components/shared/report-period-picker/report-period-picker.svelte';
+  import { ReportPeriodPicker as DateRangePicker } from '$lib/components/shared/report-period-picker';
   import {
     buildTree,
     flattenTree,
@@ -36,7 +36,7 @@
     enabled: () => !!dbSession.value && !!range.dateFrom && !!range.dateTo && range.rangeValid,
     fetch: () => {
       const { prevFrom, prevTo } = computePrevRange(range.dateFrom, range.dateTo);
-      return generatePnlReport(range.dateFrom, range.dateTo, prevFrom, prevTo);
+      return fetchPnlReport(range.dateFrom, range.dateTo, prevFrom, prevTo);
     },
     label: 'Failed to load P&L'
   });
@@ -47,7 +47,7 @@
 
   const trend = useAsyncData({
     enabled: () => !!dbSession.value && !!range.dateFrom && !!range.dateTo && range.rangeValid,
-    fetch: () => generatePnlTrend(range.dateFrom, range.dateTo),
+    fetch: () => fetchPnlTrend(range.dateFrom, range.dateTo),
     label: 'Failed to load P&L trend'
   });
 

@@ -12,7 +12,7 @@
   import { History, Undo2, LoaderCircle } from '@lucide/svelte';
   import ImportButton from '$lib/components/shared/import-button.svelte';
   import { dbSession } from '$lib/stores/db.svelte';
-  import { appSettings, saveSettings } from '$lib/stores/settings.svelte';
+  import { appSettings, applyPageSize } from '$lib/stores/settings.svelte';
   import { fetchChangeHistory, revertHistoryEntry } from '$lib/tauri';
   import type { ChangeEntry } from '$lib/tauri';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
@@ -49,11 +49,6 @@
   let confirmOpen = $state(false);
   let pending = $state<ChangeEntry | null>(null);
   let reverting = $state(false);
-
-  function handlePageSizeChange(size: number) {
-    saveSettings({ pageSize: size });
-    page = 1;
-  }
 
   function sourceLabel(entry: ChangeEntry): string {
     if (entry.kind === 'revert') return 'Undo';
@@ -187,7 +182,7 @@
         totalPages={data.totalPages}
         totalItems={data.total}
         pageSize={appSettings.value.pageSize}
-        onPageSizeChange={handlePageSizeChange}
+        onPageSizeChange={(size) => applyPageSize(size, (v) => (page = v))}
       />
     </DimWrapper>
   {/if}

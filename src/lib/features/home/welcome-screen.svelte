@@ -7,6 +7,7 @@
   import { dbSession, setActiveBookPath } from '$lib/stores/db.svelte';
   import { appSettings } from '$lib/stores/settings.svelte';
   import { BOOK_CURRENCIES, defaultCurrencyForLocale } from '$lib/utils/currency';
+  import { ensureSpendoExtension } from '$lib/utils/book';
   import { createBookAt, openBook } from '$lib/tauri';
   import { errMsg } from '$lib/utils/error';
   import { toast } from '$lib/components/ui/sonner';
@@ -18,11 +19,6 @@
   let currency = $state(defaultCurrencyForLocale(appSettings.value.locale));
   let busy = $state<'new' | 'open' | null>(null);
   let error = $state<string | null>(null);
-
-  /** Tauri's save dialog doesn't force the filtered extension — append it. */
-  function ensureSpendoExtension(path: string): string {
-    return /\.[A-Za-z0-9]+$/.test(path) ? path : `${path}.spendo`;
-  }
 
   async function handleNew() {
     if (busy) return;

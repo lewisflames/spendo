@@ -13,7 +13,7 @@
   import { TrendingUp, Columns3 } from '@lucide/svelte';
   import type { PortfolioHolding } from '$lib/tauri';
   import { STALE_PRICE_DAYS, priceStaleDays } from './price-utils';
-  import { handleRowClick, gotoHolding } from '$lib/utils/navigation';
+  import { handleRowClick, openHolding } from '$lib/utils/navigation';
   import { useDebouncedSearch } from '$lib/hooks/use-debounced-search.svelte';
   import { useTableSort } from '$lib/hooks/use-table-sort.svelte';
   import { useColumnVisibility } from '$lib/hooks/use-column-visibility.svelte';
@@ -68,14 +68,14 @@
   const cols = useColumnVisibility<ColumnId>(DEFAULT_COLUMNS);
   let visibleColumns = $derived(cols.visibleColumns);
 
-  let queryInput = $state('');
-  let query = useDebouncedSearch(
-    () => queryInput,
+  let searchInput = $state('');
+  let search = useDebouncedSearch(
+    () => searchInput,
     (v) => v.trim().toLowerCase()
   );
 
   let filteredHoldings = $derived.by(() => {
-    const q = query.value;
+    const q = search.value;
     if (!q) return holdings;
     return holdings.filter(
       (h) => (h.fullName ?? '').toLowerCase().includes(q) || h.mnemonic.toLowerCase().includes(q)
@@ -164,7 +164,7 @@
         id="holdings-search"
         label="Search holdings"
         placeholder="Search name or ticker..."
-        bind:value={queryInput}
+        bind:value={searchInput}
         class="w-60"
       />
       <DropdownMenu.Root>
@@ -269,7 +269,7 @@
         {#if filteredHoldings.length === 0}
           <Table.Row>
             <Table.Cell class="h-24 text-center text-muted-foreground" colspan={skeletonCols}>
-              No holdings match “{query.value}”.
+              No holdings match “{search.value}”.
             </Table.Cell>
           </Table.Row>
         {:else}
@@ -278,7 +278,7 @@
             {@const isWatchOnly = h.shares === 0 && h.accounts.length === 0}
             <Table.Row
               class="cursor-pointer {isClosed || isWatchOnly ? 'text-muted-foreground' : ''}"
-              onclick={(e) => handleRowClick(e, () => gotoHolding(h.commodityGuid))}
+              onclick={(e) => handleRowClick(e, () => openHolding(h.commodityGuid))}
             >
               <Table.Cell class="py-2">
                 <!-- Real link for keyboard/AT users; the row click stays as a

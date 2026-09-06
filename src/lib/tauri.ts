@@ -36,7 +36,7 @@ interface ChangeHistoryPage {
   revertibleId: number | null;
 }
 
-export interface RevertResult {
+interface RevertResult {
   revertedId: number;
   revertId: number;
   summary: DataSummary;
@@ -166,7 +166,8 @@ interface TransactionDetailResult {
 }
 
 export interface AccountBalancePoint {
-  month: string;
+  /** YYYY-MM-DD */
+  date: string;
   balance: number;
 }
 
@@ -235,7 +236,7 @@ export interface ParentAccountInfo {
   balance: number;
 }
 
-interface AccountSummary {
+export interface AccountSummary {
   totalTransactions: number;
   totalIncome: number;
   totalExpenses: number;
@@ -262,11 +263,11 @@ export const clearAppDb = (): Promise<void> => invoke('clear_app_db');
 // ── Books (document model: one active `.spendo` file opened in place) ──
 
 /** Active book path, or `null` while book-less (fresh install). */
-export interface ActiveBook {
+interface ActiveBook {
   path: string | null;
 }
 
-export const getActiveBook = (): Promise<ActiveBook> => invoke('get_active_book');
+export const fetchActiveBook = (): Promise<ActiveBook> => invoke('fetch_active_book');
 
 interface EmptyBookResult {
   hasData: boolean;
@@ -285,15 +286,7 @@ interface DataInfo {
   dbPath: string;
 }
 
-interface ChangeHistoryPage {
-  entries: ChangeEntry[];
-  total: number;
-  pageSize: number;
-  totalPages: number;
-  revertibleId: number | null;
-}
-
-export const getDataInfo = (): Promise<DataInfo> => invoke('get_data_info');
+export const fetchDataInfo = (): Promise<DataInfo> => invoke('fetch_data_info');
 
 export const fetchChangeHistory = (page: number, pageSize: number): Promise<ChangeHistoryPage> =>
   invoke('fetch_change_history', { page, pageSize });
@@ -305,9 +298,6 @@ export const importGnucash = (path: string, filename: string): Promise<ImportRes
   invoke('import_gnucash', { path, filename });
 
 export const reimportLast = (): Promise<ImportResult> => invoke('reimport_last');
-
-export const createEmptyBook = (currency: string): Promise<EmptyBookResult> =>
-  invoke('create_empty_book', { currency });
 
 export const setBaseCurrency = (currency: string): Promise<EmptyBookResult> =>
   invoke('set_base_currency', { currency });
@@ -356,9 +346,9 @@ export const fetchAccountDetail = (
     guid,
     page,
     pageSize,
-    dateFrom,
-    dateTo,
-    search,
+    dateFrom: dateFrom ?? null,
+    dateTo: dateTo ?? null,
+    search: search ?? null,
     sortBy: sortBy ?? null,
     sortDir: sortDir ?? null,
     asOf: asOf ?? null
@@ -397,13 +387,13 @@ export interface ProfitLossReport {
   missingFx: string[];
 }
 
-export const generatePnlReport = (
+export const fetchPnlReport = (
   dateFrom: string,
   dateTo: string,
   prevDateFrom?: string,
   prevDateTo?: string
 ): Promise<ProfitLossReport> =>
-  invoke('generate_pnl_report', {
+  invoke('fetch_pnl_report', {
     dateFrom,
     dateTo,
     prevDateFrom: prevDateFrom ?? null,
@@ -417,15 +407,15 @@ export interface PnlTrendPoint {
   expenses: number;
 }
 
-export const generatePnlTrend = (dateFrom: string, dateTo: string): Promise<PnlTrendPoint[]> =>
-  invoke('generate_pnl_trend', { dateFrom, dateTo });
+export const fetchPnlTrend = (dateFrom: string, dateTo: string): Promise<PnlTrendPoint[]> =>
+  invoke('fetch_pnl_trend', { dateFrom, dateTo });
 
 export interface MissingPrice {
   mnemonic: string;
   commodityGuid: string | null;
 }
 
-export interface SymbolOverride {
+interface SymbolOverride {
   commodityGuid: string;
   mnemonic: string;
   namespace: string;
@@ -433,7 +423,8 @@ export interface SymbolOverride {
   symbol: string | null;
 }
 
-export const listSymbolOverrides = (): Promise<SymbolOverride[]> => invoke('list_symbol_overrides');
+export const fetchSymbolOverrides = (): Promise<SymbolOverride[]> =>
+  invoke('fetch_symbol_overrides');
 
 export const setSymbolOverride = (commodityGuid: string, symbol: string): Promise<SymbolOverride> =>
   invoke('set_symbol_override', { commodityGuid, symbol });
@@ -494,10 +485,8 @@ export interface BudgetYearSummary {
   elapsedMonths: number;
 }
 
-export interface BudgetDetail {
+interface BudgetDetail {
   budget: Budget;
-  year: number;
-  amount: number;
   summary: BudgetYearSummary;
   monthlyEntries: MonthlySlice[];
 }
@@ -508,17 +497,17 @@ export const setBudgetYearAmount = (
   amount: number
 ): Promise<Budget> => invoke('set_budget_year_amount', { accountGuid, year, amount });
 
-export const getBudgetYears = (accountGuid: string): Promise<number[]> =>
-  invoke('get_budget_years', { accountGuid });
+export const fetchBudgetYears = (accountGuid: string): Promise<number[]> =>
+  invoke('fetch_budget_years', { accountGuid });
 
 export const deleteBudgetYear = (accountGuid: string, year: number): Promise<void> =>
   invoke('delete_budget_year', { accountGuid, year });
 
-export const getBudgetVsActual = (year: number): Promise<BudgetActualRow[]> =>
-  invoke('get_budget_vs_actual', { year });
+export const fetchBudgetVsActual = (year: number): Promise<BudgetActualRow[]> =>
+  invoke('fetch_budget_vs_actual', { year });
 
-export const getBudgetDetail = (accountGuid: string, year: number): Promise<BudgetDetail> =>
-  invoke('get_budget_detail', {
+export const fetchBudgetDetail = (accountGuid: string, year: number): Promise<BudgetDetail> =>
+  invoke('fetch_budget_detail', {
     accountGuid,
     year
   });
@@ -528,7 +517,8 @@ export interface BudgetDateRange {
   latestDate: string | null;
 }
 
-export const getBudgetDateRange = (): Promise<BudgetDateRange> => invoke('get_budget_date_range');
+export const fetchBudgetDateRange = (): Promise<BudgetDateRange> =>
+  invoke('fetch_budget_date_range');
 
 // ── Portfolio ──
 
@@ -582,7 +572,7 @@ export interface HoldingTransaction {
   valueDelta: number;
 }
 
-export interface HoldingDetail {
+interface HoldingDetail {
   holding: PortfolioHolding;
   priceHistory: PriceHistoryEntry[];
   valueTrend: PortfolioValuePoint[];

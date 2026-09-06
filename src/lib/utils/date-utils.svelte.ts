@@ -79,6 +79,11 @@ export function getMonthRange(
   };
 }
 
+/** Long month name for a 1-based month in the given locale. */
+export function monthName(month: number, locale: string): string {
+  return new Date(2000, month - 1, 1).toLocaleDateString(locale, { month: 'long' });
+}
+
 function getThisMonthRange(): { start: CalendarDate; end: CalendarDate } {
   const now = new Date();
   const start = new CalendarDate(now.getFullYear(), now.getMonth() + 1, 1);

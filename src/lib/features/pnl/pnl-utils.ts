@@ -6,9 +6,3 @@ export function changePct(current: number, previous: number): number | null {
   if (current !== 0) return 100;
   return null;
 }
-
-/** Text color for a variance amount: green when "good", red otherwise. */
-export function varianceColor(value: number, positiveGood: boolean): string {
-  if (positiveGood) return value >= 0 ? 'text-success' : 'text-destructive';
-  return value >= 0 ? 'text-destructive' : 'text-success';
-}

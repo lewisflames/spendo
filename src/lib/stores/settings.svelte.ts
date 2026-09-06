@@ -75,6 +75,12 @@ export function saveSettings(partial: Partial<AppSettings>) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(appSettings.value));
 }
 
+/** Page-size change shared by every paginated list: persist + jump to page 1. */
+export function applyPageSize(size: number, setPage: (page: number) => void): void {
+  saveSettings({ pageSize: size });
+  setPage(1);
+}
+
 /** Restore every preference to its default (does not touch imported data). */
 export function resetSettings() {
   saveSettings({ ...DEFAULT_SETTINGS });

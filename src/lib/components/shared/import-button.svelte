@@ -3,11 +3,11 @@
   import { Upload, LoaderCircle } from '@lucide/svelte';
   import { dbSession } from '$lib/stores/db.svelte';
   import { importGnucash } from '$lib/tauri';
+  import { toastPriceResult } from '$lib/features/portfolio/price-utils';
   import { errMsg } from '$lib/utils/error';
   import { toast } from '$lib/components/ui/sonner';
   import { open } from '@tauri-apps/plugin-dialog';
   import { basename } from '@tauri-apps/api/path';
-  import { plural } from '$lib/utils/format.svelte';
 
   let {
     label = 'Import from GnuCash',
@@ -39,15 +39,7 @@
       const result = await importGnucash(selected, filename);
       dbSession.value = { summary: result.summary };
       toast.success(`Imported ${filename}`);
-      const priceErrors = result.prices?.errors ?? [];
-      const priceCount = result.prices?.prices.length ?? 0;
-      if (priceErrors.length > 0) {
-        toast.warning(
-          `Prices refreshed with ${plural(priceErrors.length, 'error')} — open Portfolio to fix symbols.`
-        );
-      } else if (priceCount > 0) {
-        toast.success('Prices refreshed from Yahoo Finance');
-      }
+      toastPriceResult(result.prices, { fixHint: true });
     } catch (e: unknown) {
       const msg = errMsg(e, 'Import failed');
       if (onError) {

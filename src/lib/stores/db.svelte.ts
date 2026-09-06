@@ -1,4 +1,4 @@
-import { fetchHomeData, getActiveBook, type DataSummary } from '$lib/tauri';
+import { fetchHomeData, fetchActiveBook, type DataSummary } from '$lib/tauri';
 
 interface DbSession {
   summary: DataSummary;
@@ -52,7 +52,7 @@ export function clearSession() {
  * value; pages that need the path surface their own errors. */
 export async function loadActiveBook(): Promise<void> {
   try {
-    activeBookPath.value = (await getActiveBook()).path;
+    activeBookPath.value = (await fetchActiveBook()).path;
   } catch {
     // ignore — a later navigation retries
   }

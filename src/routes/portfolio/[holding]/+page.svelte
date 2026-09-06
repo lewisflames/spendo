@@ -1,45 +1,32 @@
 <script lang="ts">
-  import * as Table from '$lib/components/ui/table';
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import * as Card from '$lib/components/ui/card';
   import { Button } from '$lib/components/ui/button';
-  import { Briefcase, TrendingUp, TrendingDown, Download, Tag, LineChart } from '@lucide/svelte';
+  import { Download, Tag } from '@lucide/svelte';
   import { dbSession } from '$lib/stores/db.svelte';
-  import { fetchHoldingDetail, listSymbolOverrides } from '$lib/tauri';
-  import type { HoldingTransaction, PortfolioHolding, PriceHistoryEntry } from '$lib/tauri';
+  import { fetchHoldingDetail, fetchSymbolOverrides } from '$lib/tauri';
+  import type { HoldingTransaction, PriceHistoryEntry } from '$lib/tauri';
   import { toast } from '$lib/components/ui/sonner';
   import SymbolOverrideDialog from '$lib/features/portfolio/symbol-override-dialog.svelte';
-  import {
-    signColor,
-    fmtPct,
-    formatSignedCurrency,
-    formatSessionCurrency as fmt,
-    sessionCurrency,
-    formatDate,
-    parseLocalDate
-  } from '$lib/utils/format.svelte';
+  import { sessionCurrency, parseLocalDate } from '$lib/utils/format.svelte';
   import TimeSeriesChart from '$lib/components/shared/time-series-chart.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import PageHeaderSkeleton from '$lib/components/shared/page-header-skeleton.svelte';
-  import KpiCard from '$lib/components/shared/kpi-card.svelte';
   import KpiCardRow from '$lib/components/shared/kpi-card-row.svelte';
   import ChartSkeleton from '$lib/components/shared/chart-skeleton.svelte';
   import ImportPrompt from '$lib/components/shared/import-prompt.svelte';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
   import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
-  import TableShell from '$lib/components/shared/table-shell.svelte';
   import { setBreadcrumb } from '$lib/stores/breadcrumb.svelte';
   import { downloadCsv } from '$lib/utils/csv';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
-  import {
-    STALE_PRICE_DAYS,
-    priceStaleDays,
-    holdingLabel
-  } from '$lib/features/portfolio/price-utils';
-  import { handleRowClick, openAccount, openTransaction } from '$lib/utils/navigation';
+  import { holdingLabel } from '$lib/features/portfolio/price-utils';
+  import HoldingKpiCards from '$lib/features/portfolio/holding-kpi-cards.svelte';
+  import HoldingAccountsTable from '$lib/features/portfolio/holding-accounts-table.svelte';
+  import HoldingActivityTable from '$lib/features/portfolio/holding-activity-table.svelte';
 
   let holdingGuid = $derived(page.params.holding);
 
@@ -63,7 +50,7 @@
 
   const overridesRes = useAsyncData({
     enabled: () => !!dbSession.value,
-    fetch: listSymbolOverrides,
+    fetch: fetchSymbolOverrides,
     label: 'Failed to load Yahoo symbol overrides'
   });
 
@@ -84,21 +71,6 @@
   $effect(() => {
     if (!dbSession.value) return;
     setBreadcrumb([{ name: 'Portfolio', href: resolve('/portfolio') }, { name }]);
-  });
-
-  function dayChangePct(h: PortfolioHolding): number | null {
-    if (h.price === null || h.prevPrice === null || h.prevPrice === 0) return null;
-    return ((h.price - h.prevPrice) / h.prevPrice) * 100;
-  }
-
-  let range52w = $derived.by(() => {
-    const history = data?.priceHistory;
-    if (!history || history.length === 0) return null;
-    const cutoff = Date.now() - 365 * 24 * 60 * 60 * 1000;
-    const window = history.filter((e) => parseLocalDate(e.date).getTime() >= cutoff);
-    const source = window.length > 0 ? window : history;
-    const prices = source.map((e) => e.price);
-    return { high: Math.max(...prices), low: Math.min(...prices) };
   });
 
   function exportPriceHistory() {
@@ -167,12 +139,14 @@
     {/snippet}
   </EmptyState>
 {:else}
-  {@const h = data.holding}
+  {@const holding = data.holding}
 
   <div class="flex flex-col gap-6">
     <PageHeader
       title={name}
-      description="{h.mnemonic} · {h.namespace}{h.shares === 0 ? ' · No open position' : ''}"
+      description="{holding.mnemonic} · {holding.namespace}{holding.shares === 0
+        ? ' · No open position'
+        : ''}"
     >
       <Button
         variant="outline"
@@ -185,79 +159,7 @@
     </PageHeader>
 
     <!-- KPI summary cards -->
-    <div class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-      <KpiCard title="Market Value" value={fmt(h.marketValue)}>
-        {#snippet icon()}
-          <Briefcase aria-hidden="true" class="size-4 text-muted-foreground" />
-        {/snippet}
-      </KpiCard>
-      <KpiCard title="Gain / Loss" valueClass={signColor(h.gainLoss)}>
-        {#snippet icon()}
-          {#if h.gainLoss >= 0}
-            <TrendingUp aria-hidden="true" class="size-4 text-success" />
-          {:else}
-            <TrendingDown aria-hidden="true" class="size-4 text-destructive" />
-          {/if}
-        {/snippet}
-        {#snippet value()}
-          {h.gainLoss >= 0 ? '+' : ''}{fmt(h.gainLoss)}
-          <span class="text-sm font-normal">
-            ({h.costBasis !== 0 ? fmtPct(h.gainLossPct) : '—'})
-          </span>
-        {/snippet}
-      </KpiCard>
-      <KpiCard title="Current Price" valueClass={signColor(dayChangePct(h) ?? 0)}>
-        {#snippet icon()}
-          <LineChart aria-hidden="true" class="size-4 text-muted-foreground" />
-        {/snippet}
-        {#snippet value()}
-          {h.price === null ? '—' : fmt(h.price)}
-          <span class="text-xs font-normal text-muted-foreground">
-            {#if h.priceDate}
-              {@const stale = priceStaleDays(h.priceDate) > STALE_PRICE_DAYS}
-              {formatDate(h.priceDate)}{stale ? ' · stale' : ''}
-            {/if}
-            {#if dayChangePct(h) !== null}
-              · {fmtPct(dayChangePct(h))}
-            {/if}
-          </span>
-        {/snippet}
-      </KpiCard>
-      <KpiCard title="Shares">
-        {#snippet icon()}
-          <Tag aria-hidden="true" class="size-4 text-muted-foreground" />
-        {/snippet}
-        {#snippet value()}
-          {h.shares.toFixed(2)}
-          <span class="text-sm font-normal text-muted-foreground">
-            avg {h.shares > 0 ? fmt(h.avgCostPerShare) : '—'}
-          </span>
-        {/snippet}
-      </KpiCard>
-      <KpiCard title="52W Range" valueClass="text-muted-foreground">
-        {#snippet icon()}
-          <LineChart aria-hidden="true" class="size-4 text-muted-foreground" />
-        {/snippet}
-        {#snippet value()}
-          {#if range52w}
-            <span class="tabular-nums">
-              {range52w.low.toFixed(2)} – {range52w.high.toFixed(2)}
-              {priceCurrency}
-            </span>
-          {:else}
-            —
-          {/if}
-        {/snippet}
-      </KpiCard>
-      <KpiCard
-        title="Allocation"
-        value={h.allocationPct > 0 ? `${h.allocationPct.toFixed(1)}%` : '—'}
-      >
-        {#snippet icon()}
-          <Briefcase aria-hidden="true" class="size-4 text-muted-foreground" />
-        {/snippet}
-      </KpiCard>
-    </div>
+    <HoldingKpiCards {holding} priceHistory={data.priceHistory} {priceCurrency} />
 
     <!-- Yahoo symbol override (Yahoo-only pricing; app-local, read-only safe) -->
     <Card.Root>
@@ -270,7 +172,7 @@
             {:else}
               Automatic detection
             {/if}
-            {#if h.price === null}
+            {#if holding.price === null}
               · No price yet — check the symbol, then refresh prices in Portfolio.
             {/if}
           </span>
@@ -283,7 +185,7 @@
     <SymbolOverrideDialog
       bind:open={symbolDialogOpen}
       commodityGuid={holdingGuid ?? ''}
-      mnemonic={h.mnemonic}
+      mnemonic={holding.mnemonic}
       currentSymbol={overrideSymbol}
       onSave={handleSymbolSave}
       onError={(msg) => toast.error(msg)}
@@ -324,112 +226,13 @@
     </div>
 
     <!-- Accounts holding this security -->
-    {#if h.accounts.length > 0}
-      <TableShell>
-        <Table.Header>
-          <Table.Row class="bg-muted/75">
-            <Table.Head class="text-muted-foreground">Account</Table.Head>
-            <Table.Head class="text-right text-muted-foreground">Shares</Table.Head>
-            <Table.Head class="text-right text-muted-foreground">Avg Cost</Table.Head>
-            <Table.Head class="text-right text-muted-foreground">Cost Basis</Table.Head>
-            <Table.Head class="text-right text-muted-foreground">Market Value</Table.Head>
-            <Table.Head class="text-right text-muted-foreground">Gain / Loss</Table.Head>
-          </Table.Row>
-        </Table.Header>
-        <Table.Body>
-          {#each h.accounts as acct (acct.accountGuid)}
-            {@const unitPrice = h.shares > 0 && h.price !== null ? h.price : 0}
-            {@const gainPerShare = h.shares > 0 ? h.gainLoss / h.shares : 0}
-            {@const acctGain = acct.shares * gainPerShare}
-            <Table.Row
-              class="cursor-pointer hover:bg-muted/50"
-              onclick={(e) => handleRowClick(e, () => openAccount(acct.accountGuid))}
-            >
-              <Table.Cell class="py-2.5">
-                <a
-                  href={resolve('/accounts/[guid]', { guid: acct.accountGuid })}
-                  class="font-medium"
-                >
-                  {acct.accountName}
-                </a>
-              </Table.Cell>
-              <Table.Cell class="py-2.5 text-right tabular-nums">
-                {acct.shares.toFixed(2)}
-              </Table.Cell>
-              <Table.Cell class="py-2.5 text-right text-muted-foreground tabular-nums">
-                {acct.shares > 0 ? fmt(acct.costBasis / acct.shares) : '\u2014'}
-              </Table.Cell>
-              <Table.Cell class="py-2.5 text-right text-muted-foreground tabular-nums">
-                {fmt(acct.costBasis)}
-              </Table.Cell>
-              <Table.Cell class="py-2.5 text-right font-medium tabular-nums">
-                {fmt(acct.shares * unitPrice)}
-              </Table.Cell>
-              <Table.Cell class="py-2.5 text-right tabular-nums {signColor(acctGain)}">
-                {formatSignedCurrency(acctGain, currency)}
-              </Table.Cell>
-            </Table.Row>
-          {/each}
-        </Table.Body>
-      </TableShell>
-    {:else}
-      <EmptyState
-        card
-        title="No accounts hold this security"
-        description="The price history is tracked without an open position in your book."
-      >
-        {#snippet icon()}
-          <Briefcase aria-hidden="true" class="text-muted-foreground" />
-        {/snippet}
-      </EmptyState>
-    {/if}
+    <HoldingAccountsTable {holding} {currency} />
 
     <!-- Buy/Sell activity -->
-    {#if data.transactions.length > 0}
-      <div>
-        <div class="mb-2 flex items-center justify-between">
-          <h2 class="text-sm font-medium text-foreground">Buy / Sell Activity</h2>
-          <Button variant="ghost" size="sm" onclick={exportTransactions}>
-            <Download aria-hidden="true" class="size-3" />
-            Export
-          </Button>
-        </div>
-        <TableShell>
-          <Table.Header>
-            <Table.Row class="bg-muted/75">
-              <Table.Head class="text-muted-foreground">Date</Table.Head>
-              <Table.Head class="text-muted-foreground">Description</Table.Head>
-              <Table.Head class="text-muted-foreground">Account</Table.Head>
-              <Table.Head class="text-right text-muted-foreground">Shares</Table.Head>
-              <Table.Head class="text-right text-muted-foreground">Value</Table.Head>
-            </Table.Row>
-          </Table.Header>
-          <Table.Body>
-            {#each data.transactions as t (t.guid)}
-              <Table.Row
-                class="cursor-pointer hover:bg-muted/50"
-                onclick={(e) => handleRowClick(e, () => openTransaction(t.guid))}
-              >
-                <Table.Cell class="py-2 text-muted-foreground tabular-nums">
-                  {formatDate(t.postDate)}
-                </Table.Cell>
-                <Table.Cell class="max-w-64 truncate py-2">
-                  <a href={resolve('/transactions/[id]', { id: t.guid })} class="block truncate">
-                    {t.description ?? '—'}
-                  </a>
-                </Table.Cell>
-                <Table.Cell class="py-2 text-xs text-muted-foreground">{t.accountName}</Table.Cell>
-                <Table.Cell class="py-2 text-right tabular-nums {signColor(t.sharesDelta)}">
-                  {t.sharesDelta >= 0 ? '+' : ''}{t.sharesDelta.toFixed(2)}
-                </Table.Cell>
-                <Table.Cell class="py-2 text-right tabular-nums {signColor(t.sharesDelta)}">
-                  {formatSignedCurrency(t.valueDelta, currency)}
-                </Table.Cell>
-              </Table.Row>
-            {/each}
-          </Table.Body>
-        </TableShell>
-      </div>
-    {/if}
+    <HoldingActivityTable
+      transactions={data.transactions}
+      {currency}
+      onExport={exportTransactions}
+    />
   </div>
 {/if}

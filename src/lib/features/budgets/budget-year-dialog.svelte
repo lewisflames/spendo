@@ -6,16 +6,11 @@
   import { Input } from '$lib/components/ui/input';
   import { Button } from '$lib/components/ui/button';
 
-  import { getBudgetYears, setBudgetYearAmount } from '$lib/tauri';
+  import { fetchBudgetYears, setBudgetYearAmount } from '$lib/tauri';
   import { errMsg } from '$lib/utils/error';
   import type { AccountsResult, BudgetDateRange } from '$lib/tauri';
-  import {
-    flattenExpenseAccounts,
-    budgetYearBounds,
-    buildYearOptions,
-    fallbackYearOptions,
-    clampYear as clampYearToRange
-  } from './budget-utils';
+  import { flattenExpenseAccounts } from './budget-utils';
+  import { useBudgetYear } from '$lib/hooks/use-budget-year.svelte';
 
   let {
     open = $bindable(false),
@@ -43,7 +38,6 @@
 
   const now = new Date();
   let pickedAccountGuid = $state('');
-  let year = $state(String(now.getFullYear()));
 
   let amount = $state(0);
 
@@ -61,25 +55,16 @@
 
   // Years are limited to the book's transaction range, plus one year ahead so
   // budgets can be planned for the next year.
-  let { minYear, maxYear } = $derived.by(() => {
-    const { minYear, maxYear: rawMax } = budgetYearBounds(dateRange);
-    return { minYear, maxYear: rawMax !== null ? rawMax + 1 : null };
+  const by = useBudgetYear(() => dateRange, {
+    plusOne: true,
+    fallbackCenter: now.getFullYear(),
+    fallbackRadius: 10
   });
-
-  let yearOptions = $derived.by(() => {
-    if (minYear !== null && maxYear !== null) {
-      return buildYearOptions(minYear, maxYear);
-    }
-    return fallbackYearOptions(now.getFullYear(), 10);
-  });
+  let yearOptions = $derived(by.yearOptions);
 
   let takenSet = $derived(new Set(existingYears ?? []));
 
   let freeYears = $derived(yearOptions.filter((o) => !takenSet.has(Number(o.value))));
-
-  function clampYear(y: number): number {
-    return clampYearToRange(y, minYear, maxYear);
-  }
 
   // Re-initialize the form whenever the dialog opens (user interaction).
   // This must be an $effect: bits-ui only calls onOpenChange for its own
@@ -91,9 +76,9 @@
   });
 
   function syncDefaults() {
-    const y = clampYear(initialYear ?? new Date().getFullYear());
+    const y = by.clampYear(initialYear ?? new Date().getFullYear());
     pickedAccountGuid = '';
-    year = String(y);
+    by.yearSel = String(y);
     amount = 0;
     accountError = '';
     amountError = '';
@@ -110,14 +95,14 @@
     const guid = target;
     let cancelled = false;
     yearsLoading = true;
-    getBudgetYears(guid)
+    fetchBudgetYears(guid)
       .then((years) => {
         if (cancelled) return;
         existingYears = years;
         // Move off a taken year automatically so Save never starts invalid.
-        if (years.includes(Number(year))) {
+        if (years.includes(Number(by.yearSel))) {
           const fallback = yearOptions.find((o) => !years.includes(Number(o.value)));
-          if (fallback) year = fallback.value;
+          if (fallback) by.yearSel = fallback.value;
         }
       })
       .catch((e: unknown) => {
@@ -134,7 +119,7 @@
   });
 
   async function handleSave() {
-    const y = Number(year);
+    const y = Number(by.yearSel);
     accountError = target ? '' : 'Please select an expense account';
     amountError = amount > 0 ? '' : 'Target must be greater than zero';
     yearError =
@@ -227,7 +212,7 @@
 
       <div class="flex flex-col gap-2">
         <span class="text-sm font-medium">Year</span>
-        <Select.Root type="single" bind:value={year} items={yearOptions}>
+        <Select.Root type="single" bind:value={by.yearSel} items={yearOptions}>
           <Select.Trigger
             id="year"
             class="min-w-20 justify-center"
