@@ -5,10 +5,12 @@ import {
   computePrevRange,
   daysInMonth,
   getMonthRange,
+  getMonthRangeSpan,
   getQuarterRange,
   getYearRange,
   last12MonthsRange,
   monthName,
+  PNL_PRESETS,
   todayStr
 } from './date-utils.svelte';
 
@@ -54,6 +56,39 @@ describe('calendar ranges', () => {
     expect(calendarDateToStr(start)).toBe('2024-02-01');
     expect(calendarDateToStr(end)).toBe('2024-02-29');
   });
+
+  it('spans whole months within a year', () => {
+    const { start, end } = getMonthRangeSpan(2024, 3, 2024, 6);
+    expect(calendarDateToStr(start)).toBe('2024-03-01');
+    expect(calendarDateToStr(end)).toBe('2024-06-30');
+  });
+
+  it('spans a single month when both ends match', () => {
+    const { start, end } = getMonthRangeSpan(2024, 5, 2024, 5);
+    expect(calendarDateToStr(start)).toBe('2024-05-01');
+    expect(calendarDateToStr(end)).toBe('2024-05-31');
+  });
+
+  it('normalizes reversed month order', () => {
+    const { start, end } = getMonthRangeSpan(2024, 9, 2024, 4);
+    expect(calendarDateToStr(start)).toBe('2024-04-01');
+    expect(calendarDateToStr(end)).toBe('2024-09-30');
+  });
+
+  it('spans across years in either direction', () => {
+    const forward = getMonthRangeSpan(2024, 11, 2025, 2);
+    expect(calendarDateToStr(forward.start)).toBe('2024-11-01');
+    expect(calendarDateToStr(forward.end)).toBe('2025-02-28');
+    const reversed = getMonthRangeSpan(2025, 2, 2024, 11);
+    expect(calendarDateToStr(reversed.start)).toBe('2024-11-01');
+    expect(calendarDateToStr(reversed.end)).toBe('2025-02-28');
+  });
+
+  it('ends leap February correctly in a span', () => {
+    const { start, end } = getMonthRangeSpan(2024, 1, 2024, 2);
+    expect(calendarDateToStr(start)).toBe('2024-01-01');
+    expect(calendarDateToStr(end)).toBe('2024-02-29');
+  });
 });
 
 describe('monthName', () => {
@@ -77,6 +112,39 @@ describe('computePrevRange', () => {
       prevFrom: '2024-03-14',
       prevTo: '2024-03-14'
     });
+  });
+
+  it('maps whole years to the whole previous year', () => {
+    expect(computePrevRange('2026-01-01', '2026-12-31')).toEqual({
+      prevFrom: '2025-01-01',
+      prevTo: '2025-12-31'
+    });
+  });
+
+  it('is leap-safe for whole years across leap boundaries', () => {
+    expect(computePrevRange('2024-01-01', '2024-12-31')).toEqual({
+      prevFrom: '2023-01-01',
+      prevTo: '2023-12-31'
+    });
+    expect(computePrevRange('2025-01-01', '2025-12-31')).toEqual({
+      prevFrom: '2024-01-01',
+      prevTo: '2024-12-31'
+    });
+  });
+});
+
+describe('PNL_PRESETS', () => {
+  it('offers This year as a full calendar year', () => {
+    const preset = PNL_PRESETS.find((p) => p.label === 'This year');
+    expect(preset).toBeDefined();
+    const year = new Date().getFullYear();
+    const { start, end } = preset!.getRange();
+    expect(calendarDateToStr(start)).toBe(`${year}-01-01`);
+    expect(calendarDateToStr(end)).toBe(`${year}-12-31`);
+  });
+
+  it('no longer offers Year to date', () => {
+    expect(PNL_PRESETS.some((p) => p.label === 'Year to date')).toBe(false);
   });
 });
 
