@@ -4,7 +4,7 @@
   import { dbSession, dbSessionLoading, ensureDbSessionLoaded } from '$lib/stores/db.svelte';
   import { reimportLast } from '$lib/tauri';
   import { formatDateRange, plural } from '$lib/utils/format.svelte';
-  import ImportHistory from '$lib/features/home/import-history.svelte';
+  import ChangeHistory from '$lib/features/home/change-history.svelte';
   import WelcomeScreen from '$lib/features/home/welcome-screen.svelte';
   import ImportButton from '$lib/components/shared/import-button.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
@@ -77,7 +77,7 @@
   <section class="flex flex-col gap-6">
     <PageHeaderSkeleton />
     <KpiCardRow />
-    <TableSkeleton cols={5} />
+    <TableSkeleton cols={4} />
   </section>
 {:else if dbSession.value}
   <!-- ── Data dashboard ── -->
@@ -123,12 +123,12 @@
       </KpiCard>
     </div>
 
-    <!-- Import History -->
+    <!-- Changes History -->
     <div class="flex flex-col gap-6">
       {#if importError}
         <ErrorCard message={importError} />
       {/if}
-      <ImportHistory />
+      <ChangeHistory />
     </div>
   </section>
 {:else}

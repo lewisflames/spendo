@@ -424,8 +424,8 @@
           <Dialog.Header>
             <Dialog.Title>Clear all data?</Dialog.Title>
             <Dialog.Description>
-              This will permanently delete all imported accounts, transactions, prices, and import
-              history. Your settings will be preserved.
+              This will permanently delete all accounts, transactions, prices, and changes history.
+              Your settings will be preserved.
             </Dialog.Description>
           </Dialog.Header>
           <Dialog.Footer>

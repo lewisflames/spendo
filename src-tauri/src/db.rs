@@ -99,24 +99,28 @@ CREATE TABLE IF NOT EXISTS prices (
 	date TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS import_log (
+CREATE TABLE IF NOT EXISTS change_log (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
-	filename TEXT NOT NULL,
-	file_path TEXT,
-	imported_at TEXT NOT NULL,
-	sha256 TEXT,
-	accounts_added INTEGER DEFAULT 0,
-	transactions_added INTEGER DEFAULT 0,
-	splits_added INTEGER DEFAULT 0,
-	commodities_added INTEGER DEFAULT 0,
-	accounts_orphaned INTEGER DEFAULT 0,
-	transactions_orphaned INTEGER DEFAULT 0,
-	splits_orphaned INTEGER DEFAULT 0,
-	accounts_updated INTEGER DEFAULT 0,
-	transactions_updated INTEGER DEFAULT 0,
-	splits_updated INTEGER DEFAULT 0,
-	commodities_orphaned INTEGER DEFAULT 0
+	occurred_at TEXT NOT NULL,
+	kind TEXT NOT NULL,
+	label TEXT NOT NULL,
+	source TEXT NOT NULL,
+	transactions_affected INTEGER DEFAULT 0,
+	accounts_affected INTEGER DEFAULT 0,
+	detail_json TEXT,
+	reverts_id INTEGER REFERENCES change_log(id),
+	reverted_by INTEGER REFERENCES change_log(id)
 );
+
+CREATE TABLE IF NOT EXISTS change_snapshots (
+	entry_id INTEGER NOT NULL REFERENCES change_log(id) ON DELETE CASCADE,
+	table_name TEXT NOT NULL,
+	row_guid TEXT NOT NULL,
+	before_json TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_change_log_occurred ON change_log(occurred_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_snapshots_entry ON change_snapshots(entry_id);
 
 CREATE INDEX IF NOT EXISTS idx_transactions_post_date ON transactions(post_date);
 CREATE INDEX IF NOT EXISTS idx_transactions_post_date_guid ON transactions(post_date, guid);
@@ -220,9 +224,10 @@ pub fn clear_last_book(app_data_dir: &Path) {
 }
 
 /// Full database reset: drops every app table (including the legacy
-/// `budget_amounts` table from pre-release builds) and recreates the current
-/// `SCHEMA`. This is the supported upgrade path while there are no
-/// migrations — Settings → Clear all data, then re-import.
+/// `budget_amounts` table from pre-release builds and the pre-history
+/// `import_log` table) and recreates the current `SCHEMA`. This is the
+/// supported upgrade path while there are no migrations — Settings →
+/// Clear all data, then re-import.
 pub fn clear_db(conn: &Connection) -> Result<()> {
     conn.execute_batch(
          "PRAGMA foreign_keys = OFF;
@@ -233,6 +238,8 @@ pub fn clear_db(conn: &Connection) -> Result<()> {
           DROP TABLE IF EXISTS transactions;
           DROP TABLE IF EXISTS accounts;
           DROP TABLE IF EXISTS commodities;
+          DROP TABLE IF EXISTS change_snapshots;
+          DROP TABLE IF EXISTS change_log;
           DROP TABLE IF EXISTS import_log;
           DROP TABLE IF EXISTS refresh_log;
           DROP TABLE IF EXISTS symbol_overrides;
@@ -266,8 +273,9 @@ mod tests {
         for expected in [
             "accounts",
             "budgets",
+            "change_log",
+            "change_snapshots",
             "commodities",
-            "import_log",
             "prices",
             "refresh_log",
             "splits",
@@ -278,6 +286,7 @@ mod tests {
         }
         // No legacy tables linger on fresh installs.
         assert!(!tables.contains(&"budget_amounts".to_string()));
+        assert!(!tables.contains(&"import_log".to_string()));
 
         let indexes: i64 = conn
             .query_row(
@@ -293,9 +302,10 @@ mod tests {
     fn clear_resets_data_and_legacy_tables() {
         let conn = Connection::open_in_memory().unwrap();
         init_db(&conn).unwrap();
-        // Legacy table from pre-release builds must not survive a reset.
+        // Legacy tables from pre-release builds must not survive a reset.
         conn.execute_batch(
-            "CREATE TABLE budget_amounts (budget_guid TEXT NOT NULL, year INTEGER NOT NULL);",
+            "CREATE TABLE budget_amounts (budget_guid TEXT NOT NULL, year INTEGER NOT NULL);
+             CREATE TABLE import_log (id INTEGER PRIMARY KEY AUTOINCREMENT, filename TEXT NOT NULL);",
         )
         .unwrap();
         conn.execute(
@@ -311,6 +321,7 @@ mod tests {
             .unwrap();
         assert_eq!(count, 0);
         assert!(!table_names(&conn).contains(&"budget_amounts".to_string()));
+        assert!(!table_names(&conn).contains(&"import_log".to_string()));
         // Schema is usable again right after the reset.
         conn.execute(
             "INSERT INTO commodities (guid, mnemonic, namespace) VALUES ('c-usd', 'USD', 'CURRENCY')",
