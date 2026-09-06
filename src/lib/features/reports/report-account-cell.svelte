@@ -23,7 +23,7 @@
       <a
         href={resolve('/accounts/[guid]', { guid })}
         title={description ?? name}
-        class="block min-w-0 truncate text-sm font-medium hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+        class="block min-w-0 truncate text-sm font-medium focus-visible:outline-2 focus-visible:outline-ring"
       >
         {description ?? name}
       </a>

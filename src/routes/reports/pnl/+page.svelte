@@ -1,8 +1,8 @@
 <script lang="ts">
   import { dbBootstrapping, dbSession } from '$lib/stores/db.svelte';
   import { fetchPnlReport, fetchPnlTrend } from '$lib/tauri';
-  import { signColor, formatSessionCurrency, EMPTY_DASH } from '$lib/utils/format.svelte';
-  import { TrendingUp, TrendingDown, ArrowLeftRight, Download } from '@lucide/svelte';
+  import { signColor, formatSessionCurrency, fmtPct, EMPTY_DASH } from '$lib/utils/format.svelte';
+  import { ArrowLeftRight, History, TrendingUp, Percent, Download } from '@lucide/svelte';
   import { Button } from '$lib/components/ui/button';
   import { downloadReportCsv } from '$lib/utils/csv';
   import { toast } from '$lib/components/ui/sonner';
@@ -13,6 +13,7 @@
   import PnlTreetable from '$lib/features/pnl/pnl-treetable.svelte';
   import PnlTrend from '$lib/features/pnl/pnl-trend.svelte';
   import MissingFxWarning from '$lib/features/reports/missing-fx-warning.svelte';
+  import ErrorCard from '$lib/components/shared/error-card.svelte';
   import { errMsg } from '$lib/utils/error';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import { useReportDateRange } from '$lib/hooks/use-report-date-range.svelte';
@@ -46,6 +47,7 @@
 
   let trendData = $derived(trend.data);
   let trendLoading = $derived(trend.loading);
+  let trendError = $derived(trend.error);
 
   const fmt = formatSessionCurrency;
 
@@ -54,6 +56,18 @@
 
   let visibleIncomeRows = $derived(flattenAll(incomeTree));
   let visibleExpenseRows = $derived(flattenAll(expenseTree));
+
+  let prevNetIncome = $derived(
+    pnlData ? pnlData.totalIncomePrev - pnlData.totalExpensesPrev : null
+  );
+  let netVariance = $derived(
+    pnlData && prevNetIncome !== null ? pnlData.netIncome - prevNetIncome : null
+  );
+  let netChangePct = $derived(
+    pnlData && prevNetIncome !== null ? changePct(pnlData.netIncome, prevNetIncome) : null
+  );
+  let isZeroVariance = $derived(netVariance === null || netVariance === 0);
+  let isZeroChange = $derived(netChangePct === null || netChangePct === 0);
 
   function handleExportCsv() {
     if (!pnlData) return;
@@ -130,28 +144,8 @@
         Start date must not be after end date — adjust the period to generate the report.
       </p>
     {/if}
-    <!-- KPI summary cards -->
-    <DimWrapper active={loading} class="grid grid-cols-1 gap-6 sm:grid-cols-3">
-      <KpiCard
-        title="Total Income"
-        value={pnlData ? fmt(pnlData.totalIncome) : EMPTY_DASH}
-        valueClass={pnlData ? 'text-success' : ''}
-        loading={!pnlData && (loading || dbBootstrapping.value)}
-      >
-        {#snippet icon()}
-          <TrendingUp aria-hidden="true" class="size-4 text-success" />
-        {/snippet}
-      </KpiCard>
-      <KpiCard
-        title="Total Expenses"
-        value={pnlData ? fmt(pnlData.totalExpenses) : EMPTY_DASH}
-        valueClass={pnlData ? 'text-destructive' : ''}
-        loading={!pnlData && (loading || dbBootstrapping.value)}
-      >
-        {#snippet icon()}
-          <TrendingDown aria-hidden="true" class="size-4 text-destructive" />
-        {/snippet}
-      </KpiCard>
+    <!-- Net income KPI summary cards -->
+    <DimWrapper active={loading} class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
       <KpiCard
         title="Net Income"
         value={pnlData ? fmt(pnlData.netIncome) : EMPTY_DASH}
@@ -165,11 +159,65 @@
           />
         {/snippet}
       </KpiCard>
+      <KpiCard
+        title="Previous Period"
+        value={pnlData && prevNetIncome !== null ? fmt(prevNetIncome) : EMPTY_DASH}
+        valueClass={pnlData ? 'text-muted-foreground' : ''}
+        loading={!pnlData && (loading || dbBootstrapping.value)}
+      >
+        {#snippet icon()}
+          <History aria-hidden="true" class="size-4 text-muted-foreground" />
+        {/snippet}
+      </KpiCard>
+      <KpiCard
+        title="Variance"
+        value={pnlData && netVariance !== null
+          ? isZeroVariance
+            ? EMPTY_DASH
+            : `${netVariance >= 0 ? '+' : ''}${fmt(netVariance)}`
+          : EMPTY_DASH}
+        valueClass={pnlData && netVariance !== null && !isZeroVariance
+          ? signColor(netVariance)
+          : 'text-muted-foreground'}
+        loading={!pnlData && (loading || dbBootstrapping.value)}
+      >
+        {#snippet icon()}
+          <TrendingUp
+            aria-hidden="true"
+            class="size-4 {pnlData && netVariance !== null && !isZeroVariance
+              ? signColor(netVariance)
+              : 'text-muted-foreground'}"
+          />
+        {/snippet}
+      </KpiCard>
+      <KpiCard
+        title="Change"
+        value={pnlData && netChangePct !== null
+          ? isZeroChange
+            ? EMPTY_DASH
+            : fmtPct(netChangePct)
+          : EMPTY_DASH}
+        valueClass={pnlData && netChangePct !== null && !isZeroChange
+          ? signColor(netChangePct)
+          : 'text-muted-foreground'}
+        loading={!pnlData && (loading || dbBootstrapping.value)}
+      >
+        {#snippet icon()}
+          <Percent
+            aria-hidden="true"
+            class="size-4 {pnlData && netChangePct !== null && !isZeroChange
+              ? signColor(netChangePct)
+              : 'text-muted-foreground'}"
+          />
+        {/snippet}
+      </KpiCard>
     </DimWrapper>
     {#if pnlData}
       <MissingFxWarning missing={pnlData.missingFx} reportCurrency={pnlData.reportCurrency} />
     {/if}
-    {#if trendData || trendLoading}
+    {#if trendError && !trendLoading && !trendData}
+      <ErrorCard message={trendError} onRetry={() => trend.reload()} />
+    {:else if trendData || trendLoading}
       <PnlTrend data={trendData ?? []} loading={trendLoading} />
     {/if}
 

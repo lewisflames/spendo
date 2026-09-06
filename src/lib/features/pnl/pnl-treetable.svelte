@@ -12,6 +12,7 @@
   import ReportTable from '$lib/features/reports/report-table.svelte';
   import ReportAccountCell from '$lib/features/reports/report-account-cell.svelte';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
+  import * as Tabs from '$lib/components/ui/tabs';
   import type { ProfitLossReport } from '$lib/tauri';
   import type { PnLTreeNode } from './pnl-types';
   import { changePct } from './pnl-utils';
@@ -34,9 +35,25 @@
 
   // Backend convention (src-tauri/src/reports.rs): income and expense totals
   // are both positive; net = income - expenses.
-  let isEmpty = $derived(
-    pnlData !== null && pnlData.incomeRows.length === 0 && pnlData.expenseRows.length === 0
-  );
+  let section = $state<'income' | 'expenses'>('income');
+
+  let isIncomeEmpty = $derived(pnlData !== null && pnlData.incomeRows.length === 0);
+  let isExpensesEmpty = $derived(pnlData !== null && pnlData.expenseRows.length === 0);
+  let isEmpty = $derived(section === 'income' ? isIncomeEmpty : isExpensesEmpty);
+
+  // Default to the first non-empty side when a new report arrives so users
+  // don't land on an empty tab when only the other side has activity.
+  let lastPnlData = $state<ProfitLossReport | null>(null);
+  $effect(() => {
+    if (pnlData && pnlData !== lastPnlData) {
+      lastPnlData = pnlData;
+      if (pnlData.incomeRows.length === 0 && pnlData.expenseRows.length > 0) {
+        section = 'expenses';
+      } else if (pnlData.expenseRows.length === 0 && pnlData.incomeRows.length > 0) {
+        section = 'income';
+      }
+    }
+  });
 </script>
 
 {#snippet pnlRows(rows: { node: PnLTreeNode; depth: number }[], positiveGood: boolean)}
@@ -46,9 +63,7 @@
     {@const isZeroVariance = variance === 0}
     {@const isZeroPct = row.changePct === null || row.changePct === 0}
     <Table.Row
-      class={item.depth === 0
-        ? 'cursor-pointer bg-muted/50 hover:bg-muted'
-        : 'cursor-pointer hover:bg-muted/50'}
+      class="cursor-pointer hover:bg-muted"
       onclick={(e) => handleRowClick(e, () => openAccount(row.accountGuid))}
     >
       <ReportAccountCell
@@ -96,23 +111,28 @@
   guid: string | null,
   current: number,
   previous: number,
-  positiveGood: boolean
+  positiveGood: boolean,
+  footer = false
 )}
   {@const variance = current - previous}
   {@const pct = changePct(current, previous)}
   {@const isZeroVariance = variance === 0}
   {@const isZeroPct = pct === null || pct === 0}
   <Table.Row
-    class={guid !== null
-      ? 'cursor-pointer border-t border-b bg-muted/50 font-semibold hover:bg-muted'
-      : 'border-t-2 bg-muted/50 font-semibold'}
+    class={footer
+      ? guid !== null
+        ? 'cursor-pointer border-t-2 bg-muted/50 font-semibold hover:bg-muted'
+        : 'border-t-2 bg-muted/50 font-semibold'
+      : guid !== null
+        ? 'cursor-pointer border-t border-b bg-muted/50 font-semibold hover:bg-muted'
+        : 'border-t-2 bg-muted/50 font-semibold'}
     onclick={guid !== null ? (e) => handleRowClick(e, () => openAccount(guid)) : undefined}
   >
-    <Table.Cell class="py-2.5 text-xs font-semibold tracking-wider text-muted-foreground uppercase">
+    <Table.Cell class="py-2.5 text-xs font-semibold tracking-wider uppercase">
       {#if guid !== null}
         <a
           href={resolve('/accounts/[guid]', { guid })}
-          class="hover:underline focus-visible:outline-2 focus-visible:outline-ring">{label}</a
+          class="focus-visible:outline-2 focus-visible:outline-ring">{label}</a
         >
       {:else}
         {label}
@@ -156,13 +176,23 @@
     description="Select a period to generate the report."
   />
 {:else}
+  {#if pnlData}
+    <Tabs.Root bind:value={section}>
+      <Tabs.List aria-label="Profit and loss section">
+        <Tabs.Trigger value="income">Income</Tabs.Trigger>
+        <Tabs.Trigger value="expenses">Expenses</Tabs.Trigger>
+      </Tabs.List>
+    </Tabs.Root>
+  {/if}
   <ReportTable
     {loading}
     {error}
     {onRetry}
     hasData={pnlData !== null}
     {isEmpty}
-    emptyMessage="No income or expense transactions found for this period."
+    emptyMessage={section === 'income'
+      ? 'No income transactions found for this period.'
+      : 'No expense transactions found for this period.'}
     skeletonCols={5}
   >
     {#snippet header()}
@@ -188,32 +218,25 @@
         </Table.Row>
       </Table.Header>
     {/snippet}
-    {#if pnlData && pnlData.incomeRows.length > 0}
+    {#if pnlData && section === 'income'}
+      {@render pnlRows(visibleIncomeRows, true)}
       {@render totalRow(
-        'Income',
+        'Total Income',
         pnlData.incomeRootGuid,
         pnlData.totalIncome,
         pnlData.totalIncomePrev,
+        true,
         true
       )}
-      {@render pnlRows(visibleIncomeRows, true)}
     {/if}
-    {#if pnlData && pnlData.expenseRows.length > 0}
+    {#if pnlData && section === 'expenses'}
+      {@render pnlRows(visibleExpenseRows, false)}
       {@render totalRow(
-        'Expenses',
+        'Total Expenses',
         pnlData.expenseRootGuid,
         pnlData.totalExpenses,
         pnlData.totalExpensesPrev,
-        false
-      )}
-      {@render pnlRows(visibleExpenseRows, false)}
-    {/if}
-    {#if pnlData}
-      {@render totalRow(
-        'Net Income',
-        null,
-        pnlData.netIncome,
-        pnlData.totalIncomePrev - pnlData.totalExpensesPrev,
+        false,
         true
       )}
     {/if}

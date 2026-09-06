@@ -44,8 +44,15 @@ export function signColor(value: number, positiveGood = true): string {
 
 export function fmtPct(n: number | null | undefined): string {
   if (n === null || n === undefined) return EMPTY_DASH;
+  // `changePct` is on a 0–100 scale, so render via number formatting (not
+  // `style: 'percent'`) to keep one decimal with locale-aware separators
+  // and percent placement (e.g. `12,3 %` in fr-FR).
+  const formatted = cachedNumberFormat(appSettings.value.locale, {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1
+  }).format(n);
   const sign = n >= 0 ? '+' : '';
-  return `${sign}${n.toFixed(1)}%`;
+  return `${sign}${formatted}%`;
 }
 
 /** Snap float dust (e.g. -0.004 from FX math) to a clean zero for display. */
