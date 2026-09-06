@@ -82,7 +82,7 @@
             <!-- Accessible link target for keyboard/middle-click; the row click
                  is a convenience shortcut. -->
             <a
-              class="block min-w-0 font-medium hover:underline"
+              class="block min-w-0 font-medium"
               href="{resolve('/budgets/[accountGuid]', {
                 accountGuid: item.accountGuid
               })}?year={year}"

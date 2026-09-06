@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { resolve } from '$app/paths';
   import { dbBootstrapping, dbSession } from '$lib/stores/db.svelte';
   import { fetchPnlReport, fetchPnlTrend } from '$lib/tauri';
   import { signColor, formatSessionCurrency, EMPTY_DASH } from '$lib/utils/format.svelte';
@@ -15,17 +14,11 @@
   import PnlTrend from '$lib/features/pnl/pnl-trend.svelte';
   import MissingFxWarning from '$lib/features/reports/missing-fx-warning.svelte';
   import { errMsg } from '$lib/utils/error';
-  import { useTreeExpand } from '$lib/hooks/use-tree-expand.svelte';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import { useReportDateRange } from '$lib/hooks/use-report-date-range.svelte';
   import { computePrevRange, PNL_PRESETS } from '$lib/utils/date-utils.svelte';
   import { ReportPeriodPicker as DateRangePicker } from '$lib/components/shared/report-period-picker';
-  import {
-    buildTree,
-    flattenTree,
-    flattenAll,
-    collectParentGuids
-  } from '$lib/features/reports/report-tree';
+  import { buildTree, flattenAll } from '$lib/features/reports/report-tree';
   import { changePct } from '$lib/features/pnl/pnl-utils';
 
   // Shared period state + URL-param restore; must precede useAsyncData so the
@@ -56,31 +49,11 @@
 
   const fmt = formatSessionCurrency;
 
-  let tree = useTreeExpand();
-  let appliedExpandKey = '';
-
   let incomeTree = $derived(pnlData ? buildTree(pnlData.incomeRows) : []);
   let expenseTree = $derived(pnlData ? buildTree(pnlData.expenseRows) : []);
 
-  $effect(() => {
-    if (incomeTree.length > 0 || expenseTree.length > 0) {
-      // Only reset expansions when the report's account structure changes;
-      // plain refetches (e.g. a nudged date range) must keep the user's
-      // manual collapse choices.
-      const key =
-        collectParentGuids(incomeTree).join(',') + '|' + collectParentGuids(expenseTree).join(',');
-      if (key === appliedExpandKey) return;
-      appliedExpandKey = key;
-      tree.expandAll([...collectParentGuids(incomeTree), ...collectParentGuids(expenseTree)]);
-    }
-  });
-
-  let visibleIncomeRows = $derived(flattenTree(incomeTree, tree.expanded));
-  let visibleExpenseRows = $derived(flattenTree(expenseTree, tree.expanded));
-
-  function expandAllPnl() {
-    tree.expandAll([...collectParentGuids(incomeTree), ...collectParentGuids(expenseTree)]);
-  }
+  let visibleIncomeRows = $derived(flattenAll(incomeTree));
+  let visibleExpenseRows = $derived(flattenAll(expenseTree));
 
   function handleExportCsv() {
     if (!pnlData) return;
@@ -116,7 +89,7 @@
           ['Currency', pnlData.reportCurrency]
         ],
         headers: ['Type', 'Account', 'Depth', 'Current', 'Previous', 'Variance', 'Change %'],
-        // Full trees regardless of UI collapse state.
+        // Full trees for the export.
         rows: [...section('Income', incomeTree), ...section('Expense', expenseTree)],
         totals: [
           total('Income', pnlData.totalIncome, pnlData.totalIncomePrev),
@@ -199,21 +172,12 @@
     {#if trendData || trendLoading}
       <PnlTrend data={trendData ?? []} loading={trendLoading} />
     {/if}
-    <div class="flex items-center justify-end gap-1">
-      <Button variant="ghost" size="sm" onclick={expandAllPnl} disabled={!pnlData}>
-        Expand all
-      </Button>
-      <Button variant="ghost" size="sm" onclick={() => tree.collapseAll()} disabled={!pnlData}>
-        Collapse all
-      </Button>
-    </div>
 
     <PnlTreetable
       loading={loading || dbBootstrapping.value}
       {error}
       onRetry={() => res.reload()}
       {pnlData}
-      {tree}
       {visibleIncomeRows}
       {visibleExpenseRows}
     />
@@ -221,12 +185,6 @@
     {#if pnlData && !loading && !error}
       <p class="text-xs text-muted-foreground">
         Amounts converted to {pnlData.reportCurrency || 'report currency'} at month-end rates.
-        <a
-          href="{resolve('/transactions')}?from={range.dateFrom}&to={range.dateTo}"
-          class="font-medium underline"
-        >
-          View transactions for this period
-        </a>.
       </p>
     {/if}
   {:else}
