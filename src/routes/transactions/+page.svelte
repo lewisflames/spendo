@@ -90,21 +90,6 @@
 
   let currency = $derived(sessionCurrency());
 
-  let accounts = $state<AccountInfo[]>([]);
-
-  useAsyncData({
-    enabled: () => !!dbSession.value,
-    fetch: fetchAccountNames,
-    label: 'Failed to load accounts',
-    onError: (message) => {
-      accounts = [];
-      toast.error(message);
-    },
-    onSuccess: (r) => {
-      accounts = r;
-    }
-  });
-
   const res = useAsyncData({
     enabled: () => !!dbSession.value,
     fetch: async () => {
@@ -136,6 +121,32 @@
       page = 1;
     }
     prevFilterKey = fk;
+  });
+
+  // Let the ledger table win the initial backend race: the account filter
+  // options load once the first table request settles. One-shot so later
+  // table refetches never wipe the options (a disabled hook clears data).
+  let accountsUnlocked = $state(false);
+
+  $effect(() => {
+    if (!accountsUnlocked && !res.loading && (res.data !== null || res.error !== null)) {
+      accountsUnlocked = true;
+    }
+  });
+
+  let accounts = $state<AccountInfo[]>([]);
+
+  useAsyncData({
+    enabled: () => !!dbSession.value && accountsUnlocked,
+    fetch: fetchAccountNames,
+    label: 'Failed to load accounts',
+    onError: (message) => {
+      accounts = [];
+      toast.error(message);
+    },
+    onSuccess: (r) => {
+      accounts = r;
+    }
   });
 
   let exporting = $state(false);
