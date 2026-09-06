@@ -1,70 +1,6 @@
-import type { CalendarDate } from '@internationalized/date';
-import {
-  daysInMonth,
-  getMonthRange,
-  getQuarterRange,
-  getYearRange
-} from '$lib/utils/date-utils.svelte';
+import { CalendarDate } from '@internationalized/date';
+import { daysInMonth } from '$lib/utils/date-utils.svelte';
 import { formatDate, yearOf } from '$lib/utils/format.svelte';
-
-export type PeriodTab = 'year' | 'quarter' | 'month';
-
-/** Absolute month index for anchor math: Jan 2024 < Feb 2024 < … */
-export function toAbsMonth(year: number, month: number): number {
-  return year * 12 + (month - 1);
-}
-
-export function fromAbsMonth(abs: number): { year: number; month: number } {
-  const year = Math.floor(abs / 12);
-  return { year, month: abs - year * 12 + 1 };
-}
-
-/** Absolute quarter index for anchor math. Quarter q is 1-4. */
-export function toAbsQuarter(year: number, q: number): number {
-  return year * 4 + (q - 1);
-}
-
-export function fromAbsQuarter(abs: number): { year: number; quarter: number } {
-  const year = Math.floor(abs / 4);
-  return { year, quarter: abs - year * 4 + 1 };
-}
-
-export function rangeFromAbsMonths(
-  a: number,
-  b: number
-): { start: CalendarDate; end: CalendarDate } {
-  const lo = Math.min(a, b);
-  const hi = Math.max(a, b);
-  const startParts = fromAbsMonth(lo);
-  const endParts = fromAbsMonth(hi);
-  return {
-    start: getMonthRange(startParts.year, startParts.month).start,
-    end: getMonthRange(endParts.year, endParts.month).end
-  };
-}
-
-export function rangeFromAbsQuarters(
-  a: number,
-  b: number
-): { start: CalendarDate; end: CalendarDate } {
-  const lo = Math.min(a, b);
-  const hi = Math.max(a, b);
-  const startParts = fromAbsQuarter(lo);
-  const endParts = fromAbsQuarter(hi);
-  return {
-    start: getQuarterRange(startParts.year, startParts.quarter).start,
-    end: getQuarterRange(endParts.year, endParts.quarter).end
-  };
-}
-
-export function rangeFromYears(a: number, b: number): { start: CalendarDate; end: CalendarDate } {
-  const lo = Math.min(a, b);
-  const hi = Math.max(a, b);
-  return {
-    start: getYearRange(lo).start,
-    end: getYearRange(hi).end
-  };
-}
 
 /** Year bounds for the picker, from the book's transaction window with a fallback. */
 export function getReportYearBounds(
@@ -131,18 +67,6 @@ export function formatPeriodLabel(
   return `${formatDate(start.toString())} – ${formatDate(end.toString())}`;
 }
 
-/** Infer which tab best explains an existing range when the popover opens. */
-export function inferPeriodTab(
-  start: CalendarDate | null | undefined,
-  end: CalendarDate | null | undefined
-): PeriodTab {
-  if (start && end) {
-    if (isYearAligned(start, end)) return 'year';
-    if (isQuarterAligned(start, end)) return 'quarter';
-  }
-  return 'month';
-}
-
 /** Short month names for the month grid, respecting the app locale. */
 export function getMonthShortNames(locale: string): string[] {
   const fmt = new Intl.DateTimeFormat(locale, { month: 'short' });
@@ -156,4 +80,87 @@ export function isSameRange(
 ): boolean {
   if (!b.start || !b.end) return false;
   return a.start.compare(b.start) === 0 && a.end.compare(b.end) === 0;
+}
+
+/**
+ * True for Jan-1-starting partial-year windows (the "Year to date" shape):
+ * month-aligned ranges starting Jan 1 (single January, Q1, full year) are
+ * excluded so they keep their calendar-unit step. Everything matching steps
+ * year-over-year (±12 months) instead of by its own month-span.
+ */
+export function isYearToDateLike(start: CalendarDate, end: CalendarDate): boolean {
+  return (
+    start.month === 1 && start.day === 1 && start.year === end.year && !isMonthAligned(start, end)
+  );
+}
+
+function absMonthIndex(year: number, month: number): number {
+  return year * 12 + (month - 1);
+}
+
+function yearMonthOfAbsMonth(abs: number): { year: number; month: number } {
+  const year = Math.floor(abs / 12);
+  return { year, month: abs - year * 12 + 1 };
+}
+
+/** Shift a date by whole months, clamping the day (Feb 29 → Feb 28). */
+function shiftMonthsPreservingDay(cd: CalendarDate, months: number): CalendarDate {
+  const { year, month } = yearMonthOfAbsMonth(absMonthIndex(cd.year, cd.month) + months);
+  return new CalendarDate(year, month, Math.min(cd.day, daysInMonth(year, month)));
+}
+
+/**
+ * Shift a period for the prev/next arrows. Aligned ranges move by their own
+ * calendar span (month → 1, quarter → 3, 12 months → 12) keeping month
+ * boundaries; YTD-like windows move year-over-year (±12); other partial
+ * ranges move by their month-span preserving days. Manual year/month math
+ * avoids `CalendarDate.add` day-overflow (Jan 31 + 1 mo → March).
+ */
+export function shiftPeriodRange(
+  start: CalendarDate,
+  end: CalendarDate,
+  direction: 1 | -1
+): { start: CalendarDate; end: CalendarDate } {
+  const span = isYearToDateLike(start, end)
+    ? 12
+    : (end.year - start.year) * 12 + (end.month - start.month) + 1;
+  const delta = direction * span;
+  if (isMonthAligned(start, end)) {
+    const newStart = yearMonthOfAbsMonth(absMonthIndex(start.year, start.month) + delta);
+    const newEnd = yearMonthOfAbsMonth(absMonthIndex(end.year, end.month) + delta);
+    return {
+      start: new CalendarDate(newStart.year, newStart.month, 1),
+      end: new CalendarDate(newEnd.year, newEnd.month, daysInMonth(newEnd.year, newEnd.month))
+    };
+  }
+  return {
+    start: shiftMonthsPreservingDay(start, delta),
+    end: shiftMonthsPreservingDay(end, delta)
+  };
+}
+
+/** True when the period starts at or before the book's earliest month. */
+export function isAtBookStart(start: CalendarDate, earliestDate: string | null): boolean {
+  if (!earliestDate) return false;
+  const year = Number(earliestDate.slice(0, 4));
+  const month = Number(earliestDate.slice(5, 7));
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) return false;
+  return absMonthIndex(start.year, start.month) <= absMonthIndex(year, month);
+}
+
+/**
+ * True when stepping forward would leave the present: the period already ends
+ * at/past the end of the current month, or it is the current year-to-date
+ * window (ends today or later).
+ */
+export function isAtPresent(start: CalendarDate, end: CalendarDate): boolean {
+  const now = new Date();
+  const thisYear = now.getFullYear();
+  const thisMonth = now.getMonth() + 1;
+  const today = now.getDate();
+  if (end.year !== thisYear) return end.year > thisYear;
+  const monthEnd = daysInMonth(thisYear, end.month);
+  if (end.month !== thisMonth) return end.month > thisMonth;
+  if (end.day >= monthEnd) return true;
+  return start.month === 1 && start.day === 1 && start.year === thisYear && end.day >= today;
 }
