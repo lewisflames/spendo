@@ -9,7 +9,15 @@
   import { todayStr } from '$lib/utils/date-utils.svelte';
   import { TYPE_COLOR } from '$lib/features/accounts/account-types';
 
-  let { guid, accountType, asOf }: { guid: string; accountType?: string; asOf?: string } = $props();
+  // `accountType` arrives with the detail payload while the trend resolves on
+  // its own fetch. Unknown reads as `undefined` (never omit the prop), so the
+  // first paint waits for the final color instead of drawing with the
+  // fallback and flashing to the type color once detail arrives.
+  let {
+    guid,
+    accountType,
+    asOf
+  }: { guid: string; accountType: string | undefined; asOf?: string } = $props();
 
   let color = $derived(TYPE_COLOR[accountType ?? ''] ?? 'var(--color-primary)');
 
@@ -31,7 +39,9 @@
   });
 
   let data = $derived(res.data ?? []);
-  let loading = $derived(res.loading);
+  // Hold the skeleton until the account type is known: painting with the
+  // fallback color first and recoloring on detail arrival is a visible flash.
+  let loading = $derived(res.loading || accountType == null);
   let error = $derived(res.error);
   let currency = $derived(sessionCurrency());
 </script>

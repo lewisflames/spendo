@@ -21,6 +21,8 @@
   import { useTableSort } from '$lib/hooks/use-table-sort.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import PageHeaderSkeleton from '$lib/components/shared/page-header-skeleton.svelte';
+  import * as Card from '$lib/components/ui/card';
+  import { Skeleton } from '$lib/components/ui/skeleton';
   import { todayStr } from '$lib/utils/date-utils.svelte';
   import KpiCardRow from '$lib/components/shared/kpi-card-row.svelte';
   import BalanceTrendChart from '$lib/features/accounts/balance-trend-chart.svelte';
@@ -126,6 +128,12 @@
     !!subtreeNode && subtreeNode.children.some((c) => Math.abs(clampZero(c.balance)) >= 0.005)
   );
 
+  // Charts loading gate: while the detail payload hasn't arrived we reserve
+  // both chart slots (assuming the pie exists) so the trend chart settling
+  // before/after the pie data never changes the grid shape mid-paint.
+  let chartsLoading = $derived((loading || dbBootstrapping.value) && !data);
+  let showPie = $derived(!chartsLoading && hasPieData);
+
   let prevNavKey = '';
   let prevSortKey = '';
 
@@ -230,18 +238,33 @@
       <AccountKpiCards summary={data.summary} {currentBalance} {isToday} {asOf} />
     {/if}
 
-    <!-- Balance over time + composition -->
+    <!-- Balance over time + composition. The grid keeps its shape across the
+      detail fetch: the pie slot is reserved with a skeleton while loading,
+      and the trend chart instance is never remounted by the loading/settle
+      transition, so independent fetch timing can't shift layout. -->
     {#if guid}
-      {#if hasPieData && subtreeNode}
-        <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
-          <div class="lg:col-span-2">
+      <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <div class={showPie || chartsLoading ? 'lg:col-span-2' : 'lg:col-span-3'}>
+          {#if dbSession.value}
             <BalanceTrendChart {guid} accountType={data?.account.accountType} {asOf} />
-          </div>
-          <BalancePie node={subtreeNode} parent={parentInfo} {loading} />
+          {:else}
+            <Card.Root>
+              <Card.Header>
+                <Skeleton class="h-6 w-40" />
+                <Skeleton class="h-4 w-56" />
+              </Card.Header>
+              <Card.Content>
+                <Skeleton class="h-72 w-full" />
+              </Card.Content>
+            </Card.Root>
+          {/if}
         </div>
-      {:else}
-        <BalanceTrendChart {guid} accountType={data?.account.accountType} {asOf} />
-      {/if}
+        {#if showPie}
+          <BalancePie node={subtreeNode} parent={parentInfo} {loading} />
+        {:else if chartsLoading}
+          <BalancePie node={null} parent={null} loading={true} />
+        {/if}
+      </div>
     {/if}
 
     <!-- Sub-accounts -->
