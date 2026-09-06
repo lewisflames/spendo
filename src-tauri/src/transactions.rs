@@ -335,10 +335,6 @@ fn fetch_transactions_inner(
     sort_by: Option<&str>,
     sort_dir: Option<&str>,
 ) -> Result<TransactionsResult, String> {
-    // Clamp here (not just at the command boundary) so direct `_inner`
-    // callers/tests can never divide by zero in `total_pages` or emit a
-    // negative LIMIT/OFFSET.
-    let page_size = utils::clamp_page_size(page_size);
     let w = build_filter_conditions(&filters, 0);
     let where_clause = w.where_clause();
 
@@ -350,9 +346,7 @@ fn fetch_transactions_inner(
         .query_row(param_refs.as_slice(), |row| row.get(0))
         .map_err(|e| e.to_string())?;
 
-    let total_pages = utils::total_pages(total, page_size);
-    let safe_page = utils::clamp_page(page, total_pages);
-    let offset = (safe_page - 1) * page_size;
+    let (page_size, total_pages, safe_page, offset) = utils::paginate(total, page, page_size);
 
     // Amount sorting needs the FX-converted totals, which are computed in Rust,
     // so fetch all matching rows, sort, then paginate.
@@ -504,7 +498,7 @@ pub async fn fetch_transactions(
         fetch_transactions_inner(
             conn,
             page,
-            utils::clamp_page_size(page_size),
+            page_size,
             filters,
             sort_by.as_deref(),
             sort_dir.as_deref(),
