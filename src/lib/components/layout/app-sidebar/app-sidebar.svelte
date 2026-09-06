@@ -60,11 +60,11 @@
           </Sidebar.MenuItem>
           <Sidebar.MenuItem>
             <Sidebar.MenuButton
-              isActive={page.url.pathname === '/pnl'}
+              isActive={page.url.pathname === '/reports/pnl'}
               tooltipContent="Profit & Loss"
             >
               {#snippet child({ props })}
-                <a href={resolve('/pnl')} {...props}>
+                <a href={resolve('/reports/pnl')} {...props}>
                   <Receipt aria-hidden="true" />
                   <span class="group-data-[collapsible=icon]:hidden">Profit &amp; Loss</span>
                 </a>
