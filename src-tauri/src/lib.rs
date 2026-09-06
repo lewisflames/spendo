@@ -4,6 +4,7 @@ mod books;
 mod budgets;
 mod db;
 mod fx;
+mod history;
 mod home;
 mod import;
 mod init;
@@ -87,9 +88,10 @@ pub fn run() {
             init::set_base_currency,
             settings::clear_app_db,
             settings::get_data_info,
-            import::fetch_import_history,
             import::import_gnucash,
             import::reimport_last,
+            history::fetch_change_history,
+            history::revert_history_entry,
             accounts::fetch_accounts,
             transactions::fetch_transactions,
             transactions::fetch_transaction,

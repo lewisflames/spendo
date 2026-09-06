@@ -21,9 +21,10 @@ fn gnucash_guidance() -> String {
 }
 
 /// Check that `path` is an openable Spendo book: stamped `application_id`, or
-/// — for pre-stamp `spendo.db` files — the Spendo-specific `import_log` table
-/// on top of the shared core tables. GnuCash sources and random SQLite/text
-/// files are rejected with actionable errors.
+/// — for pre-stamp `spendo.db` files — a Spendo-specific history table
+/// (`change_log`, or legacy `import_log`) on top of the shared core tables.
+/// GnuCash sources and random SQLite/text files are rejected with actionable
+/// errors.
 fn validate_spendo_db_inner(path: &Path) -> Result<(), String> {
     if !path.is_file() {
         return Err(format!("File not found: {}", path.display()));
@@ -62,7 +63,7 @@ fn validate_spendo_db_inner(path: &Path) -> Result<(), String> {
     let has_core = ["accounts", "commodities", "transactions", "splits"]
         .iter()
         .all(|t| tables.contains(*t));
-    if has_core && tables.contains("import_log") {
+    if has_core && (tables.contains("change_log") || tables.contains("import_log")) {
         return Ok(());
     }
     if has_core {

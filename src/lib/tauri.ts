@@ -14,23 +14,32 @@ export interface DataSummary {
   netWorth: number;
 }
 
-export interface ImportLogDetails {
+/** One row of the unified changes history (imports + manual edits). */
+export interface ChangeEntry {
   id: number;
-  filename: string;
-  filePath?: string;
-  importedAt: string;
-  sha256: string | null;
-  accountsAdded: number;
-  transactionsAdded: number;
-  splitsAdded: number;
-  commoditiesAdded: number;
-  accountsUpdated: number;
-  transactionsUpdated: number;
-  splitsUpdated: number;
-  accountsOrphaned: number;
-  transactionsOrphaned: number;
-  splitsOrphaned: number;
-  commoditiesOrphaned: number;
+  occurredAt: string;
+  kind: string;
+  label: string;
+  source: string;
+  transactionsAffected: number;
+  accountsAffected: number;
+  revertsId: number | null;
+  revertedBy: number | null;
+}
+
+interface ChangeHistoryPage {
+  entries: ChangeEntry[];
+  total: number;
+  pageSize: number;
+  totalPages: number;
+  /** Newest entry eligible for linear undo, if any. */
+  revertibleId: number | null;
+}
+
+export interface RevertResult {
+  revertedId: number;
+  revertId: number;
+  summary: DataSummary;
 }
 
 interface ImportResult {
@@ -276,17 +285,21 @@ interface DataInfo {
   dbPath: string;
 }
 
-interface ImportHistoryPage {
-  logs: ImportLogDetails[];
+interface ChangeHistoryPage {
+  entries: ChangeEntry[];
   total: number;
   pageSize: number;
   totalPages: number;
+  revertibleId: number | null;
 }
 
 export const getDataInfo = (): Promise<DataInfo> => invoke('get_data_info');
 
-export const fetchImportHistory = (page: number, pageSize: number): Promise<ImportHistoryPage> =>
-  invoke('fetch_import_history', { page, pageSize });
+export const fetchChangeHistory = (page: number, pageSize: number): Promise<ChangeHistoryPage> =>
+  invoke('fetch_change_history', { page, pageSize });
+
+export const revertHistoryEntry = (id: number): Promise<RevertResult> =>
+  invoke('revert_history_entry', { id });
 
 export const importGnucash = (path: string, filename: string): Promise<ImportResult> =>
   invoke('import_gnucash', { path, filename });

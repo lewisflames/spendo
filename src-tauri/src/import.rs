@@ -6,6 +6,7 @@ use std::fs;
 use tauri::State;
 
 use crate::db::{self, connect_source_db, init_db, AppState};
+use crate::history;
 use crate::home::{get_summary, DataSummary};
 use crate::prices::{self, PriceError, PricesResult};
 use crate::utils;
@@ -39,37 +40,7 @@ fn process_entities<T: Importable>(
     Ok((added, updated))
 }
 
-// ── Log structs ─────────────────────────────────────────────────────────────
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ImportLogDetails {
-    pub id: i64,
-    pub filename: String,
-    pub file_path: Option<String>,
-    pub imported_at: String,
-    pub sha256: Option<String>,
-    pub accounts_added: i64,
-    pub transactions_added: i64,
-    pub splits_added: i64,
-    pub commodities_added: i64,
-    pub accounts_updated: i64,
-    pub transactions_updated: i64,
-    pub splits_updated: i64,
-    pub accounts_orphaned: i64,
-    pub transactions_orphaned: i64,
-    pub splits_orphaned: i64,
-    pub commodities_orphaned: i64,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ImportHistoryPage {
-    pub logs: Vec<ImportLogDetails>,
-    pub total: i64,
-    pub page_size: i64,
-    pub total_pages: i64,
-}
+// ── Result struct ────────────────────────────────────────────────────────────
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -89,56 +60,6 @@ pub struct ImportResult {
     pub total_transactions: i64,
     pub summary: DataSummary,
     pub prices: PricesResult,
-}
-
-// ── Log helpers ─────────────────────────────────────────────────────────────
-
-fn get_import_logs(
-    conn: &Connection,
-    limit: i64,
-    offset: i64,
-) -> Result<Vec<ImportLogDetails>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, filename, file_path, imported_at, sha256,
-			        accounts_added, transactions_added, splits_added, commodities_added,
-			        accounts_updated, transactions_updated, splits_updated,
-			        accounts_orphaned, transactions_orphaned, splits_orphaned, commodities_orphaned
-			 FROM import_log ORDER BY id DESC LIMIT ?1 OFFSET ?2",
-        )
-        .map_err(|e| e.to_string())?;
-
-    let rows = stmt
-        .query_map(rusqlite::params![limit, offset], |row| {
-            Ok(ImportLogDetails {
-                id: row.get(0)?,
-                filename: row.get(1)?,
-                file_path: row.get(2)?,
-                imported_at: row.get(3)?,
-                sha256: row.get(4)?,
-                accounts_added: row.get(5)?,
-                transactions_added: row.get(6)?,
-                splits_added: row.get(7)?,
-                commodities_added: row.get(8)?,
-                accounts_updated: row.get(9)?,
-                transactions_updated: row.get(10)?,
-                splits_updated: row.get(11)?,
-                accounts_orphaned: row.get(12)?,
-                transactions_orphaned: row.get(13)?,
-                splits_orphaned: row.get(14)?,
-                commodities_orphaned: row.get(15)?,
-            })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
-
-    Ok(rows)
-}
-
-fn count_import_logs(conn: &Connection) -> Result<i64, String> {
-    conn.query_row("SELECT COUNT(*) FROM import_log", [], |row| row.get(0))
-        .map_err(|e| e.to_string())
 }
 
 // ── SHA256 ──────────────────────────────────────────────────────────────────
@@ -629,6 +550,77 @@ fn import_gnucash_inner(
             .map(|s| (s.guid.clone(), s))
             .collect();
 
+        // Capture before-images for every row the merge is about to touch so
+        // the single history row can revert this import. Added rows snapshot
+        // as absent (`None` — revert deletes them); updated and orphaned rows
+        // snapshot their current image (revert restores it). Unchanged rows
+        // are skipped: the merge leaves them alone.
+        let mut snapshots: Vec<history::Snapshot> = Vec::new();
+        let mut capture =
+            |table: &'static str, guid: &str| -> Result<(), String> {
+                snapshots.push(history::Snapshot {
+                    table_name: table,
+                    row_guid: guid.to_string(),
+                    before_json: history::snapshot_row(dest_conn, table, guid)?,
+                });
+                Ok(())
+            };
+        for r in &src.commodities {
+            match existing_commodities.get(r.guid()) {
+                None => capture("commodities", r.guid())?,
+                Some(ex) if r.has_changes(ex) => capture("commodities", r.guid())?,
+                _ => {}
+            }
+        }
+        for r in &src.accounts {
+            match existing_accounts.get(r.guid()) {
+                None => capture("accounts", r.guid())?,
+                Some(ex) if r.has_changes(ex) => capture("accounts", r.guid())?,
+                _ => {}
+            }
+        }
+        for r in &src.transactions {
+            match existing_txns.get(r.guid()) {
+                None => capture("transactions", r.guid())?,
+                Some(ex) if r.has_changes(ex) => capture("transactions", r.guid())?,
+                _ => {}
+            }
+        }
+        for r in &src.splits {
+            match existing_splits.get(r.guid()) {
+                None => capture("splits", r.guid())?,
+                Some(ex) if r.has_changes(ex) => capture("splits", r.guid())?,
+                _ => {}
+            }
+        }
+        let src_commodity_guids: HashSet<&str> =
+            src.commodities.iter().map(|r| r.guid()).collect();
+        let src_account_guids: HashSet<&str> =
+            src.accounts.iter().map(|r| r.guid()).collect();
+        let src_tx_guids: HashSet<&str> =
+            src.transactions.iter().map(|r| r.guid()).collect();
+        let src_split_guids: HashSet<&str> = src.splits.iter().map(|r| r.guid()).collect();
+        for guid in existing_commodities.keys() {
+            if !src_commodity_guids.contains(guid.as_str()) {
+                capture("commodities", guid)?;
+            }
+        }
+        for guid in existing_accounts.keys() {
+            if !src_account_guids.contains(guid.as_str()) {
+                capture("accounts", guid)?;
+            }
+        }
+        for guid in existing_txns.keys() {
+            if !src_tx_guids.contains(guid.as_str()) {
+                capture("transactions", guid)?;
+            }
+        }
+        for guid in existing_splits.keys() {
+            if !src_split_guids.contains(guid.as_str()) {
+                capture("splits", guid)?;
+            }
+        }
+
         (commodities_added, commodities_updated) =
             process_entities(dest_conn, &src.commodities, &existing_commodities)?;
         (accounts_added, accounts_updated) =
@@ -657,13 +649,32 @@ fn import_gnucash_inner(
             || commodities_orphaned != 0;
 
         if has_changes {
-            let now = utils::iso_now();
-            dest_conn
-				.execute(
-					"INSERT INTO import_log (filename, file_path, imported_at, sha256, accounts_added, transactions_added, splits_added, commodities_added, accounts_updated, transactions_updated, splits_updated, accounts_orphaned, transactions_orphaned, splits_orphaned, commodities_orphaned) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
-					rusqlite::params![filename, source_path, now, sha256, accounts_added, transactions_added, splits_added, commodities_added, accounts_updated, transactions_updated, splits_updated, accounts_orphaned, transactions_orphaned, splits_orphaned, commodities_orphaned],
-				)
-				.map_err(|e| e.to_string())?;
+            let detail = serde_json::json!({
+                "filename": filename,
+                "filePath": source_path,
+                "sha256": sha256,
+                "accountsAdded": accounts_added,
+                "transactionsAdded": transactions_added,
+                "splitsAdded": splits_added,
+                "commoditiesAdded": commodities_added,
+                "accountsUpdated": accounts_updated,
+                "transactionsUpdated": transactions_updated,
+                "splitsUpdated": splits_updated,
+                "accountsOrphaned": accounts_orphaned,
+                "transactionsOrphaned": transactions_orphaned,
+                "splitsOrphaned": splits_orphaned,
+                "commoditiesOrphaned": commodities_orphaned,
+            });
+            history::insert_change_entry(
+                dest_conn,
+                "import",
+                &format!("Imported {filename}"),
+                "import",
+                transactions_added + transactions_updated + transactions_orphaned,
+                accounts_added + accounts_updated + accounts_orphaned,
+                Some(&detail.to_string()),
+                &snapshots,
+            )?;
         }
 
         dest_conn
@@ -785,39 +796,12 @@ pub async fn import_gnucash(
 }
 
 #[tauri::command]
-pub async fn fetch_import_history(
-    state: State<'_, AppState>,
-    page: i64,
-    page_size: i64,
-) -> Result<ImportHistoryPage, String> {
-    db::run_blocking(state.db.clone(), move |conn| {
-        let page_size = utils::clamp_page_size(page_size);
-        let total = count_import_logs(conn)?;
-        let total_pages = utils::total_pages(total, page_size);
-        let safe_page = utils::clamp_page(page, total_pages);
-        let logs = get_import_logs(conn, page_size, (safe_page - 1) * page_size)?;
-        Ok(ImportHistoryPage {
-            logs,
-            total,
-            page_size,
-            total_pages,
-        })
-    })
-    .await
-}
-
-#[tauri::command]
 pub async fn reimport_last(state: State<'_, AppState>) -> Result<ImportResult, String> {
     // Look up the last import outside the blocking closure, then hash + merge.
-    let (file_path, filename) = db::run_blocking(state.db.clone(), |conn| {
-        conn.query_row(
-            "SELECT file_path, filename FROM import_log WHERE file_path IS NOT NULL ORDER BY id DESC LIMIT 1",
-            [],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-        )
-        .map_err(|e| format!("Failed to look up previous import: {}", e))
-    })
-    .await?;
+    // Reads the uniform change history first, falling back to the legacy
+    // import log so books imported before the rewrite can still reimport.
+    let (file_path, filename) =
+        db::run_blocking(state.db.clone(), history::last_import_source).await?;
     utils::validate_gnucash_path(&file_path)?;
     let sha256 = file_sha256(&file_path)?;
 
@@ -861,5 +845,120 @@ mod tests {
         assert_eq!(normalize_post_date("not-a-date"), "not-a-date");
         assert_eq!(normalize_post_date(""), "");
         assert_eq!(normalize_post_date("2024-01"), "2024-01");
+    }
+
+    /// End-to-end: import a minimal GnuCash source into a book with local-only
+    /// rows, asserting the single history row, the reimport pointer, the
+    /// no-op second import, and a full revert (orphans restored, added
+    /// rows removed).
+    #[test]
+    fn import_logs_single_row_and_reverts() {
+        let dir =
+            std::env::temp_dir().join(format!("spendo-import-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let src_path = dir.join("book.gnucash");
+        {
+            let src = Connection::open(&src_path).unwrap();
+            src.execute_batch(
+                "CREATE TABLE commodities (guid TEXT PRIMARY KEY, mnemonic TEXT, namespace TEXT, fullname TEXT);
+                 CREATE TABLE accounts (guid TEXT PRIMARY KEY, name TEXT, account_type TEXT, parent_guid TEXT, code TEXT, description TEXT, placeholder INTEGER, commodity_guid TEXT);
+                 CREATE TABLE transactions (guid TEXT PRIMARY KEY, post_date TEXT, description TEXT, num TEXT);
+                 CREATE TABLE splits (guid TEXT PRIMARY KEY, tx_guid TEXT, account_guid TEXT, value_num INTEGER, value_denom INTEGER, quantity_num INTEGER, quantity_denom INTEGER, reconcile_state TEXT, memo TEXT);
+                 CREATE TABLE slots (obj_guid TEXT, name TEXT, string_val TEXT);
+                 INSERT INTO commodities (guid, mnemonic, namespace) VALUES ('c-eur', 'EUR', 'CURRENCY');
+                 INSERT INTO accounts (guid, name, account_type, parent_guid, placeholder, commodity_guid)
+                   VALUES ('root', 'Root Account', 'ROOT', NULL, 0, 'c-eur'),
+                          ('checking', 'Checking', 'BANK', 'root', 0, 'c-eur');
+                 INSERT INTO transactions (guid, post_date, description) VALUES ('t1', '2024-01-15 10:30:00', 'Groceries');
+                 INSERT INTO splits (guid, tx_guid, account_guid, value_num, value_denom, quantity_num, quantity_denom, reconcile_state)
+                   VALUES ('s1', 't1', 'checking', 5000, 100, 5000, 100, 'n');",
+            )
+            .unwrap();
+        }
+        let src_str = src_path.to_string_lossy().to_string();
+
+        let dest = Connection::open_in_memory().unwrap();
+        init_db(&dest).unwrap();
+        // Local-only rows absent from the source: the import orphans them.
+        dest.execute_batch(
+            "INSERT INTO commodities (guid, mnemonic, namespace) VALUES ('x-com', 'XCO', 'CURRENCY');
+             INSERT INTO accounts (guid, name, account_type, parent_guid, placeholder, commodity_guid)
+               VALUES ('x-root', 'X Root', 'ROOT', NULL, 0, 'x-com');
+             INSERT INTO transactions (guid, post_date, description) VALUES ('t-extra', '2024-03-01', 'Local only');
+             INSERT INTO splits (guid, tx_guid, account_guid, value_num, value_denom, quantity_num, quantity_denom)
+               VALUES ('s-extra', 't-extra', 'x-root', 100, 100, 100, 100);",
+        )
+        .unwrap();
+
+        let result = import_gnucash_inner(&dest, &src_str, "book.gnucash", "deadbeef").unwrap();
+        assert_eq!(result.commodities_added, 1);
+        assert_eq!(result.commodities_orphaned, 1);
+        assert_eq!(result.accounts_added, 2);
+        assert_eq!(result.accounts_orphaned, 1);
+        assert_eq!(result.transactions_added, 1);
+        assert_eq!(result.transactions_orphaned, 1);
+        assert_eq!(result.splits_added, 1);
+        assert_eq!(result.splits_orphaned, 1);
+
+        // Exactly one history row; orphans are gone from the data.
+        let page = history::fetch_change_history_inner(&dest, 1, 50).unwrap();
+        assert_eq!(page.total, 1);
+        assert_eq!(page.entries[0].kind, "import");
+        assert_eq!(page.entries[0].label, "Imported book.gnucash");
+        assert_eq!(page.entries[0].transactions_affected, 2);
+        assert_eq!(page.entries[0].accounts_affected, 3);
+        assert_eq!(page.revertible_id, Some(page.entries[0].id));
+        let count = |table: &str| -> i64 {
+            dest.query_row(
+                &format!("SELECT COUNT(*) FROM {table}"),
+                [],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(count("transactions"), 1);
+        assert_eq!(
+            dest.query_row(
+                "SELECT description FROM transactions WHERE guid = 't1'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+            "Groceries"
+        );
+
+        // The reimport pointer survives the rewrite via detail_json.
+        assert_eq!(
+            history::last_import_source(&dest).unwrap(),
+            (src_str.clone(), "book.gnucash".to_string())
+        );
+
+        // Identical reimport is a no-op and logs nothing new.
+        let again = import_gnucash_inner(&dest, &src_str, "book.gnucash", "deadbeef").unwrap();
+        assert_eq!(again.transactions_added, 0);
+        assert_eq!(again.transactions_orphaned, 0);
+        assert_eq!(
+            history::fetch_change_history_inner(&dest, 1, 50)
+                .unwrap()
+                .total,
+            1
+        );
+
+        // Revert removes added rows and restores the orphaned local rows.
+        history::revert_history_entry_inner(&dest, page.entries[0].id).unwrap();
+        assert_eq!(count("transactions"), 1);
+        assert_eq!(
+            dest.query_row(
+                "SELECT description FROM transactions WHERE guid = 't-extra'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+            "Local only"
+        );
+        assert_eq!(count("accounts"), 1);
+        assert_eq!(count("commodities"), 1);
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
