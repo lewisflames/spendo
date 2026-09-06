@@ -1,12 +1,19 @@
 <script lang="ts">
-  import { onNavigate } from '$app/navigation';
+  import { onNavigate, goto } from '$app/navigation';
+  import { resolve } from '$app/paths';
+  import { page } from '$app/state';
   import { MediaQuery } from 'svelte/reactivity';
   import * as Sidebar from '$lib/components/ui/sidebar/index.js';
   import { AppSidebar } from '$lib/components/layout/app-sidebar';
   import { appSettings, saveSettings, resolveTheme } from '$lib/stores/settings.svelte';
   import { goBack, goForward, initNavHistory } from '$lib/stores/nav-history.svelte';
-  import { ensureDbSessionLoaded } from '$lib/stores/db.svelte';
-  import { TitleBar } from '$lib/components/layout/title-bar';
+  import {
+    dbSession,
+    dbSessionLoading,
+    ensureDbSessionLoaded,
+    loadActiveBook
+  } from '$lib/stores/db.svelte';
+  import { TitleBar, MinimalTitleBar } from '$lib/components/layout/title-bar';
   import { Sonner } from '$lib/components/ui/sonner';
   import KeyboardShortcutsDialog from '$lib/components/layout/keyboard-shortcuts-dialog.svelte';
   import { keyboardShortcutsDialog as shortcutsDialog } from '$lib/stores/keyboard-shortcuts.svelte';
@@ -25,6 +32,26 @@
   // session surface their own errors.
   $effect(() => {
     ensureDbSessionLoaded().catch(() => {});
+    loadActiveBook().catch(() => {});
+  });
+
+  // Chromeless welcome shell while there is no data (first start, or after
+  // Settings → Clear all data). During the initial bootstrap we also stay
+  // chromeless so neither shell flashes for the wrong audience.
+  //
+  // NOTE: this must depend on session identity ALONE, never on
+  // dbSessionLoading. The home page force-refreshes the session on every
+  // mount, which toggles loading; if the shell read loading, mounting the
+  // app shell would hide it again → remount → refetch → an infinite
+  // shell-flapping fetch storm that freezes the app.
+  let showAppChrome = $derived(!!dbSession.value);
+
+  // Strict onboarding: any route other than `/` redirects home while empty.
+  // The welcome screen lives on `/`, so this never loops.
+  $effect(() => {
+    if (!dbSessionLoading.value && !dbSession.value && page.url.pathname !== '/') {
+      goto(resolve('/'), { replaceState: true });
+    }
   });
 
   let transitionInFlight = false;
@@ -74,6 +101,9 @@
     document.documentElement.classList.toggle('dark', resolvedTheme === 'dark');
     document.documentElement.style.colorScheme = resolvedTheme;
     document.documentElement.lang = appSettings.value.locale;
+    // Mirrors Settings → Appearance → Reduce motion onto <html> for
+    // CSS-driven ambient decoration.
+    document.documentElement.classList.toggle('reduce-motion', appSettings.value.reduceMotion);
   });
 
   function handleKeydown(e: KeyboardEvent) {
@@ -108,19 +138,28 @@
 <svelte:document onkeydown={handleKeydown} />
 
 <div class="[--header-height:calc(--spacing(10))]">
-  <Sidebar.Provider class="flex flex-col">
-    <TitleBar />
-    <div class="flex flex-1 overflow-hidden">
-      <AppSidebar />
-      <Sidebar.Inset class="min-w-0">
-        <main id="main-content" class="flex-1 overflow-auto p-8">
-          <div class="mx-auto w-full max-w-7xl">
-            {@render children()}
-          </div>
-        </main>
-      </Sidebar.Inset>
+  {#if showAppChrome}
+    <Sidebar.Provider class="flex flex-col">
+      <TitleBar />
+      <div class="flex flex-1 overflow-hidden">
+        <AppSidebar />
+        <Sidebar.Inset class="min-w-0">
+          <main id="main-content" class="flex-1 overflow-auto p-8">
+            <div class="mx-auto w-full max-w-7xl">
+              {@render children()}
+            </div>
+          </main>
+        </Sidebar.Inset>
+      </div>
+    </Sidebar.Provider>
+  {:else}
+    <div class="flex h-svh flex-col">
+      <MinimalTitleBar />
+      <main id="main-content" class="relative flex flex-1 flex-col overflow-auto">
+        {@render children()}
+      </main>
     </div>
-  </Sidebar.Provider>
+  {/if}
 </div>
 
 <Sonner theme={resolvedTheme} />

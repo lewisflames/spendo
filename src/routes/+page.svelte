@@ -1,10 +1,11 @@
 <script lang="ts">
   import { Button } from '$lib/components/ui/button';
-  import { Wallet, RefreshCw, LoaderCircle, Calendar, Building2, Receipt } from '@lucide/svelte';
+  import { RefreshCw, LoaderCircle, Calendar, Building2, Receipt } from '@lucide/svelte';
   import { dbSession, dbSessionLoading, ensureDbSessionLoaded } from '$lib/stores/db.svelte';
   import { reimportLast } from '$lib/tauri';
   import { formatDateRange } from '$lib/utils/format.svelte';
   import ImportHistory from '$lib/features/home/import-history.svelte';
+  import WelcomeScreen from '$lib/features/home/welcome-screen.svelte';
   import ImportButton from '$lib/components/shared/import-button.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import PageHeaderSkeleton from '$lib/components/shared/page-header-skeleton.svelte';
@@ -56,8 +57,13 @@
 </script>
 
 <svelte:head>
-  <title>Spendo</title>
-  <meta name="description" content="Spendo — expense tracking app" />
+  <title>{dbSession.value ? 'Overview — Spendo' : 'Welcome — Spendo'}</title>
+  <meta
+    name="description"
+    content={dbSession.value
+      ? 'Spendo — financial overview and key metrics'
+      : 'Spendo — explore your finances locally. Open or create a book to get started.'}
+  />
 </svelte:head>
 
 {#if dbSessionLoading.value && !dbSession.value}
@@ -120,29 +126,6 @@
     </div>
   </section>
 {:else}
-  <!-- ── Empty state ── -->
-  <section class="flex flex-col items-center justify-center gap-8 py-36">
-    <div class="flex flex-col items-center gap-6 text-center">
-      <div class="flex size-20 items-center justify-center rounded-2xl bg-primary/8">
-        <Wallet aria-hidden="true" class="size-10 text-primary" />
-      </div>
-      <div class="flex flex-col gap-2">
-        <h1 class="text-4xl font-bold tracking-tight sm:text-5xl">Spendo</h1>
-        <p class="text-lg text-muted-foreground">
-          Import your GnuCash file and start exploring your finances.
-        </p>
-      </div>
-    </div>
-
-    {#if importError}
-      <ErrorCard message={importError} />
-    {/if}
-
-    <ImportButton
-      size="lg"
-      label="Import GnuCash File"
-      onError={(msg) => (importError = msg)}
-      onStatusChange={(v) => (importing = v)}
-    />
-  </section>
+  <!-- ── Welcome (no data yet) ── -->
+  <WelcomeScreen />
 {/if}

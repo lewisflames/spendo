@@ -8,8 +8,8 @@
 <Card.Root>
   <Card.Content class="p-0">
     <EmptyState
-      title="Import a GnuCash file first"
-      description="Load a .gnucash file to explore this data."
+      title="No data in this book yet"
+      description="Import from GnuCash to start exploring."
     >
       {#snippet icon()}
         <FileUp aria-hidden="true" class="text-muted-foreground" />

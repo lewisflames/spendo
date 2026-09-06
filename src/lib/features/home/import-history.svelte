@@ -8,6 +8,7 @@
   import TreeChevron from '$lib/components/shared/tree-chevron.svelte';
   import { PaginationNav } from '$lib/components/shared/pagination-nav';
   import { Upload } from '@lucide/svelte';
+  import ImportButton from '$lib/components/shared/import-button.svelte';
   import { dbSession } from '$lib/stores/db.svelte';
   import { appSettings, saveSettings } from '$lib/stores/settings.svelte';
   import { fetchImportHistory } from '$lib/tauri';
@@ -75,10 +76,13 @@
     <EmptyState
       card
       title="No imports yet"
-      description="Import a .gnucash file to start analyzing your finances."
+      description="Import from GnuCash to start analyzing this book."
     >
       {#snippet icon()}
         <Upload aria-hidden="true" class="text-muted-foreground" />
+      {/snippet}
+      {#snippet action()}
+        <ImportButton />
       {/snippet}
     </EmptyState>
   {:else}

@@ -2,7 +2,7 @@
 
 SvelteKit + Svelte 5 (runes mode). Tailwind v4. Tauri v2 desktop app.
 
-GnuCash financial data importer/explorer. Rust backend (`rusqlite`) + static SvelteKit frontend (`@sveltejs/adapter-static`).
+Local-first personal finance manager (portable `.spendo` books). Rust backend (`rusqlite`) + static SvelteKit frontend (`@sveltejs/adapter-static`). GnuCash is one import source, not the app's center.
 
 ## Commands
 
@@ -33,14 +33,14 @@ No `preview` script (no `vite preview` wrapper). No frontend test framework. Rus
 
 - **Tauri v2** desktop app. Frontend is static SvelteKit (adapter-static, SPA, no SSR). Backend is Rust in `src-tauri/src/`.
 - **All backend calls** go through `@tauri-apps/api/core` `invoke()` via `$lib/tauri.ts`. No `+server.ts` / `+page.server.ts`.
-- **Rust modules** (`src-tauri/src/`): `db`, `accounts`, `account_detail`, `transactions`, `prices`, `import`, `home`, `reports`, `budgets`, `portfolio`, `settings`, `utils`, plus support modules `fx`, `sql`, `tree`, `yahoo`. Cargo crate: `spendo_app_lib`.
-- **DB**: SQLite via `rusqlite`. Connection held as `Arc<Mutex<Connection>>` in Tauri state (`AppState` also carries `db_path`), initialized once at startup. DB file lives in Tauri's `app_data_dir` (`spendo.db`). Schema created on first use in `db::init_db`. No migrations by design (pre-release): `SCHEMA` is the single source of truth; schema changes require a database reset (Settings → Clear all data, or delete `spendo.db`) followed by re-import.
+- **Rust modules** (`src-tauri/src/`): `db`, `accounts`, `account_detail`, `transactions`, `prices`, `import`, `home`, `reports`, `budgets`, `portfolio`, `settings`, `books`, `utils`, plus support modules `fx`, `sql`, `tree`, `yahoo`. Cargo crate: `spendo_app_lib`.
+- **DB**: SQLite via `rusqlite`. Document model: one active `.spendo` book opened in place; connection held as `Arc<Mutex<Connection>>` in Tauri state (`AppState` also carries `db_path: Mutex<Option<PathBuf>>` — `None` while book-less — plus `app_data_dir`). Book switching (`books.rs`: `open_book`/`create_book_at`/`save_book_as`) replaces the `Connection` via `db::run_swap_blocking` (the mutable counterpart of `run_blocking`) and remembers the path in `app_data_dir/last_book.json`. Books are stamped with `PRAGMA application_id` (`SPENDO_APP_ID`) so Open can reject GnuCash sources / random SQLite. Legacy single `spendo.db` in `app_data_dir` is auto-adopted on upgrade. Schema created on first use in `db::init_db`. No migrations by design (pre-release): `SCHEMA` is the single source of truth; schema changes require a database reset (Settings → Clear all data, or delete the book file) followed by re-import.
 - **Routes**: `/`, `/accounts`, `/accounts/[guid]`, `/budgets`, `/budgets/[accountGuid]`, `/reports/pnl`, `/portfolio`, `/portfolio/[holding]`, `/transactions`, `/transactions/[id]`, `/settings`, `/about` (plus dev-only `/dev/force-test`). `/accounts` is the single balance-sheet view (as-of picker + accounting identity); `/reports` holds only period reports (P&L).
 - **Frontend layout**: routes contain only route files (`+page.svelte` etc.). Page-specific components/types live in `$lib/features/<domain>/` (`home`, `accounts`, `budgets`, `pnl`, `reports`, `portfolio`, `transactions`). Domain utilities in `$lib/utils/` (`csv`, `export`, `error`, `format.svelte.ts`, `date-utils.svelte.ts`, plus `navigation.ts`, `reconcile.ts`).
 
 ## Data / imports
 
-- Accepts **only `.gnucash` files** (GnuCash SQLite format). Users pick files via Tauri file dialog (`@tauri-apps/plugin-dialog`).
+- GnuCash import accepts **only `.gnucash` files** (GnuCash SQLite format) and requires an open book first — it merges _into_ the active `.spendo` book, never opens in place. Users pick files via Tauri file dialog (`@tauri-apps/plugin-dialog`).
 - Import in `src-tauri/src/import.rs`: reads source DB tables (commodities, accounts, transactions, splits — `prices` are NOT imported from the source book), merges into app DB via GUID-keyed upserts (`ON CONFLICT … DO UPDATE`) plus an orphan sweep (rows absent from the source are deleted); source file is opened strictly read-only.
 - `clear_app_db` in `settings.rs` performs a full reset (drops all tables, including legacy ones, then recreates `SCHEMA`). Frontend calls via `clearAppDb()` in `$lib/tauri.ts`. Exposed on Settings page.
 - Price data: live prices fetched from Yahoo only (`yahoo.rs` + `fx.rs`) via `reqwest` + async tokio runtime; never imported from the source book. Per-commodity Yahoo symbol overrides live in the app-local `symbol_overrides` table (`set/delete_symbol_override` in `prices.rs`, edited on the holding detail page). Latest price per commodity queried from DB via `get_cached_prices_map()`.
@@ -64,7 +64,7 @@ No `preview` script (no `vite preview` wrapper). No frontend test framework. Rus
 
 ## Backend conventions
 
-- **Every DB-touching command** runs through `db::run_blocking(state.db.clone(), move |conn| …)` — never lock the connection directly inside an `async fn` (it blocks a tokio worker). File I/O (hashing, dialogs) happens before acquiring the lock.
+- **Every DB-touching command** runs through `db::run_blocking(state.db.clone(), move |conn| …)` — never lock the connection directly inside an `async fn` (it blocks a tokio worker). File I/O (hashing, dialogs) happens before acquiring the lock. Book switching uses the mutable counterpart `db::run_swap_blocking` (see `books.rs`).
 - **Visibility window**: future-dated transactions are excluded from every "current state" query via `utils::VISIBLE_TX_FILTER`. Don't hand-write the predicate — new money queries must use it or net worth/PnL/budgets diverge.
 - **SQL fragments**: reuse `utils::RAW_AMOUNT` / `QUANTITY_AMOUNT` / `signed_amount_expr` and the `sql::WhereBuilder` for dynamic WHERE clauses (auto-numbered `?N`, `param_offset` reserves leading indices). Escape user search input with `utils::escape_like` + `ESCAPE '\'`.
 - **Pagination**: clamp client input at the boundary with `utils::clamp_page_size` / `clamp_page`; compute totals with `utils::total_pages`.

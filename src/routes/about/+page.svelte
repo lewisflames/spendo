@@ -19,12 +19,14 @@
     </Card.Header>
     <Card.Content class="flex flex-col gap-4">
       <p class="text-sm text-muted-foreground">
-        Spendo is a desktop application for importing, exploring, and analyzing GnuCash financial
-        data. It runs natively via Tauri with a static SvelteKit frontend and a Rust/SQLite backend.
+        Spendo is a local-first desktop application for managing your finances in portable
+        <code>.spendo</code> books. It runs natively via Tauri with a static SvelteKit frontend and a
+        Rust/SQLite backend.
       </p>
       <p class="text-sm text-muted-foreground">
-        Import your <code>.gnucash</code> file to browse your chart of accounts, inspect transactions,
-        track investment prices, and view interactive dashboards. All data stays local on your machine.
+        Open or create a book to browse your chart of accounts, inspect transactions, track
+        investment prices, and view interactive dashboards. Coming from GnuCash? Import your
+        <code>.gnucash</code> file into the open book. All data stays local on your machine.
       </p>
     </Card.Content>
   </Card.Root>

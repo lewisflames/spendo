@@ -9,7 +9,7 @@
   import { basename } from '@tauri-apps/api/path';
 
   let {
-    label = 'Import',
+    label = 'Import from GnuCash',
     onError,
     onStatusChange,
     ...rest
