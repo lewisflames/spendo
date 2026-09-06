@@ -195,14 +195,18 @@
     </DimWrapper>
     {#if pnlData}
       <MissingFxWarning missing={pnlData.missingFx} reportCurrency={pnlData.reportCurrency} />
-      {#if trendData || trendLoading}
-        <PnlTrend data={trendData ?? []} loading={trendLoading} />
-      {/if}
-      <div class="flex items-center justify-end gap-1">
-        <Button variant="ghost" size="sm" onclick={expandAllPnl}>Expand all</Button>
-        <Button variant="ghost" size="sm" onclick={() => tree.collapseAll()}>Collapse all</Button>
-      </div>
     {/if}
+    {#if trendData || trendLoading}
+      <PnlTrend data={trendData ?? []} loading={trendLoading} />
+    {/if}
+    <div class="flex items-center justify-end gap-1">
+      <Button variant="ghost" size="sm" onclick={expandAllPnl} disabled={!pnlData}>
+        Expand all
+      </Button>
+      <Button variant="ghost" size="sm" onclick={() => tree.collapseAll()} disabled={!pnlData}>
+        Collapse all
+      </Button>
+    </div>
 
     <PnlTreetable
       {loading}

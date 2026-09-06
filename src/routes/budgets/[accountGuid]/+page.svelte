@@ -26,7 +26,9 @@
   import EmptyState from '$lib/components/shared/empty-state.svelte';
   import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
   import TableShell from '$lib/components/shared/table-shell.svelte';
+  import { Skeleton } from '$lib/components/ui/skeleton';
   import KpiCard from '$lib/components/shared/kpi-card.svelte';
+  import KpiCardRow from '$lib/components/shared/kpi-card-row.svelte';
   import BudgetEntryDialog from '$lib/features/budgets/budget-entry-dialog.svelte';
   import BudgetYearStepper from '$lib/features/budgets/budget-year-stepper.svelte';
   import PacingBar from '$lib/features/budgets/pacing-bar.svelte';
@@ -177,6 +179,23 @@
   <span class="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
     Yearly budget for this account
   </span>
+{/snippet}
+
+{#snippet loadingSkeleton()}
+  <KpiCardRow count={4} />
+  <!-- Skeleton mirrors the pacing card + monthly table shape. -->
+  <div class="rounded-lg border p-4">
+    <div class="flex flex-wrap items-baseline justify-between gap-2">
+      <Skeleton class="h-4 w-52" />
+      <Skeleton class="h-4 w-44" />
+    </div>
+    <div class="mt-3 flex items-center gap-3">
+      <Skeleton class="h-2 flex-1" />
+      <Skeleton class="h-4 w-12" />
+    </div>
+    <Skeleton class="mt-2 h-3 w-72" />
+  </div>
+  <TableSkeleton cols={6} rows={6} />
 {/snippet}
 
 {#if dbSession.value}
@@ -343,7 +362,7 @@
         </TableShell>
       </DimWrapper>
     {:else if loading}
-      <TableSkeleton cols={6} rows={6} />
+      {@render loadingSkeleton()}
     {:else if error}
       <EmptyState
         card
@@ -360,7 +379,8 @@
         {/snippet}
       </EmptyState>
     {:else}
-      <TableSkeleton cols={6} rows={6} />
+      <!-- Year-mismatch window before the refetch starts; same placeholder. -->
+      {@render loadingSkeleton()}
     {/if}
   </div>
 {:else}

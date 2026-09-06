@@ -140,9 +140,9 @@
     </PageHeader>
 
     {#if loading && !data}
-      <KpiCardRow />
+      <KpiCardRow count={4} />
 
-      <TableSkeleton cols={4} />
+      <TableSkeleton cols={3} />
     {:else if error}
       <ErrorCard message={error} onRetry={() => res.reload()} />
     {:else if data}

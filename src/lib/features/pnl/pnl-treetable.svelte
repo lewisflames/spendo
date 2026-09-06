@@ -118,6 +118,7 @@
     {loading}
     {error}
     {onRetry}
+    hasData={pnlData !== null}
     {isEmpty}
     emptyMessage="No income or expense transactions found for this period."
     skeletonCols={5}

@@ -85,7 +85,7 @@
   </Card.Header>
   <Card.Content>
     {#if loading}
-      <Skeleton class="mx-auto h-160 w-full max-w-160" />
+      <Skeleton class="mx-auto h-120 w-full max-w-160" />
     {:else if data.length === 0}
       <div class="py-6 text-center text-sm text-muted-foreground">No account balances found.</div>
     {:else}

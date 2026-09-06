@@ -4,7 +4,6 @@
   import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
   import { PaginationNav } from '$lib/components/shared/pagination-nav';
   import { Button } from '$lib/components/ui/button';
-  import { Skeleton } from '$lib/components/ui/skeleton';
   import {
     TrendingUp,
     TrendingDown,
@@ -45,6 +44,7 @@
   import TransactionFilters from '$lib/features/transactions/transaction-filters.svelte';
   import TransactionTable from '$lib/features/transactions/transaction-table.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
+  import PageHeaderSkeleton from '$lib/components/shared/page-header-skeleton.svelte';
   import KpiCard from '$lib/components/shared/kpi-card.svelte';
   import KpiCardRow from '$lib/components/shared/kpi-card-row.svelte';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
@@ -247,10 +247,7 @@
 {#if dbSession.value}
   <div class="flex flex-col gap-6">
     {#if loading && !data}
-      <div class="flex flex-col gap-1">
-        <Skeleton class="h-8 w-48" />
-        <Skeleton class="h-4 w-64" />
-      </div>
+      <PageHeaderSkeleton />
     {:else if data}
       {@const d = data}
       <PageHeader title={d.account.description ?? d.account.name}>

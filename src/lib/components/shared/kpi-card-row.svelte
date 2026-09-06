@@ -1,16 +1,24 @@
 <script lang="ts">
   import KpiCard from './kpi-card.svelte';
 
-  let { count = 3 }: { count?: number } = $props();
+  let {
+    count = 3,
+    gridClass = ''
+  }: {
+    count?: number;
+    /** Overrides the responsive grid classes (must match the loaded KPI grid). */
+    gridClass?: string;
+  } = $props();
 
   const GRID_COLS: Record<number, string> = {
     2: 'sm:grid-cols-2',
     3: 'sm:grid-cols-3',
-    4: 'sm:grid-cols-2 lg:grid-cols-4'
+    4: 'sm:grid-cols-2 lg:grid-cols-4',
+    6: 'sm:grid-cols-2 lg:grid-cols-3'
   };
 </script>
 
-<div class="grid grid-cols-1 gap-6 {GRID_COLS[count] ?? 'sm:grid-cols-' + count}">
+<div class="grid grid-cols-1 gap-6 {(gridClass || GRID_COLS[count]) ?? 'sm:grid-cols-' + count}">
   {#each Array(count) as _, i (i)}
     <KpiCard loading />
   {/each}
