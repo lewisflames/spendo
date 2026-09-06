@@ -5,6 +5,7 @@
   import { Skeleton } from '$lib/components/ui/skeleton';
   import { AreaChart, BarChart, AnnotationLine } from 'layerchart';
   import { formatCurrency, formatDate } from '$lib/utils/format.svelte';
+  import { appSettings } from '$lib/stores/settings.svelte';
   import { curveStepAfter } from 'd3-shape';
 
   interface TimeSeriesSeries {
@@ -37,7 +38,8 @@
     currency,
     tooltipTotals,
     variant = 'area',
-    referenceLine = null
+    referenceLine = null,
+    showRangeFilter = true
   }: {
     title: string;
     description?: string;
@@ -51,6 +53,7 @@
     tooltipTotals?: TimeSeriesTooltipTotal[];
     variant?: 'area' | 'bar';
     referenceLine?: TimeSeriesReferenceLine | null;
+    showRangeFilter?: boolean;
   } = $props();
 
   let dateRange = $state('All');
@@ -68,7 +71,9 @@
   });
 
   let filteredData = $derived(
-    dateRange === 'All' ? data : data.filter((d) => getX(d).getTime() >= rangeThreshold)
+    showRangeFilter && dateRange !== 'All'
+      ? data.filter((d) => getX(d).getTime() >= rangeThreshold)
+      : data
   );
 
   // Only draw the marker when it lands inside the visible domain — e.g. a
@@ -100,6 +105,27 @@
   const chartConfig = $derived(
     Object.fromEntries(visibleSeries.map((s) => [s.key, { label: s.label, color: s.color }]))
   );
+
+  // Locale-aware axis ticks: layerchart defaults to English month names, so
+  // format explicitly with the app locale. X shows localized "Mon Year"
+  // (e.g. Jan 2024 / janv. 2024); Y shows grouped integers while the
+  // tooltip carries the full currency amount.
+  let locale = $derived(appSettings.value.locale);
+  let xTickFormatter = $derived.by(() => {
+    const fmt = new Intl.DateTimeFormat(locale, { month: 'short', year: 'numeric' });
+    return (v: unknown): string => {
+      const d = v instanceof Date ? v : new Date(v as string | number);
+      if (Number.isNaN(d.getTime())) return `${v ?? ''}`;
+      return fmt.format(d);
+    };
+  });
+  let yTickFormatter = $derived.by(() => {
+    const fmt = new Intl.NumberFormat(locale, { maximumFractionDigits: 0 });
+    return (v: unknown): string => {
+      if (typeof v !== 'number' || !Number.isFinite(v)) return `${v ?? ''}`;
+      return fmt.format(v);
+    };
+  });
 
   const rangeOptions = [
     { value: '1M', label: '1M' },
@@ -145,21 +171,23 @@
           <Card.Description>{description}</Card.Description>
         {/if}
       </div>
-      <div class="flex flex-wrap gap-1">
-        {#each rangeOptions as opt (opt.value)}
-          <button
-            type="button"
-            class="rounded-md px-2 py-1 text-xs font-medium transition-colors {dateRange ===
-            opt.value
-              ? 'bg-primary text-primary-foreground'
-              : 'text-muted-foreground hover:bg-muted'}"
-            aria-pressed={dateRange === opt.value}
-            onclick={() => (dateRange = opt.value)}
-          >
-            {opt.label}
-          </button>
-        {/each}
-      </div>
+      {#if showRangeFilter}
+        <div class="flex flex-wrap gap-1">
+          {#each rangeOptions as opt (opt.value)}
+            <button
+              type="button"
+              class="rounded-md px-2 py-1 text-xs font-medium transition-colors {dateRange ===
+              opt.value
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:bg-muted'}"
+              aria-pressed={dateRange === opt.value}
+              onclick={() => (dateRange = opt.value)}
+            >
+              {opt.label}
+            </button>
+          {/each}
+        </div>
+      {/if}
     </div>
   </Card.Header>
   <Card.Content>
@@ -186,6 +214,10 @@
             padding={{ top: 0, right: 10, bottom: 20, left: 50 }}
             bandPadding={0.4}
             groupPadding={0.15}
+            props={{
+              xAxis: { format: xTickFormatter },
+              yAxis: { format: yTickFormatter }
+            }}
           >
             {#snippet tooltip()}
               <Chart.Tooltip
@@ -209,7 +241,9 @@
             props={{
               area: {
                 curve: curveStepAfter
-              }
+              },
+              xAxis: { format: xTickFormatter },
+              yAxis: { format: yTickFormatter }
             }}
             aboveMarks={chartAboveMarks}
           >

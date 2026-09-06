@@ -22,4 +22,5 @@
   {currency}
   tooltipTotals={[{ label: 'Net', compute: (d: PnlTrendPoint) => d.income - d.expenses }]}
   variant="bar"
+  showRangeFilter={false}
 />
