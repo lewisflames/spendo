@@ -2,17 +2,13 @@ import { CalendarDate } from '@internationalized/date';
 import { describe, expect, it } from 'vitest';
 import {
   formatPeriodLabel,
-  fromAbsMonth,
-  fromAbsQuarter,
   getMonthShortNames,
   getReportYearBounds,
-  inferPeriodTab,
+  isAtBookStart,
+  isAtPresent,
   isSameRange,
-  rangeFromAbsMonths,
-  rangeFromAbsQuarters,
-  rangeFromYears,
-  toAbsMonth,
-  toAbsQuarter
+  isYearToDateLike,
+  shiftPeriodRange
 } from './report-period';
 
 function cd(year: number, month: number, day: number): CalendarDate {
@@ -22,37 +18,6 @@ function cd(year: number, month: number, day: number): CalendarDate {
 function str(range: { start: CalendarDate; end: CalendarDate }): [string, string] {
   return [range.start.toString(), range.end.toString()];
 }
-
-describe('absolute month/quarter math', () => {
-  it('round-trips months', () => {
-    expect(fromAbsMonth(toAbsMonth(2024, 1))).toEqual({ year: 2024, month: 1 });
-    expect(fromAbsMonth(toAbsMonth(2024, 12))).toEqual({ year: 2024, month: 12 });
-    expect(toAbsMonth(2024, 2)).toBeGreaterThan(toAbsMonth(2024, 1));
-  });
-
-  it('round-trips quarters', () => {
-    expect(fromAbsQuarter(toAbsQuarter(2024, 1))).toEqual({ year: 2024, quarter: 1 });
-    expect(fromAbsQuarter(toAbsQuarter(2024, 4))).toEqual({ year: 2024, quarter: 4 });
-  });
-
-  it('normalizes reversed month bounds', () => {
-    expect(str(rangeFromAbsMonths(toAbsMonth(2024, 6), toAbsMonth(2024, 3)))).toEqual([
-      '2024-03-01',
-      '2024-06-30'
-    ]);
-  });
-
-  it('normalizes reversed quarter bounds', () => {
-    expect(str(rangeFromAbsQuarters(toAbsQuarter(2024, 2), toAbsQuarter(2024, 1)))).toEqual([
-      '2024-01-01',
-      '2024-06-30'
-    ]);
-  });
-
-  it('covers whole years in order', () => {
-    expect(str(rangeFromYears(2025, 2024))).toEqual(['2024-01-01', '2025-12-31']);
-  });
-});
 
 describe('getReportYearBounds', () => {
   it('derives bounds from the book window', () => {
@@ -108,18 +73,6 @@ describe('formatPeriodLabel', () => {
   });
 });
 
-describe('inferPeriodTab', () => {
-  it('picks year and quarter for aligned ranges', () => {
-    expect(inferPeriodTab(cd(2024, 1, 1), cd(2024, 12, 31))).toBe('year');
-    expect(inferPeriodTab(cd(2024, 1, 1), cd(2024, 3, 31))).toBe('quarter');
-  });
-
-  it('defaults to month otherwise', () => {
-    expect(inferPeriodTab(cd(2024, 1, 1), cd(2024, 2, 29))).toBe('month');
-    expect(inferPeriodTab(null, null)).toBe('month');
-  });
-});
-
 describe('isSameRange / getMonthShortNames', () => {
   const range = { start: cd(2024, 1, 1), end: cd(2024, 1, 31) };
 
@@ -133,5 +86,108 @@ describe('isSameRange / getMonthShortNames', () => {
     const names = getMonthShortNames('en-US');
     expect(names.length).toBe(12);
     expect(names[0]).toMatch(/jan/i);
+  });
+});
+
+describe('isYearToDateLike', () => {
+  it('matches Jan-1-starting partial-year windows', () => {
+    expect(isYearToDateLike(cd(2025, 1, 1), cd(2025, 9, 6))).toBe(true);
+    expect(isYearToDateLike(cd(2025, 1, 1), cd(2025, 1, 15))).toBe(true);
+  });
+
+  it('excludes month-aligned ranges starting Jan 1', () => {
+    expect(isYearToDateLike(cd(2025, 1, 1), cd(2025, 1, 31))).toBe(false);
+    expect(isYearToDateLike(cd(2025, 1, 1), cd(2025, 3, 31))).toBe(false);
+    expect(isYearToDateLike(cd(2025, 1, 1), cd(2025, 12, 31))).toBe(false);
+  });
+
+  it('excludes windows not starting Jan 1 or spanning years', () => {
+    expect(isYearToDateLike(cd(2025, 2, 1), cd(2025, 9, 6))).toBe(false);
+    expect(isYearToDateLike(cd(2024, 1, 1), cd(2025, 9, 6))).toBe(false);
+  });
+});
+
+describe('shiftPeriodRange', () => {
+  it('steps single months with year rollover', () => {
+    expect(str(shiftPeriodRange(cd(2024, 3, 1), cd(2024, 3, 31), -1))).toEqual([
+      '2024-02-01',
+      '2024-02-29'
+    ]);
+    expect(str(shiftPeriodRange(cd(2024, 12, 1), cd(2024, 12, 31), 1))).toEqual([
+      '2025-01-01',
+      '2025-01-31'
+    ]);
+  });
+
+  it('steps quarters by three months', () => {
+    expect(str(shiftPeriodRange(cd(2024, 1, 1), cd(2024, 3, 31), 1))).toEqual([
+      '2024-04-01',
+      '2024-06-30'
+    ]);
+  });
+
+  it('steps twelve-month windows by twelve months', () => {
+    expect(str(shiftPeriodRange(cd(2024, 3, 1), cd(2025, 2, 28), -1))).toEqual([
+      '2023-03-01',
+      '2024-02-29'
+    ]);
+  });
+
+  it('shifts other partial ranges by month-span preserving days', () => {
+    expect(str(shiftPeriodRange(cd(2024, 3, 5), cd(2024, 5, 20), -1))).toEqual([
+      '2023-12-05',
+      '2024-02-20'
+    ]);
+  });
+
+  it('steps YTD-like windows year-over-year', () => {
+    expect(str(shiftPeriodRange(cd(2025, 1, 1), cd(2025, 9, 6), -1))).toEqual([
+      '2024-01-01',
+      '2024-09-06'
+    ]);
+    expect(str(shiftPeriodRange(cd(2024, 1, 1), cd(2024, 9, 6), 1))).toEqual([
+      '2025-01-01',
+      '2025-09-06'
+    ]);
+  });
+
+  it('clamps days when the target month is shorter', () => {
+    expect(str(shiftPeriodRange(cd(2024, 1, 30), cd(2024, 1, 31), 1))).toEqual([
+      '2024-02-29',
+      '2024-02-29'
+    ]);
+    expect(str(shiftPeriodRange(cd(2023, 3, 15), cd(2023, 3, 31), 1))).toEqual([
+      '2023-04-15',
+      '2023-04-30'
+    ]);
+  });
+});
+
+describe('isAtBookStart / isAtPresent', () => {
+  it('clamps prev at the earliest book month', () => {
+    expect(isAtBookStart(cd(2024, 3, 1), '2024-03-15')).toBe(true);
+    expect(isAtBookStart(cd(2024, 4, 1), '2024-03-15')).toBe(false);
+    expect(isAtBookStart(cd(2024, 2, 1), '2024-03-15')).toBe(true);
+    expect(isAtBookStart(cd(2024, 4, 1), null)).toBe(false);
+  });
+
+  it('clamps next once the period reaches the current month', () => {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = now.getMonth() + 1;
+    const monthEnd = new Date(y, m, 0).getDate();
+    expect(isAtPresent(cd(y, m, 1), cd(y, m, monthEnd))).toBe(true);
+    expect(isAtPresent(cd(2024, 3, 1), cd(2024, 3, 31))).toBe(false);
+    expect(isAtPresent(cd(y, m, 1), cd(y + 1, m, monthEnd))).toBe(true);
+  });
+
+  it('clamps next on the current year-to-date window', () => {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = now.getMonth() + 1;
+    const today = now.getDate();
+    // Current YTD blocks forward; last year's same window allows it.
+    expect(isAtPresent(cd(y, 1, 1), cd(y, m, today))).toBe(true);
+    expect(isAtPresent(cd(y - 1, 1, 1), cd(y - 1, m, today))).toBe(false);
   });
 });
