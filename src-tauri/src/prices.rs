@@ -249,7 +249,7 @@ fn list_symbol_overrides_inner(conn: &Connection) -> Result<Vec<SymbolOverride>,
 }
 
 pub(crate) struct PriceFetchPlan {
-    commodities: Vec<CommodityInfo>,
+    pub(crate) commodities: Vec<CommodityInfo>,
     already_fetched: HashSet<String>,
     latest_dates: HashMap<String, String>,
     report_currency_guid: Option<String>,
@@ -271,7 +271,7 @@ pub(crate) struct PendingPriceWrites {
     fx_prices: Vec<(String, Vec<(i64, f64)>)>,
 }
 
-fn read_price_data(conn: &Connection) -> Result<PriceFetchPlan, String> {
+pub(crate) fn read_price_data(conn: &Connection) -> Result<PriceFetchPlan, String> {
     let commodities = list_commodities(conn)?;
 
     let already_fetched: HashSet<String> = {
@@ -386,7 +386,7 @@ fn write_history_prices(
     Ok(())
 }
 
-fn write_price_data(conn: &Connection, data: &PendingPriceWrites) -> Result<(), String> {
+pub(crate) fn write_price_data(conn: &Connection, data: &PendingPriceWrites) -> Result<(), String> {
     let PendingPriceWrites {
         symbol_map,
         yahoo_history,
@@ -473,7 +473,9 @@ fn register_symbol(
     }
 }
 
-async fn fetch_prices_remote(pre: PriceFetchPlan) -> Result<(PricesResult, PendingPriceWrites), String> {
+pub(crate) async fn fetch_prices_remote(
+    pre: PriceFetchPlan,
+) -> Result<(PricesResult, PendingPriceWrites), String> {
     let PriceFetchPlan {
         commodities,
         already_fetched,
@@ -857,6 +859,41 @@ pub async fn delete_symbol_override(
     .await
 }
 
+/// Empty result used when there is nothing priceable to fetch (e.g. a fresh
+/// import without securities). Not an error — callers treat it as a no-op.
+pub(crate) fn empty_prices_result() -> PricesResult {
+    PricesResult {
+        prices: vec![],
+        fetched_at: utils::iso_now(),
+        errors: vec![],
+    }
+}
+
+/// Single transaction so prices + refresh_log commit atomically; a mid-write
+/// failure must not leave partial prices behind.
+pub(crate) fn write_prices_and_log(
+    conn: &Connection,
+    write_data: &PendingPriceWrites,
+) -> Result<(), String> {
+    conn.execute_batch("BEGIN").map_err(|e| e.to_string())?;
+    let write_result = (|| -> Result<(), String> {
+        write_price_data(conn, write_data)?;
+        conn.execute(
+            "INSERT INTO refresh_log (refreshed_at) VALUES (?1)",
+            rusqlite::params![utils::iso_now()],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    })();
+    match write_result {
+        Ok(()) => conn.execute_batch("COMMIT").map_err(|e| e.to_string()),
+        Err(e) => {
+            conn.execute_batch("ROLLBACK").ok();
+            Err(e)
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn refresh_prices(state: State<'_, AppState>) -> Result<PricesResult, String> {
     let pre = db::run_blocking(state.db.clone(), read_price_data).await?;
@@ -864,25 +901,7 @@ pub async fn refresh_prices(state: State<'_, AppState>) -> Result<PricesResult, 
     let (result, write_data) = fetch_prices_remote(pre).await?;
 
     db::run_blocking(state.db.clone(), move |conn| {
-        // Single transaction so prices + refresh_log commit atomically; a
-        // mid-write failure must not leave partial prices behind.
-        conn.execute_batch("BEGIN").map_err(|e| e.to_string())?;
-        let write_result = (|| -> Result<(), String> {
-            write_price_data(conn, &write_data)?;
-            conn.execute(
-                "INSERT INTO refresh_log (refreshed_at) VALUES (?1)",
-                rusqlite::params![utils::iso_now()],
-            )
-            .map_err(|e| e.to_string())?;
-            Ok(())
-        })();
-        match write_result {
-            Ok(()) => conn.execute_batch("COMMIT").map_err(|e| e.to_string()),
-            Err(e) => {
-                conn.execute_batch("ROLLBACK").ok();
-                Err(e)
-            }
-        }
+        write_prices_and_log(conn, &write_data)
     })
     .await?;
 

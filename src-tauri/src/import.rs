@@ -7,6 +7,7 @@ use tauri::State;
 
 use crate::db::{self, connect_source_db, init_db, AppState};
 use crate::home::{get_summary, DataSummary};
+use crate::prices::{self, PriceError, PricesResult};
 use crate::utils;
 
 // ── Traits ──────────────────────────────────────────────────────────────────
@@ -87,6 +88,7 @@ pub struct ImportResult {
     pub total_accounts: i64,
     pub total_transactions: i64,
     pub summary: DataSummary,
+    pub prices: PricesResult,
 }
 
 // ── Log helpers ─────────────────────────────────────────────────────────────
@@ -712,7 +714,55 @@ fn import_gnucash_inner(
         total_accounts,
         total_transactions,
         summary,
+        // Placeholder: the Tauri commands below replace this with a
+        // best-effort Yahoo fetch after the merge commits.
+        prices: prices::empty_prices_result(),
     })
+}
+
+// ── Post-import price fetch ─────────────────────────────────────────────────
+
+/// Best-effort Yahoo fetch after a successful merge. Never fails the import:
+/// hard failures degrade to a synthetic `PriceError` so the frontend can show
+/// a warning toast while keeping the imported data.
+async fn fetch_prices_best_effort(
+    db: std::sync::Arc<std::sync::Mutex<Connection>>,
+) -> PricesResult {
+    fn failed(message: String) -> PricesResult {
+        PricesResult {
+            prices: vec![],
+            fetched_at: utils::iso_now(),
+            errors: vec![PriceError {
+                mnemonic: "Yahoo".to_string(),
+                error: message,
+            }],
+        }
+    }
+
+    // Each stage runs sequentially without holding the DB lock across the
+    // network fetch (same discipline as `refresh_prices`).
+    let pre = match db::run_blocking(db.clone(), prices::read_price_data).await {
+        Ok(pre) => pre,
+        Err(e) => return failed(format!("Failed to read price plan: {e}")),
+    };
+    if pre.commodities.is_empty() {
+        return prices::empty_prices_result();
+    }
+    let (mut result, write_data) = match prices::fetch_prices_remote(pre).await {
+        Ok(v) => v,
+        Err(e) => return failed(e),
+    };
+    if let Err(e) = db::run_blocking(db, move |conn| {
+        prices::write_prices_and_log(conn, &write_data)
+    })
+    .await
+    {
+        result.errors.push(PriceError {
+            mnemonic: "Yahoo".to_string(),
+            error: format!("Failed to store fetched prices: {e}"),
+        });
+    }
+    result
 }
 
 // ── Tauri commands ──────────────────────────────────────────────────────────
@@ -726,10 +776,12 @@ pub async fn import_gnucash(
     utils::validate_gnucash_path(&path)?;
     // Hash before acquiring the DB lock so the lock isn't held during file I/O.
     let sha256 = file_sha256(&path)?;
-    db::run_blocking(state.db.clone(), move |conn| {
+    let mut result = db::run_blocking(state.db.clone(), move |conn| {
         import_gnucash_inner(conn, &path, &filename, &sha256)
     })
-    .await
+    .await?;
+    result.prices = fetch_prices_best_effort(state.db.clone()).await;
+    Ok(result)
 }
 
 #[tauri::command]
@@ -769,10 +821,12 @@ pub async fn reimport_last(state: State<'_, AppState>) -> Result<ImportResult, S
     utils::validate_gnucash_path(&file_path)?;
     let sha256 = file_sha256(&file_path)?;
 
-    db::run_blocking(state.db.clone(), move |conn| {
+    let mut result = db::run_blocking(state.db.clone(), move |conn| {
         import_gnucash_inner(conn, &file_path, &filename, &sha256)
     })
-    .await
+    .await?;
+    result.prices = fetch_prices_best_effort(state.db.clone()).await;
+    Ok(result)
 }
 
 #[cfg(test)]

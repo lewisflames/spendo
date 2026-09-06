@@ -48,6 +48,7 @@ interface ImportResult {
   totalAccounts: number;
   totalTransactions: number;
   summary: DataSummary;
+  prices: PricesResult;
 }
 
 export interface AccountNode {
@@ -161,10 +162,12 @@ export interface AccountBalancePoint {
 }
 
 /**
- * Response of `refresh_prices`. The backend also returns the full price list
- * and a `fetchedAt` timestamp; the UI only consumes per-commodity errors.
+ * Response of `refresh_prices` (also nested as `ImportResult.prices` after an
+ * automatic post-import fetch). The UI only consumes per-commodity errors.
  */
 interface PricesResult {
+  prices: { mnemonic: string; price: number; priceDate: string; currency: string }[];
+  fetchedAt: string;
   errors: { mnemonic: string; error: string }[];
 }
 
