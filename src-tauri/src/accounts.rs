@@ -405,13 +405,15 @@ type AccountTreeSlice = (
 /// Direct children (for the child table), the whole subtree (for the
 /// balance-composition chart) and the parent (for the pie's parent-ratio
 /// label) of one account, from a single tree fetch so the detail view needs
-/// no second full-tree fetch. Empty/`None` when the account is missing from
-/// the tree.
+/// no second full-tree fetch. `as_of` is forwarded to the tree fetch so
+/// detail balances agree with the accounts page for the same date.
+/// Empty/`None` when the account is missing from the tree.
 pub fn fetch_children_and_subtree(
     conn: &Connection,
     parent_guid: &str,
+    as_of: Option<&str>,
 ) -> Result<AccountTreeSlice, String> {
-    let result = fetch_accounts_inner(conn, None)?;
+    let result = fetch_accounts_inner(conn, as_of)?;
     let (parent, node) = find_account_with_parent(&result.trees, parent_guid);
     let Some(node) = node else {
         return Ok((Vec::new(), None, None));
