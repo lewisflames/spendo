@@ -11,7 +11,7 @@
   import { PaginationNav } from '$lib/components/shared/pagination-nav';
   import { History, Undo2, LoaderCircle } from '@lucide/svelte';
   import ImportButton from '$lib/components/shared/import-button.svelte';
-  import { dbSession } from '$lib/stores/db.svelte';
+  import { dbSession, setDbSession } from '$lib/stores/db.svelte';
   import { appSettings, applyPageSize } from '$lib/stores/settings.svelte';
   import { fetchChangeHistory, revertHistoryEntry } from '$lib/tauri';
   import type { ChangeEntry } from '$lib/tauri';
@@ -79,7 +79,7 @@
     reverting = true;
     try {
       const result = await revertHistoryEntry(pending.id);
-      dbSession.value = { summary: result.summary };
+      setDbSession(result.summary);
       toast.success('Change reverted');
       confirmOpen = false;
       pending = null;

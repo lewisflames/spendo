@@ -9,7 +9,7 @@
   import { goBack, goForward, initNavHistory } from '$lib/stores/nav-history.svelte';
   import {
     dbSession,
-    dbSessionLoading,
+    dbBootstrapping,
     ensureDbSessionLoaded,
     loadActiveBook
   } from '$lib/stores/db.svelte';
@@ -35,21 +35,27 @@
     loadActiveBook().catch(() => {});
   });
 
-  // Chromeless welcome shell while there is no data (first start, or after
-  // Settings → Clear all data). During the initial bootstrap we also stay
-  // chromeless so neither shell flashes for the wrong audience.
+  // App chrome stays mounted while the first bootstrap is in flight so a
+  // full reload paints TitleBar + Sidebar around the page skeletons instead
+  // of dropping to the chromeless welcome shell mid-load. Once bootstrap
+  // settles, session identity alone decides (empty → welcome shell).
   //
-  // NOTE: this must depend on session identity ALONE, never on
-  // dbSessionLoading. The home page force-refreshes the session on every
-  // mount, which toggles loading; if the shell read loading, mounting the
-  // app shell would hide it again → remount → refetch → an infinite
-  // shell-flapping fetch storm that freezes the app.
-  let showAppChrome = $derived(!!dbSession.value);
+  // NOTE: this reads dbBootstrapping, never dbSessionLoading. The home page
+  // force-refreshes the session on every mount, which toggles loading with
+  // the session intact; bootstrapping is already false by then, so refreshes
+  // can't flap the shell into a remount → refetch loop. Tradeoff: a true
+  // first run (or cleared book) briefly shows the app shell with skeletons
+  // before settling on welcome — preferred over every reload flashing
+  // chromeless, since a persisted hint proved unreliable across webview /
+  // browser storage contexts.
+  let showAppChrome = $derived(!!dbSession.value || dbBootstrapping.value);
 
   // Strict onboarding: any route other than `/` redirects home while empty.
-  // The welcome screen lives on `/`, so this never loops.
+  // The welcome screen lives on `/`, so this never loops. Waits for the
+  // bootstrap specifically (not refresh loading) so a home revalidation
+  // never triggers a redirect.
   $effect(() => {
-    if (!dbSessionLoading.value && !dbSession.value && page.url.pathname !== '/') {
+    if (!dbBootstrapping.value && !dbSession.value && page.url.pathname !== '/') {
       goto(resolve('/'), { replaceState: true });
     }
   });

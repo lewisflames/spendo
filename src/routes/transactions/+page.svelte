@@ -3,7 +3,7 @@
   import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
   import { Button } from '$lib/components/ui/button';
   import { fetchTransactions, fetchAccountNames } from '$lib/tauri';
-  import { dbSession } from '$lib/stores/db.svelte';
+  import { dbBootstrapping, dbSession } from '$lib/stores/db.svelte';
   import { appSettings, applyPageSize } from '$lib/stores/settings.svelte';
   import TransactionFilters from '$lib/features/transactions/transaction-filters.svelte';
   import TransactionTable from '$lib/features/transactions/transaction-table.svelte';
@@ -182,7 +182,7 @@
   <meta name="description" content="Transaction ledger with filters." />
 </svelte:head>
 
-{#if dbSession.value}
+{#if dbSession.value || dbBootstrapping.value}
   <div class="flex flex-col gap-6">
     <PageHeader title="Transactions" description={data ? plural(data.total, 'transaction') : ''}>
       <Button
@@ -209,7 +209,7 @@
       {accounts}
     />
 
-    {#if loading && !data}
+    {#if (loading || dbBootstrapping.value) && !data}
       <!-- Same wrapper as the loaded DimWrapper content so the pagination
            placeholder holds its height and nothing jumps on first load. -->
       <div class="flex flex-col gap-4">

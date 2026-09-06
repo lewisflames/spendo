@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Button, type ButtonProps } from '$lib/components/ui/button';
   import { Upload, LoaderCircle } from '@lucide/svelte';
-  import { dbSession } from '$lib/stores/db.svelte';
+  import { setDbSession } from '$lib/stores/db.svelte';
   import { importGnucash } from '$lib/tauri';
   import { toastPriceResult } from '$lib/features/portfolio/price-utils';
   import { errMsg } from '$lib/utils/error';
@@ -37,7 +37,7 @@
       if (!selected) return;
       const filename = await basename(selected);
       const result = await importGnucash(selected, filename);
-      dbSession.value = { summary: result.summary };
+      setDbSession(result.summary);
       toast.success(`Imported ${filename}`);
       toastPriceResult(result.prices, { fixHint: true });
     } catch (e: unknown) {

@@ -14,7 +14,7 @@
     Calendar
   } from '@lucide/svelte';
   import { toast } from '$lib/components/ui/sonner';
-  import { dbSession } from '$lib/stores/db.svelte';
+  import { dbBootstrapping, dbSession } from '$lib/stores/db.svelte';
   import { setBreadcrumb } from '$lib/stores/breadcrumb.svelte';
   import { fetchTransaction } from '$lib/tauri';
   import type { SplitDetail } from '$lib/tauri';
@@ -100,9 +100,9 @@
   <meta name="description" content="Transaction details and splits." />
 </svelte:head>
 
-{#if dbSession.value}
+{#if dbSession.value || dbBootstrapping.value}
   <div class="flex flex-col gap-6">
-    {#if loading && !detail}
+    {#if (loading || dbBootstrapping.value) && !detail}
       <PageHeaderSkeleton />
       <KpiCardRow gridClass="sm:grid-cols-2 lg:grid-cols-3" />
       <TableSkeleton cols={4} rows={3} />

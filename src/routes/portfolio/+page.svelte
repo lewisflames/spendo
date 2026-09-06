@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Briefcase, TrendingUp, TrendingDown, RefreshCw, TriangleAlert } from '@lucide/svelte';
   import { resolve } from '$app/paths';
-  import { dbSession } from '$lib/stores/db.svelte';
+  import { dbBootstrapping, dbSession } from '$lib/stores/db.svelte';
   import { fetchPortfolioData, refreshPrices } from '$lib/tauri';
   import {
     signColor,
@@ -112,9 +112,9 @@
     {/if}
   </PageHeader>
 
-  {#if !dbSession.value}
+  {#if !dbSession.value && !dbBootstrapping.value}
     <ImportPrompt />
-  {:else if loading && !res.data}
+  {:else if dbBootstrapping.value || (loading && !res.data)}
     <KpiCardRow />
     <!-- Skeleton grid matches the loaded performance + allocation layout. -->
     <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
