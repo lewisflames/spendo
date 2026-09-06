@@ -12,7 +12,7 @@ export function openAccount(guid: string): Promise<void> {
 }
 
 /** Navigate to a holding detail page. */
-export function gotoHolding(commodityGuid: string): Promise<void> {
+export function openHolding(commodityGuid: string): Promise<void> {
   return goto(resolve('/portfolio/[holding]', { holding: commodityGuid }));
 }
 
@@ -24,22 +24,13 @@ export function openBudget(accountGuid: string, year?: number): Promise<void> {
   return goto(year !== undefined ? `${base}?year=${year}` : base);
 }
 
-/** Navigate to the transactions list filtered to a report period. */
-export function openReportTransactions(dateFrom: string, dateTo: string): Promise<void> {
-  const base = resolve('/transactions');
-  const query = `from=${encodeURIComponent(dateFrom)}&to=${encodeURIComponent(dateTo)}`;
-  // Query-only date suffix on top of a resolved route.
-  // eslint-disable-next-line svelte/no-navigation-without-resolve
-  return goto(`${base}?${query}`);
-}
-
 /**
  * Row-click navigation guard shared by every clickable table row. Ignores
  * clicks with modifier keys (open in new tab etc.) and clicks on interactive
  * children (links, buttons, inputs) so the inner anchor keeps its native
  * behavior.
  */
-export function isPlainRowClick(e: MouseEvent): boolean {
+function isPlainRowClick(e: MouseEvent): boolean {
   if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) {
     return false;
   }

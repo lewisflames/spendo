@@ -24,7 +24,7 @@
     sortBy = null,
     sortDir = 'desc',
     onSort,
-    variant = 'global',
+    variant = 'all',
     visibleColumns = ['transfer', 'amount'] as AccountColumn[]
   }: {
     transactions?: TransactionRow[] | DetailTransaction[];
@@ -34,7 +34,7 @@
     /** Direction handling lives with the caller's sort state; just report the key. */
     onSort?: (key: SortKey) => void;
     /** `account` adds Transfer/Status/Amount/Balance columns for the ledger view. */
-    variant?: 'global' | 'account';
+    variant?: 'all' | 'account';
     visibleColumns?: AccountColumn[];
   } = $props();
 
@@ -66,7 +66,7 @@
         dir={sortDir}
         onclick={() => onSort?.('description')}
       />
-      {#if variant === 'global'}
+      {#if variant === 'all'}
         <SortHead
           label="Total"
           active={sortBy === 'amount'}
@@ -123,7 +123,7 @@
             </p>
           {/if}
         </Table.Cell>
-        {#if variant === 'global'}
+        {#if variant === 'all'}
           <Table.Cell
             class="py-2.5 text-right font-medium whitespace-nowrap tabular-nums {signColor(
               totalOf(txn)

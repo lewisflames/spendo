@@ -1,4 +1,5 @@
-import { parseLocalDate } from '$lib/utils/format.svelte';
+import { toast } from '$lib/components/ui/sonner';
+import { parseLocalDate, plural } from '$lib/utils/format.svelte';
 
 /** A cached price older than this many days is flagged stale in the UI. */
 export const STALE_PRICE_DAYS = 7;
@@ -14,4 +15,47 @@ export function priceStaleDays(priceDate: string): number {
 /** Display label of a holding: full name when known, else the ticker mnemonic. */
 export function holdingLabel(h: { fullName: string | null; mnemonic: string }): string {
   return h.fullName ?? h.mnemonic;
+}
+
+/** Day change in percent, or null without a usable previous price. */
+export function dayChangePct(h: { price: number | null; prevPrice: number | null }): number | null {
+  if (h.price === null || h.prevPrice === null || h.prevPrice === 0) return null;
+  return ((h.price - h.prevPrice) / h.prevPrice) * 100;
+}
+
+/** 52-week high/low over the trailing year of price history (or all of it). */
+export function range52w(
+  history: { date: string; price: number }[] | null | undefined
+): { high: number; low: number } | null {
+  if (!history || history.length === 0) return null;
+  const cutoff = Date.now() - 365 * 24 * 60 * 60 * 1000;
+  const window = history.filter((e) => parseLocalDate(e.date).getTime() >= cutoff);
+  const source = window.length > 0 ? window : history;
+  const prices = source.map((e) => e.price);
+  return { high: Math.max(...prices), low: Math.min(...prices) };
+}
+
+/** Structural outcome of a Yahoo price refresh (matches the backend shape). */
+export interface PriceRefreshOutcome {
+  prices: { mnemonic: string; price: number; priceDate: string; currency: string }[];
+  errors: { mnemonic: string; error: string }[];
+}
+
+/**
+ * Success/warning toasts for a price refresh; silent when nothing happened.
+ * `fixHint` points at the Portfolio symbol overrides (for import flows).
+ */
+export function toastPriceResult(
+  result: PriceRefreshOutcome | null | undefined,
+  opts: { fixHint?: boolean } = {}
+): void {
+  if (!result) return;
+  const errorCount = result.errors.length;
+  if (errorCount > 0) {
+    toast.warning(
+      `Prices refreshed with ${plural(errorCount, 'error')}${opts.fixHint ? ' — open Portfolio to fix symbols.' : ''}`
+    );
+  } else if (result.prices.length > 0) {
+    toast.success(opts.fixHint ? 'Prices refreshed from Yahoo Finance' : 'Prices refreshed');
+  }
 }

@@ -4,7 +4,7 @@
   import { Button } from '$lib/components/ui/button';
   import { fetchTransactions, fetchAccountNames } from '$lib/tauri';
   import { dbSession } from '$lib/stores/db.svelte';
-  import { appSettings, saveSettings } from '$lib/stores/settings.svelte';
+  import { appSettings, applyPageSize } from '$lib/stores/settings.svelte';
   import TransactionFilters from '$lib/features/transactions/transaction-filters.svelte';
   import TransactionTable from '$lib/features/transactions/transaction-table.svelte';
   import TransactionHeatmap from '$lib/features/transactions/transaction-heatmap.svelte';
@@ -16,9 +16,7 @@
   import EmptyState from '$lib/components/shared/empty-state.svelte';
   import { errMsg } from '$lib/utils/error';
   import { toast } from '$lib/components/ui/sonner';
-  import { downloadCsv } from '$lib/utils/csv';
-  import { fetchAllRows } from '$lib/utils/export';
-  import type { TransactionRow } from '$lib/tauri';
+  import { exportPaginatedCsv } from '$lib/utils/export';
   import { useDebouncedSearch } from '$lib/hooks/use-debounced-search.svelte';
   import {
     useUrlParams,
@@ -151,29 +149,26 @@
 
   let exporting = $state(false);
 
-  function handlePageSizeChange(size: number) {
-    saveSettings({ pageSize: size });
-    page = 1;
-  }
-
   async function handleExportCsv() {
     if (!data || exporting) return;
     exporting = true;
     try {
-      const all = await fetchAllRows<TransactionRow>(async (pageIdx) => {
-        const r = await fetchTransactions(pageIdx, 500, filters, sortBy, sortDir);
-        return { rows: r.transactions, total: r.total };
+      await exportPaginatedCsv({
+        filename: 'transactions.csv',
+        headers: ['Date', 'Description', 'Number', 'Notes', 'Splits', 'Total'],
+        fetchPage: async (pageIdx, size) => {
+          const r = await fetchTransactions(pageIdx, size, filters, sortBy, sortDir);
+          return { rows: r.transactions, total: r.total };
+        },
+        mapRow: (t) => [
+          t.postDate,
+          t.description ?? '',
+          t.num ?? '',
+          t.notes ?? '',
+          t.splits.map((s) => `${s.accountName} (${s.accountType}): ${s.amount}`).join(' | '),
+          String(t.totalAmount)
+        ]
       });
-      const headers = ['Date', 'Description', 'Number', 'Notes', 'Splits', 'Total'];
-      const rows = all.map((t) => [
-        t.postDate,
-        t.description ?? '',
-        t.num ?? '',
-        t.notes ?? '',
-        t.splits.map((s) => `${s.accountName} (${s.accountType}): ${s.amount}`).join(' | '),
-        String(t.totalAmount)
-      ]);
-      downloadCsv('transactions.csv', headers, rows);
     } catch (e: unknown) {
       toast.error(errMsg(e, 'Failed to export transactions'));
     } finally {
@@ -258,7 +253,7 @@
             totalPages={data.totalPages}
             totalItems={data.total}
             pageSize={appSettings.value.pageSize}
-            onPageSizeChange={handlePageSizeChange}
+            onPageSizeChange={(size) => applyPageSize(size, (v) => (page = v))}
           />
         </DimWrapper>
       {/if}

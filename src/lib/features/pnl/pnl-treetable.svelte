@@ -1,14 +1,19 @@
 <script lang="ts">
   import * as Table from '$lib/components/ui/table';
   import { resolve } from '$app/paths';
-  import { formatSessionCurrency as fmt, fmtPct, formatDateRange } from '$lib/utils/format.svelte';
+  import {
+    formatSessionCurrency as fmt,
+    fmtPct,
+    formatDateRange,
+    signColor
+  } from '$lib/utils/format.svelte';
   import ReportTable from '$lib/features/reports/report-table.svelte';
   import ReportAccountCell from '$lib/features/reports/report-account-cell.svelte';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
   import type { ProfitLossReport } from '$lib/tauri';
   import type { SvelteSet } from 'svelte/reactivity';
   import type { PnLTreeNode } from './pnl-types';
-  import { changePct, varianceColor } from './pnl-utils';
+  import { changePct } from './pnl-utils';
 
   let {
     loading,
@@ -57,13 +62,13 @@
       </Table.Cell>
       <Table.Cell
         class={'py-1.5 text-right text-sm tabular-nums ' +
-          (variance !== 0 ? varianceColor(variance, positiveGood) : '')}
+          (variance !== 0 ? signColor(variance, positiveGood) : '')}
       >
         {variance >= 0 ? '+' : ''}{fmt(variance)}
       </Table.Cell>
       <Table.Cell
         class={'py-1.5 text-right text-sm tabular-nums ' +
-          (row.changePct !== null ? varianceColor(row.changePct, positiveGood) : '')}
+          (row.changePct !== null ? signColor(row.changePct, positiveGood) : '')}
       >
         {fmtPct(row.changePct)}
       </Table.Cell>
@@ -94,13 +99,13 @@
     </Table.Cell>
     <Table.Cell
       class={'py-2 text-right text-sm tabular-nums ' +
-        (variance !== 0 ? varianceColor(variance, positiveGood) : '')}
+        (variance !== 0 ? signColor(variance, positiveGood) : '')}
     >
       {variance >= 0 ? '+' : ''}{fmt(variance)}
     </Table.Cell>
     <Table.Cell
       class={'py-2 text-right text-sm tabular-nums ' +
-        (pct !== null ? varianceColor(pct, positiveGood) : '')}
+        (pct !== null ? signColor(pct, positiveGood) : '')}
     >
       {fmtPct(pct)}
     </Table.Cell>

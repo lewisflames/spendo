@@ -4,7 +4,7 @@
   import { cn } from '$lib/utils';
   import { dbSession } from '$lib/stores/db.svelte';
   import { sessionCurrency, formatSessionCurrency } from '$lib/utils/format.svelte';
-  import { getBudgetVsActual, fetchAccounts, getBudgetDateRange } from '$lib/tauri';
+  import { fetchBudgetVsActual, fetchAccounts, fetchBudgetDateRange } from '$lib/tauri';
   import { openBudget } from '$lib/utils/navigation';
   import { useUrlParams, yearParam } from '$lib/hooks/use-url-params.svelte';
   import { useDebouncedSearch } from '$lib/hooks/use-debounced-search.svelte';
@@ -18,34 +18,28 @@
   import ToolbarSkeleton from '$lib/components/shared/toolbar-skeleton.svelte';
   import BudgetYearDialog from '$lib/features/budgets/budget-year-dialog.svelte';
   import BudgetYearStepper from '$lib/features/budgets/budget-year-stepper.svelte';
-  import {
-    accountPathMap,
-    budgetYearBounds,
-    buildYearOptions,
-    fallbackYearOptions,
-    clampYear as clampYearToRange
-  } from '$lib/features/budgets/budget-utils';
+  import { accountPathMap } from '$lib/features/budgets/budget-utils';
+  import { useBudgetYear } from '$lib/hooks/use-budget-year.svelte';
   import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
   import BudgetsTable from '$lib/features/budgets/budgets-table.svelte';
-
-  const now = new Date();
-  let yearSel = $state(String(now.getFullYear()));
-
-  let currentYear = $derived(Number(yearSel));
 
   let showAddDialog = $state(false);
 
   let searchInput = $state('');
   let search = useDebouncedSearch(() => searchInput);
 
+  // Instantiated before the URL restore below (which reads the selection);
+  // the range getter only runs once data loads.
+  const by = useBudgetYear(() => dateRange);
+
   // URL params are applied before the fetch is set up so the first load
   // already uses values from the URL.
   useUrlParams([
     yearParam(
       'year',
-      () => yearSel,
-      (v) => (yearSel = v)
+      () => by.yearSel,
+      (v) => (by.yearSel = v)
     )
   ]);
 
@@ -53,15 +47,15 @@
     enabled: () => !!dbSession.value,
     fetch: async () => {
       const [budgetRows, accounts, range] = await Promise.all([
-        getBudgetVsActual(currentYear),
+        fetchBudgetVsActual(by.year),
         fetchAccounts(),
-        getBudgetDateRange()
+        fetchBudgetDateRange()
       ]);
       return { budgetRows, accounts, range };
     },
     // Keep the selection within the transaction date range once the range
     // (and the URL-driven selection) is known.
-    onSuccess: () => clampSelection(),
+    onSuccess: () => by.clampSelection(),
     label: 'Failed to load budgets'
   });
 
@@ -69,6 +63,7 @@
   let rows = $derived(res.data?.budgetRows ?? null);
   let accountsData = $derived(res.data?.accounts ?? null);
   let dateRange = $derived(res.data?.range ?? null);
+
   let error = $derived(res.error);
   let formError = $state<string | null>(null);
   // Dim during refetches only; the initial load shows the skeleton instead.
@@ -93,37 +88,11 @@
 
   let hasBudgets = $derived(rows !== null && rows.length > 0);
 
-  let { minYear, maxYear } = $derived(budgetYearBounds(dateRange));
-
-  let yearOptions = $derived.by(() => {
-    if (minYear === null || maxYear === null) {
-      return fallbackYearOptions();
-    }
-    return buildYearOptions(minYear, maxYear);
-  });
-
-  function clampYear(y: number): number {
-    return clampYearToRange(y, minYear, maxYear);
-  }
-
-  function clampSelection() {
-    if (minYear === null || maxYear === null) return;
-    const y = clampYear(currentYear);
-    if (y !== currentYear) yearSel = String(y);
-  }
-
-  let atMin = $derived(minYear !== null && currentYear <= minYear);
-  let atMax = $derived(maxYear !== null && currentYear >= maxYear);
-
   function handleSaveSuccess(accountGuid: string, createdYear: number) {
     res.reload();
     formError = null;
     toast.success('Budget saved');
     openBudget(accountGuid, createdYear);
-  }
-
-  function shiftYear(delta: number) {
-    yearSel = String(clampYear(currentYear + delta));
   }
 
   let currency = $derived(sessionCurrency());
@@ -141,12 +110,12 @@
       <div class="flex flex-wrap items-center gap-2">
         <div class="flex items-center gap-2">
           <BudgetYearStepper
-            bind:yearSel
-            {yearOptions}
-            {atMin}
-            {atMax}
-            onPrev={() => shiftYear(-1)}
-            onNext={() => shiftYear(1)}
+            bind:yearSel={by.yearSel}
+            yearOptions={by.yearOptions}
+            atMin={by.atMin}
+            atMax={by.atMax}
+            onPrev={() => by.shiftYear(-1)}
+            onNext={() => by.shiftYear(1)}
           />
         </div>
       </div>
@@ -229,7 +198,7 @@
         rows={rows !== null ? filteredRows : null}
         {hasBudgets}
         {currency}
-        year={currentYear}
+        year={by.year}
         onAddClick={() => {
           showAddDialog = true;
         }}
@@ -249,7 +218,7 @@
     {accountsData}
     {currency}
     {dateRange}
-    initialYear={currentYear}
+    initialYear={by.year}
     onSave={handleSaveSuccess}
     onError={(msg) => (formError = msg)}
   />

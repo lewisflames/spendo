@@ -7,7 +7,7 @@
   import { fetchAccounts } from '$lib/tauri';
   import {
     CATEGORY_ORDER,
-    CATEGORY_LABEL_PLURAL,
+    CATEGORY_LABEL_PLURAL as CATEGORY_LABEL,
     nodeCategory
   } from '$lib/features/accounts/account-types';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
@@ -22,13 +22,12 @@
   import KpiCard from '$lib/components/shared/kpi-card.svelte';
   import KpiCardRow from '$lib/components/shared/kpi-card-row.svelte';
   import { AsOfPicker } from '$lib/components/shared/as-of-picker';
+  import FutureAsOfNote from '$lib/components/shared/future-as-of-note.svelte';
   import MissingFxWarning from '$lib/features/reports/missing-fx-warning.svelte';
   import { clampZero, formatSessionCurrency, signColor, plural } from '$lib/utils/format.svelte';
   import { errMsg } from '$lib/utils/error';
   import AccountTable from '$lib/features/accounts/account-table.svelte';
   import BalanceTree from '$lib/features/accounts/balance-tree.svelte';
-
-  const CATEGORY_LABEL: Record<string, string> = { ...CATEGORY_LABEL_PLURAL };
 
   type Category = 'ASSET' | 'EQUITY' | 'LIABILITY';
 
@@ -95,9 +94,6 @@
 
   let retainedEarnings = $derived(data?.retainedEarnings ?? 0);
   let balanced = $derived(data !== null && Math.abs(data?.balanceCheck ?? 0) < 0.005);
-  // Future-dated transactions are excluded backend-side, so a future as-of
-  // date silently shows current balances — disclose instead of clamping.
-  let isFutureAsOf = $derived(!!asOf && asOf > todayStr());
 
   function handleExportCsv() {
     if (accounts.length === 0) return;
@@ -189,11 +185,7 @@
       {/if}
 
       {#if !loading && !error}
-        {#if isFutureAsOf}
-          <p class="text-xs text-muted-foreground">
-            Future date selected — future transactions are excluded, so this shows current balances.
-          </p>
-        {/if}
+        <FutureAsOfNote {asOf} />
         <p class="text-xs text-muted-foreground">
           {#if balanced}
             Balanced · Assets = Liabilities + Equity (incl. unrealized gains) + Retained earnings.

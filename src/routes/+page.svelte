@@ -3,7 +3,8 @@
   import { RefreshCw, LoaderCircle, Calendar, Building2, Receipt } from '@lucide/svelte';
   import { dbSession, dbSessionLoading, ensureDbSessionLoaded } from '$lib/stores/db.svelte';
   import { reimportLast } from '$lib/tauri';
-  import { formatDateRange, plural } from '$lib/utils/format.svelte';
+  import { formatDateRange } from '$lib/utils/format.svelte';
+  import { toastPriceResult } from '$lib/features/portfolio/price-utils';
   import ChangeHistory from '$lib/features/home/change-history.svelte';
   import WelcomeScreen from '$lib/features/home/welcome-screen.svelte';
   import ImportButton from '$lib/components/shared/import-button.svelte';
@@ -45,15 +46,7 @@
       } else {
         toast.warning('No new data imported');
       }
-      const priceErrors = result.prices?.errors ?? [];
-      const priceCount = result.prices?.prices.length ?? 0;
-      if (priceErrors.length > 0) {
-        toast.warning(
-          `Prices refreshed with ${plural(priceErrors.length, 'error')} — open Portfolio to fix symbols.`
-        );
-      } else if (priceCount > 0) {
-        toast.success('Prices refreshed from Yahoo Finance');
-      }
+      toastPriceResult(result.prices, { fixHint: true });
     } catch (e: unknown) {
       importError = errMsg(e, 'Reimport failed');
     } finally {

@@ -1,11 +1,6 @@
 import type { AccountNode, BudgetDateRange } from '$lib/tauri';
 import { yearOf } from '$lib/utils/format.svelte';
 
-/** Text color for a remaining/delta amount: red when over budget, green otherwise. */
-export function remainingColor(remaining: number): string {
-  return remaining < 0 ? 'text-destructive' : 'text-success';
-}
-
 export interface YearOption {
   value: string;
   label: string;

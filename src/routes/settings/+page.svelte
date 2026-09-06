@@ -15,12 +15,13 @@
   import {
     clearAppDb,
     createBookAt,
-    getDataInfo,
+    fetchDataInfo,
     openBook,
     saveBookAs,
     setBaseCurrency
   } from '$lib/tauri';
   import { BOOK_CURRENCIES, defaultCurrencyForLocale } from '$lib/utils/currency';
+  import { ensureSpendoExtension } from '$lib/utils/book';
   import { errMsg } from '$lib/utils/error';
   import { toast } from '$lib/components/ui/sonner';
   import { revealItemInDir } from '@tauri-apps/plugin-opener';
@@ -71,10 +72,6 @@
   let clearing = $state(false);
   let savingCurrency = $state(false);
   let switching = $state(false);
-
-  function ensureSpendoExtension(path: string): string {
-    return /\.[A-Za-z0-9]+$/.test(path) ? path : `${path}.spendo`;
-  }
 
   async function handleOpenBook() {
     if (switching) return;
@@ -159,7 +156,7 @@
 
   const dataRes = useAsyncData({
     enabled: () => true,
-    fetch: getDataInfo,
+    fetch: fetchDataInfo,
     label: 'Failed to load data location'
   });
 

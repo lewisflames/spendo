@@ -72,7 +72,7 @@ No `preview` script (no `vite preview` wrapper). No frontend test framework. Rus
 
 ## Frontend conventions
 
-- **Navigation**: row-click navigation goes through `$lib/utils/navigation.ts` (`handleRowClick(e, go)` + `isPlainRowClick`, `openTransaction`, `openAccount`, `gotoHolding`, `openBudget`) — never copy per-table click guards; keep real `<a>` elements for keyboard/middle-click.
+- **Navigation**: row-click navigation goes through `$lib/utils/navigation.ts` (`handleRowClick(e, go)` + `openTransaction`, `openAccount`, `openHolding`, `openBudget`) — never copy per-table click guards; keep real `<a>` elements for keyboard/middle-click.
 - **Sorting**: table sort state uses `useTableSort<K>(defaults, descFirst)` from `$lib/hooks/`.
 - **URL state**: compose specs from the factories in `use-url-params.svelte.ts` (`pageParam`, `debouncedSearchParam`, `dateParam`, `yearParam`); free-form specs only when no factory fits.
 - **Search inputs**: always debounce through `useDebouncedSearch`.

@@ -45,7 +45,7 @@
     {loading}
     emptyMessage="No balance history found."
     {data}
-    getX={(d: AccountBalancePoint) => parseLocalDate(d.month)}
+    getX={(d: AccountBalancePoint) => parseLocalDate(d.date)}
     series={[{ key: 'balance', label: 'Balance', color }]}
     {currency}
     {referenceLine}

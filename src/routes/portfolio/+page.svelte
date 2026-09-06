@@ -7,7 +7,8 @@
     signColor,
     sessionCurrency,
     formatSessionCurrency,
-    formatDate
+    formatDate,
+    plural
   } from '$lib/utils/format.svelte';
   import { errMsg } from '$lib/utils/error';
   import PageHeader from '$lib/components/layout/page-header.svelte';
@@ -21,10 +22,9 @@
   import PortfolioChart from '$lib/features/portfolio/portfolio-chart.svelte';
   import HoldingsTable from '$lib/features/portfolio/holdings-table.svelte';
   import AllocationPie from '$lib/features/accounts/allocation-pie.svelte';
-  import { holdingLabel } from '$lib/features/portfolio/price-utils';
-  import { gotoHolding } from '$lib/utils/navigation';
+  import { holdingLabel, toastPriceResult } from '$lib/features/portfolio/price-utils';
+  import { openHolding } from '$lib/utils/navigation';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
-  import { plural } from '$lib/utils/format.svelte';
 
   const res = useAsyncData({
     enabled: () => !!dbSession.value,
@@ -46,11 +46,7 @@
     try {
       const result = await refreshPrices();
       priceErrors = result.errors;
-      if (result.errors.length > 0) {
-        toast.warning(`Prices refreshed with ${plural(result.errors.length, 'error')}`);
-      } else {
-        toast.success('Prices refreshed');
-      }
+      toastPriceResult(result);
       // Reload so market values, day change and the timestamp pick up the new prices.
       res.reload();
     } catch (e: unknown) {
@@ -211,7 +207,7 @@
             description="By market value"
             centerLabel="Total"
             centerValue={fmt(d.totalMarketValue)}
-            onSelect={(key) => gotoHolding(key)}
+            onSelect={(key) => openHolding(key)}
           />
         </div>
       </div>
