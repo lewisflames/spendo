@@ -578,15 +578,13 @@ fn compute_balances_as_of(
                     (market, market - cost)
                 }
                 None => {
-                    // No cached Yahoo price: fall back to cost basis so the
-                    // sheet stays complete, and flag the security (not an FX
-                    // gap) so the UI can point at the holding's symbol.
+                    // No cached Yahoo price: contribute zero (matching
+                    // `accounts.rs`, home net worth and portfolio market
+                    // value) and flag the security (not an FX gap) so the UI
+                    // can point at the holding's symbol.
                     if let Some(m) = commodity.as_deref() {
                         missing_prices.entry(m.to_string()).or_insert(commodity_guid);
-                        (
-                            fx::convert_tracked(signed_balance, m, &report, &fx_map, None),
-                            0.0,
-                        )
+                        (0.0, 0.0)
                     } else {
                         (signed_balance, 0.0)
                     }
@@ -1096,10 +1094,12 @@ mod tests {
         let conn = setup_balance_sheet();
         conn.execute("DELETE FROM prices", [],).unwrap();
         let report = generate_balance_sheet_inner(&conn, "2024-12-31").unwrap();
-        // Falls back to cost (1000): assets 2500, equity 1000, still balanced.
-        assert_eq!(report.total_assets, 2500.0);
+        // Unpriced securities contribute zero (matching accounts/home/portfolio):
+        // checking 1500 + broker 0. The sheet is out of balance by the missing
+        // cost (1000) until a price exists.
+        assert_eq!(report.total_assets, 1500.0);
         assert_eq!(report.unrealized_gains, 0.0);
-        assert!(report.balance_check.abs() < 0.01, "check={}", report.balance_check);
+        assert!((report.balance_check + 1000.0).abs() < 0.01, "check={}", report.balance_check);
         // The security is reported as a missing price (with holding link
         // target), never as a missing FX rate.
         assert!(report.missing_fx.is_empty());

@@ -9,7 +9,7 @@ use crate::accounts;
 use crate::accounts::{AccountNode, ChildAccountInfo, ParentAccountInfo};
 use crate::db::{run_blocking, AppState};
 use crate::fx;
-use crate::prices::{get_cached_prices_map, latest_quote_currencies};
+use crate::prices::get_cached_prices_map;
 use crate::sql;
 use crate::utils;
 
@@ -197,115 +197,6 @@ fn filter_clauses(
     w
 }
 
-/// Display balance for the subtree as of `as_of`: cash split values converted
-/// to the report currency at period FX, plus investment quantities marked to
-/// market at the latest cached prices (cost basis converted at each stock's
-/// quote currency). Returned pre-sign; credit-normal negation happens at the
-/// call site.
-fn compute_subtree_balance(
-    conn: &Connection,
-    ctx: &FxCtx,
-    sub_guids: &[String],
-    as_of: Option<&str>,
-) -> Result<f64, String> {
-    let in_list = sql::in_clause(sub_guids.len());
-    let mut sub_params = sql::string_param_refs(sub_guids);
-    // Half-open cap mirroring `accounts.rs`: the whole as-of day counts, and
-    // a future as-of never leaks future transactions.
-    let as_of_str = effective_as_of(as_of);
-    sub_params.push(&as_of_str);
-    let as_of_idx = sub_guids.len() + 1;
-
-    let raw_balance: f64 = {
-        let sql = format!(
-            "SELECT c.mnemonic, COALESCE(SUM({}), 0) as raw_balance
-             FROM splits s
-             JOIN accounts a ON a.guid = s.account_guid
-             JOIN commodities c ON c.guid = a.commodity_guid
-             JOIN transactions t ON t.guid = s.tx_guid
-             WHERE s.account_guid IN ({})
-             AND a.account_type NOT IN ({})
-             AND {}
-             AND t.post_date < min(date(?{}, '+1 day'), date('now', '+1 day'))
-             GROUP BY c.mnemonic",
-            utils::RAW_AMOUNT,
-            in_list,
-            utils::investment_types_sql(),
-            utils::VISIBLE_TX_FILTER,
-            as_of_idx
-        );
-        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-        let rows: Vec<(String, f64)> = stmt
-            .query_map(sub_params.as_slice(), |row| Ok((row.get(0)?, row.get(1)?)))
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?;
-        rows.iter()
-            .map(|(mn, v)| fx::convert(*v, mn, &ctx.report_currency, &ctx.fx_map))
-            .sum()
-    };
-
-    // Stock quantities and cost basis per stock, converted via the stock's quote currency.
-    let stock_rows: Vec<(String, f64, f64)> = {
-        let sql = format!(
-            "SELECT c.mnemonic as commodity_mnemonic,
-                    SUM({}) as quantity,
-                    SUM({}) as cost
-             FROM splits s
-             JOIN accounts a ON a.guid = s.account_guid
-             JOIN commodities c ON c.guid = a.commodity_guid
-             JOIN transactions t ON t.guid = s.tx_guid
-             WHERE s.account_guid IN ({})
-             AND {}
-             AND a.account_type IN ({})
-             AND t.post_date < min(date(?{}, '+1 day'), date('now', '+1 day'))
-             GROUP BY c.mnemonic",
-            utils::QUANTITY_AMOUNT,
-            utils::RAW_AMOUNT,
-            in_list,
-            utils::VISIBLE_TX_FILTER,
-            utils::investment_types_sql(),
-            as_of_idx
-        );
-        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-        let result = stmt
-            .query_map(sub_params.as_slice(), |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-            })
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?;
-        result
-    };
-
-    let mut final_balance = raw_balance;
-    if !stock_rows.is_empty() {
-        let cached_prices = get_cached_prices_map(conn).unwrap_or_default();
-        let quote_currencies = latest_quote_currencies(conn).unwrap_or_default();
-        let mut stock_market_value = 0.0;
-        let mut stock_cost_converted = 0.0;
-        let mut has_prices = false;
-        for (mnemonic, quantity, cost) in &stock_rows {
-            if let Some(price) = cached_prices.get(mnemonic) {
-                stock_market_value += quantity * price;
-                has_prices = true;
-            } else {
-                stock_market_value += quantity;
-            }
-            let quote = quote_currencies
-                .get(mnemonic)
-                .cloned()
-                .unwrap_or_else(|| ctx.report_currency.clone());
-            stock_cost_converted += fx::convert(*cost, &quote, &ctx.report_currency, &ctx.fx_map);
-        }
-        if has_prices {
-            final_balance = raw_balance - stock_cost_converted + stock_market_value;
-        }
-    }
-
-    Ok(final_balance)
-}
-
 /// Income/expense totals across transactions in the subtree as of `as_of`
 /// that match `search`. Positive/negative signed effects bucketed per
 /// transaction after conversion to the report currency.
@@ -402,12 +293,11 @@ fn fetch_account_detail_inner(
         fx_map: fx::get_fx_map(conn, query.as_of)?,
     };
 
-    let final_balance = compute_subtree_balance(conn, &ctx, &sub_guids, query.as_of)?;
-    let balance = if utils::is_credit_normal(&header.account_type) {
-        -final_balance
-    } else {
-        final_balance
-    };
+    // Single source of truth: the KPI balance is the tree-consistent subtree
+    // balance (same valuation as the Accounts list, pie and child table), so
+    // the three can never diverge. `None` only happens for accounts missing
+    // from the tree (e.g. ROOT, which the tree excludes).
+    let balance = subtree.as_ref().map(|n| n.balance).unwrap_or(0.0);
 
     let summary = compute_summary(conn, &ctx, &sub_guids, query.search, query.as_of)?;
     let tx_page = load_tx_page(conn, &ctx, &sub_guids, &query)?;
@@ -1186,7 +1076,6 @@ mod tests {
     #[test]
     fn detail_as_of_caps_balances_but_not_ledger() {
         let conn = setup();
-        let sub = accounts::get_subaccount_guids(&conn, "checking").unwrap();
 
         fn query(as_of: Option<&str>) -> TxQuery<'_> {
             TxQuery {
@@ -1223,19 +1112,11 @@ mod tests {
         assert_eq!(result.account.balance, 70.0);
         assert_eq!(result.summary.total_transactions, 2);
 
-        // The pre-sign helper agrees (used directly to avoid sign confusion).
-        let ctx = FxCtx {
-            report_currency: "EUR".into(),
-            fx_map: HashMap::new(),
-        };
-        assert_eq!(
-            compute_subtree_balance(&conn, &ctx, &sub, Some("2024-01-15")).unwrap(),
-            100.0
-        );
-        assert_eq!(
-            compute_subtree_balance(&conn, &ctx, &sub, None).unwrap(),
-            70.0
-        );
+        // KPI agrees with the tree-consistent subtree balance by construction.
+        let (_, subtree, _) =
+            accounts::fetch_children_and_subtree(&conn, "checking", Some("2024-01-15"))
+                .unwrap();
+        assert_eq!(subtree.unwrap().balance, 100.0);
     }
 
     #[test]
@@ -1319,5 +1200,136 @@ mod tests {
         .unwrap();
         let amounts: Vec<f64> = page.transactions.iter().map(|t| t.amount).collect();
         assert_eq!(amounts, vec![-30.0, 100.0]);
+    }
+
+    fn setup_investments() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        init_db(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO commodities (guid, mnemonic, namespace) VALUES
+             ('c-eur', 'EUR', 'CURRENCY'),
+             ('c-aapl', 'AAPL', 'NASDAQ'),
+             ('c-xyz', 'XYZ', 'NASDAQ')",
+            [],
+        )
+        .unwrap();
+        // ROOT pins the report currency to EUR.
+        conn.execute(
+            "INSERT INTO accounts (guid, name, account_type, parent_guid, placeholder, commodity_guid) VALUES
+             ('root', 'Root', 'ROOT', NULL, 0, 'c-eur'),
+             ('assets', 'Assets', 'ASSET', 'root', 1, 'c-eur'),
+             ('checking', 'Checking', 'BANK', 'assets', 0, 'c-eur'),
+             ('broker', 'Broker', 'STOCK', 'assets', 0, 'c-aapl'),
+             ('vault', 'Vault', 'STOCK', 'assets', 0, 'c-xyz')",
+            [],
+        )
+        .unwrap();
+        // Cash 500.
+        add_split(&conn, "t-cash", "2024-01-10", "checking", 50_000);
+        // Buy 10 AAPL for 1000 (value) and 5 XYZ for 700.
+        conn.execute(
+            "INSERT INTO transactions (guid, post_date) VALUES ('t-aapl', '2024-02-01'), ('t-xyz', '2024-02-15')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO splits (guid, tx_guid, account_guid, value_num, value_denom, quantity_num, quantity_denom) VALUES
+             ('s-aapl', 't-aapl', 'broker', 100000, 100, 10, 1),
+             ('s-xyz', 't-xyz', 'vault', 70000, 100, 5, 1)",
+            [],
+        )
+        .unwrap();
+        // Only AAPL is priced: 10 shares @ 150 EUR = 1500 market.
+        conn.execute(
+            "INSERT INTO prices (guid, commodity_guid, currency_guid, value_num, value_denom, date)
+             VALUES ('c-aapl-2024-03-01', 'c-aapl', 'c-eur', 15000, 100, '2024-03-01')",
+            [],
+        )
+        .unwrap();
+        conn
+    }
+
+    fn detail_query() -> TxQuery<'static> {
+        TxQuery {
+            page: 1,
+            page_size: 50,
+            date_from: None,
+            date_to: None,
+            search: None,
+            sort_by: None,
+            sort_dir: None,
+            as_of: None,
+        }
+    }
+
+    #[test]
+    fn detail_kpi_matches_tree_for_priced_investments() {
+        let conn = setup_investments();
+
+        // Cash 500 + AAPL market 1500 + unpriced XYZ 0.
+        let result = fetch_account_detail_inner(&conn, "assets", detail_query()).unwrap();
+        assert_eq!(result.account.balance, 2000.0);
+        assert_eq!(result.subtree.as_ref().unwrap().balance, 2000.0);
+
+        let by_guid: HashMap<&str, f64> = result
+            .account
+            .child_accounts
+            .iter()
+            .map(|c| (c.guid.as_str(), c.balance))
+            .collect();
+        assert_eq!(by_guid["checking"], 500.0);
+        assert_eq!(by_guid["broker"], 1500.0);
+        assert_eq!(by_guid["vault"], 0.0);
+
+        // Leaf pages agree with the tree as well.
+        let broker = fetch_account_detail_inner(&conn, "broker", detail_query()).unwrap();
+        assert_eq!(broker.account.balance, 1500.0);
+        let vault = fetch_account_detail_inner(&conn, "vault", detail_query()).unwrap();
+        assert_eq!(vault.account.balance, 0.0);
+    }
+
+    #[test]
+    fn detail_kpi_excludes_unpriced_cost_from_total() {
+        // Regression for the old `raw - cost + market` helper, which reported
+        // cash + (market - cost) = 500 + 500 = 1000 here instead of 2000.
+        let conn = setup_investments();
+        let result = fetch_account_detail_inner(&conn, "assets", detail_query()).unwrap();
+        assert_eq!(result.account.balance, 2000.0);
+        assert!(
+            (result.account.balance - 1000.0).abs() > 0.01,
+            "must not be the old market-minus-cost total"
+        );
+    }
+
+    #[test]
+    fn detail_as_of_caps_investment_balances() {
+        let conn = setup_investments();
+        let (children, subtree, _) =
+            accounts::fetch_children_and_subtree(&conn, "assets", Some("2024-01-15")).unwrap();
+        // Only the cash leg exists as of mid-January.
+        assert_eq!(subtree.unwrap().balance, 500.0);
+        let broker_balance = children
+            .iter()
+            .find(|c| c.guid == "broker")
+            .map(|c| c.balance)
+            .unwrap();
+        assert_eq!(broker_balance, 0.0);
+
+        let result = fetch_account_detail_inner(
+            &conn,
+            "assets",
+            TxQuery {
+                page: 1,
+                page_size: 50,
+                date_from: None,
+                date_to: None,
+                search: None,
+                sort_by: None,
+                sort_dir: None,
+                as_of: Some("2024-01-15"),
+            },
+        )
+        .unwrap();
+        assert_eq!(result.account.balance, 500.0);
     }
 }
