@@ -1,6 +1,6 @@
 # spendo
 
-Tauri v2 desktop app (Rust backend) + SvelteKit frontend. Import and explore your GnuCash financial data.
+Tauri v2 desktop app (Rust backend) + SvelteKit frontend. Manage your finances locally in portable `.spendo` books.
 
 - **UI**: shadcn-svelte (Nova), Tailwind CSS v4, Lucide icons
 - **Backend**: Rust (`rusqlite`), persistent SQLite database in Tauri app data directory
@@ -22,7 +22,7 @@ Tauri v2 desktop app (Rust backend) + SvelteKit frontend. Import and explore you
 
 ## Architecture
 
-The app maintains its own SQLite database in Tauri's app data directory (`spendo.db`). Upload a `.gnucash` file (GnuCash SQLite format) via the file dialog on the home page to import and merge your financial data. Multiple imports accumulate and duplicates are skipped by GUID.
+The app works with portable `.spendo` book files (SQLite) that live wherever you choose; the last open book is remembered across restarts. Open or create a book from the welcome screen, then optionally import a `.gnucash` file (GnuCash SQLite format) to merge its data in. Multiple imports accumulate and duplicates are skipped by GUID.
 
 All backend calls go through `@tauri-apps/api/core` `invoke()` via `src/lib/tauri.ts`. The Rust backend lives in `src-tauri/src/` and uses `rusqlite` with Tauri's `State<Mutex<Connection>>`.
 

@@ -1,6 +1,6 @@
 import { browser } from '$app/environment';
 
-export type Locale = 'en-US' | 'en-GB' | 'de-DE' | 'fr-FR' | 'ja-JP' | 'pt-BR' | 'es-ES';
+export type Locale = 'en-US' | 'en-GB' | 'en-IE' | 'de-DE' | 'fr-FR' | 'ja-JP' | 'pt-BR' | 'es-ES';
 export type Theme = 'light' | 'dark' | 'system';
 
 export interface AppSettings {
@@ -16,14 +16,23 @@ const STORAGE_KEY = 'spendo-settings';
 export const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
 
 const DEFAULT_SETTINGS: AppSettings = {
-  locale: 'en-US',
+  locale: 'en-IE',
   theme: 'system',
   pageSize: 25,
   sidebarCollapsed: false,
   reduceMotion: false
 };
 
-const LOCALES: readonly string[] = ['en-US', 'en-GB', 'de-DE', 'fr-FR', 'ja-JP', 'pt-BR', 'es-ES'];
+const LOCALES: readonly string[] = [
+  'en-US',
+  'en-GB',
+  'en-IE',
+  'de-DE',
+  'fr-FR',
+  'ja-JP',
+  'pt-BR',
+  'es-ES'
+];
 
 function loadSettings(): AppSettings {
   if (!browser) return DEFAULT_SETTINGS;

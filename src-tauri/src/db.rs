@@ -4,9 +4,17 @@ use std::sync::{Arc, Mutex};
 
 pub struct AppState {
     pub db: Arc<Mutex<Connection>>,
-    /// Absolute path of the app database file (for display / reveal-in-folder).
-    pub db_path: PathBuf,
+    /// Absolute path of the active book file. `None` while on the in-memory
+    /// placeholder (no book opened or created yet) — see `books::get_active_book`.
+    pub db_path: Mutex<Option<PathBuf>>,
+    /// Tauri app-data dir: legacy `spendo.db` location + `last_book.json` sidecar.
+    pub app_data_dir: PathBuf,
 }
+
+/// Magic stamped via `PRAGMA application_id` on every Spendo book so
+/// `books::validate_spendo_db` can tell our files apart from GnuCash source
+/// books (which share table names like `accounts`/`splits`) and random SQLite.
+pub const SPENDO_APP_ID: i32 = 0x5350_4e44; // 'SPND'
 
 /// Run a closure with the DB connection on a blocking thread. Every DB-touching
 /// command must go through here so the tokio runtime threads are never blocked
@@ -19,6 +27,24 @@ where
     tauri::async_runtime::spawn_blocking(move || {
         let conn = db.lock().map_err(|e| e.to_string())?;
         f(&conn)
+    })
+    .await
+    .map_err(|e| format!("Background task failed: {}", e))?
+}
+
+/// Run a mutable closure with the DB connection on a blocking thread. This is
+/// the swap-path counterpart of [`run_blocking`]: book switching must replace
+/// the `Connection` itself (`*conn = new_conn`), which needs `&mut`. Same
+/// rule applies — callers must do file I/O (validate, connect new file) before
+/// entering, and never lock directly inside an `async fn`.
+pub async fn run_swap_blocking<T, F>(db: Arc<Mutex<Connection>>, f: F) -> Result<T, String>
+where
+    F: FnOnce(&mut Connection) -> Result<T, String> + Send + 'static,
+    T: Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut conn = db.lock().map_err(|e| e.to_string())?;
+        f(&mut conn)
     })
     .await
     .map_err(|e| format!("Background task failed: {}", e))?
@@ -147,6 +173,52 @@ pub fn connect_source_db(db_path: &PathBuf) -> Result<Connection> {
     Connection::open_with_flags(db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
 }
 
+/// Stamp a freshly created or adopted book with our `application_id` magic so
+/// `books::validate_spendo_db` recognizes it on later opens. Cheap and
+/// idempotent; never fails an open if the PRAGMA itself errors.
+pub fn stamp_app_id(conn: &Connection) {
+    conn.execute_batch(&format!("PRAGMA application_id = {SPENDO_APP_ID};"))
+        .ok();
+}
+
+/// Best-effort WAL checkpoint before a book switch or `VACUUM INTO`: flushes
+/// `-wal`/`-shm` sidecars back into the main file so no data lingers next to
+/// the old book. Never fails the caller (e.g. in-memory placeholder has no WAL).
+pub fn checkpoint(conn: &Connection) {
+    conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);").ok();
+}
+
+/// Path of the sidecar remembering the last active book across restarts.
+pub fn last_book_file(app_data_dir: &Path) -> PathBuf {
+    app_data_dir.join("last_book.json")
+}
+
+/// Read the sidecar; missing/corrupt content means "no remembered book", never
+/// an error — startup falls back to the legacy `spendo.db` or the welcome
+/// screen instead of crashing.
+pub fn read_last_book(app_data_dir: &Path) -> Option<PathBuf> {
+    let raw = std::fs::read_to_string(last_book_file(app_data_dir)).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let path = value.get("path")?.as_str()?;
+    if path.is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(path))
+}
+
+/// Remember the active book. Called after every successful open/create/save-as;
+/// a failure here must not fail the switch, so callers log and continue.
+pub fn write_last_book(app_data_dir: &Path, path: &Path) -> Result<(), String> {
+    let body = serde_json::json!({ "path": path.to_string_lossy() });
+    std::fs::write(last_book_file(app_data_dir), body.to_string())
+        .map_err(|e| format!("Failed to remember open book: {}", e))
+}
+
+/// Forget the active book (e.g. its file vanished). Never errors.
+pub fn clear_last_book(app_data_dir: &Path) {
+    std::fs::remove_file(last_book_file(app_data_dir)).ok();
+}
+
 /// Full database reset: drops every app table (including the legacy
 /// `budget_amounts` table from pre-release builds) and recreates the current
 /// `SCHEMA`. This is the supported upgrade path while there are no
@@ -245,5 +317,38 @@ mod tests {
             [],
         )
         .unwrap();
+    }
+
+    #[test]
+    fn stamp_sets_application_id() {
+        let conn = Connection::open_in_memory().unwrap();
+        stamp_app_id(&conn);
+        let id: i32 = conn
+            .query_row("PRAGMA application_id", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(id, SPENDO_APP_ID);
+    }
+
+    #[test]
+    fn last_book_sidecar_round_trips() {
+        let dir = std::env::temp_dir().join(format!("spendo-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // Missing sidecar means "no remembered book", not an error.
+        assert_eq!(read_last_book(&dir), None);
+
+        let book = dir.join("my.spendo");
+        write_last_book(&dir, &book).unwrap();
+        assert_eq!(read_last_book(&dir), Some(book.clone()));
+
+        clear_last_book(&dir);
+        assert_eq!(read_last_book(&dir), None);
+
+        // Corrupt content also falls back to None.
+        std::fs::write(last_book_file(&dir), "not json{").unwrap();
+        assert_eq!(read_last_book(&dir), None);
+        std::fs::write(last_book_file(&dir), r#"{"path":""}"#).unwrap();
+        assert_eq!(read_last_book(&dir), None);
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

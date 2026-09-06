@@ -1,10 +1,12 @@
 mod account_detail;
 mod accounts;
+mod books;
 mod budgets;
 mod db;
 mod fx;
 mod home;
 mod import;
+mod init;
 mod portfolio;
 mod prices;
 mod reports;
@@ -30,18 +32,59 @@ pub fn run() {
                 .app_data_dir()
                 .expect("Failed to get app data dir");
             std::fs::create_dir_all(&app_data_dir).ok();
-            let db_path = db::get_db_path(&app_data_dir);
-            let conn = db::connect_db(&db_path).expect("Failed to open database");
-            db::init_db(&conn).expect("Failed to initialize database");
+
+            // Document model: reopen the last active book, else adopt the
+            // legacy single `spendo.db`, else start book-less on an in-memory
+            // placeholder (welcome screen) — startup never crashes on a
+            // missing or corrupt file.
+            let remembered = db::read_last_book(&app_data_dir)
+                .filter(|p| p.is_file())
+                .or_else(|| {
+                    let legacy = db::get_db_path(&app_data_dir);
+                    legacy.is_file().then_some(legacy)
+                });
+            let (conn, active_path) = match remembered {
+                Some(path) => match db::connect_db(&path)
+                    .ok()
+                    .and_then(|c| db::init_db(&c).ok().map(|_| c))
+                {
+                    Some(c) => {
+                        db::stamp_app_id(&c);
+                        db::write_last_book(&app_data_dir, &path).ok();
+                        (c, Some(path))
+                    }
+                    None => {
+                        eprintln!("spendo: remembered book unreadable, starting book-less");
+                        db::clear_last_book(&app_data_dir);
+                        let c = rusqlite::Connection::open_in_memory()
+                            .expect("Failed to open placeholder database");
+                        db::init_db(&c).expect("Failed to initialize placeholder database");
+                        (c, None)
+                    }
+                },
+                None => {
+                    let c = rusqlite::Connection::open_in_memory()
+                        .expect("Failed to open placeholder database");
+                    db::init_db(&c).expect("Failed to initialize placeholder database");
+                    (c, None)
+                }
+            };
 
             app.manage(AppState {
                 db: std::sync::Arc::new(Mutex::new(conn)),
-                db_path,
+                db_path: Mutex::new(active_path),
+                app_data_dir,
             });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             home::fetch_home_data,
+            books::get_active_book,
+            books::open_book,
+            books::create_book_at,
+            books::save_book_as,
+            init::create_empty_book,
+            init::set_base_currency,
             settings::clear_app_db,
             settings::get_data_info,
             import::fetch_import_history,

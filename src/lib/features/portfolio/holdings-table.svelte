@@ -151,7 +151,7 @@
     <TableSkeleton cols={skeletonCols} rows={4} />
   </div>
 {:else if holdings.length === 0}
-  <EmptyState card title="No holdings" description="No securities found in your GnuCash file.">
+  <EmptyState card title="No holdings" description="No securities found in this book.">
     {#snippet icon()}
       <TrendingUp aria-hidden="true" class="text-muted-foreground" />
     {/snippet}

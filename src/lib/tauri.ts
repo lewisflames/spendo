@@ -247,6 +247,28 @@ export const fetchHomeData = (): Promise<HomeDataResult> => invoke('fetch_home_d
 
 export const clearAppDb = (): Promise<void> => invoke('clear_app_db');
 
+// ── Books (document model: one active `.spendo` file opened in place) ──
+
+/** Active book path, or `null` while book-less (fresh install). */
+export interface ActiveBook {
+  path: string | null;
+}
+
+export const getActiveBook = (): Promise<ActiveBook> => invoke('get_active_book');
+
+interface EmptyBookResult {
+  hasData: boolean;
+  summary: DataSummary;
+}
+
+export const openBook = (path: string): Promise<EmptyBookResult> => invoke('open_book', { path });
+
+export const createBookAt = (path: string, currency: string): Promise<EmptyBookResult> =>
+  invoke('create_book_at', { path, currency });
+
+export const saveBookAs = (path: string): Promise<EmptyBookResult> =>
+  invoke('save_book_as', { path });
+
 interface DataInfo {
   dbPath: string;
 }
@@ -267,6 +289,12 @@ export const importGnucash = (path: string, filename: string): Promise<ImportRes
   invoke('import_gnucash', { path, filename });
 
 export const reimportLast = (): Promise<ImportResult> => invoke('reimport_last');
+
+export const createEmptyBook = (currency: string): Promise<EmptyBookResult> =>
+  invoke('create_empty_book', { currency });
+
+export const setBaseCurrency = (currency: string): Promise<EmptyBookResult> =>
+  invoke('set_base_currency', { currency });
 
 export const fetchAccounts = (asOfDate?: string): Promise<AccountsResult> =>
   invoke('fetch_accounts', { asOfDate: asOfDate ?? null });

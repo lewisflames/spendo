@@ -18,10 +18,17 @@ pub async fn clear_app_db(state: State<'_, AppState>) -> Result<(), String> {
     .await
 }
 
-/// Reads only the precomputed `db_path` — no DB access, no lock needed.
+/// Reads only the precomputed active-book path — no DB access. While no book
+/// is open yet (fresh install) it falls back to the legacy default path so
+/// the UI still has something to display; prefer `books::get_active_book`
+/// when nullability matters.
 #[tauri::command]
 pub async fn get_data_info(state: State<'_, AppState>) -> Result<DataInfo, String> {
+    let guard = state.db_path.lock().map_err(|e| e.to_string())?;
+    let path = guard
+        .clone()
+        .unwrap_or_else(|| crate::db::get_db_path(&state.app_data_dir));
     Ok(DataInfo {
-        db_path: state.db_path.to_string_lossy().to_string(),
+        db_path: path.to_string_lossy().to_string(),
     })
 }

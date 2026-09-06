@@ -12,16 +12,28 @@
     type Locale,
     type Theme
   } from '$lib/stores/settings.svelte';
-  import { clearAppDb, getDataInfo } from '$lib/tauri';
+  import {
+    clearAppDb,
+    createBookAt,
+    getDataInfo,
+    openBook,
+    saveBookAs,
+    setBaseCurrency
+  } from '$lib/tauri';
+  import { BOOK_CURRENCIES, defaultCurrencyForLocale } from '$lib/utils/currency';
   import { errMsg } from '$lib/utils/error';
   import { toast } from '$lib/components/ui/sonner';
   import { revealItemInDir } from '@tauri-apps/plugin-opener';
+  import { open, save } from '@tauri-apps/plugin-dialog';
+  import { basename } from '@tauri-apps/api/path';
   import {
     SunMoon,
     Languages,
     ListOrdered,
     HardDrive,
     FolderOpen,
+    Plus,
+    Save,
     RotateCcw,
     Trash2
   } from '@lucide/svelte';
@@ -30,12 +42,18 @@
   import IconCardHeader from '$lib/components/shared/icon-card-header.svelte';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
 
-  import { dbSession, clearSession } from '$lib/stores/db.svelte';
+  import {
+    dbSession,
+    activeBookPath,
+    clearSession,
+    setActiveBookPath
+  } from '$lib/stores/db.svelte';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
 
   const locales: { value: Locale; label: string }[] = [
     { value: 'en-US', label: 'English (US)' },
     { value: 'en-GB', label: 'English (GB)' },
+    { value: 'en-IE', label: 'English (IE)' },
     { value: 'de-DE', label: 'Deutsch (DE)' },
     { value: 'fr-FR', label: 'Français (FR)' },
     { value: 'ja-JP', label: '日本語 (JP)' },
@@ -51,12 +69,115 @@
 
   let clearDialogOpen = $state(false);
   let clearing = $state(false);
+  let savingCurrency = $state(false);
+  let switching = $state(false);
+
+  function ensureSpendoExtension(path: string): string {
+    return /\.[A-Za-z0-9]+$/.test(path) ? path : `${path}.spendo`;
+  }
+
+  async function handleOpenBook() {
+    if (switching) return;
+    let selected: string | string[] | null;
+    try {
+      selected = await open({
+        multiple: false,
+        filters: [{ name: 'Spendo book', extensions: ['spendo', 'db', 'sqlite'] }]
+      });
+    } catch (e: unknown) {
+      toast.error(errMsg(e, 'Failed to open file dialog'));
+      return;
+    }
+    if (!selected || Array.isArray(selected)) return;
+    switching = true;
+    try {
+      const result = await openBook(selected);
+      dbSession.value = { summary: result.summary };
+      setActiveBookPath(selected);
+      toast.success(`Opened ${await basename(selected)}`);
+    } catch (e: unknown) {
+      toast.error(errMsg(e, 'Failed to open book'));
+    } finally {
+      switching = false;
+    }
+  }
+
+  async function handleNewBook() {
+    if (switching) return;
+    let target: string | null;
+    try {
+      target = await save({
+        defaultPath: 'book.spendo',
+        filters: [{ name: 'Spendo book', extensions: ['spendo'] }]
+      });
+    } catch (e: unknown) {
+      toast.error(errMsg(e, 'Failed to open save dialog'));
+      return;
+    }
+    if (!target) return;
+    const file = ensureSpendoExtension(target);
+    const currency = defaultCurrencyForLocale(appSettings.value.locale);
+    switching = true;
+    try {
+      const result = await createBookAt(file, currency);
+      dbSession.value = { summary: result.summary };
+      setActiveBookPath(file);
+      toast.success(`Book created (${currency})`);
+    } catch (e: unknown) {
+      toast.error(errMsg(e, 'Failed to create book'));
+    } finally {
+      switching = false;
+    }
+  }
+
+  async function handleSaveAs() {
+    if (switching || !dbSession.value) return;
+    let target: string | null;
+    try {
+      target = await save({
+        defaultPath: 'book.spendo',
+        filters: [{ name: 'Spendo book', extensions: ['spendo'] }]
+      });
+    } catch (e: unknown) {
+      toast.error(errMsg(e, 'Failed to open save dialog'));
+      return;
+    }
+    if (!target) return;
+    const file = ensureSpendoExtension(target);
+    switching = true;
+    try {
+      const result = await saveBookAs(file);
+      dbSession.value = { summary: result.summary };
+      setActiveBookPath(file);
+      toast.success(`Book saved as ${await basename(file)}`);
+    } catch (e: unknown) {
+      toast.error(errMsg(e, 'Failed to save book'));
+    } finally {
+      switching = false;
+    }
+  }
 
   const dataRes = useAsyncData({
     enabled: () => true,
     fetch: getDataInfo,
     label: 'Failed to load data location'
   });
+
+  const activePath = $derived(activeBookPath.value ?? dataRes.data?.dbPath ?? null);
+
+  async function handleCurrencyChange(v: string | undefined) {
+    if (!v || !dbSession.value || v === dbSession.value.summary.currency) return;
+    savingCurrency = true;
+    try {
+      const result = await setBaseCurrency(v);
+      dbSession.value = { summary: result.summary };
+      toast.success(`Base currency set to ${v}`);
+    } catch (e: unknown) {
+      toast.error(errMsg(e, 'Failed to set base currency'));
+    } finally {
+      savingCurrency = false;
+    }
+  }
 
   async function handleClearDb() {
     clearing = true;
@@ -73,9 +194,9 @@
   }
 
   async function handleRevealDb() {
-    if (!dataRes.data) return;
+    if (!activePath) return;
     try {
-      await revealItemInDir(dataRes.data.dbPath);
+      await revealItemInDir(activePath);
     } catch (e: unknown) {
       toast.error(errMsg(e, 'Failed to open file manager'));
     }
@@ -211,26 +332,72 @@
 
   <!-- Data location -->
   <Card.Root>
-    <IconCardHeader title="Data" description="Your imported book lives in an app-managed database.">
+    <IconCardHeader title="Data" description="Your book is a portable .spendo file.">
       {#snippet icon()}
         <HardDrive aria-hidden="true" class="size-4 text-muted-foreground" />
       {/snippet}
     </IconCardHeader>
-    <Card.Content class="flex flex-col items-start gap-3">
-      {#if dataRes.error}
-        <ErrorCard message={dataRes.error} onRetry={() => dataRes.reload()} />
-      {:else}
-        <code
-          class="max-w-full truncate rounded bg-muted px-2 py-1 font-mono text-xs text-muted-foreground"
-          title={dataRes.data?.dbPath}
-        >
-          {dataRes.data?.dbPath ?? '…'}
-        </code>
-        <Button variant="outline" disabled={!dataRes.data} onclick={handleRevealDb}>
-          <FolderOpen aria-hidden="true" class="size-4" />
-          Reveal in file manager
-        </Button>
-      {/if}
+    <Card.Content class="flex flex-col gap-4">
+      <div class="flex items-center justify-between gap-4">
+        <div class="flex flex-col gap-1">
+          <span class="text-sm font-medium">Base currency</span>
+          <span class="text-xs text-muted-foreground">Report currency for the book</span>
+        </div>
+        {#if dbSession.value}
+          <Select.Root
+            type="single"
+            value={dbSession.value.summary.currency}
+            onValueChange={handleCurrencyChange}
+            items={BOOK_CURRENCIES.map((c) => ({ value: c, label: c }))}
+            disabled={savingCurrency}
+          >
+            <Select.Trigger class="w-36">
+              <SelectPrimitive.Value placeholder="Select currency" />
+            </Select.Trigger>
+            <Select.Content>
+              {#each BOOK_CURRENCIES as c (c)}
+                <Select.Item value={c} label={c}>{c}</Select.Item>
+              {/each}
+            </Select.Content>
+          </Select.Root>
+        {:else}
+          <span class="text-xs text-muted-foreground">No book yet — start from Overview.</span>
+        {/if}
+      </div>
+      <div class="flex flex-col items-start gap-3">
+        {#if dataRes.error}
+          <ErrorCard message={dataRes.error} onRetry={() => dataRes.reload()} />
+        {:else}
+          <code
+            class="max-w-full truncate rounded bg-muted px-2 py-1 font-mono text-xs text-muted-foreground"
+            title={activePath ?? undefined}
+          >
+            {activePath ?? 'No book open'}
+          </code>
+          <div class="flex flex-wrap gap-2">
+            <Button variant="outline" disabled={switching} onclick={handleOpenBook}>
+              <FolderOpen aria-hidden="true" class="size-4" />
+              {switching ? 'Working...' : 'Open...'}
+            </Button>
+            <Button
+              variant="outline"
+              disabled={switching || !dbSession.value}
+              onclick={handleSaveAs}
+            >
+              <Save aria-hidden="true" class="size-4" />
+              Save as...
+            </Button>
+            <Button variant="outline" disabled={switching} onclick={handleNewBook}>
+              <Plus aria-hidden="true" class="size-4" />
+              New...
+            </Button>
+            <Button variant="outline" disabled={!activePath} onclick={handleRevealDb}>
+              <FolderOpen aria-hidden="true" class="size-4" />
+              Reveal in file manager
+            </Button>
+          </div>
+        {/if}
+      </div>
     </Card.Content>
   </Card.Root>
 
