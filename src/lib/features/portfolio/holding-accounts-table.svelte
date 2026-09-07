@@ -7,7 +7,8 @@
   import {
     signColor,
     formatSignedCurrency,
-    formatSessionCurrency as fmt
+    formatSessionCurrency as fmt,
+    EMPTY_DASH
   } from '$lib/utils/format.svelte';
   import { handleRowClick, openAccount } from '$lib/utils/navigation';
   import type { PortfolioHolding } from '$lib/tauri';
@@ -44,15 +45,19 @@
           onclick={(e) => handleRowClick(e, () => openAccount(acct.accountGuid))}
         >
           <Table.Cell class="py-2.5">
-            <a href={resolve('/accounts/[guid]', { guid: acct.accountGuid })} class="font-medium">
-              {acct.accountName}
+            <a
+              href={resolve('/accounts/[guid]', { guid: acct.accountGuid })}
+              class="font-medium"
+              title={acct.accountName}
+            >
+              {acct.accountDescription || acct.accountName}
             </a>
           </Table.Cell>
           <Table.Cell class="py-2.5 text-right tabular-nums">
             {acct.shares.toFixed(2)}
           </Table.Cell>
           <Table.Cell class="py-2.5 text-right text-muted-foreground tabular-nums">
-            {acct.shares > 0 ? fmt(acct.costBasis / acct.shares) : '—'}
+            {acct.shares > 0 ? fmt(acct.costBasis / acct.shares) : EMPTY_DASH}
           </Table.Cell>
           <Table.Cell class="py-2.5 text-right text-muted-foreground tabular-nums">
             {fmt(acct.costBasis)}

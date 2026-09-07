@@ -2,7 +2,14 @@
  * Column visibility state shared by tables with a columns menu
  * (account ledger, holdings). Preserves `COLUMNS` order on show.
  */
-export function useColumnVisibility<Id extends string>(defaults: Id[]) {
+export interface ColumnVisibility<Id extends string> {
+  readonly visibleColumns: Id[];
+  isVisible: (id: Id) => boolean;
+  setVisible: (id: Id, checked: boolean, allIds?: Id[]) => void;
+  resetColumns: () => void;
+}
+
+export function useColumnVisibility<Id extends string>(defaults: Id[]): ColumnVisibility<Id> {
   let visibleColumns = $state<Id[]>([...defaults]);
 
   function isVisible(id: Id): boolean {
