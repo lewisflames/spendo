@@ -23,6 +23,7 @@
   import HoldingsTable from '$lib/features/portfolio/holdings-table.svelte';
   import AllocationPie from '$lib/features/accounts/allocation-pie.svelte';
   import { holdingLabel, toastPriceResult } from '$lib/features/portfolio/price-utils';
+  import { loadBookSettings } from '$lib/stores/book-settings.svelte';
   import { openHolding } from '$lib/utils/navigation';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
 
@@ -38,6 +39,27 @@
 
   let refreshingPrices = $state(false);
   let priceErrors = $state<{ mnemonic: string; error: string }[]>([]);
+  let autoRefreshAttempted = $state(false);
+
+  // Book-scoped auto-refresh: when enabled, fetch once per page mount if the
+  // cached prices are missing or older than a day (and there is something to
+  // price). Manual refresh stays available via the header button.
+  $effect(() => {
+    if (!dbSession.value || autoRefreshAttempted || res.loading || !res.data) return;
+    if (res.data.holdings.length === 0) {
+      autoRefreshAttempted = true;
+      return;
+    }
+    autoRefreshAttempted = true;
+    loadBookSettings()
+      .then((settings) => {
+        if (settings.priceAutoRefresh !== 'on_startup' || refreshingPrices) return;
+        const last = res.data?.lastRefreshed;
+        const age = last ? Date.now() - new Date(last).getTime() : Number.POSITIVE_INFINITY;
+        if (!Number.isFinite(age) || age > 24 * 3600 * 1000) void handleRefreshPrices();
+      })
+      .catch(() => {});
+  });
 
   async function handleRefreshPrices() {
     if (!dbSession.value || refreshingPrices) return;

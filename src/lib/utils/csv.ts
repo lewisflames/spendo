@@ -1,20 +1,24 @@
-function escapeCell(value: string): string {
-  if (/[",\n\r]/.test(value)) {
+function escapeCell(value: string, delimiter: string): string {
+  if (value.includes(delimiter) || /["\n\r]/.test(value)) {
     return `"${value.replaceAll('"', '""')}"`;
   }
   return value;
 }
 
-function toCsvText(lines: string[][]): string {
-  return lines.map((r) => r.map(escapeCell).join(',')).join('\n');
+function toCsvText(lines: string[][], delimiter: string): string {
+  return lines.map((r) => r.map((c) => escapeCell(c, delimiter)).join(delimiter)).join('\n');
 }
 
 /** BOM prefix the download and file-write sinks apply so Excel detects UTF-8. */
 export const CSV_BOM = '﻿';
 
 /** Pure CSV text builder (no BOM) shared by the download and file-write sinks. */
-export function buildCsvText(headers: string[], rows: string[][]): string {
-  return toCsvText([headers, ...rows]);
+export function buildCsvText(
+  headers: string[],
+  rows: string[][],
+  delimiter: ',' | ';' = ','
+): string {
+  return toCsvText([headers, ...rows], delimiter);
 }
 
 function saveCsv(filename: string, text: string): void {
@@ -29,8 +33,13 @@ function saveCsv(filename: string, text: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
-export function downloadCsv(filename: string, headers: string[], rows: string[][]): void {
-  saveCsv(filename, buildCsvText(headers, rows));
+export function downloadCsv(
+  filename: string,
+  headers: string[],
+  rows: string[][],
+  delimiter: ',' | ';' = ','
+): void {
+  saveCsv(filename, buildCsvText(headers, rows, delimiter));
 }
 
 export interface ReportCsvOptions {
@@ -40,6 +49,7 @@ export interface ReportCsvOptions {
   rows: string[][];
   /** Totals block after a blank line (same column shape as rows). */
   totals?: string[][];
+  delimiter?: ',' | ';';
 }
 
 /**
@@ -47,10 +57,11 @@ export interface ReportCsvOptions {
  * (`String(n)`, machine-readable) — display formatting belongs in the UI.
  */
 export function downloadReportCsv(filename: string, opts: ReportCsvOptions): void {
+  const delimiter = opts.delimiter ?? ',';
   const lines: string[][] = [];
   for (const [key, value] of opts.meta ?? []) lines.push([key, value]);
   if (lines.length > 0) lines.push([]);
   lines.push(opts.headers, ...opts.rows);
   if (opts.totals && opts.totals.length > 0) lines.push([], ...opts.totals);
-  saveCsv(filename, toCsvText(lines));
+  saveCsv(filename, toCsvText(lines, delimiter));
 }

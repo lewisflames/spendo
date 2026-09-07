@@ -2,6 +2,7 @@ import { browser } from '$app/environment';
 
 export type Locale = 'en-US' | 'en-GB' | 'en-IE' | 'de-DE' | 'fr-FR' | 'ja-JP' | 'pt-BR' | 'es-ES';
 export type Theme = 'light' | 'dark' | 'system';
+export type Density = 'comfortable' | 'compact';
 
 export const ACCENT_IDS = ['zinc', 'blue', 'emerald', 'amber', 'rose', 'violet', 'custom'] as const;
 export type AccentId = (typeof ACCENT_IDS)[number];
@@ -14,6 +15,7 @@ export interface AppSettings {
   pageSize: number;
   sidebarCollapsed: boolean;
   reduceMotion: boolean;
+  density: Density;
 }
 
 const STORAGE_KEY = 'spendo-settings';
@@ -27,7 +29,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   customPrimary: null,
   pageSize: 25,
   sidebarCollapsed: false,
-  reduceMotion: false
+  reduceMotion: false,
+  density: 'comfortable'
 };
 
 const LOCALES: readonly string[] = [
@@ -109,6 +112,7 @@ function loadSettings(): AppSettings {
     const isTheme = (v: unknown): v is Theme => v === 'light' || v === 'dark' || v === 'system';
     const isPageSize = (v: unknown): v is number =>
       PAGE_SIZE_OPTIONS.includes(v as (typeof PAGE_SIZE_OPTIONS)[number]);
+    const isDensity = (v: unknown): v is Density => v === 'comfortable' || v === 'compact';
     return {
       locale: pick(raw.locale, DEFAULT_SETTINGS.locale, isLocale),
       theme: pick(raw.theme, DEFAULT_SETTINGS.theme, isTheme),
@@ -120,7 +124,8 @@ function loadSettings(): AppSettings {
           ? raw.sidebarCollapsed
           : DEFAULT_SETTINGS.sidebarCollapsed,
       reduceMotion:
-        typeof raw.reduceMotion === 'boolean' ? raw.reduceMotion : DEFAULT_SETTINGS.reduceMotion
+        typeof raw.reduceMotion === 'boolean' ? raw.reduceMotion : DEFAULT_SETTINGS.reduceMotion,
+      density: pick(raw.density, DEFAULT_SETTINGS.density, isDensity)
     };
   } catch {
     // ignore
@@ -140,6 +145,12 @@ export function saveSettings(partial: Partial<AppSettings>) {
 export function applyPageSize(size: number, setPage: (page: number) => void): void {
   saveSettings({ pageSize: size });
   setPage(1);
+}
+
+/** Reflect the density layer on `<html>` (compact tightens page spacing). */
+export function applyDensity(density: Density): void {
+  if (!browser) return;
+  document.documentElement.classList.toggle('compact', density === 'compact');
 }
 
 /** Restore every preference to its default (does not touch imported data). */

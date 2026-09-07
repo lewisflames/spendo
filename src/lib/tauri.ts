@@ -292,6 +292,26 @@ interface DataInfo {
 
 export const fetchDataInfo = (): Promise<DataInfo> => invoke('fetch_data_info');
 
+// ── Book-scoped settings (travel with the `.spendo` file) ──
+
+export type PnlPeriodId = 'this_month' | 'this_quarter' | 'this_year' | 'last_12_months';
+export type PriceAutoRefresh = 'off' | 'on_startup';
+export type CsvDelimiter = ',' | ';';
+export type ExportDateFormat = 'iso' | 'locale';
+
+export interface BookSettings {
+  fiscalYearStartMonth: number;
+  defaultPnlPeriod: PnlPeriodId;
+  priceAutoRefresh: PriceAutoRefresh;
+  exportCsvDelimiter: CsvDelimiter;
+  exportDateFormat: ExportDateFormat;
+}
+
+export const getBookSettings = (): Promise<BookSettings> => invoke('get_book_settings');
+
+export const setBookSetting = (key: string, value: string): Promise<BookSettings> =>
+  invoke('set_book_setting', { key, value });
+
 export const fetchChangeHistory = (page: number, pageSize: number): Promise<ChangeHistoryPage> =>
   invoke('fetch_change_history', { page, pageSize });
 

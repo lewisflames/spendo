@@ -1,13 +1,21 @@
 <script lang="ts">
   import * as Card from '$lib/components/ui/card';
   import { Button } from '$lib/components/ui/button';
+  import * as Select from '$lib/components/ui/select';
+  import { Select as SelectPrimitive } from 'bits-ui';
   import IconCardHeader from '$lib/components/shared/icon-card-header.svelte';
   import { toast } from '$lib/components/ui/sonner';
   import { Download, FileDown, LoaderCircle } from '@lucide/svelte';
   import { save } from '@tauri-apps/plugin-dialog';
   import { basename } from '@tauri-apps/api/path';
   import { dbSession } from '$lib/stores/db.svelte';
-  import { writeTextFile } from '$lib/tauri';
+  import {
+    bookSettings,
+    loadBookSettings,
+    saveBookSetting
+  } from '$lib/stores/book-settings.svelte';
+  import { appSettings } from '$lib/stores/settings.svelte';
+  import { writeTextFile, type CsvDelimiter, type ExportDateFormat } from '$lib/tauri';
   import { ensureCsvExtension } from '$lib/utils/book';
   import { errMsg } from '$lib/utils/error';
   import {
@@ -19,8 +27,38 @@
 
   let exportingTransactions = $state(false);
   let exportingAccounts = $state(false);
+  let savingExportPref = $state(false);
 
   let busy = $derived(exportingTransactions || exportingAccounts);
+
+  const delimiters: { value: CsvDelimiter; label: string }[] = [
+    { value: ',', label: 'Comma (,)' },
+    { value: ';', label: 'Semicolon (;)' }
+  ];
+
+  const dateFormats: { value: ExportDateFormat; label: string }[] = [
+    { value: 'iso', label: 'ISO (YYYY-MM-DD)' },
+    { value: 'locale', label: 'Locale format' }
+  ];
+
+  $effect(() => {
+    loadBookSettings().catch(() => {});
+  });
+
+  async function handleExportPref(
+    field: 'exportCsvDelimiter' | 'exportDateFormat',
+    value: CsvDelimiter | ExportDateFormat
+  ) {
+    if (!dbSession.value || savingExportPref) return;
+    savingExportPref = true;
+    try {
+      await saveBookSetting(field, value);
+    } catch (e: unknown) {
+      toast.error(errMsg(e, 'Failed to save export preference'));
+    } finally {
+      savingExportPref = false;
+    }
+  }
 
   async function handleExport(kind: 'transactions' | 'accounts') {
     const isTransactions = kind === 'transactions';
@@ -41,9 +79,14 @@
     if (isTransactions) exportingTransactions = true;
     else exportingAccounts = true;
     try {
+      const opts = {
+        delimiter: bookSettings.value.exportCsvDelimiter,
+        dateFormat: bookSettings.value.exportDateFormat,
+        locale: appSettings.value.locale
+      };
       const contents = isTransactions
-        ? await buildTransactionsExport()
-        : await buildAccountsExport();
+        ? await buildTransactionsExport(opts)
+        : await buildAccountsExport(opts);
       await writeTextFile(file, contents);
       toast.success(`Saved ${await basename(file)}`);
     } catch (e: unknown) {
@@ -62,6 +105,54 @@
     {/snippet}
   </IconCardHeader>
   <Card.Content class="flex flex-col gap-4">
+    <div class="flex items-center justify-between gap-4">
+      <div class="flex flex-col gap-1">
+        <span class="text-sm font-medium">CSV delimiter</span>
+        <span class="text-xs text-muted-foreground">Use semicolon for Excel in de-DE / fr-FR</span>
+      </div>
+      <Select.Root
+        type="single"
+        value={bookSettings.value.exportCsvDelimiter}
+        onValueChange={(v) => {
+          if (v === ',' || v === ';') void handleExportPref('exportCsvDelimiter', v);
+        }}
+        items={delimiters}
+        disabled={!dbSession.value || savingExportPref}
+      >
+        <Select.Trigger class="w-44">
+          <SelectPrimitive.Value placeholder="Select delimiter" />
+        </Select.Trigger>
+        <Select.Content>
+          {#each delimiters as d (d.value)}
+            <Select.Item value={d.value} label={d.label}>{d.label}</Select.Item>
+          {/each}
+        </Select.Content>
+      </Select.Root>
+    </div>
+    <div class="flex items-center justify-between gap-4">
+      <div class="flex flex-col gap-1">
+        <span class="text-sm font-medium">CSV date format</span>
+        <span class="text-xs text-muted-foreground">ISO stays machine-readable for re-import</span>
+      </div>
+      <Select.Root
+        type="single"
+        value={bookSettings.value.exportDateFormat}
+        onValueChange={(v) => {
+          if (v === 'iso' || v === 'locale') void handleExportPref('exportDateFormat', v);
+        }}
+        items={dateFormats}
+        disabled={!dbSession.value || savingExportPref}
+      >
+        <Select.Trigger class="w-44">
+          <SelectPrimitive.Value placeholder="Select format" />
+        </Select.Trigger>
+        <Select.Content>
+          {#each dateFormats as f (f.value)}
+            <Select.Item value={f.value} label={f.label}>{f.label}</Select.Item>
+          {/each}
+        </Select.Content>
+      </Select.Root>
+    </div>
     <div class="flex items-center justify-between gap-4">
       <div class="flex flex-col gap-1">
         <span class="text-sm font-medium">Transactions</span>

@@ -287,3 +287,12 @@
 ::view-transition-new(root) {
   animation-duration: 200ms;
 }
+
+/* Compact density: tighter page + card spacing (Settings → Appearance → Density). */
+html.compact #main-content {
+  padding: 1.25rem;
+}
+
+html.compact #main-content > div {
+  gap: 1rem;
+}

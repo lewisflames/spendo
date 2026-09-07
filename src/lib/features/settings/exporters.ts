@@ -48,9 +48,12 @@ export const ACCOUNTS_EXPORT_HEADERS = [
 ];
 
 /** One export row per split with raw native amounts (no FX, no sign flips). */
-export function mapExportSplitRow(r: ExportSplitRow): string[] {
+export function mapExportSplitRow(
+  r: ExportSplitRow,
+  formatDate: (isoDate: string) => string = (d) => d
+): string[] {
   return [
-    r.postDate,
+    formatDate(r.postDate),
     r.txGuid,
     r.num ?? '',
     r.description ?? '',
@@ -82,14 +85,49 @@ export function mapExportAccountRow(r: ExportAccountRow): string[] {
   ];
 }
 
+export interface BookExportOptions {
+  delimiter?: ',' | ';';
+  /** ISO keeps `YYYY-MM-DD` (machine-readable); locale renders via Intl. */
+  dateFormat?: 'iso' | 'locale';
+  locale?: string;
+}
+
+function exportDateFormatter(opts: BookExportOptions): (isoDate: string) => string {
+  if (opts.dateFormat !== 'locale') return (d) => d;
+  const locale = opts.locale ?? 'en-IE';
+  const fmt = new Intl.DateTimeFormat(locale, {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  });
+  return (isoDate: string) => {
+    // Date-only strings parse as UTC; render as local to avoid day shifts.
+    const d = /^\d{4}-\d{2}-\d{2}$/.test(isoDate)
+      ? new Date(`${isoDate}T00:00:00`)
+      : new Date(isoDate);
+    return Number.isNaN(d.getTime()) ? isoDate : fmt.format(d);
+  };
+}
+
 /** Full-book transactions CSV text (BOM + newest-first split rows). */
-export async function buildTransactionsExport(): Promise<string> {
+export async function buildTransactionsExport(opts: BookExportOptions = {}): Promise<string> {
   const rows = await fetchExportTransactions();
-  return CSV_BOM + buildCsvText(TRANSACTIONS_EXPORT_HEADERS, rows.map(mapExportSplitRow));
+  const formatDate = exportDateFormatter(opts);
+  return (
+    CSV_BOM +
+    buildCsvText(
+      TRANSACTIONS_EXPORT_HEADERS,
+      rows.map((r) => mapExportSplitRow(r, formatDate)),
+      opts.delimiter ?? ','
+    )
+  );
 }
 
 /** Full account tree CSV text (BOM included). */
-export async function buildAccountsExport(): Promise<string> {
+export async function buildAccountsExport(opts: BookExportOptions = {}): Promise<string> {
   const rows = await fetchExportAccounts();
-  return CSV_BOM + buildCsvText(ACCOUNTS_EXPORT_HEADERS, rows.map(mapExportAccountRow));
+  return (
+    CSV_BOM +
+    buildCsvText(ACCOUNTS_EXPORT_HEADERS, rows.map(mapExportAccountRow), opts.delimiter ?? ',')
+  );
 }
