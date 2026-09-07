@@ -165,6 +165,11 @@ CREATE TABLE IF NOT EXISTS symbol_overrides (
 	commodity_guid TEXT PRIMARY KEY,
 	symbol TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS app_settings (
+	key TEXT PRIMARY KEY,
+	value TEXT NOT NULL
+);
 ";
 
 pub fn get_db_path(app_data_dir: &Path) -> PathBuf {
@@ -256,6 +261,7 @@ pub fn clear_db(conn: &Connection) -> Result<()> {
           DROP TABLE IF EXISTS import_log;
           DROP TABLE IF EXISTS refresh_log;
           DROP TABLE IF EXISTS symbol_overrides;
+          DROP TABLE IF EXISTS app_settings;
           PRAGMA foreign_keys = ON;",
     )?;
     init_db(conn)
@@ -285,6 +291,7 @@ mod tests {
         let tables = table_names(&conn);
         for expected in [
             "accounts",
+            "app_settings",
             "budgets",
             "change_log",
             "change_snapshots",

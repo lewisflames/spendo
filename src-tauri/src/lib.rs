@@ -89,6 +89,8 @@ pub fn run() {
             settings::clear_app_db,
             settings::fetch_data_info,
             settings::write_text_file,
+            settings::get_book_settings,
+            settings::set_book_setting,
             import::import_gnucash,
             import::reimport_last,
             history::fetch_change_history,
