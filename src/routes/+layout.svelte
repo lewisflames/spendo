@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onNavigate, goto } from '$app/navigation';
+  import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { page } from '$app/state';
   import { MediaQuery } from 'svelte/reactivity';
@@ -68,40 +68,6 @@
     }
   });
 
-  let transitionInFlight = false;
-
-  onNavigate((navigation) => {
-    if (!document.startViewTransition) return;
-    // User preference wins; otherwise honor the OS reduce-motion setting.
-    if (appSettings.value.reduceMotion) return;
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    // A URL-sync goto can start a second navigation while the first
-    // transition is still running; starting another one skips/aborts it.
-    if (transitionInFlight) return;
-    transitionInFlight = true;
-    return new Promise((resolve) => {
-      const transition = document.startViewTransition(async () => {
-        // Resolve early so SvelteKit can render; the callback must stay alive
-        // until then or the browser would snapshot an unchanged DOM.
-        resolve();
-        try {
-          await navigation.complete;
-        } catch {
-          // aborted by a newer navigation (e.g. URL-sync goto) — ignore
-        }
-      });
-      // A superseded transition rejects ready/finished with AbortError;
-      // swallow those so they never surface as unhandled rejections.
-      transition.updateCallbackDone.catch(() => {});
-      transition.ready.catch(() => {});
-      transition.finished
-        .catch(() => {})
-        .finally(() => {
-          transitionInFlight = false;
-        });
-    });
-  });
-
   // Effective theme ('system' resolves live via prefersDark) + document lang.
   let resolvedTheme = $derived(
     appSettings.value.theme === 'system'
@@ -117,9 +83,6 @@
     document.documentElement.lang = appSettings.value.locale;
     applyAccent(appSettings.value.accent, appSettings.value.customPrimary);
     applyDensity(appSettings.value.density);
-    // Mirrors Settings → Appearance → Reduce motion onto <html> for
-    // CSS-driven ambient decoration.
-    document.documentElement.classList.toggle('reduce-motion', appSettings.value.reduceMotion);
   });
 
   function handleKeydown(e: KeyboardEvent) {

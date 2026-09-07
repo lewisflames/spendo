@@ -501,19 +501,6 @@
           aria-label="Start with sidebar collapsed"
         />
       </div>
-      <div class="flex items-center justify-between gap-4">
-        <div class="flex flex-col gap-1">
-          <span class="text-sm font-medium">Reduce motion</span>
-          <span class="text-xs text-muted-foreground">
-            Disable animated page transitions and ambient effects
-          </span>
-        </div>
-        <Switch
-          checked={appSettings.value.reduceMotion}
-          onCheckedChange={(v) => saveSettings({ reduceMotion: v })}
-          aria-label="Reduce motion"
-        />
-      </div>
     </Card.Content>
   </Card.Root>
 
