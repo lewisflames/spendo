@@ -9,8 +9,16 @@ function toCsvText(lines: string[][]): string {
   return lines.map((r) => r.map(escapeCell).join(',')).join('\n');
 }
 
+/** BOM prefix the download and file-write sinks apply so Excel detects UTF-8. */
+export const CSV_BOM = '﻿';
+
+/** Pure CSV text builder (no BOM) shared by the download and file-write sinks. */
+export function buildCsvText(headers: string[], rows: string[][]): string {
+  return toCsvText([headers, ...rows]);
+}
+
 function saveCsv(filename: string, text: string): void {
-  const blob = new Blob(['\uFEFF' + text], { type: 'text/csv;charset=utf-8;' });
+  const blob = new Blob([CSV_BOM + text], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -22,7 +30,7 @@ function saveCsv(filename: string, text: string): void {
 }
 
 export function downloadCsv(filename: string, headers: string[], rows: string[][]): void {
-  saveCsv(filename, toCsvText([headers, ...rows]));
+  saveCsv(filename, buildCsvText(headers, rows));
 }
 
 export interface ReportCsvOptions {

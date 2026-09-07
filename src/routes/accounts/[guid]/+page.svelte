@@ -6,10 +6,7 @@
   import { setBreadcrumb } from '$lib/stores/breadcrumb.svelte';
   import { fetchAccountDetail } from '$lib/tauri';
   import { clampZero, sessionCurrency } from '$lib/utils/format.svelte';
-  import { errMsg } from '$lib/utils/error';
   import ImportPrompt from '$lib/components/shared/import-prompt.svelte';
-  import { exportPaginatedCsv } from '$lib/utils/export';
-  import { toast } from '$lib/components/ui/sonner';
   import { useDebouncedSearch } from '$lib/hooks/use-debounced-search.svelte';
   import {
     useUrlParams,
@@ -169,46 +166,6 @@
       { name: data?.account.description ?? data?.account.name ?? 'Account' }
     ]);
   });
-
-  let exporting = $state(false);
-
-  async function handleExportCsv() {
-    const d = data;
-    if (!d || !guid || exporting) return;
-    exporting = true;
-    try {
-      await exportPaginatedCsv({
-        filename: `account-${guid}.csv`,
-        headers: ['Date', 'Description', 'Number', 'Notes', 'Splits', 'Amount', 'Running Balance'],
-        fetchPage: async (pageIdx, size) => {
-          const r = await fetchAccountDetail(
-            guid,
-            pageIdx,
-            size,
-            dateFrom || undefined,
-            dateTo || undefined,
-            search.value || undefined,
-            sortBy,
-            sortDir
-          );
-          return { rows: r.transactions, total: r.total };
-        },
-        mapRow: (t) => [
-          t.postDate,
-          t.description ?? '',
-          t.num ?? '',
-          t.notes ?? '',
-          t.splits.map((s) => `${s.accountName}: ${s.amount}`).join(' | '),
-          String(t.amount),
-          String(t.runningBalance)
-        ]
-      });
-    } catch (e: unknown) {
-      toast.error(errMsg(e, 'Failed to export transactions'));
-    } finally {
-      exporting = false;
-    }
-  }
 </script>
 
 <svelte:head>
@@ -221,15 +178,7 @@
     {#if (loading || dbBootstrapping.value) && !data}
       <PageHeaderSkeleton />
     {:else if data}
-      <AccountDetailHeader
-        account={data.account}
-        summary={data.summary}
-        {isToday}
-        bind:asOf
-        {exporting}
-        canExport={data.transactions.length > 0}
-        onExport={handleExportCsv}
-      />
+      <AccountDetailHeader account={data.account} summary={data.summary} {isToday} bind:asOf />
     {/if}
 
     {#if (loading || dbBootstrapping.value) && !data}

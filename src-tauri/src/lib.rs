@@ -3,6 +3,7 @@ mod accounts;
 mod books;
 mod budgets;
 mod db;
+mod export;
 mod fx;
 mod history;
 mod home;
@@ -87,6 +88,7 @@ pub fn run() {
             init::set_base_currency,
             settings::clear_app_db,
             settings::fetch_data_info,
+            settings::write_text_file,
             import::import_gnucash,
             import::reimport_last,
             history::fetch_change_history,
@@ -96,6 +98,8 @@ pub fn run() {
             transactions::fetch_transaction,
             transactions::fetch_transaction_heatmap,
             transactions::fetch_account_names,
+            export::fetch_export_transactions,
+            export::fetch_export_accounts,
             prices::refresh_prices,
             account_detail::fetch_account_detail,
             account_detail::fetch_account_balance_trend,

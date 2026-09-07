@@ -2,10 +2,7 @@
   import { dbBootstrapping, dbSession } from '$lib/stores/db.svelte';
   import { fetchPnlReport, fetchPnlTrend } from '$lib/tauri';
   import { signColor, formatSessionCurrency, fmtPct, EMPTY_DASH } from '$lib/utils/format.svelte';
-  import { ArrowLeftRight, History, TrendingUp, Percent, Download } from '@lucide/svelte';
-  import { Button } from '$lib/components/ui/button';
-  import { downloadReportCsv } from '$lib/utils/csv';
-  import { toast } from '$lib/components/ui/sonner';
+  import { ArrowLeftRight, History, TrendingUp, Percent } from '@lucide/svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import KpiCard from '$lib/components/shared/kpi-card.svelte';
   import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
@@ -14,7 +11,6 @@
   import PnlTrend from '$lib/features/pnl/pnl-trend.svelte';
   import MissingFxWarning from '$lib/features/reports/missing-fx-warning.svelte';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
-  import { errMsg } from '$lib/utils/error';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import { useReportDateRange } from '$lib/hooks/use-report-date-range.svelte';
   import { computePrevRange, PNL_PRESETS } from '$lib/utils/date-utils.svelte';
@@ -68,57 +64,6 @@
   );
   let isZeroVariance = $derived(netVariance === null || netVariance === 0);
   let isZeroChange = $derived(netChangePct === null || netChangePct === 0);
-
-  function handleExportCsv() {
-    if (!pnlData) return;
-    try {
-      const num = (n: number | null | undefined) =>
-        n === null || n === undefined ? '' : String(n);
-      const section = (type: string, nodes: typeof incomeTree): string[][] =>
-        flattenAll(nodes).map(({ node, depth }) => {
-          const r = node.row;
-          return [
-            type,
-            r.accountName,
-            String(depth),
-            String(r.currentAmount),
-            String(r.previousAmount),
-            String(r.currentAmount - r.previousAmount),
-            num(r.changePct)
-          ];
-        });
-      const total = (label: string, current: number, previous: number): string[] => [
-        'Total',
-        label,
-        '',
-        String(current),
-        String(previous),
-        String(current - previous),
-        num(changePct(current, previous))
-      ];
-      downloadReportCsv('pnl.csv', {
-        meta: [
-          ['Period', `${pnlData.dateFrom} to ${pnlData.dateTo}`],
-          ['Previous period', `${pnlData.prevDateFrom} to ${pnlData.prevDateTo}`],
-          ['Currency', pnlData.reportCurrency]
-        ],
-        headers: ['Type', 'Account', 'Depth', 'Current', 'Previous', 'Variance', 'Change %'],
-        // Full trees for the export.
-        rows: [...section('Income', incomeTree), ...section('Expense', expenseTree)],
-        totals: [
-          total('Income', pnlData.totalIncome, pnlData.totalIncomePrev),
-          total('Expenses', pnlData.totalExpenses, pnlData.totalExpensesPrev),
-          total(
-            'Net Income',
-            pnlData.netIncome,
-            pnlData.totalIncomePrev - pnlData.totalExpensesPrev
-          )
-        ]
-      });
-    } catch (e: unknown) {
-      toast.error(errMsg(e, 'Failed to export P&L'));
-    }
-  }
 </script>
 
 <svelte:head>
@@ -132,10 +77,6 @@
     description="Income and expense statement for a selected period"
   >
     <DateRangePicker bind:value={range.value} presets={PNL_PRESETS} defaultLabel="Select period" />
-    <Button variant="outline" onclick={handleExportCsv} disabled={!pnlData}>
-      <Download aria-hidden="true" class="size-3" />
-      Export
-    </Button>
   </PageHeader>
 
   {#if dbSession.value || dbBootstrapping.value}

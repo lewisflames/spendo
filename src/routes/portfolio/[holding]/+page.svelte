@@ -3,11 +3,11 @@
   import { resolve } from '$app/paths';
   import { Button } from '$lib/components/ui/button';
   import * as Tabs from '$lib/components/ui/tabs';
-  import { ArrowLeft, Download, LoaderCircle, TrendingUp } from '@lucide/svelte';
+  import { ArrowLeft, TrendingUp } from '@lucide/svelte';
   import { dbBootstrapping, dbSession } from '$lib/stores/db.svelte';
   import { appSettings, applyPageSize } from '$lib/stores/settings.svelte';
   import { fetchHoldingDetail, fetchSymbolOverrides, refreshPrices } from '$lib/tauri';
-  import type { HoldingTransaction, PriceHistoryEntry } from '$lib/tauri';
+  import type { PriceHistoryEntry } from '$lib/tauri';
   import { toast } from '$lib/components/ui/sonner';
   import { errMsg } from '$lib/utils/error';
   import SymbolOverrideDialog from '$lib/features/portfolio/symbol-override-dialog.svelte';
@@ -25,8 +25,6 @@
   import EmptyState from '$lib/components/shared/empty-state.svelte';
   import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
   import { setBreadcrumb } from '$lib/stores/breadcrumb.svelte';
-  import { downloadCsv } from '$lib/utils/csv';
-  import { exportPaginatedCsv } from '$lib/utils/export';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import { useUrlParams, pageParam } from '$lib/hooks/use-url-params.svelte';
   import { holdingLabel, toastPriceResult, range52w } from '$lib/features/portfolio/price-utils';
@@ -103,8 +101,6 @@
   let symbolDialogOpen = $state(false);
 
   let refreshingPrices = $state(false);
-  let exportingPrices = $state(false);
-  let exportingActivity = $state(false);
 
   /** Activity/Prices tab selection (local; activity pagination owns the URL). */
   let tab = $state('activity');
@@ -149,70 +145,6 @@
     if (!dbSession.value) return;
     setBreadcrumb([{ name: 'Portfolio', href: resolve('/portfolio') }, { name }]);
   });
-
-  function safeFilename(s: string): string {
-    return s.replace(/[^\w.-]+/g, '_');
-  }
-
-  function exportPriceHistory() {
-    const d = data;
-    if (!d || d.priceHistory.length === 0 || exportingPrices) return;
-    exportingPrices = true;
-    try {
-      const headers = ['Mnemonic', 'Currency', 'Date', 'Price'];
-      const rows = d.priceHistory.map((e: PriceHistoryEntry) => [
-        d.holding.mnemonic,
-        e.currency,
-        e.date,
-        e.price.toFixed(6)
-      ]);
-      downloadCsv(`${safeFilename(d.holding.mnemonic)}-prices.csv`, headers, rows);
-    } catch (e: unknown) {
-      toast.error(errMsg(e, 'Failed to export prices'));
-    } finally {
-      exportingPrices = false;
-    }
-  }
-
-  async function exportTransactions() {
-    const d = data;
-    const g = holdingGuid;
-    if (!d || !g || d.total === 0 || exportingActivity) return;
-    exportingActivity = true;
-    try {
-      await exportPaginatedCsv({
-        filename: `${safeFilename(d.holding.mnemonic)}-transactions.csv`,
-        headers: [
-          'Date',
-          'Description',
-          'Number',
-          'Notes',
-          'Account',
-          'Shares',
-          'Value',
-          'Running Shares'
-        ],
-        fetchPage: async (pageIdx, size) => {
-          const r = await fetchHoldingDetail(g, pageIdx, size);
-          return { rows: r.transactions, total: r.total };
-        },
-        mapRow: (t: HoldingTransaction) => [
-          t.postDate,
-          t.description ?? '',
-          t.num ?? '',
-          t.notes ?? '',
-          t.accountDescription || t.accountName,
-          t.sharesDelta.toFixed(6),
-          t.valueDelta.toFixed(2),
-          t.runningShares.toFixed(6)
-        ]
-      });
-    } catch (e: unknown) {
-      toast.error(errMsg(e, 'Failed to export activity'));
-    } finally {
-      exportingActivity = false;
-    }
-  }
 </script>
 
 <svelte:head>
@@ -324,38 +256,8 @@
         </Tabs.List>
         <div class="flex items-center gap-2">
           {#if tab === 'activity'}
-            <Button
-              variant="outline"
-              size="sm"
-              onclick={exportTransactions}
-              disabled={data.total === 0 || exportingActivity}
-              title="Export activity as CSV"
-            >
-              {#if exportingActivity}
-                <LoaderCircle aria-hidden="true" class="size-3 animate-spin" />
-                Exporting...
-              {:else}
-                <Download aria-hidden="true" class="size-3" />
-                Export
-              {/if}
-            </Button>
             <ColumnsMenu columns={ACTIVITY_COLUMNS} cols={activityCols} />
           {:else}
-            <Button
-              variant="outline"
-              size="sm"
-              onclick={exportPriceHistory}
-              disabled={data.priceHistory.length === 0 || exportingPrices}
-              title="Export price history as CSV"
-            >
-              {#if exportingPrices}
-                <LoaderCircle aria-hidden="true" class="size-3 animate-spin" />
-                Exporting...
-              {:else}
-                <Download aria-hidden="true" class="size-3" />
-                Export
-              {/if}
-            </Button>
             <ColumnsMenu columns={PRICE_COLUMNS} cols={priceCols} />
           {/if}
         </div>

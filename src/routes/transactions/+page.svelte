@@ -1,7 +1,6 @@
 <script lang="ts">
   import ErrorCard from '$lib/components/shared/error-card.svelte';
   import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
-  import { Button } from '$lib/components/ui/button';
   import { fetchTransactions, fetchAccountNames } from '$lib/tauri';
   import { dbBootstrapping, dbSession } from '$lib/stores/db.svelte';
   import { appSettings, applyPageSize } from '$lib/stores/settings.svelte';
@@ -14,9 +13,7 @@
   import { Skeleton } from '$lib/components/ui/skeleton';
   import ImportPrompt from '$lib/components/shared/import-prompt.svelte';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
-  import { errMsg } from '$lib/utils/error';
   import { toast } from '$lib/components/ui/sonner';
-  import { exportPaginatedCsv } from '$lib/utils/export';
   import { useDebouncedSearch } from '$lib/hooks/use-debounced-search.svelte';
   import {
     useUrlParams,
@@ -27,7 +24,7 @@
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import { useTableSort } from '$lib/hooks/use-table-sort.svelte';
   import { plural, sessionCurrency } from '$lib/utils/format.svelte';
-  import { ArrowLeftRight, Download, LoaderCircle } from '@lucide/svelte';
+  import { ArrowLeftRight } from '@lucide/svelte';
   import type { AccountInfo } from '$lib/tauri';
 
   let pageSize = $derived(appSettings.value.pageSize);
@@ -146,35 +143,6 @@
       accounts = r;
     }
   });
-
-  let exporting = $state(false);
-
-  async function handleExportCsv() {
-    if (!data || exporting) return;
-    exporting = true;
-    try {
-      await exportPaginatedCsv({
-        filename: 'transactions.csv',
-        headers: ['Date', 'Description', 'Number', 'Notes', 'Splits', 'Total'],
-        fetchPage: async (pageIdx, size) => {
-          const r = await fetchTransactions(pageIdx, size, filters, sortBy, sortDir);
-          return { rows: r.transactions, total: r.total };
-        },
-        mapRow: (t) => [
-          t.postDate,
-          t.description ?? '',
-          t.num ?? '',
-          t.notes ?? '',
-          t.splits.map((s) => `${s.accountName} (${s.accountType}): ${s.amount}`).join(' | '),
-          String(t.totalAmount)
-        ]
-      });
-    } catch (e: unknown) {
-      toast.error(errMsg(e, 'Failed to export transactions'));
-    } finally {
-      exporting = false;
-    }
-  }
 </script>
 
 <svelte:head>
@@ -184,20 +152,7 @@
 
 {#if dbSession.value || dbBootstrapping.value}
   <div class="flex flex-col gap-6">
-    <PageHeader title="Transactions" description={data ? plural(data.total, 'transaction') : ''}>
-      <Button
-        variant="outline"
-        onclick={handleExportCsv}
-        disabled={!data || data.transactions.length === 0 || exporting}
-      >
-        {#if exporting}
-          <LoaderCircle aria-hidden="true" class="size-3 animate-spin" />
-        {:else}
-          <Download aria-hidden="true" class="size-3" />
-        {/if}
-        Export
-      </Button>
-    </PageHeader>
+    <PageHeader title="Transactions" description={data ? plural(data.total, 'transaction') : ''} />
 
     <TransactionHeatmap {filters} />
 

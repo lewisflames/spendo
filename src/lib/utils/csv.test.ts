@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { downloadCsv, downloadReportCsv } from './csv';
+import { buildCsvText, CSV_BOM, downloadCsv, downloadReportCsv } from './csv';
 
 const BOM = '\uFEFF';
 
@@ -64,5 +64,21 @@ describe('downloadReportCsv', () => {
   it('omits preamble and totals when absent', async () => {
     downloadReportCsv('r.csv', { headers: ['A'], rows: [['1'], ['2']] });
     expect(await csvText()).toBe('A\n1\n2');
+  });
+});
+
+describe('buildCsvText', () => {
+  it('exposes the BOM separately from the body text', () => {
+    expect(CSV_BOM).toBe(BOM);
+  });
+
+  it('builds header-plus-rows text without touching the DOM', () => {
+    expect(buildCsvText(['Name', 'Amount'], [['Cash', '100']])).toBe('Name,Amount\nCash,100');
+  });
+
+  it('quotes cells with commas, quotes and newlines', () => {
+    expect(buildCsvText(['Note'], [['a "quoted", multi\nline']])).toBe(
+      'Note\n"a ""quoted"", multi\nline"'
+    );
   });
 });
