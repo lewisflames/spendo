@@ -13,9 +13,6 @@ use crate::prices::{
 use crate::sql;
 use crate::utils;
 
-/// Upper bound on transactions returned for a single holding detail view.
-const MAX_HOLDING_TRANSACTIONS: i64 = 500;
-
 /// Approximate number of points targeted when sampling the portfolio value trend.
 const TREND_SAMPLE_TARGET: i64 = 180;
 
@@ -24,6 +21,7 @@ const TREND_SAMPLE_TARGET: i64 = 180;
 pub struct HoldingAccount {
     pub account_guid: String,
     pub account_name: String,
+    pub account_description: Option<String>,
     pub shares: f64,
     pub cost_basis: f64,
 }
@@ -74,9 +72,15 @@ pub struct HoldingTransaction {
     pub guid: String,
     pub post_date: String,
     pub description: Option<String>,
+    pub num: Option<String>,
+    pub notes: Option<String>,
     pub account_name: String,
+    pub account_description: Option<String>,
     pub shares_delta: f64,
     pub value_delta: f64,
+    /// Cumulative share balance after this transaction (ascending date order),
+    /// so paged newest-first rows still carry a globally correct balance.
+    pub running_shares: f64,
 }
 
 #[derive(Debug, Serialize)]
@@ -86,6 +90,10 @@ pub struct HoldingDetail {
     pub price_history: Vec<PriceHistoryEntry>,
     pub value_trend: Vec<PortfolioValuePoint>,
     pub transactions: Vec<HoldingTransaction>,
+    pub total: i64,
+    pub page: i64,
+    pub page_size: i64,
+    pub total_pages: i64,
 }
 
 struct HoldingSplit {
@@ -95,6 +103,7 @@ struct HoldingSplit {
     namespace: String,
     account_guid: String,
     account_name: String,
+    account_description: Option<String>,
     shares: f64,
     cost: f64,
 }
@@ -134,7 +143,7 @@ fn load_holding_splits(
 ) -> Result<Vec<HoldingSplit>, String> {
     let mut sql = format!(
         "SELECT a.commodity_guid, c.mnemonic, c.fullname, c.namespace,
-				s.account_guid, a.name AS account_name,
+				s.account_guid, a.name AS account_name, a.description AS account_description,
 				SUM(CAST(s.quantity_num AS REAL) / CAST(s.quantity_denom AS REAL)) AS shares,
 				SUM(CAST(s.value_num AS REAL) / CAST(s.value_denom AS REAL)) AS cost
 		 FROM splits s
@@ -164,8 +173,9 @@ fn load_holding_splits(
                 namespace: row.get(3)?,
                 account_guid: row.get(4)?,
                 account_name: row.get(5)?,
-                shares: row.get(6)?,
-                cost: row.get(7)?,
+                account_description: row.get(6)?,
+                shares: row.get(7)?,
+                cost: row.get(8)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -296,6 +306,7 @@ fn build_holdings(
         entry.accounts.push(HoldingAccount {
             account_guid: r.account_guid.clone(),
             account_name: r.account_name.clone(),
+            account_description: r.account_description.clone(),
             shares: r.shares,
             cost_basis: cost_converted,
         });
@@ -668,14 +679,44 @@ fn fetch_portfolio_data_inner(conn: &Connection) -> Result<PortfolioData, String
     })
 }
 
+/// One page of a holding's buy/sell activity with pagination metadata.
+struct HoldingTxPage {
+    transactions: Vec<HoldingTransaction>,
+    total: i64,
+    safe_page: i64,
+    page_size: i64,
+    total_pages: i64,
+}
+
+/// Grouped per-transaction activity row before pagination.
+struct HoldingTxRow {
+    guid: String,
+    post_date: String,
+    description: Option<String>,
+    num: Option<String>,
+    notes: Option<String>,
+    account_name: String,
+    account_description: Option<String>,
+    shares_delta: f64,
+    value_delta: f64,
+}
+
 fn fetch_holding_transactions(
     conn: &Connection,
     commodity_guid: &str,
-) -> Result<Vec<HoldingTransaction>, String> {
-    let mut stmt = conn
-        .prepare(&format!(
-            "SELECT t.guid, t.post_date, t.description,
+    page: i64,
+    page_size: i64,
+    search: Option<&str>,
+) -> Result<HoldingTxPage, String> {
+    // Trimmed, empty searches match everything (the frontend sends None, but
+    // direct callers shouldn't have to).
+    let search = search.map(str::trim).filter(|s| !s.is_empty());
+    let mut sql = format!(
+        "SELECT t.guid, t.post_date, t.description, t.num, t.notes,
 					MIN(a.name) AS account_name,
+					-- Description of the MIN(name) account: ordering by the combined
+					-- key picks the same row, so name and description stay paired.
+					MIN(a.name || CHAR(31) || IFNULL(a.description, '')) AS account_key,
 					SUM({}) AS shares_delta,
 					SUM({}) AS value_delta
 			 FROM splits s
@@ -684,39 +725,107 @@ fn fetch_holding_transactions(
 			 WHERE a.commodity_guid = ?1
 			   AND a.account_type IN ({})
 			   AND a.placeholder = 0
-			   AND {}
-			 GROUP BY t.guid
-			 ORDER BY t.post_date DESC
-			 LIMIT {}",
-            utils::QUANTITY_AMOUNT,
-            utils::RAW_AMOUNT,
-            utils::investment_types_sql(),
-            utils::VISIBLE_TX_FILTER,
-            MAX_HOLDING_TRANSACTIONS
-        ))
-        .map_err(|e| e.to_string())?;
+			   AND {}",
+        utils::QUANTITY_AMOUNT,
+        utils::RAW_AMOUNT,
+        utils::investment_types_sql(),
+        utils::VISIBLE_TX_FILTER,
+    );
+    // ?1 is the commodity GUID; the search reuses ?2 three times.
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> =
+        vec![Box::new(commodity_guid.to_string())];
+    if let Some(q) = search {
+        sql.push_str(
+            " AND (t.description LIKE '%' || ?2 || '%' ESCAPE '\\' \
+               OR t.num LIKE '%' || ?2 || '%' ESCAPE '\\' \
+               OR t.notes LIKE '%' || ?2 || '%' ESCAPE '\\')",
+        );
+        params.push(Box::new(utils::escape_like(q)));
+    }
+    sql.push_str(" GROUP BY t.guid ORDER BY t.post_date ASC, t.guid ASC");
 
-    let rows = stmt
-        .query_map([commodity_guid], |row| {
-            Ok(HoldingTransaction {
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+
+    let mut rows: Vec<HoldingTxRow> = stmt
+        .query_map(sql::param_refs(&params).as_slice(), |row| {
+            let account_name: String = row.get(5)?;
+            let account_key: String = row.get(6)?;
+            let account_description = account_key
+                .split_once('\u{1f}')
+                .map(|(_, d)| d.to_string())
+                .filter(|d| !d.is_empty());
+            Ok(HoldingTxRow {
                 guid: row.get(0)?,
                 post_date: row.get(1)?,
                 description: row.get(2)?,
-                account_name: row.get(3)?,
-                shares_delta: row.get(4)?,
-                value_delta: row.get(5)?,
+                num: row.get(3)?,
+                notes: row.get(4)?,
+                account_name,
+                account_description,
+                shares_delta: row.get(7)?,
+                value_delta: row.get(8)?,
             })
         })
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
 
-    Ok(rows)
+    let total = rows.len() as i64;
+    let (page_size, total_pages, safe_page, offset) = utils::paginate(total, page, page_size);
+
+    // Running share balance accumulates in ascending date order so every page
+    // carries a globally correct balance (mirrors account_detail's
+    // running_by_guid, without FX since shares are unit-less).
+    let mut running = 0.0;
+    let mut running_by_guid: HashMap<String, f64> = HashMap::with_capacity(rows.len());
+    for r in &rows {
+        running += r.shares_delta;
+        running_by_guid.insert(r.guid.clone(), running);
+    }
+
+    // Newest-first display order; running balances were fixed above.
+    rows.sort_by(|a, b| {
+        b.post_date
+            .cmp(&a.post_date)
+            .then_with(|| b.guid.cmp(&a.guid))
+    });
+
+    let transactions = rows
+        .into_iter()
+        .skip(offset as usize)
+        .take(page_size as usize)
+        .map(|r| {
+            let running_shares = running_by_guid.remove(&r.guid).unwrap_or(0.0);
+            HoldingTransaction {
+                guid: r.guid,
+                post_date: r.post_date,
+                description: r.description,
+                num: r.num,
+                notes: r.notes,
+                account_name: r.account_name,
+                account_description: r.account_description,
+                shares_delta: r.shares_delta,
+                value_delta: r.value_delta,
+                running_shares,
+            }
+        })
+        .collect();
+
+    Ok(HoldingTxPage {
+        transactions,
+        total,
+        safe_page,
+        page_size,
+        total_pages,
+    })
 }
 
 fn fetch_holding_detail_inner(
     conn: &Connection,
     commodity_guid: &str,
+    page: i64,
+    page_size: i64,
+    search: Option<&str>,
 ) -> Result<HoldingDetail, String> {
     // Allocation is relative to the whole portfolio, so it is derived from the
     // unfiltered holdings rather than the single-commodity aggregation.
@@ -735,13 +844,17 @@ fn fetch_holding_detail_inner(
 
     let price_history = get_price_history(conn, commodity_guid)?;
     let value_trend = build_value_trend(conn, Some(commodity_guid))?;
-    let transactions = fetch_holding_transactions(conn, commodity_guid)?;
+    let tx_page = fetch_holding_transactions(conn, commodity_guid, page, page_size, search)?;
 
     Ok(HoldingDetail {
         holding,
         price_history,
         value_trend,
-        transactions,
+        transactions: tx_page.transactions,
+        total: tx_page.total,
+        page: tx_page.safe_page,
+        page_size: tx_page.page_size,
+        total_pages: tx_page.total_pages,
     })
 }
 
@@ -754,9 +867,134 @@ pub async fn fetch_portfolio_data(state: State<'_, AppState>) -> Result<Portfoli
 pub async fn fetch_holding_detail(
     state: State<'_, AppState>,
     commodity_guid: String,
+    page: i64,
+    page_size: i64,
+    search: Option<String>,
 ) -> Result<HoldingDetail, String> {
     run_blocking(state.db.clone(), move |conn| {
-        fetch_holding_detail_inner(conn, &commodity_guid)
+        fetch_holding_detail_inner(conn, &commodity_guid, page, page_size, search.as_deref())
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::init_db;
+    use rusqlite::params;
+
+    fn setup() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        init_db(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO commodities (guid, mnemonic, namespace, fullname) VALUES
+             ('sec-aapl', 'AAPL', 'NASDAQ', 'Apple Inc'),
+             ('c-eur', 'EUR', 'CURRENCY', NULL)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO accounts (guid, name, account_type, parent_guid, description, placeholder, commodity_guid) VALUES
+             ('broker', 'Brokerage', 'STOCK', NULL, 'Brokerage acct', 0, 'sec-aapl')",
+            [],
+        )
+        .unwrap();
+        add_activity(&conn, "t1", "2024-01-10", "Buy AAPL", Some("B1"), Some("first buy"), 10, 1000);
+        add_activity(&conn, "t2", "2024-02-05", "Buy AAPL", None, None, 5, 550);
+        add_activity(&conn, "t3", "2024-03-01", "Sell AAPL", Some("S1"), Some("trim"), -8, -960);
+        conn
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn add_activity(
+        conn: &Connection,
+        tag: &str,
+        date: &str,
+        description: &str,
+        num: Option<&str>,
+        notes: Option<&str>,
+        shares: i64,
+        value: i64,
+    ) {
+        conn.execute(
+            "INSERT INTO transactions (guid, post_date, description, num, notes)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![tag, date, description, num, notes],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO splits (guid, tx_guid, account_guid, value_num, value_denom, quantity_num, quantity_denom)
+             VALUES (?1, ?2, 'broker', ?3, 100, ?4, 1)",
+            params![format!("s-{tag}"), tag, value * 100, shares],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn holding_activity_paginates_newest_first_with_running_balances() {
+        let conn = setup();
+
+        let p1 = fetch_holding_transactions(&conn, "sec-aapl", 1, 2, None).unwrap();
+        assert_eq!((p1.total, p1.safe_page, p1.total_pages), (3, 1, 2));
+        assert_eq!(p1.transactions.len(), 2);
+        // Newest first, with globally correct running balances (10 + 5 - 8).
+        assert_eq!(p1.transactions[0].guid, "t3");
+        assert_eq!(p1.transactions[0].running_shares, 7.0);
+        assert_eq!(p1.transactions[0].num.as_deref(), Some("S1"));
+        assert_eq!(p1.transactions[0].notes.as_deref(), Some("trim"));
+        assert_eq!(p1.transactions[1].guid, "t2");
+        assert_eq!(p1.transactions[1].running_shares, 15.0);
+        assert_eq!(p1.transactions[1].num, None);
+
+        let p2 = fetch_holding_transactions(&conn, "sec-aapl", 2, 2, None).unwrap();
+        assert_eq!(p2.transactions.len(), 1);
+        assert_eq!(p2.transactions[0].guid, "t1");
+        assert_eq!(p2.transactions[0].running_shares, 10.0);
+        assert_eq!(p2.transactions[0].account_name, "Brokerage");
+        assert_eq!(
+            p2.transactions[0].account_description.as_deref(),
+            Some("Brokerage acct")
+        );
+
+        // Out-of-range pages clamp to the last valid page.
+        let clamped = fetch_holding_transactions(&conn, "sec-aapl", 99, 2, None).unwrap();
+        assert_eq!(clamped.safe_page, 2);
+        assert_eq!(clamped.transactions.len(), 1);
+    }
+
+    #[test]
+    fn holding_activity_search_matches_description_num_and_notes() {
+        let conn = setup();
+
+        // Notes match.
+        let page = fetch_holding_transactions(&conn, "sec-aapl", 1, 25, Some("trim")).unwrap();
+        assert_eq!(page.total, 1);
+        assert_eq!(page.transactions[0].guid, "t3");
+
+        // Number match.
+        let page = fetch_holding_transactions(&conn, "sec-aapl", 1, 25, Some("B1")).unwrap();
+        assert_eq!(page.total, 1);
+        assert_eq!(page.transactions[0].guid, "t1");
+
+        // Description match (LIKE is ASCII case-insensitive).
+        let page = fetch_holding_transactions(&conn, "sec-aapl", 1, 25, Some("buy")).unwrap();
+        assert_eq!(page.total, 2);
+
+        // LIKE metacharacters match literally, not as wildcards.
+        let page = fetch_holding_transactions(&conn, "sec-aapl", 1, 25, Some("%")).unwrap();
+        assert_eq!(page.total, 0);
+
+        // No match yields an empty page.
+        let page = fetch_holding_transactions(&conn, "sec-aapl", 1, 25, Some("zzz")).unwrap();
+        assert_eq!(page.total, 0);
+        assert!(page.transactions.is_empty());
+    }
+
+    #[test]
+    fn holding_without_activity_returns_empty_page() {
+        let conn = setup();
+        let page = fetch_holding_transactions(&conn, "c-eur", 1, 25, None).unwrap();
+        assert_eq!(page.total, 0);
+        assert!(page.transactions.is_empty());
+    }
 }

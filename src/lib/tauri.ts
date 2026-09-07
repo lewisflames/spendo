@@ -525,6 +525,7 @@ export const fetchBudgetDateRange = (): Promise<BudgetDateRange> =>
 interface HoldingAccount {
   accountGuid: string;
   accountName: string;
+  accountDescription: string | null;
   shares: number;
   costBasis: number;
 }
@@ -567,9 +568,13 @@ export interface HoldingTransaction {
   guid: string;
   postDate: string;
   description: string | null;
+  num?: string | null;
+  notes?: string | null;
   accountName: string;
+  accountDescription: string | null;
   sharesDelta: number;
   valueDelta: number;
+  runningShares: number;
 }
 
 interface HoldingDetail {
@@ -577,9 +582,18 @@ interface HoldingDetail {
   priceHistory: PriceHistoryEntry[];
   valueTrend: PortfolioValuePoint[];
   transactions: HoldingTransaction[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
 }
 
 export const fetchPortfolioData = (): Promise<PortfolioData> => invoke('fetch_portfolio_data');
 
-export const fetchHoldingDetail = (commodityGuid: string): Promise<HoldingDetail> =>
-  invoke('fetch_holding_detail', { commodityGuid });
+export const fetchHoldingDetail = (
+  commodityGuid: string,
+  page: number,
+  pageSize: number,
+  search?: string
+): Promise<HoldingDetail> =>
+  invoke('fetch_holding_detail', { commodityGuid, page, pageSize, search: search ?? null });
