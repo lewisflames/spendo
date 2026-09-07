@@ -9,6 +9,7 @@
     appSettings,
     saveSettings,
     applyAccent,
+    applyDensity,
     resolveTheme
   } from '$lib/stores/settings.svelte';
   import { goBack, goForward, initNavHistory } from '$lib/stores/nav-history.svelte';
@@ -113,6 +114,7 @@
     document.documentElement.style.colorScheme = resolvedTheme;
     document.documentElement.lang = appSettings.value.locale;
     applyAccent(appSettings.value.accent, appSettings.value.customPrimary);
+    applyDensity(appSettings.value.density);
     // Mirrors Settings → Appearance → Reduce motion onto <html> for
     // CSS-driven ambient decoration.
     document.documentElement.classList.toggle('reduce-motion', appSettings.value.reduceMotion);

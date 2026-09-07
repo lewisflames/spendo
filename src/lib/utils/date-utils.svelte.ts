@@ -132,6 +132,46 @@ function getThisYearRange(): { start: CalendarDate; end: CalendarDate } {
   return getYearRange(new Date().getFullYear());
 }
 
+/**
+ * Fiscal year containing today for a 1-based start month. January behaves as
+ * the calendar year; otherwise the window spans two calendar years (e.g.
+ * start 4 → Apr 1 this year – Mar 31 next year when today is past April).
+ */
+export function getFiscalYearContaining(
+  fyStartMonth: number,
+  now: Date = new Date()
+): { start: CalendarDate; end: CalendarDate } {
+  const m = Math.min(12, Math.max(1, Math.trunc(fyStartMonth) || 1));
+  if (m === 1) return getYearRange(now.getFullYear());
+  const year = now.getFullYear();
+  const month = now.getMonth() + 1;
+  const startYear = month >= m ? year : year - 1;
+  const endYear = startYear + 1;
+  const endMonth = m - 1;
+  return {
+    start: new CalendarDate(startYear, m, 1),
+    end: new CalendarDate(endYear, endMonth, daysInMonth(endYear, endMonth))
+  };
+}
+
+/** Resolve a stored P&L default period to a concrete range (FY-aware year). */
+export function getPnlPeriodRange(
+  period: string,
+  fyStartMonth: number
+): { start: CalendarDate; end: CalendarDate } {
+  switch (period) {
+    case 'this_month':
+      return getThisMonthRange();
+    case 'this_quarter':
+      return getThisQuarterRange();
+    case 'this_year':
+      return getFiscalYearContaining(fyStartMonth);
+    case 'last_12_months':
+    default:
+      return last12MonthsRange();
+  }
+}
+
 export const PNL_PRESETS: DatePreset[] = [
   { label: 'This month', getRange: getThisMonthRange },
   { label: 'This quarter', getRange: getThisQuarterRange },

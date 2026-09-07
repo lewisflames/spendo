@@ -14,6 +14,9 @@
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import { useReportDateRange } from '$lib/hooks/use-report-date-range.svelte';
   import { computePrevRange, PNL_PRESETS } from '$lib/utils/date-utils.svelte';
+  import { getPnlPeriodRange } from '$lib/utils/date-utils.svelte';
+  import { loadBookSettings } from '$lib/stores/book-settings.svelte';
+  import { page } from '$app/state';
   import { ReportPeriodPicker as DateRangePicker } from '$lib/components/shared/report-period-picker';
   import { buildTree, flattenAll } from '$lib/features/reports/report-tree';
   import { changePct } from '$lib/features/pnl/pnl-utils';
@@ -21,6 +24,32 @@
   // Shared period state + URL-param restore; must precede useAsyncData so the
   // first fetch already uses values from the URL.
   const range = useReportDateRange();
+
+  // Book default period (FY-aware) applies once on first load when the URL
+  // carries no explicit dates. Explicit ?from/?to always win; later user
+  // picks never get clobbered.
+  let defaultPeriodApplied = $state(false);
+  $effect(() => {
+    if (!dbSession.value || defaultPeriodApplied) return;
+    loadBookSettings()
+      .then((settings) => {
+        if (defaultPeriodApplied) return;
+        const sp = page.url.searchParams;
+        if (sp.get('from') || sp.get('to')) {
+          defaultPeriodApplied = true;
+          return;
+        }
+        const { start, end } = getPnlPeriodRange(
+          settings.defaultPnlPeriod,
+          settings.fiscalYearStartMonth
+        );
+        range.value = { start, end };
+        defaultPeriodApplied = true;
+      })
+      .catch(() => {
+        defaultPeriodApplied = true;
+      });
+  });
 
   const res = useAsyncData({
     enabled: () => !!dbSession.value && !!range.dateFrom && !!range.dateTo && range.rangeValid,

@@ -11,6 +11,7 @@
     resetSettings,
     PAGE_SIZE_OPTIONS,
     type AccentId,
+    type Density,
     type Locale,
     type Theme
   } from '$lib/stores/settings.svelte';
@@ -29,9 +30,9 @@
   import { revealItemInDir } from '@tauri-apps/plugin-opener';
   import { open, save } from '@tauri-apps/plugin-dialog';
   import { basename } from '@tauri-apps/api/path';
+  import { resolve } from '$app/paths';
   import {
     SunMoon,
-    Languages,
     ListOrdered,
     HardDrive,
     FolderOpen,
@@ -39,7 +40,11 @@
     Plus,
     Save,
     RotateCcw,
-    Trash2
+    Trash2,
+    Copy,
+    Check,
+    ExternalLink,
+    CalendarDays
   } from '@lucide/svelte';
   import { cn } from '$lib/utils.js';
   import * as Dialog from '$lib/components/ui/dialog';
@@ -55,6 +60,14 @@
     setActiveBookPath,
     setDbSession
   } from '$lib/stores/db.svelte';
+  import {
+    bookSettings,
+    loadBookSettings,
+    resetBookSettings,
+    saveBookSetting
+  } from '$lib/stores/book-settings.svelte';
+  import type { BookSettings, PnlPeriodId } from '$lib/tauri';
+  import { monthName } from '$lib/utils/date-utils.svelte';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
 
   const locales: { value: Locale; label: string }[] = [
@@ -72,6 +85,18 @@
     { value: 'system', label: 'System' },
     { value: 'light', label: 'Light' },
     { value: 'dark', label: 'Dark' }
+  ];
+
+  const densities: { value: Density; label: string }[] = [
+    { value: 'comfortable', label: 'Comfortable' },
+    { value: 'compact', label: 'Compact' }
+  ];
+
+  const pnlPeriods: { value: PnlPeriodId; label: string }[] = [
+    { value: 'this_month', label: 'This month' },
+    { value: 'this_quarter', label: 'This quarter' },
+    { value: 'this_year', label: 'This year (fiscal)' },
+    { value: 'last_12_months', label: 'Last 12 months' }
   ];
 
   const DEFAULT_CUSTOM_PRIMARY = '#3b82f6';
@@ -111,9 +136,42 @@
   }
 
   let clearDialogOpen = $state(false);
+  let resetDialogOpen = $state(false);
+  let currencyDialogOpen = $state(false);
+  let pendingCurrency = $state<string | null>(null);
   let clearing = $state(false);
   let savingCurrency = $state(false);
   let switching = $state(false);
+  let copied = $state(false);
+  let bookSettingsError = $state<string | null>(null);
+  let savingBookKey = $state(false);
+
+  $effect(() => {
+    loadBookSettings().catch((e: unknown) => {
+      bookSettingsError = errMsg(e, 'Failed to load book settings');
+    });
+  });
+
+  const fyMonths = $derived(
+    Array.from({ length: 12 }, (_, i) => ({
+      value: String(i + 1),
+      label: monthName(i + 1, appSettings.value.locale)
+    }))
+  );
+
+  async function handleBookSetting<
+    K extends 'fiscalYearStartMonth' | 'defaultPnlPeriod' | 'priceAutoRefresh'
+  >(field: K, value: BookSettings[K]) {
+    if (!dbSession.value || savingBookKey) return;
+    savingBookKey = true;
+    try {
+      await saveBookSetting(field, value);
+    } catch (e: unknown) {
+      toast.error(errMsg(e, 'Failed to save book setting'));
+    } finally {
+      savingBookKey = false;
+    }
+  }
 
   async function handleOpenBook() {
     if (switching) return;
@@ -133,6 +191,10 @@
       const result = await openBook(selected);
       setDbSession(result.summary);
       setActiveBookPath(selected);
+      bookSettingsError = null;
+      await loadBookSettings(true).catch((e: unknown) => {
+        bookSettingsError = errMsg(e, 'Failed to load book settings');
+      });
       toast.success(`Opened ${await basename(selected)}`);
     } catch (e: unknown) {
       toast.error(errMsg(e, 'Failed to open book'));
@@ -161,6 +223,10 @@
       const result = await createBookAt(file, currency);
       setDbSession(result.summary);
       setActiveBookPath(file);
+      bookSettingsError = null;
+      await loadBookSettings(true).catch((e: unknown) => {
+        bookSettingsError = errMsg(e, 'Failed to load book settings');
+      });
       toast.success(`Book created (${currency})`);
     } catch (e: unknown) {
       toast.error(errMsg(e, 'Failed to create book'));
@@ -188,6 +254,10 @@
       const result = await saveBookAs(file);
       setDbSession(result.summary);
       setActiveBookPath(file);
+      bookSettingsError = null;
+      await loadBookSettings(true).catch((e: unknown) => {
+        bookSettingsError = errMsg(e, 'Failed to load book settings');
+      });
       toast.success(`Book saved as ${await basename(file)}`);
     } catch (e: unknown) {
       toast.error(errMsg(e, 'Failed to save book'));
@@ -204,8 +274,32 @@
 
   const activePath = $derived(activeBookPath.value ?? dataRes.data?.dbPath ?? null);
 
-  async function handleCurrencyChange(v: string | undefined) {
+  function bookHasData(): boolean {
+    const summary = dbSession.value?.summary;
+    return !!summary && (summary.totalAccounts > 0 || summary.totalTransactions > 0);
+  }
+
+  function requestCurrencyChange(v: string | undefined) {
     if (!v || !dbSession.value || v === dbSession.value.summary.currency) return;
+    // Revaluing a populated book touches every report, so confirm first.
+    // Empty books can switch silently.
+    if (bookHasData()) {
+      pendingCurrency = v;
+      currencyDialogOpen = true;
+    } else {
+      void handleCurrencyChange(v);
+    }
+  }
+
+  async function confirmCurrencyChange() {
+    if (!pendingCurrency) return;
+    const next = pendingCurrency;
+    pendingCurrency = null;
+    currencyDialogOpen = false;
+    await handleCurrencyChange(next);
+  }
+
+  async function handleCurrencyChange(v: string) {
     savingCurrency = true;
     try {
       const result = await setBaseCurrency(v);
@@ -223,6 +317,7 @@
     try {
       await clearAppDb();
       clearSession();
+      resetBookSettings();
       clearDialogOpen = false;
       toast.success('Database cleared');
     } catch (e: unknown) {
@@ -241,9 +336,22 @@
     }
   }
 
+  async function handleCopyPath() {
+    if (!activePath) return;
+    try {
+      await navigator.clipboard.writeText(activePath);
+      copied = true;
+      toast.success('Book path copied');
+      setTimeout(() => (copied = false), 1500);
+    } catch (e: unknown) {
+      toast.error(errMsg(e, 'Failed to copy path'));
+    }
+  }
+
   function handleReset() {
     resetSettings();
     customDraft = DEFAULT_CUSTOM_PRIMARY;
+    resetDialogOpen = false;
     toast.success('Preferences reset to defaults');
   }
 </script>
@@ -254,12 +362,7 @@
 </svelte:head>
 
 <div class="flex flex-col gap-6">
-  <PageHeader title="Settings" description="Configure your preferences">
-    <Button variant="outline" onclick={handleReset}>
-      <RotateCcw aria-hidden="true" class="size-4" />
-      Reset to defaults
-    </Button>
-  </PageHeader>
+  <PageHeader title="Settings" description="Configure your preferences" />
 
   <Card.Root>
     <IconCardHeader title="Appearance">
@@ -359,13 +462,51 @@
           </div>
         </div>
         {#if !customValid}
-          <p class="text-xs text-destructive">Enter a hex color like #3b82f6.</p>
+          <p aria-live="polite" class="text-xs text-destructive">Enter a hex color like #3b82f6.</p>
         {/if}
       {/if}
       <div class="flex items-center justify-between gap-4">
         <div class="flex flex-col gap-1">
+          <span class="text-sm font-medium">Density</span>
+          <span class="text-xs text-muted-foreground">Tighter spacing for pages and tables</span>
+        </div>
+        <Select.Root
+          type="single"
+          value={appSettings.value.density}
+          onValueChange={(v) => {
+            if (v === 'comfortable' || v === 'compact') saveSettings({ density: v });
+          }}
+          items={densities}
+        >
+          <Select.Trigger class="w-36">
+            <SelectPrimitive.Value placeholder="Select density" />
+          </Select.Trigger>
+          <Select.Content>
+            {#each densities as d (d.value)}
+              <Select.Item value={d.value}>{d.label}</Select.Item>
+            {/each}
+          </Select.Content>
+        </Select.Root>
+      </div>
+      <div class="flex items-center justify-between gap-4">
+        <div class="flex flex-col gap-1">
+          <span class="text-sm font-medium">Sidebar</span>
+          <span class="text-xs text-muted-foreground">
+            Start with the navigation collapsed (Ctrl+B toggles)
+          </span>
+        </div>
+        <Switch
+          checked={appSettings.value.sidebarCollapsed}
+          onCheckedChange={(v) => saveSettings({ sidebarCollapsed: v })}
+          aria-label="Start with sidebar collapsed"
+        />
+      </div>
+      <div class="flex items-center justify-between gap-4">
+        <div class="flex flex-col gap-1">
           <span class="text-sm font-medium">Reduce motion</span>
-          <span class="text-xs text-muted-foreground">Disable animated page transitions</span>
+          <span class="text-xs text-muted-foreground">
+            Disable animated page transitions and ambient effects
+          </span>
         </div>
         <Switch
           checked={appSettings.value.reduceMotion}
@@ -377,9 +518,9 @@
   </Card.Root>
 
   <Card.Root>
-    <IconCardHeader title="Regional">
+    <IconCardHeader title="Display & lists">
       {#snippet icon()}
-        <Languages aria-hidden="true" class="size-4 text-muted-foreground" />
+        <ListOrdered aria-hidden="true" class="size-4 text-muted-foreground" />
       {/snippet}
     </IconCardHeader>
     <Card.Content class="flex flex-col gap-4">
@@ -406,20 +547,12 @@
           </Select.Content>
         </Select.Root>
       </div>
-    </Card.Content>
-  </Card.Root>
-
-  <Card.Root>
-    <IconCardHeader title="Transactions">
-      {#snippet icon()}
-        <ListOrdered aria-hidden="true" class="size-4 text-muted-foreground" />
-      {/snippet}
-    </IconCardHeader>
-    <Card.Content class="flex flex-col gap-4">
       <div class="flex items-center justify-between gap-4">
         <div class="flex flex-col gap-1">
-          <span class="text-sm font-medium">Page size</span>
-          <span class="text-xs text-muted-foreground">Transactions per page</span>
+          <span class="text-sm font-medium">Rows per page</span>
+          <span class="text-xs text-muted-foreground">
+            Applies to every list: transactions, ledger, history, holdings
+          </span>
         </div>
         <Select.Root
           type="single"
@@ -441,9 +574,9 @@
     </Card.Content>
   </Card.Root>
 
-  <!-- Data location -->
+  <!-- Book -->
   <Card.Root>
-    <IconCardHeader title="Data" description="Your book is a portable .spendo file.">
+    <IconCardHeader title="Book" description="Your book is a portable .spendo file.">
       {#snippet icon()}
         <HardDrive aria-hidden="true" class="size-4 text-muted-foreground" />
       {/snippet}
@@ -452,13 +585,15 @@
       <div class="flex items-center justify-between gap-4">
         <div class="flex flex-col gap-1">
           <span class="text-sm font-medium">Base currency</span>
-          <span class="text-xs text-muted-foreground">Report currency for the book</span>
+          <span class="text-xs text-muted-foreground">
+            Report currency for the book — revalues net worth, reports and portfolio
+          </span>
         </div>
         {#if dbSession.value}
           <Select.Root
             type="single"
             value={dbSession.value.summary.currency}
-            onValueChange={handleCurrencyChange}
+            onValueChange={requestCurrencyChange}
             items={BOOK_CURRENCIES.map((c) => ({ value: c, label: c }))}
             disabled={savingCurrency}
           >
@@ -472,19 +607,37 @@
             </Select.Content>
           </Select.Root>
         {:else}
-          <span class="text-xs text-muted-foreground">No book yet — start from Overview.</span>
+          <span class="text-xs text-muted-foreground">
+            No book yet — start from <a href={resolve('/')} class="underline">Overview</a>.
+          </span>
         {/if}
       </div>
       <div class="flex flex-col items-start gap-3">
         {#if dataRes.error}
           <ErrorCard message={dataRes.error} onRetry={() => dataRes.reload()} />
         {:else}
-          <code
-            class="max-w-full truncate rounded bg-muted px-2 py-1 font-mono text-xs text-muted-foreground"
-            title={activePath ?? undefined}
-          >
-            {activePath ?? 'No book open'}
-          </code>
+          <div class="flex w-full items-center gap-2">
+            <code
+              class="max-w-full flex-1 truncate rounded bg-muted px-2 py-1 font-mono text-xs text-muted-foreground"
+              title={activePath ?? undefined}
+            >
+              {activePath ?? 'No book open'}
+            </code>
+            <Button
+              variant="outline"
+              size="icon"
+              disabled={!activePath}
+              onclick={handleCopyPath}
+              aria-label="Copy book path"
+              title="Copy book path"
+            >
+              {#if copied}
+                <Check aria-hidden="true" class="size-4" />
+              {:else}
+                <Copy aria-hidden="true" class="size-4" />
+              {/if}
+            </Button>
+          </div>
           <div class="flex flex-wrap gap-2">
             <Button variant="outline" disabled={switching} onclick={handleOpenBook}>
               <FolderOpen aria-hidden="true" class="size-4" />
@@ -503,7 +656,7 @@
               New...
             </Button>
             <Button variant="outline" disabled={!activePath} onclick={handleRevealDb}>
-              <FolderOpen aria-hidden="true" class="size-4" />
+              <ExternalLink aria-hidden="true" class="size-4" />
               Reveal in file manager
             </Button>
           </div>
@@ -512,49 +665,217 @@
     </Card.Content>
   </Card.Root>
 
+  <Dialog.Root bind:open={currencyDialogOpen}>
+    <Dialog.Content>
+      <Dialog.Header>
+        <Dialog.Title>Change base currency?</Dialog.Title>
+        <Dialog.Description>
+          This revalues net worth, P&amp;L reports and portfolio totals to {pendingCurrency ?? ''}.
+          Past transactions keep their original amounts; only the report currency changes.
+        </Dialog.Description>
+      </Dialog.Header>
+      <Dialog.Footer>
+        <Button
+          variant="outline"
+          onclick={() => {
+            currencyDialogOpen = false;
+            pendingCurrency = null;
+          }}
+          disabled={savingCurrency}
+        >
+          Cancel
+        </Button>
+        <Button onclick={confirmCurrencyChange} disabled={savingCurrency || !pendingCurrency}>
+          {savingCurrency ? 'Saving...' : `Change to ${pendingCurrency ?? ''}`}
+        </Button>
+      </Dialog.Footer>
+    </Dialog.Content>
+  </Dialog.Root>
+
+  <!-- Reporting (book-scoped: travels with the .spendo file) -->
+  <Card.Root>
+    <IconCardHeader
+      title="Reporting"
+      description="Book-scoped defaults stored inside the .spendo file."
+    >
+      {#snippet icon()}
+        <CalendarDays aria-hidden="true" class="size-4 text-muted-foreground" />
+      {/snippet}
+    </IconCardHeader>
+    <Card.Content class="flex flex-col gap-4">
+      {#if bookSettingsError}
+        <ErrorCard message={bookSettingsError} onRetry={() => loadBookSettings(true)} />
+      {/if}
+      <div class="flex items-center justify-between gap-4">
+        <div class="flex flex-col gap-1">
+          <span class="text-sm font-medium">Fiscal year starts</span>
+          <span class="text-xs text-muted-foreground">
+            Shapes the This-year P&amp;L default; full report grouping follows next
+          </span>
+        </div>
+        {#if dbSession.value}
+          <Select.Root
+            type="single"
+            value={String(bookSettings.value.fiscalYearStartMonth)}
+            onValueChange={(v) => {
+              const month = Number(v);
+              if (Number.isInteger(month) && month >= 1 && month <= 12)
+                void handleBookSetting('fiscalYearStartMonth', month);
+            }}
+            items={fyMonths}
+            disabled={savingBookKey}
+          >
+            <Select.Trigger class="w-36">
+              <SelectPrimitive.Value placeholder="Select month" />
+            </Select.Trigger>
+            <Select.Content>
+              {#each fyMonths as m (m.value)}
+                <Select.Item value={m.value} label={m.label}>{m.label}</Select.Item>
+              {/each}
+            </Select.Content>
+          </Select.Root>
+        {:else}
+          <span class="text-xs text-muted-foreground">No book open.</span>
+        {/if}
+      </div>
+      <div class="flex items-center justify-between gap-4">
+        <div class="flex flex-col gap-1">
+          <span class="text-sm font-medium">Default P&amp;L period</span>
+          <span class="text-xs text-muted-foreground">
+            Initial range for Profit &amp; Loss when no dates are in the URL
+          </span>
+        </div>
+        {#if dbSession.value}
+          <Select.Root
+            type="single"
+            value={bookSettings.value.defaultPnlPeriod}
+            onValueChange={(v) => {
+              if (
+                v === 'this_month' ||
+                v === 'this_quarter' ||
+                v === 'this_year' ||
+                v === 'last_12_months'
+              )
+                void handleBookSetting('defaultPnlPeriod', v);
+            }}
+            items={pnlPeriods}
+            disabled={savingBookKey}
+          >
+            <Select.Trigger class="w-44">
+              <SelectPrimitive.Value placeholder="Select period" />
+            </Select.Trigger>
+            <Select.Content>
+              {#each pnlPeriods as p (p.value)}
+                <Select.Item value={p.value} label={p.label}>{p.label}</Select.Item>
+              {/each}
+            </Select.Content>
+          </Select.Root>
+        {:else}
+          <span class="text-xs text-muted-foreground">No book open.</span>
+        {/if}
+      </div>
+      <div class="flex items-center justify-between gap-4">
+        <div class="flex flex-col gap-1">
+          <span class="text-sm font-medium">Auto-refresh prices</span>
+          <span class="text-xs text-muted-foreground">
+            Fetch fresh Yahoo prices when opening the Portfolio
+          </span>
+        </div>
+        <Switch
+          checked={bookSettings.value.priceAutoRefresh === 'on_startup'}
+          onCheckedChange={(v) =>
+            void handleBookSetting('priceAutoRefresh', v ? 'on_startup' : 'off')}
+          disabled={!dbSession.value || savingBookKey}
+          aria-label="Auto-refresh prices on portfolio open"
+        />
+      </div>
+      {#if !dbSession.value}
+        <p class="text-xs text-muted-foreground">
+          Open or create a book to change reporting defaults — they travel with the file.
+        </p>
+      {/if}
+    </Card.Content>
+  </Card.Root>
+
   <!-- Data export -->
   <DataExport />
 
-  <!-- Clear database -->
+  <!-- Danger zone -->
   <Card.Root class="border-destructive/30">
-    <IconCardHeader
-      title="Clear database"
-      description="Permanently delete all imported data. This action cannot be undone."
-    >
+    <IconCardHeader title="Danger zone" description="Destructive actions. These cannot be undone.">
       {#snippet icon()}
         <Trash2 aria-hidden="true" class="size-4 text-destructive" />
       {/snippet}
     </IconCardHeader>
-    <Card.Content class="flex flex-col items-start gap-1.5">
-      <Dialog.Root bind:open={clearDialogOpen}>
-        <Button
-          variant="destructive"
-          disabled={!dbSession.value || clearing}
-          onclick={() => (clearDialogOpen = true)}
-        >
-          Clear all data
-        </Button>
-        <Dialog.Content>
-          <Dialog.Header>
-            <Dialog.Title>Clear all data?</Dialog.Title>
-            <Dialog.Description>
-              This will permanently delete all accounts, transactions, prices, and changes history.
-              Your settings will be preserved.
-            </Dialog.Description>
-          </Dialog.Header>
-          <Dialog.Footer>
-            <Button variant="outline" onclick={() => (clearDialogOpen = false)} disabled={clearing}>
-              Cancel
-            </Button>
-            <Button variant="destructive" onclick={handleClearDb} disabled={clearing}>
-              {clearing ? 'Clearing...' : 'Yes, clear everything'}
-            </Button>
-          </Dialog.Footer>
-        </Dialog.Content>
-      </Dialog.Root>
+    <Card.Content class="flex flex-col items-start gap-4">
+      <div class="flex w-full items-center justify-between gap-4">
+        <div class="flex flex-col gap-1">
+          <span class="text-sm font-medium">Clear all data</span>
+          <span class="text-xs text-muted-foreground">
+            Delete accounts, transactions, budgets, prices and history from this book
+          </span>
+        </div>
+        <Dialog.Root bind:open={clearDialogOpen}>
+          <Button
+            variant="destructive"
+            disabled={!dbSession.value || clearing}
+            onclick={() => (clearDialogOpen = true)}
+          >
+            Clear all data
+          </Button>
+          <Dialog.Content>
+            <Dialog.Header>
+              <Dialog.Title>Clear all data?</Dialog.Title>
+              <Dialog.Description>
+                This will permanently delete all accounts, transactions, budgets, prices, symbol
+                overrides and changes history. Your appearance preferences will be preserved.
+              </Dialog.Description>
+            </Dialog.Header>
+            <Dialog.Footer>
+              <Button
+                variant="outline"
+                onclick={() => (clearDialogOpen = false)}
+                disabled={clearing}
+              >
+                Cancel
+              </Button>
+              <Button variant="destructive" onclick={handleClearDb} disabled={clearing}>
+                {clearing ? 'Clearing...' : 'Yes, clear everything'}
+              </Button>
+            </Dialog.Footer>
+          </Dialog.Content>
+        </Dialog.Root>
+      </div>
       {#if !dbSession.value}
         <p class="text-xs text-muted-foreground">No data imported yet — nothing to clear.</p>
       {/if}
+      <div class="flex w-full items-center justify-between gap-4">
+        <div class="flex flex-col gap-1">
+          <span class="text-sm font-medium">Reset preferences</span>
+          <span class="text-xs text-muted-foreground">
+            Restore theme, density, locale and list settings to defaults
+          </span>
+        </div>
+        <Dialog.Root bind:open={resetDialogOpen}>
+          <Button variant="outline" onclick={() => (resetDialogOpen = true)}>
+            <RotateCcw aria-hidden="true" class="size-4" />
+            Reset to defaults
+          </Button>
+          <Dialog.Content>
+            <Dialog.Header>
+              <Dialog.Title>Reset preferences?</Dialog.Title>
+              <Dialog.Description>
+                This restores all appearance and display settings to their defaults. Your book data
+                is not touched.
+              </Dialog.Description>
+            </Dialog.Header>
+            <Dialog.Footer>
+              <Button variant="outline" onclick={() => (resetDialogOpen = false)}>Cancel</Button>
+              <Button variant="destructive" onclick={handleReset}>Reset preferences</Button>
+            </Dialog.Footer>
+          </Dialog.Content>
+        </Dialog.Root>
+      </div>
     </Card.Content>
   </Card.Root>
 </div>
