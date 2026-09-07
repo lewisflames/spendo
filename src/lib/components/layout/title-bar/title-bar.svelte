@@ -9,6 +9,7 @@
   import { goBack, goForward, navHistory } from '$lib/stores/nav-history.svelte';
   import { routeTitle } from '$lib/routes';
   import * as Breadcrumb from '$lib/components/ui/breadcrumb';
+  import PaletteTrigger from './palette-trigger.svelte';
   import WindowControls from './window-controls.svelte';
 
   // Synchronous runtime check (prerender-safe); see window-controls.svelte.
@@ -84,6 +85,7 @@
       >
         <ArrowRight class="size-4" />
       </Button>
+      <PaletteTrigger />
     </div>
 
     <Breadcrumb.Root>
