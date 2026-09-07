@@ -14,7 +14,6 @@ export interface AppSettings {
   customPrimary: string | null;
   pageSize: number;
   sidebarCollapsed: boolean;
-  reduceMotion: boolean;
   density: Density;
 }
 
@@ -29,7 +28,6 @@ const DEFAULT_SETTINGS: AppSettings = {
   customPrimary: null,
   pageSize: 25,
   sidebarCollapsed: false,
-  reduceMotion: false,
   density: 'comfortable'
 };
 
@@ -123,8 +121,6 @@ function loadSettings(): AppSettings {
         typeof raw.sidebarCollapsed === 'boolean'
           ? raw.sidebarCollapsed
           : DEFAULT_SETTINGS.sidebarCollapsed,
-      reduceMotion:
-        typeof raw.reduceMotion === 'boolean' ? raw.reduceMotion : DEFAULT_SETTINGS.reduceMotion,
       density: pick(raw.density, DEFAULT_SETTINGS.density, isDensity)
     };
   } catch {
