@@ -1,6 +1,7 @@
 <script lang="ts">
   import * as Card from '$lib/components/ui/card';
   import { Button } from '$lib/components/ui/button';
+  import { Input } from '$lib/components/ui/input';
   import * as Select from '$lib/components/ui/select';
   import { Switch } from '$lib/components/ui/switch';
   import { Select as SelectPrimitive } from 'bits-ui';
@@ -9,6 +10,7 @@
     saveSettings,
     resetSettings,
     PAGE_SIZE_OPTIONS,
+    type AccentId,
     type Locale,
     type Theme
   } from '$lib/stores/settings.svelte';
@@ -33,11 +35,13 @@
     ListOrdered,
     HardDrive,
     FolderOpen,
+    Palette,
     Plus,
     Save,
     RotateCcw,
     Trash2
   } from '@lucide/svelte';
+  import { cn } from '$lib/utils.js';
   import * as Dialog from '$lib/components/ui/dialog';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import IconCardHeader from '$lib/components/shared/icon-card-header.svelte';
@@ -69,6 +73,42 @@
     { value: 'light', label: 'Light' },
     { value: 'dark', label: 'Dark' }
   ];
+
+  const DEFAULT_CUSTOM_PRIMARY = '#3b82f6';
+
+  const accents: { value: AccentId; label: string; swatch: string }[] = [
+    { value: 'zinc', label: 'Zinc', swatch: '#71717a' },
+    { value: 'blue', label: 'Blue', swatch: '#2563eb' },
+    { value: 'emerald', label: 'Emerald', swatch: '#059669' },
+    { value: 'amber', label: 'Amber', swatch: '#d97706' },
+    { value: 'rose', label: 'Rose', swatch: '#e11d48' },
+    { value: 'violet', label: 'Violet', swatch: '#7c3aed' },
+    { value: 'custom', label: 'Custom', swatch: '' }
+  ];
+
+  let customDraft = $state(appSettings.value.customPrimary ?? DEFAULT_CUSTOM_PRIMARY);
+  let customValid = $derived(/^#[0-9a-fA-F]{6}$/.test(customDraft.trim()));
+
+  function handleAccentSelect(value: AccentId) {
+    if (value === 'custom') {
+      const seeded = appSettings.value.customPrimary ?? DEFAULT_CUSTOM_PRIMARY;
+      customDraft = seeded;
+      saveSettings({ accent: 'custom', customPrimary: seeded });
+    } else {
+      saveSettings({ accent: value });
+    }
+  }
+
+  function handleCustomPick(value: string) {
+    customDraft = value;
+    saveSettings({ accent: 'custom', customPrimary: value });
+  }
+
+  function handleCustomHexInput(value: string) {
+    customDraft = value;
+    const hex = value.trim();
+    if (/^#[0-9a-fA-F]{6}$/.test(hex)) saveSettings({ accent: 'custom', customPrimary: hex });
+  }
 
   let clearDialogOpen = $state(false);
   let clearing = $state(false);
@@ -203,6 +243,7 @@
 
   function handleReset() {
     resetSettings();
+    customDraft = DEFAULT_CUSTOM_PRIMARY;
     toast.success('Preferences reset to defaults');
   }
 </script>
@@ -250,6 +291,77 @@
           </Select.Content>
         </Select.Root>
       </div>
+      <div class="flex items-center justify-between gap-4">
+        <div class="flex flex-col gap-1">
+          <span class="text-sm font-medium">Accent</span>
+          <span class="text-xs text-muted-foreground">Preset color or your own custom color</span>
+        </div>
+        <div class="flex items-center gap-1.5" role="radiogroup" aria-label="Accent color">
+          {#each accents as a (a.value)}
+            <button
+              type="button"
+              role="radio"
+              aria-checked={appSettings.value.accent === a.value}
+              title={a.label}
+              aria-label={a.label}
+              onclick={() => handleAccentSelect(a.value)}
+              class={cn(
+                'flex size-7 items-center justify-center rounded-full border transition-all outline-none focus-visible:ring-3 focus-visible:ring-ring/50',
+                appSettings.value.accent === a.value
+                  ? 'border-primary ring-2 ring-ring/50'
+                  : 'border-border hover:scale-110 hover:border-muted-foreground'
+              )}
+            >
+              {#if a.value === 'custom'}
+                <span
+                  aria-hidden="true"
+                  class="flex size-5 items-center justify-center rounded-full"
+                  style="background: conic-gradient(from 0deg, #f43f5e, #f59e0b, #10b981, #3b82f6, #8b5cf6, #f43f5e)"
+                >
+                  <Palette aria-hidden="true" class="size-3 text-white drop-shadow" />
+                </span>
+              {:else}
+                <span
+                  aria-hidden="true"
+                  class="size-5 rounded-full"
+                  style="background-color: {a.swatch}"
+                ></span>
+              {/if}
+            </button>
+          {/each}
+        </div>
+      </div>
+      {#if appSettings.value.accent === 'custom'}
+        <div class="flex items-center justify-between gap-4">
+          <div class="flex flex-col gap-1">
+            <span class="text-sm font-medium">Custom color</span>
+            <span class="text-xs text-muted-foreground">Applied to buttons, rings and charts</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <input
+              type="color"
+              aria-label="Pick a custom accent color"
+              value={appSettings.value.customPrimary ?? DEFAULT_CUSTOM_PRIMARY}
+              oninput={(e) => handleCustomPick(e.currentTarget.value)}
+              class="h-8 w-10 cursor-pointer rounded-md border border-input bg-transparent p-1"
+            />
+            <Input
+              id="custom-primary-hex"
+              value={customDraft}
+              oninput={(e) => handleCustomHexInput(e.currentTarget.value)}
+              aria-invalid={!customValid}
+              aria-label="Custom accent color hex value"
+              placeholder="#3b82f6"
+              maxlength={7}
+              spellcheck={false}
+              class="w-24 font-mono"
+            />
+          </div>
+        </div>
+        {#if !customValid}
+          <p class="text-xs text-destructive">Enter a hex color like #3b82f6.</p>
+        {/if}
+      {/if}
       <div class="flex items-center justify-between gap-4">
         <div class="flex flex-col gap-1">
           <span class="text-sm font-medium">Reduce motion</span>

@@ -5,7 +5,12 @@
   import { MediaQuery } from 'svelte/reactivity';
   import * as Sidebar from '$lib/components/ui/sidebar/index.js';
   import { AppSidebar } from '$lib/components/layout/app-sidebar';
-  import { appSettings, saveSettings, resolveTheme } from '$lib/stores/settings.svelte';
+  import {
+    appSettings,
+    saveSettings,
+    applyAccent,
+    resolveTheme
+  } from '$lib/stores/settings.svelte';
   import { goBack, goForward, initNavHistory } from '$lib/stores/nav-history.svelte';
   import {
     dbSession,
@@ -107,6 +112,7 @@
     document.documentElement.classList.toggle('dark', resolvedTheme === 'dark');
     document.documentElement.style.colorScheme = resolvedTheme;
     document.documentElement.lang = appSettings.value.locale;
+    applyAccent(appSettings.value.accent, appSettings.value.customPrimary);
     // Mirrors Settings → Appearance → Reduce motion onto <html> for
     // CSS-driven ambient decoration.
     document.documentElement.classList.toggle('reduce-motion', appSettings.value.reduceMotion);
