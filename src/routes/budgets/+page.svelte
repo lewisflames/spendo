@@ -22,7 +22,14 @@
   import { useBudgetYear } from '$lib/hooks/use-budget-year.svelte';
   import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
-  import BudgetsTable from '$lib/features/budgets/budgets-table.svelte';
+  import { ColumnsMenu } from '$lib/components/shared/columns-menu';
+  import { useColumnVisibility } from '$lib/hooks/use-column-visibility.svelte';
+  import BudgetsTable, {
+    BUDGET_COLUMNS,
+    BUDGET_DEFAULT_COLUMNS
+  } from '$lib/features/budgets/budgets-table.svelte';
+
+  const budgetCols = useColumnVisibility(BUDGET_DEFAULT_COLUMNS);
 
   let showAddDialog = $state(false);
 
@@ -182,6 +189,8 @@
 
         <div class="flex items-center gap-2">
           <Button
+            variant="outline"
+            size="sm"
             onclick={() => {
               showAddDialog = true;
             }}
@@ -189,6 +198,7 @@
             <Plus aria-hidden="true" />
             Add Budget
           </Button>
+          <ColumnsMenu columns={BUDGET_COLUMNS} cols={budgetCols} />
         </div>
       </div>
     {/if}
@@ -199,6 +209,7 @@
         {hasBudgets}
         {currency}
         year={by.year}
+        cols={budgetCols}
         onAddClick={() => {
           showAddDialog = true;
         }}
