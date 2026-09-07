@@ -1,6 +1,4 @@
 <script lang="ts">
-  import { Button } from '$lib/components/ui/button';
-  import { Download, LoaderCircle } from '@lucide/svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import { AsOfPicker } from '$lib/components/shared/as-of-picker';
   import { formatDate, plural } from '$lib/utils/format.svelte';
@@ -10,18 +8,12 @@
     account,
     summary,
     isToday,
-    asOf = $bindable(),
-    exporting,
-    canExport,
-    onExport
+    asOf = $bindable()
   }: {
     account: AccountDetailInfo;
     summary: AccountSummary;
     isToday: boolean;
     asOf: string;
-    exporting: boolean;
-    canExport: boolean;
-    onExport: () => void;
   } = $props();
 </script>
 
@@ -40,12 +32,4 @@
     {/if}
   {/snippet}
   <AsOfPicker bind:value={asOf} />
-  <Button variant="outline" onclick={onExport} disabled={!canExport || exporting}>
-    {#if exporting}
-      <LoaderCircle aria-hidden="true" class="size-3 animate-spin" />
-    {:else}
-      <Download aria-hidden="true" class="size-3" />
-    {/if}
-    Export
-  </Button>
 </PageHeader>

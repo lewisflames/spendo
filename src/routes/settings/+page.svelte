@@ -42,6 +42,7 @@
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import IconCardHeader from '$lib/components/shared/icon-card-header.svelte';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
+  import DataExport from '$lib/features/settings/data-export.svelte';
 
   import {
     dbSession,
@@ -398,6 +399,9 @@
       </div>
     </Card.Content>
   </Card.Root>
+
+  <!-- Data export -->
+  <DataExport />
 
   <!-- Clear database -->
   <Card.Root class="border-destructive/30">

@@ -260,6 +260,10 @@ export const fetchHomeData = (): Promise<HomeDataResult> => invoke('fetch_home_d
 
 export const clearAppDb = (): Promise<void> => invoke('clear_app_db');
 
+/** Writes text (e.g. a CSV export) to a user-chosen path. */
+export const writeTextFile = (path: string, contents: string): Promise<void> =>
+  invoke('write_text_file', { path, contents });
+
 // ── Books (document model: one active `.spendo` file opened in place) ──
 
 /** Active book path, or `null` while book-less (fresh install). */
@@ -328,6 +332,44 @@ export const fetchTransactionHeatmap = (filters?: Filters): Promise<HeatmapPoint
 /** `null` when no transaction with that GUID exists. */
 export const fetchTransaction = (guid: string): Promise<TransactionDetailResult | null> =>
   invoke('fetch_transaction', { guid });
+
+/** One row per split for the settings CSV export (GnuCash multi-split shape). */
+export interface ExportSplitRow {
+  txGuid: string;
+  splitGuid: string;
+  /** YYYY-MM-DD */
+  postDate: string;
+  description: string | null;
+  num?: string | null;
+  notes?: string | null;
+  commodity?: string | null;
+  memo?: string | null;
+  fullAccountName: string;
+  accountName: string;
+  amount: number;
+  reconcileState?: string | null;
+  price: number;
+}
+
+/** One row per account in parent-before-child order for the settings CSV export. */
+export interface ExportAccountRow {
+  guid: string;
+  parentGuid: string | null;
+  accountType: string;
+  fullName: string;
+  name: string;
+  code: string | null;
+  description: string | null;
+  commodity: string | null;
+  commodityNamespace: string | null;
+  placeholder: boolean;
+}
+
+export const fetchExportTransactions = (): Promise<ExportSplitRow[]> =>
+  invoke('fetch_export_transactions');
+
+export const fetchExportAccounts = (): Promise<ExportAccountRow[]> =>
+  invoke('fetch_export_accounts');
 
 export const refreshPrices = (): Promise<PricesResult> => invoke('refresh_prices');
 

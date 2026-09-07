@@ -2,3 +2,8 @@
 export function ensureSpendoExtension(path: string): string {
   return /\.[A-Za-z0-9]+$/.test(path) ? path : `${path}.spendo`;
 }
+
+/** Same behavior for CSV export defaults. */
+export function ensureCsvExtension(path: string): string {
+  return /\.[A-Za-z0-9]+$/.test(path) ? path : `${path}.csv`;
+}

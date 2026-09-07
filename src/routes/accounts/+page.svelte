@@ -1,8 +1,5 @@
 <script lang="ts">
-  import { Landmark, PiggyBank, CreditCard, TrendingUp, Download } from '@lucide/svelte';
-  import { Button } from '$lib/components/ui/button';
-  import { toast } from '$lib/components/ui/sonner';
-  import { downloadCsv } from '$lib/utils/csv';
+  import { Landmark, PiggyBank, CreditCard, TrendingUp } from '@lucide/svelte';
   import { dbBootstrapping, dbSession } from '$lib/stores/db.svelte';
   import { fetchAccounts } from '$lib/tauri';
   import {
@@ -25,7 +22,6 @@
   import FutureAsOfNote from '$lib/components/shared/future-as-of-note.svelte';
   import MissingFxWarning from '$lib/features/reports/missing-fx-warning.svelte';
   import { clampZero, formatSessionCurrency, signColor, plural } from '$lib/utils/format.svelte';
-  import { errMsg } from '$lib/utils/error';
   import AccountTable from '$lib/features/accounts/account-table.svelte';
   import BalanceTree from '$lib/features/accounts/balance-tree.svelte';
 
@@ -95,23 +91,6 @@
   let retainedEarnings = $derived(data?.retainedEarnings ?? 0);
   let balanced = $derived(data !== null && Math.abs(data?.balanceCheck ?? 0) < 0.005);
 
-  function handleExportCsv() {
-    if (accounts.length === 0) return;
-    try {
-      const headers = ['Category', 'Account', 'Type', 'Txn Count', 'Balance'];
-      const csvRows = accounts.map((node) => [
-        nodeCategory(node.accountType),
-        node.description || node.name,
-        node.accountType,
-        String(node.txCount),
-        String(node.balance)
-      ]);
-      downloadCsv('accounts.csv', headers, csvRows);
-    } catch (e: unknown) {
-      toast.error(errMsg(e, 'Failed to export accounts'));
-    }
-  }
-
   function displayValue(n: number): string {
     return formatSessionCurrency(clampZero(n));
   }
@@ -129,10 +108,6 @@
       description={data ? `Chart of accounts · ${plural(data.totalAccounts, 'account')}` : ''}
     >
       <AsOfPicker bind:value={asOf} />
-      <Button variant="outline" onclick={handleExportCsv} disabled={accounts.length === 0}>
-        <Download aria-hidden="true" class="size-3" />
-        Export
-      </Button>
     </PageHeader>
 
     {#if (loading || dbBootstrapping.value) && !data}
