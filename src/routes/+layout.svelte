@@ -22,7 +22,9 @@
   import { TitleBar, MinimalTitleBar } from '$lib/components/layout/title-bar';
   import { Sonner } from '$lib/components/ui/sonner';
   import KeyboardShortcutsDialog from '$lib/components/layout/keyboard-shortcuts-dialog.svelte';
+  import CommandPalette from '$lib/components/layout/command-palette.svelte';
   import { keyboardShortcutsDialog as shortcutsDialog } from '$lib/stores/keyboard-shortcuts.svelte';
+  import { commandPalette } from '$lib/stores/command-palette.svelte';
   import '../app.css';
 
   let { children } = $props();
@@ -121,6 +123,13 @@
   });
 
   function handleKeydown(e: KeyboardEvent) {
+    // The palette must open from anywhere — including inside inputs — so
+    // this chord is checked before the input guard below.
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      commandPalette.value = !commandPalette.value;
+      return;
+    }
     if (e.target instanceof HTMLElement && e.target.closest('input, textarea, [contenteditable]')) {
       return;
     }
@@ -179,3 +188,5 @@
 <Sonner theme={resolvedTheme} />
 
 <KeyboardShortcutsDialog />
+
+<CommandPalette />

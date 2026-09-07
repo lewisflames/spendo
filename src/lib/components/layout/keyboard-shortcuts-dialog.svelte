@@ -13,6 +13,7 @@
   }
 
   const globalShortcuts: ShortcutEntry[] = [
+    { keys: [modKey, 'K'], description: 'Open command palette' },
     { keys: ['?'], description: 'Open keyboard shortcuts help' },
     { keys: ['Alt', '←'], description: 'Go back' },
     { keys: ['Alt', '→'], description: 'Go forward' },
