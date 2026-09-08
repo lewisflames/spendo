@@ -2,7 +2,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 use tauri::State;
 
-use crate::db::{run_blocking, validate_data_table, AppState};
+use crate::db::{run_blocking, validate_data_table, with_tx_err, AppError, AppState};
 use crate::home::{get_summary, DataSummary};
 use crate::utils;
 
@@ -372,38 +372,35 @@ pub(crate) fn fetch_change_history_inner(
 
 // ── Revert (linear undo) ─────────────────────────────────────────────────────
 
-pub(crate) fn revert_history_entry_inner(conn: &Connection, id: i64) -> Result<(i64, i64), String> {
+pub(crate) fn revert_history_entry_inner(
+    conn: &Connection,
+    id: i64,
+) -> Result<(i64, i64), AppError> {
     let (kind, label, reverted_by): (String, String, Option<i64>) = conn
         .query_row(
             "SELECT kind, label, reverted_by FROM change_log WHERE id = ?1",
             [id],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
-        .optional()
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "Change not found — it may have been cleared".to_string())?;
+        .optional()?
+        .ok_or_else(|| AppError::NotFound("Change not found — it may have been cleared".to_string()))?;
     if kind == "revert" {
-        return Err("Undo entries cannot be reverted".to_string());
+        return Err(AppError::Validation("Undo entries cannot be reverted".to_string()));
     }
     if reverted_by.is_some() {
-        return Err("This change was already reverted".to_string());
+        return Err(AppError::Validation("This change was already reverted".to_string()));
     }
-    let newer: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM change_log
-             WHERE kind != 'revert' AND reverted_by IS NULL AND id > ?1",
-            [id],
-            |row| row.get(0),
-        )
-        .map_err(|e| e.to_string())?;
+    let newer: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM change_log
+         WHERE kind != 'revert' AND reverted_by IS NULL AND id > ?1",
+        [id],
+        |row| row.get(0),
+    )?;
     if newer > 0 {
-        return Err("Revert newer changes first".to_string());
+        return Err(AppError::Validation("Revert newer changes first".to_string()));
     }
 
-    let tx_result = (|| -> Result<i64, String> {
-        conn.execute_batch("BEGIN TRANSACTION")
-            .map_err(|e| e.to_string())?;
-
+    let tx_result = with_tx_err(conn, || {
         // Phase 1: drop rows the operation added (children before parents).
         for table in ["splits", "transactions", "accounts", "commodities"] {
             validate_data_table(table)?;
@@ -412,24 +409,19 @@ pub(crate) fn revert_history_entry_inner(conn: &Connection, id: i64) -> Result<(
                     SELECT row_guid FROM change_snapshots
                     WHERE entry_id = ?1 AND table_name = ?2 AND before_json IS NULL)"
             );
-            conn.execute(&sql, params![id, table])
-                .map_err(|e| e.to_string())?;
+            conn.execute(&sql, params![id, table])?;
         }
 
         // Phase 2: restore rows the operation changed or removed
         // (parents before children so references resolve).
         for table in ["commodities", "accounts", "transactions", "splits"] {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT before_json FROM change_snapshots
-                     WHERE entry_id = ?1 AND table_name = ?2 AND before_json IS NOT NULL",
-                )
-                .map_err(|e| e.to_string())?;
+            let mut stmt = conn.prepare(
+                "SELECT before_json FROM change_snapshots
+                 WHERE entry_id = ?1 AND table_name = ?2 AND before_json IS NOT NULL",
+            )?;
             let befores: Vec<String> = stmt
-                .query_map(params![id, table], |row| row.get(0))
-                .map_err(|e| e.to_string())?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| e.to_string())?;
+                .query_map(params![id, table], |row| row.get(0))?
+                .collect::<Result<Vec<_>, _>>()?;
             for before in befores {
                 restore_snapshot_row(conn, table, &before)?;
             }
@@ -443,33 +435,31 @@ pub(crate) fn revert_history_entry_inner(conn: &Connection, id: i64) -> Result<(
                  (occurred_at, kind, label, source, reverts_id)
                  VALUES (?1, 'revert', ?2, 'system', ?3)",
                 params![occurred_at, revert_label, id],
-            )
-            .map_err(|e| e.to_string())?;
+            )?;
             conn.last_insert_rowid()
         };
         conn.execute(
             "UPDATE change_log SET reverted_by = ?1 WHERE id = ?2",
             params![revert_id, id],
-        )
-        .map_err(|e| e.to_string())?;
+        )?;
 
-        conn.execute_batch("COMMIT").map_err(|e| e.to_string())?;
         Ok(revert_id)
-    })();
+    });
     match tx_result {
         Ok(revert_id) => Ok((id, revert_id)),
-        Err(e) => {
-            conn.execute_batch("ROLLBACK").ok();
-            // Untracked rows (written outside the history log) referencing
-            // rows this revert removes surface as FK violations — translate
-            // to the same "blocked" language as the ordering guard.
-            if e.to_lowercase().contains("foreign key") {
-                return Err(
-                    "Cannot revert — newer data depends on this change".to_string(),
-                );
-            }
-            Err(e)
-        }
+        Err(e) => Err(map_revert_error(e)),
+    }
+}
+
+/// Untracked rows (written outside the history log) referencing rows this
+/// revert removes surface as FK violations — translate to the same "blocked"
+/// language as the ordering guard. Matched on the extended result code so
+/// other constraint failures stay loud instead of masquerading as ordering.
+fn map_revert_error(e: AppError) -> AppError {
+    if matches!(&e, AppError::Db(db) if db.is_foreign_key()) {
+        AppError::Validation("Cannot revert — newer data depends on this change".to_string())
+    } else {
+        e
     }
 }
 
@@ -680,12 +670,12 @@ mod tests {
 
         // Older entry is blocked while a newer one is pending.
         let err = revert_history_entry_inner(&conn, first).unwrap_err();
-        assert!(err.contains("newer"), "unexpected: {err}");
+        assert!(err.to_string().contains("newer"), "unexpected: {err:?}");
 
         revert_history_entry_inner(&conn, second).unwrap();
         // Double revert is blocked.
         let err = revert_history_entry_inner(&conn, second).unwrap_err();
-        assert!(err.contains("already"), "unexpected: {err}");
+        assert!(err.to_string().contains("already"), "unexpected: {err:?}");
         // Only the second create was undone so far.
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM transactions", [], |r| r.get(0))
@@ -711,6 +701,32 @@ mod tests {
             .unwrap()
             .revertible_id
             .is_none());
+    }
+
+    #[test]
+    fn revert_maps_only_fk_violations_to_blocked() {
+        use crate::db::DbError;
+        // Synthetic FK failure (unreachable end-to-end with the current
+        // schema — the only FK onto data tables cascades — so cover the
+        // mapping directly).
+        let fk = AppError::Db(DbError {
+            message: "FOREIGN KEY constraint failed".to_string(),
+            extended_code: Some(rusqlite::ffi::SQLITE_CONSTRAINT_FOREIGNKEY),
+        });
+        let mapped = map_revert_error(fk);
+        assert!(matches!(mapped, AppError::Validation(ref m) if m.contains("depends")));
+        assert_eq!(
+            String::from(mapped),
+            "Cannot revert — newer data depends on this change"
+        );
+        // Other Db failures (e.g. UNIQUE) and guards pass through untouched.
+        let unique = AppError::Db(DbError {
+            message: "UNIQUE constraint failed".to_string(),
+            extended_code: Some(rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE),
+        });
+        assert!(matches!(map_revert_error(unique), AppError::Db(_)));
+        let guard = AppError::Validation("Revert newer changes first".to_string());
+        assert!(matches!(map_revert_error(guard), AppError::Validation(_)));
     }
 
     #[test]

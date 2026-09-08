@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use tauri::State;
 
-use crate::db::{run_blocking, AppState};
+use crate::db::{run_blocking, with_tx_err, AppError, AppState};
 use crate::fx;
 use crate::history;
 use crate::sql;
@@ -180,41 +180,41 @@ pub struct HeatmapPoint {
 /// Validate `YYYY-MM-DD`, reject empty/malformed and future dates (hard-block
 /// preserves the `VISIBLE_TX_FILTER` invariant: manually created rows are
 /// always visible in balances immediately).
-fn validate_post_date(post_date: &str) -> Result<String, String> {
+fn validate_post_date(post_date: &str) -> Result<String, AppError> {
     let trimmed = post_date.trim();
     if trimmed.is_empty() {
-        return Err("Date is required".to_string());
+        return Err(AppError::Validation("Date is required".to_string()));
     }
     let parsed = chrono::NaiveDate::parse_from_str(trimmed, "%Y-%m-%d")
-        .map_err(|_| format!("Invalid date (expected YYYY-MM-DD): {trimmed}"))?;
+        .map_err(|_| AppError::Validation(format!("Invalid date (expected YYYY-MM-DD): {trimmed}")))?;
     let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
     if parsed.format("%Y-%m-%d").to_string() > today {
-        return Err("Future dates are not allowed".to_string());
+        return Err(AppError::Validation("Future dates are not allowed".to_string()));
     }
     Ok(parsed.format("%Y-%m-%d").to_string())
 }
 
-fn to_value_rational(amount: f64) -> Result<(i64, i64), String> {
+fn to_value_rational(amount: f64) -> Result<(i64, i64), AppError> {
     if !amount.is_finite() {
-        return Err("Split amounts must be finite numbers".to_string());
+        return Err(AppError::Validation("Split amounts must be finite numbers".to_string()));
     }
     if amount.abs() > 1_000_000_000.0 {
-        return Err("Split amount is too large".to_string());
+        return Err(AppError::Validation("Split amount is too large".to_string()));
     }
     let num = (amount * VALUE_DENOM as f64).round() as i64;
     let drift = ((num as f64 / VALUE_DENOM as f64) - amount).abs();
     if drift > 0.5 / VALUE_DENOM as f64 + 1e-9 {
-        return Err("Split amount cannot be represented".to_string());
+        return Err(AppError::Validation("Split amount cannot be represented".to_string()));
     }
     Ok((num, VALUE_DENOM))
 }
 
-fn to_quantity_rational(qty: f64) -> Result<(i64, i64), String> {
+fn to_quantity_rational(qty: f64) -> Result<(i64, i64), AppError> {
     if !qty.is_finite() {
-        return Err("Split quantities must be finite numbers".to_string());
+        return Err(AppError::Validation("Split quantities must be finite numbers".to_string()));
     }
     if qty.abs() > 1_000_000_000.0 {
-        return Err("Split quantity is too large".to_string());
+        return Err(AppError::Validation("Split quantity is too large".to_string()));
     }
     let num = (qty * QUANTITY_DENOM as f64).round() as i64;
     Ok((num, QUANTITY_DENOM))
@@ -227,20 +227,20 @@ fn opt_text(s: &Option<String>) -> Option<String> {
 /// Shared validation for create/update: ≥2 splits, accounts exist and are not
 /// placeholders, finite amounts, zero-sum balance. Returns the normalized
 /// post-date string.
-fn validate_tx_input(conn: &Connection, input: &TxInput) -> Result<String, String> {
+fn validate_tx_input(conn: &Connection, input: &TxInput) -> Result<String, AppError> {
     let post_date = validate_post_date(&input.post_date)?;
     if input.splits.len() < 2 {
-        return Err("A transaction needs at least two splits".to_string());
+        return Err(AppError::Validation("A transaction needs at least two splits".to_string()));
     }
     if input.splits.len() > 50 {
-        return Err("Too many splits (max 50)".to_string());
+        return Err(AppError::Validation("Too many splits (max 50)".to_string()));
     }
     let mut sum = 0.0;
     let mut seen_accounts = HashSet::new();
     for (i, s) in input.splits.iter().enumerate() {
         let n = i + 1;
         if s.account_guid.trim().is_empty() {
-            return Err(format!("Split {n}: account is required"));
+            return Err(AppError::Validation(format!("Split {n}: account is required")));
         }
         let placeholder: Option<i64> = conn
             .query_row(
@@ -249,7 +249,7 @@ fn validate_tx_input(conn: &Connection, input: &TxInput) -> Result<String, Strin
                 |row| row.get(0),
             )
             .optional()
-            .map_err(|e| e.to_string())?
+            ?
             .flatten();
         // Distinguish missing (None + no row) from present-with-NULL: re-query
         // existence explicitly since `placeholder` is nullable.
@@ -260,48 +260,48 @@ fn validate_tx_input(conn: &Connection, input: &TxInput) -> Result<String, Strin
                 |_| Ok(()),
             )
             .optional()
-            .map_err(|e| e.to_string())?
+            ?
             .is_some();
         if !exists {
-            return Err(format!("Split {n}: account not found"));
+            return Err(AppError::NotFound(format!("Split {n}: account not found")));
         }
         if placeholder.unwrap_or(0) != 0 {
-            return Err(format!("Split {n}: placeholder accounts cannot hold splits"));
+            return Err(AppError::Validation(format!("Split {n}: placeholder accounts cannot hold splits")));
         }
         if !s.amount.is_finite() {
-            return Err(format!("Split {n}: amount must be a number"));
+            return Err(AppError::Validation(format!("Split {n}: amount must be a number")));
         }
         if let Some(q) = s.quantity {
             if !q.is_finite() {
-                return Err(format!("Split {n}: quantity must be a number"));
+                return Err(AppError::Validation(format!("Split {n}: quantity must be a number")));
             }
         }
         if let Some(ref memo) = s.memo {
             if memo.len() > 500 {
-                return Err(format!("Split {n}: memo is too long (max 500)"));
+                return Err(AppError::Validation(format!("Split {n}: memo is too long (max 500)")));
             }
         }
         sum += s.amount;
         seen_accounts.insert(s.account_guid.clone());
     }
     if sum.abs() > BALANCE_EPS {
-        return Err(format!(
+        return Err(AppError::Validation(format!(
             "Splits are out of balance by {sum:.2} — debits must equal credits"
-        ));
+        )));
     }
     if let Some(ref d) = input.description {
         if d.len() > 500 {
-            return Err("Description is too long (max 500)".to_string());
+            return Err(AppError::Validation("Description is too long (max 500)".to_string()));
         }
     }
     if let Some(ref n) = input.num {
         if n.len() > 100 {
-            return Err("Number is too long (max 100)".to_string());
+            return Err(AppError::Validation("Number is too long (max 100)".to_string()));
         }
     }
     if let Some(ref n) = input.notes {
         if n.len() > 2000 {
-            return Err("Notes are too long (max 2000)".to_string());
+            return Err(AppError::Validation("Notes are too long (max 2000)".to_string()));
         }
     }
     let _ = seen_accounts;
@@ -800,7 +800,7 @@ fn insert_split_rows(
     conn: &Connection,
     tx_guid: &str,
     splits: &[SplitInput],
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<String>, AppError> {
     let mut guids = Vec::with_capacity(splits.len());
     for s in splits {
         let (value_num, value_denom) = to_value_rational(s.amount)?;
@@ -823,26 +823,26 @@ fn insert_split_rows(
                 opt_text(&s.memo),
             ],
         )
-        .map_err(|e| e.to_string())?;
+        ?;
         guids.push(split_guid);
     }
     Ok(guids)
 }
 
-fn existing_split_guids(conn: &Connection, tx_guid: &str) -> Result<Vec<String>, String> {
+fn existing_split_guids(conn: &Connection, tx_guid: &str) -> Result<Vec<String>, AppError> {
     let mut stmt = conn
         .prepare("SELECT guid FROM splits WHERE tx_guid = ?1")
-        .map_err(|e| e.to_string())?;
+        ?;
     let rows = stmt
         .query_map(params![tx_guid], |row| row.get(0))
-        .map_err(|e| e.to_string())?;
+        ?;
     let guids = rows
         .collect::<Result<Vec<String>, _>>()
-        .map_err(|e| e.to_string())?;
+        ?;
     Ok(guids)
 }
 
-fn create_transaction_inner(conn: &Connection, input: TxInput) -> Result<String, String> {
+fn create_transaction_inner(conn: &Connection, input: TxInput) -> Result<String, AppError> {
 
     let post_date = validate_tx_input(conn, &input)?;
     let tx_guid = uuid::Uuid::new_v4().to_string();
@@ -855,8 +855,7 @@ fn create_transaction_inner(conn: &Connection, input: TxInput) -> Result<String,
         .collect::<HashSet<_>>()
         .len() as i64;
 
-    let tx_result = (|| -> Result<String, String> {
-        conn.execute_batch("BEGIN").map_err(|e| e.to_string())?;
+    with_tx_err(conn, || {
         conn.execute(
             "INSERT INTO transactions (guid, post_date, description, num, notes)
              VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -868,7 +867,7 @@ fn create_transaction_inner(conn: &Connection, input: TxInput) -> Result<String,
                 opt_text(&input.notes),
             ],
         )
-        .map_err(|e| e.to_string())?;
+        ?;
         let split_guids = insert_split_rows(conn, &tx_guid, &input.splits)?;
         let mut snapshots = vec![history::Snapshot {
             table_name: "transactions",
@@ -892,23 +891,15 @@ fn create_transaction_inner(conn: &Connection, input: TxInput) -> Result<String,
             Some(&detail),
             &snapshots,
         )?;
-        conn.execute_batch("COMMIT").map_err(|e| e.to_string())?;
         Ok(tx_guid.clone())
-    })();
-    match tx_result {
-        Ok(g) => Ok(g),
-        Err(e) => {
-            conn.execute_batch("ROLLBACK").ok();
-            Err(e)
-        }
-    }
+    })
 }
 
 fn update_transaction_inner(
     conn: &Connection,
     guid: &str,
     input: TxInput,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let post_date = validate_tx_input(conn, &input)?;
     let exists: bool = conn
         .query_row(
@@ -917,10 +908,10 @@ fn update_transaction_inner(
             |_| Ok(()),
         )
         .optional()
-        .map_err(|e| e.to_string())?
+        ?
         .is_some();
     if !exists {
-        return Err("Transaction not found — it may have been removed".to_string());
+        return Err(AppError::NotFound("Transaction not found — it may have been removed".to_string()));
     }
     let old_splits = existing_split_guids(conn, guid)?;
     let label = tx_label(&input);
@@ -933,8 +924,7 @@ fn update_transaction_inner(
         .collect::<HashSet<_>>()
         .len() as i64;
 
-    let tx_result = (|| -> Result<(), String> {
-        conn.execute_batch("BEGIN").map_err(|e| e.to_string())?;
+    with_tx_err(conn, || {
         let mut snapshots = vec![history::Snapshot {
             table_name: "transactions",
             row_guid: guid.to_string(),
@@ -958,9 +948,9 @@ fn update_transaction_inner(
                 guid,
             ],
         )
-        .map_err(|e| e.to_string())?;
+        ?;
         conn.execute("DELETE FROM splits WHERE tx_guid = ?1", params![guid])
-            .map_err(|e| e.to_string())?;
+            ?;
         let new_guids = insert_split_rows(conn, guid, &input.splits)?;
         for g in &new_guids {
             snapshots.push(history::Snapshot {
@@ -979,19 +969,11 @@ fn update_transaction_inner(
             Some(&detail),
             &snapshots,
         )?;
-        conn.execute_batch("COMMIT").map_err(|e| e.to_string())?;
         Ok(())
-    })();
-    match tx_result {
-        Ok(()) => Ok(()),
-        Err(e) => {
-            conn.execute_batch("ROLLBACK").ok();
-            Err(e)
-        }
-    }
+    })
 }
 
-fn delete_transaction_inner(conn: &Connection, guid: &str) -> Result<(), String> {
+fn delete_transaction_inner(conn: &Connection, guid: &str) -> Result<(), AppError> {
     let before: Option<String> = conn
         .query_row(
             "SELECT description FROM transactions WHERE guid = ?1",
@@ -999,7 +981,7 @@ fn delete_transaction_inner(conn: &Connection, guid: &str) -> Result<(), String>
             |row| row.get::<_, Option<String>>(0),
         )
         .optional()
-        .map_err(|e| e.to_string())?
+        ?
         .flatten()
         .into();
     let exists = conn
@@ -1009,10 +991,10 @@ fn delete_transaction_inner(conn: &Connection, guid: &str) -> Result<(), String>
             |_| Ok(()),
         )
         .optional()
-        .map_err(|e| e.to_string())?
+        ?
         .is_some();
     if !exists {
-        return Err("Transaction not found — it may have been removed".to_string());
+        return Err(AppError::NotFound("Transaction not found — it may have been removed".to_string()));
     }
     let old_splits = existing_split_guids(conn, guid)?;
     let label = before
@@ -1029,8 +1011,7 @@ fn delete_transaction_inner(conn: &Connection, guid: &str) -> Result<(), String>
         })
         .unwrap_or_else(|| "Delete manual transaction".to_string());
 
-    let tx_result = (|| -> Result<(), String> {
-        conn.execute_batch("BEGIN").map_err(|e| e.to_string())?;
+    with_tx_err(conn, || {
         let mut snapshots = vec![history::Snapshot {
             table_name: "transactions",
             row_guid: guid.to_string(),
@@ -1044,9 +1025,9 @@ fn delete_transaction_inner(conn: &Connection, guid: &str) -> Result<(), String>
             });
         }
         conn.execute("DELETE FROM splits WHERE tx_guid = ?1", params![guid])
-            .map_err(|e| e.to_string())?;
+            ?;
         conn.execute("DELETE FROM transactions WHERE guid = ?1", params![guid])
-            .map_err(|e| e.to_string())?;
+            ?;
         history::insert_change_entry(
             conn,
             "tx_delete",
@@ -1057,16 +1038,8 @@ fn delete_transaction_inner(conn: &Connection, guid: &str) -> Result<(), String>
             None,
             &snapshots,
         )?;
-        conn.execute_batch("COMMIT").map_err(|e| e.to_string())?;
         Ok(())
-    })();
-    match tx_result {
-        Ok(()) => Ok(()),
-        Err(e) => {
-            conn.execute_batch("ROLLBACK").ok();
-            Err(e)
-        }
-    }
+    })
 }
 
 #[tauri::command]
@@ -1075,7 +1048,7 @@ pub async fn create_transaction(
     input: TxInput,
 ) -> Result<String, String> {
     run_blocking(state.db.clone(), move |conn| {
-        create_transaction_inner(conn, input)
+        create_transaction_inner(conn, input).map_err(String::from)
     })
     .await
 }
@@ -1087,7 +1060,7 @@ pub async fn update_transaction(
     input: TxInput,
 ) -> Result<(), String> {
     run_blocking(state.db.clone(), move |conn| {
-        update_transaction_inner(conn, &guid, input)
+        update_transaction_inner(conn, &guid, input).map_err(String::from)
     })
     .await
 }
@@ -1095,7 +1068,7 @@ pub async fn update_transaction(
 #[tauri::command]
 pub async fn delete_transaction(state: State<'_, AppState>, guid: String) -> Result<(), String> {
     run_blocking(state.db.clone(), move |conn| {
-        delete_transaction_inner(conn, &guid)
+        delete_transaction_inner(conn, &guid).map_err(String::from)
     })
     .await
 }
@@ -1258,19 +1231,19 @@ mod tests {
         // Placeholder account.
         let mut bad = balanced_input();
         bad.splits[1].account_guid = "placeholder".to_string();
-        assert!(create_transaction_inner(&conn, bad).unwrap_err().contains("placeholder"));
+        assert!(create_transaction_inner(&conn, bad).unwrap_err().to_string().contains("placeholder"));
         // Future date hard-block.
         let mut bad = balanced_input();
         bad.post_date = "2099-01-01".to_string();
-        assert!(create_transaction_inner(&conn, bad).unwrap_err().contains("Future"));
+        assert!(create_transaction_inner(&conn, bad).unwrap_err().to_string().contains("Future"));
         // Single split.
         let mut bad = balanced_input();
         bad.splits.truncate(1);
-        assert!(create_transaction_inner(&conn, bad).unwrap_err().contains("two splits"));
+        assert!(create_transaction_inner(&conn, bad).unwrap_err().to_string().contains("two splits"));
         // Unknown account.
         let mut bad = balanced_input();
         bad.splits[0].account_guid = "nope".to_string();
-        assert!(create_transaction_inner(&conn, bad).unwrap_err().contains("not found"));
+        assert!(create_transaction_inner(&conn, bad).unwrap_err().to_string().contains("not found"));
     }
 
     #[test]

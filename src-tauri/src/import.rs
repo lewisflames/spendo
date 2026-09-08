@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use tauri::State;
 
-use crate::db::{self, connect_source_db, init_db, AppState};
+use crate::db::{self, connect_source_db, init_db, AppError, AppState};
 use crate::history;
 use crate::home::{get_summary, DataSummary};
 use crate::prices::{self, PriceError, PricesResult};
@@ -456,33 +456,21 @@ fn non_empty(s: Option<String>) -> Option<String> {
 /// anti-join instead of a giant `IN (...)` list (SQLite caps bound parameters
 /// at ~32k, which real books exceed). Inserts run in one txn instead of one
 /// autocommit per GUID.
-fn populate_source_guids(conn: &Connection, name: &str, guids: &[String]) -> Result<(), String> {
+fn populate_source_guids(conn: &Connection, name: &str, guids: &[String]) -> Result<(), AppError> {
     conn.execute_batch(&format!(
         "DROP TABLE IF EXISTS {name};
          CREATE TEMP TABLE {name} (guid TEXT NOT NULL PRIMARY KEY);"
     ))
-    .map_err(|e| e.to_string())?;
-    conn.execute_batch("BEGIN")
-        .map_err(|e| e.to_string())?;
-    let result = (|| -> Result<(), String> {
+    ?;
+    db::with_tx_err(conn, || {
         let mut stmt = conn
             .prepare(&format!("INSERT OR IGNORE INTO {name} (guid) VALUES (?1)"))
-            .map_err(|e| e.to_string())?;
+            ?;
         for guid in guids {
-            stmt.execute([guid]).map_err(|e| e.to_string())?;
+            stmt.execute([guid])?;
         }
         Ok(())
-    })();
-    match result {
-        Ok(()) => {
-            conn.execute_batch("COMMIT").map_err(|e| e.to_string())?;
-            Ok(())
-        }
-        Err(e) => {
-            conn.execute_batch("ROLLBACK").ok();
-            Err(e)
-        }
-    }
+    })
 }
 
 fn drop_source_guid_tables(conn: &Connection) {
@@ -494,20 +482,20 @@ fn drop_source_guid_tables(conn: &Connection) {
     );
 }
 
-fn count_orphaned(conn: &Connection, table: &str, src_table: &str) -> Result<i64, String> {
+fn count_orphaned(conn: &Connection, table: &str, src_table: &str) -> Result<i64, AppError> {
     db::validate_data_table(table)?;
     let sql =
         format!("SELECT COUNT(*) FROM {table} WHERE guid NOT IN (SELECT guid FROM {src_table})");
     conn.query_row(&sql, [], |row| row.get(0))
-        .map_err(|e| e.to_string())
+        .map_err(AppError::from)
 }
 
-fn delete_orphans(conn: &Connection, table: &str, src_table: &str) -> Result<i64, String> {
+fn delete_orphans(conn: &Connection, table: &str, src_table: &str) -> Result<i64, AppError> {
     db::validate_data_table(table)?;
     let sql = format!("DELETE FROM {table} WHERE guid NOT IN (SELECT guid FROM {src_table})");
     conn.execute(&sql, [])
         .map(|n| n as i64)
-        .map_err(|e| e.to_string())
+        .map_err(AppError::from)
 }
 
 // ── Merge ───────────────────────────────────────────────────────────────────
@@ -521,7 +509,7 @@ struct ExistingData {
 }
 
 impl ExistingData {
-    fn load(conn: &Connection) -> Result<Self, String> {
+    fn load(conn: &Connection) -> Result<Self, AppError> {
         Ok(Self {
             commodities: read_commodity(conn)?
                 .into_iter()
@@ -592,7 +580,7 @@ impl MergeCounts {
     }
 }
 
-fn capture_snapshot(conn: &Connection, table: &'static str, guid: &str) -> Result<history::Snapshot<'static>, String> {
+fn capture_snapshot(conn: &Connection, table: &'static str, guid: &str) -> Result<history::Snapshot<'static>, AppError> {
     Ok(history::Snapshot {
         table_name: table,
         row_guid: guid.to_string(),
@@ -608,7 +596,7 @@ fn capture_changed<T: Importable>(
     src: &[T],
     existing: &HashMap<String, T>,
     snapshots: &mut Vec<history::Snapshot<'static>>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     for r in src {
         match existing.get(r.guid()) {
             None => snapshots.push(capture_snapshot(conn, table, r.guid())?),
@@ -626,7 +614,7 @@ fn capture_orphaned<T: Importable>(
     src: &[T],
     existing: &HashMap<String, T>,
     snapshots: &mut Vec<history::Snapshot<'static>>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let src_guids: HashSet<&str> = src.iter().map(|r| r.guid()).collect();
     for guid in existing.keys() {
         if !src_guids.contains(guid.as_str()) {
@@ -642,7 +630,7 @@ fn capture_import_snapshots(
     conn: &Connection,
     src: &SourceData,
     existing: &ExistingData,
-) -> Result<Vec<history::Snapshot<'static>>, String> {
+) -> Result<Vec<history::Snapshot<'static>>, AppError> {
     let mut snapshots = Vec::new();
     capture_changed(conn, "commodities", &src.commodities, &existing.commodities, &mut snapshots)?;
     capture_changed(conn, "accounts", &src.accounts, &existing.accounts, &mut snapshots)?;
@@ -661,7 +649,7 @@ fn apply_merge(
     src: &SourceData,
     existing: &ExistingData,
     counts: &mut MergeCounts,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     (counts.commodities_added, counts.commodities_updated) =
         process_entities(conn, &src.commodities, &existing.commodities)?;
     (counts.accounts_added, counts.accounts_updated) =
@@ -685,7 +673,7 @@ fn import_gnucash_inner(
     source_path: &str,
     filename: &str,
     sha256: &str,
-) -> Result<ImportResult, String> {
+) -> Result<ImportResult, AppError> {
     let source = connect_source_db(&std::path::PathBuf::from(source_path))
         .map_err(|e| format!("Failed to open source DB: {}", e))?;
 
@@ -705,13 +693,11 @@ fn import_gnucash_inner(
 
     let mut counts = MergeCounts::default();
 
-    let tx_result = (|| -> Result<(), String> {
-        dest_conn
-            .execute_batch("BEGIN TRANSACTION")
-            .map_err(|e| e.to_string())?;
-
-        // Counts live inside the txn so the numbers in the history row match
-        // the deletes they report.
+    // Counts live inside the txn so the numbers in the history row match
+    // the deletes they report. Temp tables live on the long-lived
+    // connection; drop them after the txn instead of letting them linger
+    // until the next import recreates them.
+    let tx_result: Result<(), AppError> = db::with_tx_err(dest_conn, || {
         counts.commodities_orphaned =
             count_orphaned(dest_conn, "commodities", "tmp_src_commodities")?;
         counts.accounts_orphaned =
@@ -737,34 +723,23 @@ fn import_gnucash_inner(
             )?;
         }
 
-        dest_conn
-            .execute_batch("COMMIT")
-            .map_err(|e| e.to_string())?;
-
-        // Temp tables live on the long-lived connection; drop them now instead
-        // of letting them linger until the next import recreates them.
-        drop_source_guid_tables(dest_conn);
-
         Ok(())
-    })();
+    });
 
-    if let Err(e) = tx_result {
-        dest_conn.execute_batch("ROLLBACK").ok();
-        drop_source_guid_tables(dest_conn);
-        return Err(e);
-    }
+    drop_source_guid_tables(dest_conn);
+    tx_result?;
 
     let summary = get_summary(dest_conn)?;
 
     let total_accounts: i64 = dest_conn
         .query_row("SELECT COUNT(*) as cnt FROM accounts", [], |row| row.get(0))
-        .map_err(|e| e.to_string())?;
+        ?;
 
     let total_transactions: i64 = dest_conn
         .query_row("SELECT COUNT(*) as cnt FROM transactions", [], |row| {
             row.get(0)
         })
-        .map_err(|e| e.to_string())?;
+        ?;
 
     Ok(ImportResult {
         accounts_added: counts.accounts_added,
@@ -820,7 +795,7 @@ async fn fetch_prices_best_effort(
         Err(e) => return failed(e),
     };
     if let Err(e) = db::run_blocking(db, move |conn| {
-        prices::write_prices_and_log(conn, &write_data)
+        prices::write_prices_and_log(conn, &write_data).map_err(String::from)
     })
     .await
     {
@@ -844,7 +819,7 @@ pub async fn import_gnucash(
     // Hash before acquiring the DB lock so the lock isn't held during file I/O.
     let sha256 = file_sha256(&path)?;
     let mut result = db::run_blocking(state.db.clone(), move |conn| {
-        import_gnucash_inner(conn, &path, &filename, &sha256)
+        import_gnucash_inner(conn, &path, &filename, &sha256).map_err(String::from)
     })
     .await?;
     result.prices = fetch_prices_best_effort(state.db.clone()).await;
@@ -862,7 +837,7 @@ pub async fn reimport_last(state: State<'_, AppState>) -> Result<ImportResult, S
     let sha256 = file_sha256(&file_path)?;
 
     let mut result = db::run_blocking(state.db.clone(), move |conn| {
-        import_gnucash_inner(conn, &file_path, &filename, &sha256)
+        import_gnucash_inner(conn, &file_path, &filename, &sha256).map_err(String::from)
     })
     .await?;
     result.prices = fetch_prices_best_effort(state.db.clone()).await;

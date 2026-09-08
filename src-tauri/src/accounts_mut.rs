@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use tauri::State;
 
 use crate::accounts::get_subaccount_guids;
-use crate::db::{run_blocking, AppState};
+use crate::db::{run_blocking, with_tx_err, AppError, AppState};
 use crate::history;
 
 /// Creatable account types (mirrors `TYPE_TO_CATEGORY` keys minus the
@@ -45,40 +45,40 @@ fn opt_text(s: &Option<String>) -> Option<String> {
     s.as_ref().map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
 }
 
-fn root_guid(conn: &Connection) -> Result<String, String> {
+fn root_guid(conn: &Connection) -> Result<String, AppError> {
     conn.query_row(
         "SELECT guid FROM accounts WHERE account_type = 'ROOT' LIMIT 1",
         [],
         |row| row.get(0),
     )
     .optional()
-    .map_err(|e| e.to_string())?
-    .ok_or_else(|| "Book has no ROOT account — re-create the book".to_string())
+    ?
+    .ok_or_else(|| AppError::NotFound("Book has no ROOT account — re-create the book".to_string()))
 }
 
 fn validate_account_input(
     conn: &Connection,
     input: &AccountInput,
     self_guid: Option<&str>,
-) -> Result<String, String> {
+) -> Result<String, AppError> {
     let name = input.name.trim();
     if name.is_empty() {
-        return Err("Account name is required".to_string());
+        return Err(AppError::Validation("Account name is required".to_string()));
     }
     if name.len() > 200 {
-        return Err("Account name is too long (max 200)".to_string());
+        return Err(AppError::Validation("Account name is too long (max 200)".to_string()));
     }
     if !ACCOUNT_TYPES.contains(&input.account_type.as_str()) {
-        return Err(format!("Invalid account type: {}", input.account_type));
+        return Err(AppError::Validation(format!("Invalid account type: {}", input.account_type)));
     }
     if let Some(ref code) = input.code {
         if code.len() > 100 {
-            return Err("Code is too long (max 100)".to_string());
+            return Err(AppError::Validation("Code is too long (max 100)".to_string()));
         }
     }
     if let Some(ref d) = input.description {
         if d.len() > 500 {
-            return Err("Description is too long (max 500)".to_string());
+            return Err(AppError::Validation("Description is too long (max 500)".to_string()));
         }
     }
     if let Some(ref cg) = input.commodity_guid {
@@ -89,10 +89,10 @@ fn validate_account_input(
                 |_| Ok(()),
             )
             .optional()
-            .map_err(|e| e.to_string())?
+            ?
             .is_some();
         if !exists {
-            return Err("Selected currency does not exist".to_string());
+            return Err(AppError::Validation("Selected currency does not exist".to_string()));
         }
     }
 
@@ -101,7 +101,7 @@ fn validate_account_input(
         None => root_guid(conn)?,
         Some(p) => {
             if Some(p.as_str()) == self_guid {
-                return Err("An account cannot be its own parent".to_string());
+                return Err(AppError::Validation("An account cannot be its own parent".to_string()));
             }
             let parent_type: Option<String> = conn
                 .query_row(
@@ -110,9 +110,9 @@ fn validate_account_input(
                     |row| row.get(0),
                 )
                 .optional()
-                .map_err(|e| e.to_string())?;
+                ?;
             let Some(pt) = parent_type else {
-                return Err("Parent account not found".to_string());
+                return Err(AppError::NotFound("Parent account not found".to_string()));
             };
             if pt == "ROOT" {
                 root_guid(conn)?
@@ -124,9 +124,9 @@ fn validate_account_input(
                     for _ in 0..100 {
                         let Some(c) = current else { break };
                         if c == self_g {
-                            return Err(
+                            return Err(AppError::Validation(
                                 "Cannot move an account under its own descendant".to_string()
-                            );
+                            ));
                         }
                         if !visited.insert(c.clone()) {
                             break;
@@ -138,7 +138,7 @@ fn validate_account_input(
                                 |row| row.get::<_, Option<String>>(0),
                             )
                             .optional()
-                            .map_err(|e| e.to_string())?
+                            ?
                             .flatten();
                     }
                 }
@@ -157,10 +157,10 @@ fn validate_account_input(
             |_| Ok(()),
         )
         .optional()
-        .map_err(|e| e.to_string())?
+        ?
         .is_some();
     if clash {
-        return Err("An account with this name already exists under the same parent".to_string());
+        return Err(AppError::Validation("An account with this name already exists under the same parent".to_string()));
     }
 
     Ok(parent)
@@ -176,13 +176,12 @@ fn account_label(name: &str, verb: &str) -> String {
     }
 }
 
-fn create_account_inner(conn: &Connection, input: AccountInput) -> Result<String, String> {
+fn create_account_inner(conn: &Connection, input: AccountInput) -> Result<String, AppError> {
     let parent = validate_account_input(conn, &input, None)?;
     let guid = uuid::Uuid::new_v4().to_string();
     let label = account_label(input.name.trim(), "Create");
 
-    let tx_result = (|| -> Result<String, String> {
-        conn.execute_batch("BEGIN").map_err(|e| e.to_string())?;
+    with_tx_err(conn, || {
         conn.execute(
             "INSERT INTO accounts
               (guid, name, account_type, parent_guid, code, description,
@@ -199,7 +198,7 @@ fn create_account_inner(conn: &Connection, input: AccountInput) -> Result<String
                 opt_text(&input.commodity_guid),
             ],
         )
-        .map_err(|e| e.to_string())?;
+        ?;
         history::insert_change_entry(
             conn,
             "account_create",
@@ -214,23 +213,15 @@ fn create_account_inner(conn: &Connection, input: AccountInput) -> Result<String
                 before_json: None,
             }],
         )?;
-        conn.execute_batch("COMMIT").map_err(|e| e.to_string())?;
         Ok(guid.clone())
-    })();
-    match tx_result {
-        Ok(g) => Ok(g),
-        Err(e) => {
-            conn.execute_batch("ROLLBACK").ok();
-            Err(e)
-        }
-    }
+    })
 }
 
 fn update_account_inner(
     conn: &Connection,
     guid: &str,
     input: AccountInput,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let existing_type: Option<String> = conn
         .query_row(
             "SELECT account_type FROM accounts WHERE guid = ?1",
@@ -238,21 +229,20 @@ fn update_account_inner(
             |row| row.get(0),
         )
         .optional()
-        .map_err(|e| e.to_string())?;
+        ?;
     let Some(existing_type) = existing_type else {
-        return Err("Account not found — it may have been removed".to_string());
+        return Err(AppError::NotFound("Account not found — it may have been removed".to_string()));
     };
     if existing_type == "ROOT" {
-        return Err("The root account cannot be edited".to_string());
+        return Err(AppError::Validation("The root account cannot be edited".to_string()));
     }
     if input.account_type == "ROOT" {
-        return Err("Accounts cannot be converted to ROOT".to_string());
+        return Err(AppError::Validation("Accounts cannot be converted to ROOT".to_string()));
     }
     let parent = validate_account_input(conn, &input, Some(guid))?;
     let label = account_label(input.name.trim(), "Update");
 
-    let tx_result = (|| -> Result<(), String> {
-        conn.execute_batch("BEGIN").map_err(|e| e.to_string())?;
+    with_tx_err(conn, || {
         let snapshots = vec![history::Snapshot {
             table_name: "accounts",
             row_guid: guid.to_string(),
@@ -274,7 +264,7 @@ fn update_account_inner(
                 guid,
             ],
         )
-        .map_err(|e| e.to_string())?;
+        ?;
         history::insert_change_entry(
             conn,
             "account_update",
@@ -285,23 +275,15 @@ fn update_account_inner(
             None,
             &snapshots,
         )?;
-        conn.execute_batch("COMMIT").map_err(|e| e.to_string())?;
         Ok(())
-    })();
-    match tx_result {
-        Ok(()) => Ok(()),
-        Err(e) => {
-            conn.execute_batch("ROLLBACK").ok();
-            Err(e)
-        }
-    }
+    })
 }
 
 fn move_account_inner(
     conn: &Connection,
     guid: &str,
     new_parent_guid: Option<String>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let row: Option<(
         String,
         String,
@@ -328,18 +310,18 @@ fn move_account_inner(
             },
         )
         .optional()
-        .map_err(|e| e.to_string())?;
+        ?;
     let Some((name, account_type, code, description, _, placeholder, commodity_guid)) = row else {
-        return Err("Account not found — it may have been removed".to_string());
+        return Err(AppError::NotFound("Account not found — it may have been removed".to_string()));
     };
     if account_type == "ROOT" {
-        return Err("The root account cannot be moved".to_string());
+        return Err(AppError::Validation("The root account cannot be moved".to_string()));
     }
     // Block moves under a descendant (get_subaccount_guids includes self).
     if let Some(ref p) = opt_text(&new_parent_guid) {
         let sub = get_subaccount_guids(conn, guid)?;
         if sub.iter().any(|g| g == p) {
-            return Err("Cannot move an account under its own descendant".to_string());
+            return Err(AppError::Validation("Cannot move an account under its own descendant".to_string()));
         }
     }
     update_account_inner(
@@ -357,7 +339,7 @@ fn move_account_inner(
     )
 }
 
-fn delete_account_inner(conn: &Connection, guid: &str) -> Result<(), String> {
+fn delete_account_inner(conn: &Connection, guid: &str) -> Result<(), AppError> {
     let row: Option<(String, String)> = conn
         .query_row(
             "SELECT name, account_type FROM accounts WHERE guid = ?1",
@@ -365,12 +347,12 @@ fn delete_account_inner(conn: &Connection, guid: &str) -> Result<(), String> {
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()
-        .map_err(|e| e.to_string())?;
+        ?;
     let Some((name, account_type)) = row else {
-        return Err("Account not found — it may have been removed".to_string());
+        return Err(AppError::NotFound("Account not found — it may have been removed".to_string()));
     };
     if account_type == "ROOT" {
-        return Err("The root account cannot be deleted".to_string());
+        return Err(AppError::Validation("The root account cannot be deleted".to_string()));
     }
     let children: i64 = conn
         .query_row(
@@ -378,12 +360,12 @@ fn delete_account_inner(conn: &Connection, guid: &str) -> Result<(), String> {
             params![guid],
             |row| row.get(0),
         )
-        .map_err(|e| e.to_string())?;
+        ?;
     if children > 0 {
-        return Err(format!(
+        return Err(AppError::Validation(format!(
             "Cannot delete — it has {children} sub-account{}. Move or delete them first.",
             if children == 1 { "" } else { "s" }
-        ));
+        )));
     }
     let splits: i64 = conn
         .query_row(
@@ -391,12 +373,12 @@ fn delete_account_inner(conn: &Connection, guid: &str) -> Result<(), String> {
             params![guid],
             |row| row.get(0),
         )
-        .map_err(|e| e.to_string())?;
+        ?;
     if splits > 0 {
-        return Err(format!(
+        return Err(AppError::Validation(format!(
             "Cannot delete — {splits} split{} reference it. Delete or move those transactions first.",
             if splits == 1 { "" } else { "s" }
-        ));
+        )));
     }
     let budgets: i64 = conn
         .query_row(
@@ -404,21 +386,20 @@ fn delete_account_inner(conn: &Connection, guid: &str) -> Result<(), String> {
             params![guid],
             |row| row.get(0),
         )
-        .map_err(|e| e.to_string())?;
+        ?;
     if budgets > 0 {
-        return Err("Cannot delete — budgets reference it. Remove the budgets first.".to_string());
+        return Err(AppError::Validation("Cannot delete — budgets reference it. Remove the budgets first.".to_string()));
     }
 
     let label = account_label(&name, "Delete");
-    let tx_result = (|| -> Result<(), String> {
-        conn.execute_batch("BEGIN").map_err(|e| e.to_string())?;
+    with_tx_err(conn, || {
         let snapshots = vec![history::Snapshot {
             table_name: "accounts",
             row_guid: guid.to_string(),
             before_json: history::snapshot_row(conn, "accounts", guid)?,
         }];
         conn.execute("DELETE FROM accounts WHERE guid = ?1", params![guid])
-            .map_err(|e| e.to_string())?;
+            ?;
         history::insert_change_entry(
             conn,
             "account_delete",
@@ -429,22 +410,14 @@ fn delete_account_inner(conn: &Connection, guid: &str) -> Result<(), String> {
             None,
             &snapshots,
         )?;
-        conn.execute_batch("COMMIT").map_err(|e| e.to_string())?;
         Ok(())
-    })();
-    match tx_result {
-        Ok(()) => Ok(()),
-        Err(e) => {
-            conn.execute_batch("ROLLBACK").ok();
-            Err(e)
-        }
-    }
+    })
 }
 
 #[tauri::command]
 pub async fn create_account(state: State<'_, AppState>, input: AccountInput) -> Result<String, String> {
     run_blocking(state.db.clone(), move |conn| {
-        create_account_inner(conn, input)
+        create_account_inner(conn, input).map_err(String::from)
     })
     .await
 }
@@ -456,7 +429,7 @@ pub async fn update_account(
     input: AccountInput,
 ) -> Result<(), String> {
     run_blocking(state.db.clone(), move |conn| {
-        update_account_inner(conn, &guid, input)
+        update_account_inner(conn, &guid, input).map_err(String::from)
     })
     .await
 }
@@ -468,7 +441,7 @@ pub async fn move_account(
     new_parent_guid: Option<String>,
 ) -> Result<(), String> {
     run_blocking(state.db.clone(), move |conn| {
-        move_account_inner(conn, &guid, new_parent_guid)
+        move_account_inner(conn, &guid, new_parent_guid).map_err(String::from)
     })
     .await
 }
@@ -476,7 +449,7 @@ pub async fn move_account(
 #[tauri::command]
 pub async fn delete_account(state: State<'_, AppState>, guid: String) -> Result<(), String> {
     run_blocking(state.db.clone(), move |conn| {
-        delete_account_inner(conn, &guid)
+        delete_account_inner(conn, &guid).map_err(String::from)
     })
     .await
 }
@@ -570,7 +543,7 @@ mod tests {
             [],
         )
         .unwrap();
-        assert!(delete_account_inner(&conn, "checking").unwrap_err().contains("split"));
+        assert!(delete_account_inner(&conn, "checking").unwrap_err().to_string().contains("split"));
         // Delete blocked with budgets (would CASCADE unsnapshotted rows).
         conn.execute(
             "INSERT INTO budgets (guid, account_guid, year, amount, created_at)
@@ -586,7 +559,7 @@ mod tests {
             params![leaf],
         )
         .unwrap();
-        assert!(delete_account_inner(&conn, &leaf).unwrap_err().contains("budget"));
+        assert!(delete_account_inner(&conn, &leaf).unwrap_err().to_string().contains("budget"));
         // Clean leaf deletes and logs.
         delete_account_inner(&conn, &child).expect("delete runs");
         let kinds: Vec<String> = {

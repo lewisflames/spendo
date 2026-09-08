@@ -1,9 +1,9 @@
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use tauri::State;
 
-use crate::db::{self, AppState};
+use crate::db::{self, AppError, AppState};
 use crate::fx;
 use crate::utils;
 use crate::yahoo::{
@@ -200,19 +200,19 @@ pub struct SymbolOverride {
 /// Normalize free-text Yahoo symbols: trim + ASCII-uppercase (`aapl` →
 /// `AAPL`, `btc-eur` → `BTC-EUR`). Rejects empty, overlong (>32) or values
 /// containing whitespace, `/`, `?` or `#` (URL path breakers).
-fn normalize_symbol(input: &str) -> Result<String, String> {
+fn normalize_symbol(input: &str) -> Result<String, AppError> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
-        return Err("Symbol must not be empty".to_string());
+        return Err(AppError::Validation("Symbol must not be empty".to_string()));
     }
     if trimmed.len() > 32 {
-        return Err("Symbol must be 32 characters or fewer".to_string());
+        return Err(AppError::Validation("Symbol must be 32 characters or fewer".to_string()));
     }
     if trimmed
         .chars()
         .any(|c| c.is_whitespace() || matches!(c, '/' | '?' | '#'))
     {
-        return Err("Symbol must not contain spaces, '/', '?' or '#'".to_string());
+        return Err(AppError::Validation("Symbol must not contain spaces, '/', '?' or '#'".to_string()));
     }
     Ok(trimmed.to_ascii_uppercase())
 }
@@ -861,6 +861,41 @@ pub async fn fetch_symbol_overrides(
     db::run_blocking(state.db.clone(), fetch_symbol_overrides_inner).await
 }
 
+/// Guard against typos: the commodity must exist and be priceable
+/// (non-CURRENCY, non-template).
+fn set_symbol_override_inner(
+    conn: &Connection,
+    commodity_guid: String,
+    normalized: String,
+) -> Result<SymbolOverride, AppError> {
+    let (mnemonic, namespace, full_name): (String, String, Option<String>) = conn
+        .query_row(
+            "SELECT mnemonic, namespace, fullname FROM commodities WHERE guid = ?1",
+            [&commodity_guid],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()
+        .map_err(AppError::from)?
+        .ok_or_else(|| AppError::NotFound(format!("Unknown commodity: {commodity_guid}")))?;
+    if namespace == "CURRENCY" || namespace == "template" {
+        return Err(AppError::Validation(
+            "Symbol overrides apply to securities only".to_string(),
+        ));
+    }
+    conn.execute(
+        "INSERT INTO symbol_overrides (commodity_guid, symbol) VALUES (?1, ?2)
+         ON CONFLICT(commodity_guid) DO UPDATE SET symbol = excluded.symbol",
+        rusqlite::params![commodity_guid, normalized],
+    )?;
+    Ok(SymbolOverride {
+        commodity_guid,
+        mnemonic,
+        namespace,
+        full_name,
+        symbol: Some(normalized),
+    })
+}
+
 #[tauri::command]
 pub async fn set_symbol_override(
     state: State<'_, AppState>,
@@ -869,31 +904,7 @@ pub async fn set_symbol_override(
 ) -> Result<SymbolOverride, String> {
     let normalized = normalize_symbol(&symbol)?;
     db::run_blocking(state.db.clone(), move |conn| {
-        // Guard against typos: the commodity must exist and be priceable
-        // (non-CURRENCY, non-template).
-        let (mnemonic, namespace, full_name): (String, String, Option<String>) = conn
-            .query_row(
-                "SELECT mnemonic, namespace, fullname FROM commodities WHERE guid = ?1",
-                [&commodity_guid],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .map_err(|_| format!("Unknown commodity: {commodity_guid}"))?;
-        if namespace == "CURRENCY" || namespace == "template" {
-            return Err("Symbol overrides apply to securities only".to_string());
-        }
-        conn.execute(
-            "INSERT INTO symbol_overrides (commodity_guid, symbol) VALUES (?1, ?2)
-             ON CONFLICT(commodity_guid) DO UPDATE SET symbol = excluded.symbol",
-            rusqlite::params![commodity_guid, normalized],
-        )
-        .map_err(|e| e.to_string())?;
-        Ok(SymbolOverride {
-            commodity_guid,
-            mnemonic,
-            namespace,
-            full_name,
-            symbol: Some(normalized),
-        })
+        set_symbol_override_inner(conn, commodity_guid, normalized).map_err(String::from)
     })
     .await
 }
@@ -929,24 +940,15 @@ pub(crate) fn empty_prices_result() -> PricesResult {
 pub(crate) fn write_prices_and_log(
     conn: &Connection,
     write_data: &PendingPriceWrites,
-) -> Result<(), String> {
-    conn.execute_batch("BEGIN").map_err(|e| e.to_string())?;
-    let write_result = (|| -> Result<(), String> {
+) -> Result<(), AppError> {
+    db::with_tx_err(conn, || {
         write_price_data(conn, write_data)?;
         conn.execute(
             "INSERT INTO refresh_log (refreshed_at) VALUES (?1)",
             rusqlite::params![utils::iso_now()],
-        )
-        .map_err(|e| e.to_string())?;
+        )?;
         Ok(())
-    })();
-    match write_result {
-        Ok(()) => conn.execute_batch("COMMIT").map_err(|e| e.to_string()),
-        Err(e) => {
-            conn.execute_batch("ROLLBACK").ok();
-            Err(e)
-        }
-    }
+    })
 }
 
 #[tauri::command]
@@ -956,7 +958,7 @@ pub async fn refresh_prices(state: State<'_, AppState>) -> Result<PricesResult, 
     let (result, write_data) = fetch_prices_remote(pre).await?;
 
     db::run_blocking(state.db.clone(), move |conn| {
-        write_prices_and_log(conn, &write_data)
+        write_prices_and_log(conn, &write_data).map_err(String::from)
     })
     .await?;
 

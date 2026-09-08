@@ -45,6 +45,90 @@ where
     .map_err(|e| format!("Background task failed: {}", e))?
 }
 
+/// Run `f` inside a SQLite transaction on a shared `&Connection`.
+/// Uses `unchecked_transaction()` (shared-borrow) because every command holds
+/// only `&Connection` via `run_blocking`. Drop rolls back on error; commit
+/// only on `Ok`. Replaces the manual `BEGIN`/`COMMIT`/`ROLLBACK` blocks.
+/// Run `f` inside a SQLite transaction on a shared `&Connection`.
+/// Uses `unchecked_transaction()` (shared-borrow) because every command holds
+/// only `&Connection` via `run_blocking`. Drop rolls back on error; commit
+/// only on `Ok`. Replaces manual `BEGIN`/`COMMIT`/`ROLLBACK` blocks.
+pub fn with_tx_err<T, E>(conn: &Connection, f: impl FnOnce() -> Result<T, E>) -> Result<T, E>
+where
+    E: From<rusqlite::Error>,
+{
+    let tx = conn.unchecked_transaction().map_err(E::from)?;
+    let out = f()?;
+    tx.commit().map_err(E::from)?;
+    Ok(out)
+}
+
+/// Typed backend error for gradual migration off `Result<T, String>`.
+/// Commands keep `Result<T, String>` at the `#[tauri::command]` boundary (so
+/// the frontend contract is unchanged — `From<AppError> for String` keeps
+/// messages identical); `*_inner` functions should migrate to
+/// `Result<T, AppError>` over time.
+#[derive(Debug)]
+pub enum AppError {
+    NotFound(String),
+    Validation(String),
+    Db(DbError),
+}
+
+/// A database failure with its message plus the extended SQLite result code,
+/// so callers can match failure kinds (e.g. foreign-key) without substrings.
+#[derive(Debug)]
+pub struct DbError {
+    pub message: String,
+    pub extended_code: Option<i32>,
+}
+
+impl DbError {
+    pub fn is_foreign_key(&self) -> bool {
+        self.extended_code == Some(rusqlite::ffi::SQLITE_CONSTRAINT_FOREIGNKEY)
+    }
+}
+
+impl std::fmt::Display for AppError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AppError::NotFound(m) | AppError::Validation(m) => write!(f, "{m}"),
+            AppError::Db(e) => write!(f, "{}", e.message),
+        }
+    }
+}
+
+impl From<AppError> for String {
+    fn from(e: AppError) -> String {
+        e.to_string()
+    }
+}
+
+impl From<rusqlite::Error> for AppError {
+    fn from(e: rusqlite::Error) -> AppError {
+        let extended_code = match &e {
+            rusqlite::Error::SqliteFailure(err, _) => Some(err.extended_code),
+            _ => None,
+        };
+        AppError::Db(DbError {
+            message: e.to_string(),
+            extended_code,
+        })
+    }
+}
+
+/// Already-stringified (often validation-adjacent) errors convert as opaque
+/// `Db` errors with no code — lets `?` work in `AppError` closures over
+/// helpers that still return `String`.
+impl From<String> for AppError {
+    fn from(message: String) -> AppError {
+        AppError::Db(DbError {
+            message,
+            extended_code: None,
+        })
+    }
+}
+
 /// Run a mutable closure with the DB connection on a blocking thread. This is
 /// the swap-path counterpart of [`run_blocking`]: book switching must replace
 /// the `Connection` itself (`*conn = new_conn`), which needs `&mut`. Same
@@ -279,6 +363,75 @@ mod tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap()
+    }
+
+    #[test]
+    fn fk_error_matches_extended_code_not_message() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "PRAGMA foreign_keys = ON;
+             CREATE TABLE fk_parent (id INTEGER PRIMARY KEY);
+             CREATE TABLE fk_child (id INTEGER REFERENCES fk_parent(id));
+             INSERT INTO fk_parent VALUES (1);
+             INSERT INTO fk_child VALUES (1);",
+        )
+        .unwrap();
+        // Real foreign-key violation: deleting the referenced parent.
+        let fk_err = conn
+            .execute("DELETE FROM fk_parent WHERE id = 1", [])
+            .unwrap_err();
+        // Other constraint failures must NOT classify as FK violations
+        // (the old substring match masked them as "blocked" reverts).
+        let unique_err = conn
+            .execute("INSERT INTO fk_parent VALUES (1)", [])
+            .unwrap_err();
+
+        // AppError preserves the code through conversion for typed matching.
+        let app_err = AppError::from(fk_err);
+        assert!(matches!(app_err, AppError::Db(ref e) if e.is_foreign_key()));
+        let app_unique = AppError::from(unique_err);
+        assert!(matches!(app_unique, AppError::Db(ref e) if !e.is_foreign_key()));
+        // Frontend contract unchanged: plain messages.
+        assert_eq!(
+            String::from(app_unique),
+            "UNIQUE constraint failed: fk_parent.id"
+        );
+    }
+
+    #[test]
+    fn with_tx_commits_and_rolls_back() {
+        let conn = Connection::open_in_memory().unwrap();
+        init_db(&conn).unwrap();
+        with_tx_err(&conn, || -> Result<(), AppError> {
+            conn.execute(
+                "INSERT INTO commodities (guid, mnemonic, namespace) VALUES ('c1', 'EUR', 'CURRENCY')",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM commodities", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+
+        let err = with_tx_err(&conn, || -> Result<(), AppError> {
+            conn.execute(
+                "INSERT INTO commodities (guid, mnemonic, namespace) VALUES ('c2', 'USD', 'CURRENCY')",
+                [],
+            )?;
+            Err(AppError::Validation("boom".to_string()))
+        })
+        .unwrap_err();
+        assert_eq!(err.to_string(), "boom");
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM commodities WHERE guid = 'c2'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0);
     }
 
     #[test]
