@@ -6,7 +6,7 @@
     ArrowLeftRight,
     Settings,
     Info,
-    House,
+    History,
     Receipt,
     PiggyBank,
     Briefcase,
@@ -25,11 +25,14 @@
       <Sidebar.GroupContent>
         <Sidebar.Menu>
           <Sidebar.MenuItem>
-            <Sidebar.MenuButton isActive={page.url.pathname === '/'} tooltipContent="Overview">
+            <Sidebar.MenuButton
+              isActive={page.url.pathname === '/transactions'}
+              tooltipContent="Transactions"
+            >
               {#snippet child({ props })}
-                <a href={resolve('/')} {...props}>
-                  <House aria-hidden="true" />
-                  <span class="group-data-[collapsible=icon]:hidden">Overview</span>
+                <a href={resolve('/transactions')} {...props}>
+                  <ArrowLeftRight aria-hidden="true" />
+                  <span class="group-data-[collapsible=icon]:hidden">Transactions</span>
                 </a>
               {/snippet}
             </Sidebar.MenuButton>
@@ -43,19 +46,6 @@
                 <a href={resolve('/accounts')} {...props}>
                   <FolderTree aria-hidden="true" />
                   <span class="group-data-[collapsible=icon]:hidden">Accounts</span>
-                </a>
-              {/snippet}
-            </Sidebar.MenuButton>
-          </Sidebar.MenuItem>
-          <Sidebar.MenuItem>
-            <Sidebar.MenuButton
-              isActive={page.url.pathname === '/transactions'}
-              tooltipContent="Transactions"
-            >
-              {#snippet child({ props })}
-                <a href={resolve('/transactions')} {...props}>
-                  <ArrowLeftRight aria-hidden="true" />
-                  <span class="group-data-[collapsible=icon]:hidden">Transactions</span>
                 </a>
               {/snippet}
             </Sidebar.MenuButton>
@@ -124,6 +114,19 @@
                 <a href={resolve('/portfolio')} {...props}>
                   <Briefcase aria-hidden="true" />
                   <span class="group-data-[collapsible=icon]:hidden">Portfolio</span>
+                </a>
+              {/snippet}
+            </Sidebar.MenuButton>
+          </Sidebar.MenuItem>
+          <Sidebar.MenuItem>
+            <Sidebar.MenuButton
+              isActive={page.url.pathname === '/history'}
+              tooltipContent="History"
+            >
+              {#snippet child({ props })}
+                <a href={resolve('/history')} {...props}>
+                  <History aria-hidden="true" />
+                  <span class="group-data-[collapsible=icon]:hidden">History</span>
                 </a>
               {/snippet}
             </Sidebar.MenuButton>

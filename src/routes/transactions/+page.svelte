@@ -8,6 +8,7 @@
   import TransactionTable from '$lib/features/transactions/transaction-table.svelte';
   import TransactionHeatmap from '$lib/features/transactions/transaction-heatmap.svelte';
   import TransactionEditorDialog from '$lib/features/transactions/transaction-editor-dialog.svelte';
+  import ImportMenu from '$lib/features/transactions/import-menu.svelte';
   import { Button } from '$lib/components/ui/button';
   import { Plus } from '@lucide/svelte';
   import { resolve } from '$app/paths';
@@ -154,10 +155,7 @@
       description={res.data ? plural(res.data.total, 'transaction') : ''}
     >
       {#if dbSession.value}
-        <Button variant="outline" href={resolve('/transactions/import')}>
-          <ArrowLeftRight aria-hidden="true" class="size-4" />
-          Import CSV
-        </Button>
+        <ImportMenu onImported={() => res.reload()} />
         <Button variant="outline" href={resolve('/scheduled')}>
           <CalendarClock aria-hidden="true" class="size-4" />
           Recurring

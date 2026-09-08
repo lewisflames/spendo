@@ -196,7 +196,7 @@
       </Button>
     </div>
     {#if !dbSession.value}
-      <p class="text-xs text-muted-foreground">No book yet — start from Overview.</p>
+      <p class="text-xs text-muted-foreground">No book yet — open or create one from Welcome.</p>
     {/if}
   </Card.Content>
 </Card.Root>
