@@ -57,7 +57,7 @@
                 href={resolve('/portfolio/[holding]', { holding: mp.commodityGuid })}
                 class="font-medium underline"
               >
-                Set symbol
+                Set Yahoo symbol
               </a>
             {/if}
           </li>
@@ -92,7 +92,7 @@
                 })}
                 class="font-medium underline"
               >
-                Fix symbol
+                Set Yahoo symbol
               </a>
             {/if}
           </li>

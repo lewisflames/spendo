@@ -46,7 +46,7 @@
   <SearchInput
     id="{idPrefix}-search"
     label="Search description, notes, memo, number"
-    placeholder="Search description, notes, memo, number..."
+    placeholder="Search description, notes, memo, number…"
     bind:value={search}
     class="grow basis-48"
   />

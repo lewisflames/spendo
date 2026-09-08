@@ -5,7 +5,13 @@
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import { CalendarCheck, SkipForward, Pencil, Pause, Play } from '@lucide/svelte';
   import type { Schedule } from '$lib/tauri';
-  import { formatCurrency, formatDate, parseLocalDate, plural } from '$lib/utils/format.svelte';
+  import {
+    formatCurrency,
+    formatDate,
+    parseLocalDate,
+    plural,
+    EMPTY_DASH
+  } from '$lib/utils/format.svelte';
   import {
     frequencyLabel,
     isPostable,
@@ -57,24 +63,24 @@
 <TableShell>
   <Table.Header>
     <Table.Row class="bg-muted/75">
-      <Table.Head>Status</Table.Head>
-      <Table.Head>Name</Table.Head>
-      <Table.Head>Repeats</Table.Head>
-      <Table.Head>Next due</Table.Head>
-      <Table.Head class="text-right">Amount</Table.Head>
-      <Table.Head>Posted</Table.Head>
-      <Table.Head class="w-56 text-right">Action</Table.Head>
+      <Table.Head class="text-muted-foreground">Status</Table.Head>
+      <Table.Head class="text-muted-foreground">Name</Table.Head>
+      <Table.Head class="text-muted-foreground">Repeats</Table.Head>
+      <Table.Head class="text-muted-foreground">Next due</Table.Head>
+      <Table.Head class="text-right text-muted-foreground">Amount</Table.Head>
+      <Table.Head class="text-muted-foreground">Posted</Table.Head>
+      <Table.Head class="w-56 text-right text-muted-foreground">Action</Table.Head>
     </Table.Row>
   </Table.Header>
   <Table.Body>
     {#each schedules as schedule (schedule.guid)}
       {@const status = scheduleStatus(schedule, today)}
       {@const badge = STATUS_BADGE[status]}
-      <Table.Row class="hover:bg-muted/50">
+      <Table.Row>
         <Table.Cell class="py-2.5 whitespace-nowrap">
           <Badge variant={badge.variant}>{badge.label}</Badge>
         </Table.Cell>
-        <Table.Cell class="py-2.5">
+        <Table.Cell class="max-w-48 truncate py-2.5">
           <span class="font-medium">{schedule.name}</span>
           {#if schedule.description && schedule.description !== schedule.name}
             <span class="block text-xs text-muted-foreground">{schedule.description}</span>
@@ -92,10 +98,10 @@
               </span>
             {/if}
           {:else}
-            <span class="text-xs text-muted-foreground">—</span>
+            <span class="text-xs text-muted-foreground">{EMPTY_DASH}</span>
           {/if}
         </Table.Cell>
-        <Table.Cell class="py-2.5 text-right tabular-nums">
+        <Table.Cell class="py-2.5 text-right font-medium whitespace-nowrap tabular-nums">
           {formatCurrency(schedule.previewAmount, currency)}
         </Table.Cell>
         <Table.Cell class="py-2.5 whitespace-nowrap tabular-nums">
