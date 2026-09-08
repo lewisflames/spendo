@@ -8,7 +8,7 @@ import {
   Briefcase,
   CircleHelp,
   FolderTree,
-  House,
+  History,
   Info,
   PanelLeft,
   PiggyBank,
@@ -37,12 +37,12 @@ function goTo(
     | '/about'
     | '/accounts'
     | '/budgets'
+    | '/history'
     | '/portfolio'
     | '/reconcile'
     | '/reports/pnl'
     | '/settings'
     | '/transactions'
-    | '/'
 ): () => Promise<void> {
   return () => goto(resolve(path));
 }
@@ -50,12 +50,12 @@ function goTo(
 /** Static v1 command list: page navigation + app actions. No backend calls. */
 export const PALETTE_COMMANDS: PaletteCommand[] = [
   {
-    id: 'go-overview',
-    title: 'Go to Overview',
+    id: 'go-history',
+    title: 'Go to History',
     group: 'Go to',
-    icon: House,
-    keywords: ['home', 'overview', 'dashboard'],
-    run: goTo('/')
+    icon: History,
+    keywords: ['history', 'changelog', 'changes', 'undo', 'revert'],
+    run: goTo('/history')
   },
   {
     id: 'go-accounts',

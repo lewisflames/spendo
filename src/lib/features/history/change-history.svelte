@@ -97,7 +97,7 @@
     <EmptyState
       card
       title="No changes yet"
-      description="Import from GnuCash to start building history."
+      description="Import transactions to start building history."
     >
       {#snippet icon()}
         <History aria-hidden="true" class="text-muted-foreground" />

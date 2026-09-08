@@ -604,7 +604,7 @@
           </Select.Root>
         {:else}
           <span class="text-xs text-muted-foreground">
-            No book yet — start from <a href={resolve('/')} class="underline">Overview</a>.
+            No book yet — start from <a href={resolve('/')} class="underline">Welcome</a>.
           </span>
         {/if}
       </div>

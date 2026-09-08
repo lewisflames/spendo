@@ -15,7 +15,7 @@
     variant
   }: {
     variant:
-      | 'home'
+      | 'history'
       | 'accounts'
       | 'transactions'
       | 'transaction-detail'
@@ -27,9 +27,8 @@
   } = $props();
 </script>
 
-{#if variant === 'home'}
+{#if variant === 'history'}
   <PageHeaderSkeleton />
-  <KpiCardRow />
   <TableSkeleton cols={4} />
 {:else if variant === 'accounts'}
   <KpiCardRow count={4} />

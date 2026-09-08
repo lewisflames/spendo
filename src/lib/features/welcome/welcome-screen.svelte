@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { goto } from '$app/navigation';
+  import { resolve } from '$app/paths';
   import * as Card from '$lib/components/ui/card';
   import { Button } from '$lib/components/ui/button';
   import * as Select from '$lib/components/ui/select';
@@ -41,6 +43,7 @@
       setDbSession(result.summary);
       setActiveBookPath(file);
       toast.success(`Book created (${currency})`);
+      await goto(resolve('/transactions'));
     } catch (e: unknown) {
       error = errMsg(e, 'Failed to create book');
     } finally {
@@ -68,6 +71,7 @@
       setDbSession(result.summary);
       setActiveBookPath(selected);
       toast.success(`Opened ${await basename(selected)}`);
+      await goto(resolve('/transactions'));
     } catch (e: unknown) {
       error = errMsg(e, 'Failed to open book');
     } finally {
@@ -107,7 +111,7 @@
         <Card.Title>Open or create a book</Card.Title>
         <Card.Description>
           Books are portable .spendo files stored wherever you choose. Using GnuCash? Create or open
-          a book first, then bring it in via Import from GnuCash on the Overview page.
+          a book first, then bring it in via Import on the Transactions page.
         </Card.Description>
       </Card.Header>
       <Card.Content class="flex flex-1 flex-col gap-3">
