@@ -669,4 +669,23 @@ mod tests {
         let info = fetch_reconcile_info_inner(&conn, "card", "2024-02-01").expect("info runs");
         assert_eq!(info.starting_balance, -40.0);
     }
+
+    #[test]
+    fn reconcilable_types_match_utils_sets() {
+        // `RECONCILABLE_TYPES` must stay the union of `CASH_LIKE_TYPES` and
+        // `LIABILITY_TYPES` (see also `isReconcilable` in
+        // `src/lib/features/reconcile/math.ts`).
+        use crate::utils::{CASH_LIKE_TYPES, LIABILITY_TYPES};
+        let mut actual = RECONCILABLE_TYPES.to_vec();
+        actual.sort_unstable();
+        let mut expected: Vec<&str> = CASH_LIKE_TYPES
+            .iter()
+            .chain(LIABILITY_TYPES.iter())
+            .copied()
+            .collect();
+        expected.sort_unstable();
+        assert_eq!(actual, expected);
+        // Keep in sync with `RECONCILE_EPS` in `math.ts`.
+        assert!((BALANCE_EPS - 0.005).abs() < 1e-12);
+    }
 }
