@@ -336,6 +336,79 @@ export const importGnucash = (path: string, filename: string): Promise<ImportRes
 
 export const reimportLast = (): Promise<ImportResult> => invoke<ImportResult>('reimport_last');
 
+// ── CSV import (bank-statement wizard: detect → map → preview → commit) ──
+
+export interface CsvMapping {
+  dateCol: number;
+  descCol: number;
+  amountCol?: number | null;
+  debitCol?: number | null;
+  creditCol?: number | null;
+  numCol?: number | null;
+  notesCol?: number | null;
+}
+
+export interface CsvPreviewInput {
+  path: string;
+  encoding?: string | null;
+  delimiter?: string | null;
+  hasHeader?: boolean | null;
+  mapping: CsvMapping;
+  targetAccountGuid: string;
+  offsetAccountGuid: string;
+  datePreference?: string | null;
+}
+
+export interface CsvDetectResult {
+  encoding: string;
+  delimiter: string;
+  hasHeader: boolean;
+  headers: string[];
+  columnCount: number;
+  rowCount: number;
+  sampleRows: string[][];
+  filename: string;
+}
+
+export interface CsvPreviewRow {
+  key: number;
+  raw: string[];
+  postDate: string | null;
+  description: string | null;
+  amount: number | null;
+  valid: boolean;
+  duplicate: boolean;
+  error: string | null;
+}
+
+export interface CsvPreviewResult {
+  rows: CsvPreviewRow[];
+  totalRows: number;
+  validCount: number;
+  duplicateCount: number;
+  errorCount: number;
+  minDate: string | null;
+  maxDate: string | null;
+}
+
+export interface CsvCommitResult {
+  created: number;
+  skippedDuplicates: number;
+  skippedErrors: number;
+  entryId: number;
+  label: string;
+}
+
+export const csvDetect = (path: string): Promise<CsvDetectResult> =>
+  invoke<CsvDetectResult>('csv_detect', { path });
+
+export const csvPreview = (input: CsvPreviewInput): Promise<CsvPreviewResult> =>
+  invoke<CsvPreviewResult>('csv_preview', { input });
+
+export const csvCommit = (
+  input: CsvPreviewInput & { selectedKeys: number[] }
+): Promise<CsvCommitResult> => invoke<CsvCommitResult>('csv_commit', { input });
+
 export const setBaseCurrency = (currency: string): Promise<EmptyBookResult> =>
   invoke<EmptyBookResult>('set_base_currency', { currency });
 

@@ -154,6 +154,10 @@
       description={res.data ? plural(res.data.total, 'transaction') : ''}
     >
       {#if dbSession.value}
+        <Button variant="outline" href={resolve('/transactions/import')}>
+          <ArrowLeftRight aria-hidden="true" class="size-4" />
+          Import CSV
+        </Button>
         <Button variant="outline" href={resolve('/scheduled')}>
           <CalendarClock aria-hidden="true" class="size-4" />
           Recurring
