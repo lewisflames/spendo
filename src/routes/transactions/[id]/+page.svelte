@@ -1,5 +1,6 @@
 <script lang="ts">
   import { page } from '$app/state';
+  import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import * as Table from '$lib/components/ui/table';
   import { Badge } from '$lib/components/ui/badge';
@@ -10,6 +11,7 @@
     ArrowRight,
     CircleCheck,
     Copy,
+    Pencil,
     Receipt,
     Calendar
   } from '@lucide/svelte';
@@ -17,6 +19,7 @@
   import { dbBootstrapping, dbSession } from '$lib/stores/db.svelte';
   import { setBreadcrumb } from '$lib/stores/breadcrumb.svelte';
   import { fetchTransaction } from '$lib/tauri';
+  import TransactionEditorDialog from '$lib/features/transactions/transaction-editor-dialog.svelte';
   import type { SplitDetail } from '$lib/tauri';
   import {
     clampZero,
@@ -62,6 +65,7 @@
   let currency = $derived(sessionCurrency());
 
   let reconciledCount = $derived(detail ? detail.splits.filter((s) => s.reconciled).length : 0);
+  let editorOpen = $state(false);
 
   $effect(() => {
     setBreadcrumb([
@@ -161,8 +165,30 @@
             <Copy aria-hidden="true" class="size-3" />
             Copy GUID
           </Button>
+          <Button onclick={() => (editorOpen = true)}>
+            <Pencil aria-hidden="true" class="size-3" />
+            Edit
+          </Button>
         </div>
       </PageHeader>
+
+      {#if detail}
+        <TransactionEditorDialog
+          bind:open={editorOpen}
+          mode="edit"
+          guid={detail.guid}
+          initial={detail}
+          onSaved={() => {
+            res.reload();
+            toast.success('Transaction updated');
+          }}
+          onDeleted={() => {
+            toast.success('Transaction deleted');
+            void goto(resolve('/transactions'));
+          }}
+          onError={(msg) => toast.error(msg)}
+        />
+      {/if}
 
       <div class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
         <KpiCard title="Date" value={fmtDate(d.postDate)}>
