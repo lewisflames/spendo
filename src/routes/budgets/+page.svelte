@@ -6,7 +6,7 @@
   import { sessionCurrency, formatSessionCurrency } from '$lib/utils/format.svelte';
   import { fetchBudgetVsActual, fetchAccounts, fetchBudgetDateRange } from '$lib/tauri';
   import { openBudget } from '$lib/utils/navigation';
-  import { useUrlParams, yearParam } from '$lib/hooks/use-url-params.svelte';
+  import { useUrlParams, yearParam, debouncedSearchParam } from '$lib/hooks/use-url-params.svelte';
   import { useDebouncedSearch } from '$lib/hooks/use-debounced-search.svelte';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import { Plus, PiggyBank, Wallet, TrendingDown } from '@lucide/svelte';
@@ -29,7 +29,7 @@
     BUDGET_DEFAULT_COLUMNS
   } from '$lib/features/budgets/budgets-table.svelte';
 
-  const budgetCols = useColumnVisibility(BUDGET_DEFAULT_COLUMNS);
+  const budgetCols = useColumnVisibility(BUDGET_DEFAULT_COLUMNS, 'cols:budgets:v1');
 
   let showAddDialog = $state(false);
 
@@ -47,6 +47,14 @@
       'year',
       () => by.yearSel,
       (v) => (by.yearSel = v)
+    ),
+    debouncedSearchParam(
+      'q',
+      () => search.value || null,
+      (v) => {
+        searchInput = v;
+        search.set(v);
+      }
     )
   ]);
 
@@ -135,9 +143,9 @@
     {/if}
 
     <!-- KPI summary cards -->
-    {#if rows === null}
+    {#if rows === null && !res.error}
       <KpiCardRow />
-    {:else}
+    {:else if rows !== null}
       <DimWrapper active={yearLoading} class="grid grid-cols-1 gap-6 sm:grid-cols-3">
         <KpiCard title="Effective budget" value={fmt(totalEffective)} valueClass="text-chart-1">
           {#snippet icon()}
@@ -174,9 +182,9 @@
       </DimWrapper>
     {/if}
 
-    {#if rows === null}
+    {#if rows === null && !res.error}
       <ToolbarSkeleton />
-    {:else if rows.length > 0}
+    {:else if rows !== null && rows.length > 0}
       <div class="flex flex-wrap items-center justify-between gap-2">
         <SearchInput
           id="budgets-search"
@@ -202,18 +210,20 @@
       </div>
     {/if}
 
-    <DimWrapper active={yearLoading}>
-      <BudgetsTable
-        rows={rows !== null ? filteredRows : null}
-        {hasBudgets}
-        {currency}
-        year={by.year}
-        cols={budgetCols}
-        onAddClick={() => {
-          showAddDialog = true;
-        }}
-      />
-    </DimWrapper>
+    {#if rows !== null || !res.error}
+      <DimWrapper active={yearLoading}>
+        <BudgetsTable
+          rows={rows !== null ? filteredRows : null}
+          {hasBudgets}
+          {currency}
+          year={by.year}
+          cols={budgetCols}
+          onAddClick={() => {
+            showAddDialog = true;
+          }}
+        />
+      </DimWrapper>
+    {/if}
   </div>
 </BookGate>
 

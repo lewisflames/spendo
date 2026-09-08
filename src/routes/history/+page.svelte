@@ -61,7 +61,7 @@
     </PageHeader>
 
     {#if importError}
-      <ErrorCard message={importError} />
+      <ErrorCard message={importError} onRetry={() => void handleReimport()} />
     {/if}
     <ChangeHistory />
   </div>

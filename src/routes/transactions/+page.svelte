@@ -190,9 +190,10 @@
     {#if (res.loading || dbBootstrapping.value) && !res.data}
       <!-- Pagination placeholder holds its height so nothing jumps on first load. -->
       <PageSkeleton variant="transactions" />
-    {:else if res.error}
-      <ErrorCard message={res.error} onRetry={() => res.reload()} />
     {:else if res.data}
+      {#if res.error}
+        <ErrorCard message={res.error} onRetry={() => res.reload()} />
+      {/if}
       {#if res.data.transactions.length === 0}
         <EmptyState
           card
@@ -225,6 +226,8 @@
           />
         </DimWrapper>
       {/if}
+    {:else if res.error}
+      <ErrorCard message={res.error} onRetry={() => res.reload()} />
     {/if}
   </div>
 </BookGate>

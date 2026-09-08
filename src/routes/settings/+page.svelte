@@ -700,7 +700,10 @@
     </IconCardHeader>
     <Card.Content class="flex flex-col gap-4">
       {#if bookSettingsError}
-        <ErrorCard message={bookSettingsError} onRetry={() => loadBookSettings(true)} />
+        <ErrorCard
+          message={bookSettingsError}
+          onRetry={() => void loadBookSettings(true).catch(() => {})}
+        />
       {/if}
       <div class="flex items-center justify-between gap-4">
         <div class="flex flex-col gap-1">

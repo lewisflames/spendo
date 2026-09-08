@@ -23,6 +23,7 @@
   import type { SplitDetail } from '$lib/tauri';
   import {
     clampZero,
+    EMPTY_DASH,
     formatDate as fmtDate,
     formatNumber,
     formatSessionCurrency as fmt,
@@ -108,29 +109,14 @@
   <div class="flex flex-col gap-6">
     {#if (res.loading || dbBootstrapping.value) && !detail}
       <PageSkeleton variant="transaction-detail" />
-    {:else if res.error}
-      <ErrorCard message={res.error} onRetry={() => res.reload()} />
-    {:else if !detail}
-      <EmptyState
-        card
-        title="Transaction not found"
-        description="No transaction exists with this ID. It may have been removed by a re-import."
-      >
-        {#snippet icon()}
-          <Receipt aria-hidden="true" class="text-muted-foreground" />
-        {/snippet}
-        {#snippet action()}
-          <Button variant="outline" href={resolve('/transactions')}>
-            <ArrowLeft aria-hidden="true" class="size-3" />
-            Back to transactions
-          </Button>
-        {/snippet}
-      </EmptyState>
     {:else if detail}
       {@const d = detail}
+      {#if res.error}
+        <ErrorCard message={res.error} onRetry={() => res.reload()} />
+      {/if}
       <PageHeader title={d.description || 'Transaction'}>
         {#snippet description()}
-          {d.notes ?? '\u2014'}{#if d.num}&nbsp;&middot; #{d.num}{/if}
+          {d.notes ?? EMPTY_DASH}{#if d.num}&nbsp;&middot; #{d.num}{/if}
         {/snippet}
         <div class="flex items-center gap-2">
           <div class="flex items-center gap-1">
@@ -246,7 +232,7 @@
                   </Badge>
                 </Table.Cell>
                 <Table.Cell class="max-w-xs truncate py-2.5 text-muted-foreground">
-                  {split.memo || '\u2014'}
+                  {split.memo || EMPTY_DASH}
                 </Table.Cell>
                 <Table.Cell class="py-2.5">
                   <Badge variant={status.variant}>{status.label}</Badge>
@@ -264,6 +250,24 @@
           </Table.Body>
         </TableShell>
       </DimWrapper>
+    {:else if res.error}
+      <ErrorCard message={res.error} onRetry={() => res.reload()} />
+    {:else}
+      <EmptyState
+        card
+        title="Transaction not found"
+        description="No transaction exists with this ID. It may have been removed by a re-import."
+      >
+        {#snippet icon()}
+          <Receipt aria-hidden="true" class="text-muted-foreground" />
+        {/snippet}
+        {#snippet action()}
+          <Button variant="outline" href={resolve('/transactions')}>
+            <ArrowLeft aria-hidden="true" class="size-3" />
+            Back to transactions
+          </Button>
+        {/snippet}
+      </EmptyState>
     {/if}
   </div>
 </BookGate>

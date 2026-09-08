@@ -56,24 +56,31 @@
     onRetry: () => void;
   } = $props();
 
-  const cols = useColumnVisibility<ColumnId>(DEFAULT_COLUMNS);
+  const cols = useColumnVisibility<ColumnId>(DEFAULT_COLUMNS, 'cols:ledger:v1');
   let visibleColumns = $derived(cols.visibleColumns);
   let skeletonCols = $derived(visibleColumns.length + 2);
+
+  function handleHideColumn(id: ColumnId) {
+    // Amount is the only hideable column that is also sortable — fall back to
+    // date so an invisible sort can't stay in effect.
+    if (id === 'amount' && sortBy === 'amount') onSort('date');
+  }
 </script>
 
 <!-- Filters -->
 <TransactionFilters bind:search={searchInput} bind:dateFrom bind:dateTo>
   {#snippet extra()}
-    <ColumnsMenu columns={COLUMNS} {cols} />
+    <ColumnsMenu columns={COLUMNS} {cols} onHide={handleHideColumn} />
   {/snippet}
 </TransactionFilters>
 
 {#if loading && !data}
   <TableSkeleton cols={skeletonCols} rows={5} />
-{:else if error}
-  <ErrorCard message={error} {onRetry} />
 {:else if data}
   {@const ledger = data}
+  {#if error}
+    <ErrorCard message={error} {onRetry} />
+  {/if}
 
   {#if ledger.transactions.length === 0}
     <EmptyState
@@ -110,4 +117,6 @@
       />
     </DimWrapper>
   {/if}
+{:else if error}
+  <ErrorCard message={error} {onRetry} />
 {/if}
