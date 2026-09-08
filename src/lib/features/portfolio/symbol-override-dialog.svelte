@@ -26,7 +26,8 @@
   let symbol = $state('');
   let loading = $state(false);
   let resetting = $state(false);
-  let symbolError = $state('');
+  let confirmReset = $state(false);
+  let formError = $state('');
 
   // Re-initialize whenever the dialog opens so it always reflects the saved
   // override.
@@ -34,33 +35,50 @@
 
   function syncFromEntry() {
     symbol = currentSymbol ?? '';
-    symbolError = '';
+    formError = '';
+    confirmReset = false;
+    loading = false;
+    resetting = false;
   }
+
+  let symbolError = $derived(
+    symbol.trim() ? '' : 'Enter a Yahoo symbol (e.g. AAPL, SIE.DE, BTC-EUR)'
+  );
+  let saveDisabled = $derived(loading || resetting || !symbol.trim());
 
   async function handleSave() {
     const trimmed = symbol.trim();
-    symbolError = trimmed ? '' : 'Enter a Yahoo symbol (e.g. AAPL, SIE.DE, BTC-EUR)';
     if (!trimmed) return;
     loading = true;
+    formError = '';
     try {
       await setSymbolOverride(commodityGuid, trimmed);
       open = false;
       onSave?.();
     } catch (e: unknown) {
-      onError?.(errMsg(e, 'Failed to save Yahoo symbol'));
+      const msg = errMsg(e, 'Failed to save Yahoo symbol');
+      formError = msg;
+      onError?.(msg);
     } finally {
       loading = false;
     }
   }
 
   async function handleReset() {
+    if (!confirmReset) {
+      confirmReset = true;
+      return;
+    }
     resetting = true;
+    formError = '';
     try {
       await deleteSymbolOverride(commodityGuid);
       open = false;
       onSave?.();
     } catch (e: unknown) {
-      onError?.(errMsg(e, 'Failed to reset Yahoo symbol'));
+      const msg = errMsg(e, 'Failed to reset Yahoo symbol');
+      formError = msg;
+      onError?.(msg);
     } finally {
       resetting = false;
     }
@@ -90,20 +108,35 @@
         class="font-mono"
         aria-invalid={!!symbolError}
         aria-describedby={symbolError ? 'yahoo-symbol-error' : undefined}
+        autofocus
       />
       {#if symbolError}
         <p id="yahoo-symbol-error" role="alert" class="text-xs text-destructive">{symbolError}</p>
       {/if}
-      <p class="text-xs text-muted-foreground">
-        Saved in uppercase. Refresh prices afterwards to fetch with the new symbol.
-      </p>
+      {#if formError}
+        <p role="alert" class="text-sm text-destructive">{formError}</p>
+      {/if}
+      {#if confirmReset}
+        <p role="alert" class="text-sm text-destructive">
+          Resetting removes the override and returns to automatic detection. Click reset again to
+          confirm.
+        </p>
+      {:else}
+        <p class="text-xs text-muted-foreground">
+          Saved in uppercase. Refresh prices afterwards to fetch with the new symbol.
+        </p>
+      {/if}
     </div>
 
     <Dialog.Footer class="sm:justify-between">
       <div>
         {#if currentSymbol}
-          <Button variant="ghost" onclick={handleReset} disabled={loading || resetting}>
-            {resetting ? 'Resetting...' : 'Reset to automatic'}
+          <Button
+            variant={confirmReset ? 'destructive' : 'ghost'}
+            onclick={handleReset}
+            disabled={loading || resetting}
+          >
+            {resetting ? 'Resetting…' : confirmReset ? 'Confirm reset' : 'Reset to automatic'}
           </Button>
         {/if}
       </div>
@@ -114,8 +147,8 @@
             open = false;
           }}>Cancel</Button
         >
-        <Button onclick={handleSave} disabled={loading || resetting}>
-          {loading ? 'Saving...' : 'Save'}
+        <Button onclick={handleSave} disabled={saveDisabled}>
+          {loading ? 'Saving…' : 'Save'}
         </Button>
       </div>
     </Dialog.Footer>

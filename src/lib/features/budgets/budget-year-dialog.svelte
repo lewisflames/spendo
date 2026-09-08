@@ -1,10 +1,10 @@
 <script lang="ts">
   import * as Dialog from '$lib/components/ui/dialog';
+  import DialogSaveFooter from '$lib/components/shared/dialog-save-footer.svelte';
   import { useDialogReset } from '$lib/hooks/use-dialog-reset.svelte';
   import * as Select from '$lib/components/ui/select';
   import { Select as SelectPrimitive } from 'bits-ui';
   import { Input } from '$lib/components/ui/input';
-  import { Button } from '$lib/components/ui/button';
 
   import { fetchBudgetYears, setBudgetYearAmount } from '$lib/tauri';
   import { errMsg } from '$lib/utils/error';
@@ -42,9 +42,8 @@
   let amount = $state(0);
 
   let loading = $state(false);
-  let accountError = $state('');
-  let amountError = $state('');
-  let yearError = $state('');
+  let formError = $state('');
+  let fetchError = $state('');
 
   // Years already budgeted for the target account. Null = unknown
   // (no account selected yet, or not fetched).
@@ -74,10 +73,11 @@
     pickedAccountGuid = '';
     by.yearSel = String(y);
     amount = 0;
-    accountError = '';
-    amountError = '';
-    yearError = '';
+    formError = '';
+    fetchError = '';
     existingYears = null;
+    yearsLoading = false;
+    loading = false;
   }
 
   // Load taken years whenever the dialog is open and the target account is
@@ -89,6 +89,7 @@
     const guid = target;
     let cancelled = false;
     yearsLoading = true;
+    fetchError = '';
     fetchBudgetYears(guid)
       .then((years) => {
         if (cancelled) return;
@@ -102,7 +103,9 @@
       .catch((e: unknown) => {
         if (cancelled) return;
         existingYears = null;
-        onError?.(errMsg(e, 'Failed to load existing budgets'));
+        const msg = errMsg(e, 'Failed to load existing budgets');
+        fetchError = msg;
+        onError?.(msg);
       })
       .finally(() => {
         if (!cancelled) yearsLoading = false;
@@ -112,28 +115,70 @@
     };
   });
 
+  let accountError = $derived(target ? '' : 'Please select an expense account');
+  let amountError = $derived(amount > 0 ? '' : 'Target must be greater than zero');
+  let yearError = $derived(
+    existingYears !== null && existingYears.includes(Number(by.yearSel))
+      ? 'This account already has a budget for the selected year'
+      : ''
+  );
+
+  let noFreeYears = $derived(target !== null && existingYears !== null && freeYears.length === 0);
+  let saveDisabled = $derived(
+    loading ||
+      yearsLoading ||
+      (target !== null && existingYears === null) ||
+      noFreeYears ||
+      !target ||
+      amount <= 0 ||
+      !!yearError
+  );
+
+  function retryFetchYears() {
+    existingYears = null;
+    fetchError = '';
+    yearsLoading = false;
+    // Trigger refetch by touching target via reload: simplest is to re-run
+    // the effect by bumping yearSel twice (no-op) — instead, fetch directly.
+    const guid = target;
+    if (!guid) return;
+    yearsLoading = true;
+    fetchBudgetYears(guid)
+      .then((years) => {
+        existingYears = years;
+        if (years.includes(Number(by.yearSel))) {
+          const fallback = yearOptions.find((o) => !years.includes(Number(o.value)));
+          if (fallback) by.yearSel = fallback.value;
+        }
+      })
+      .catch((e: unknown) => {
+        existingYears = null;
+        const msg = errMsg(e, 'Failed to load existing budgets');
+        fetchError = msg;
+        onError?.(msg);
+      })
+      .finally(() => {
+        yearsLoading = false;
+      });
+  }
+
   async function handleSave() {
     const y = Number(by.yearSel);
-    accountError = target ? '' : 'Please select an expense account';
-    amountError = amount > 0 ? '' : 'Target must be greater than zero';
-    yearError =
-      existingYears !== null && existingYears.includes(y)
-        ? 'This account already has a budget for the selected year'
-        : '';
     if (!target || amount <= 0 || yearError) return;
     loading = true;
+    formError = '';
     try {
       await setBudgetYearAmount(target, y, amount);
       open = false;
       onSave?.(target, y);
     } catch (e: unknown) {
-      onError?.(errMsg(e, 'Failed to save budget'));
+      const msg = errMsg(e, 'Failed to save budget');
+      formError = msg;
+      onError?.(msg);
     } finally {
       loading = false;
     }
   }
-
-  let noFreeYears = $derived(target !== null && existingYears !== null && freeYears.length === 0);
 </script>
 
 <Dialog.Root bind:open>
@@ -205,13 +250,14 @@
       </div>
 
       <div class="flex flex-col gap-2">
-        <span class="text-sm font-medium">Year</span>
+        <label id="budget-year-label" for="year" class="text-sm font-medium">Year</label>
         <Select.Root type="single" bind:value={by.yearSel} items={yearOptions}>
           <Select.Trigger
             id="year"
             class="min-w-20 justify-center"
             aria-invalid={!!yearError}
             aria-describedby={yearError ? 'year-error' : undefined}
+            aria-labelledby="budget-year-label"
           >
             <SelectPrimitive.Value />
           </Select.Trigger>
@@ -229,12 +275,25 @@
       {#if yearError}
         <p id="year-error" role="alert" class="text-xs text-destructive">{yearError}</p>
       {/if}
+      {#if fetchError}
+        <p role="alert" class="text-sm text-destructive">
+          {fetchError}
+          <button type="button" class="ml-2 underline underline-offset-2" onclick={retryFetchYears}>
+            Retry
+          </button>
+        </p>
+      {/if}
+      {#if formError}
+        <p role="alert" class="text-sm text-destructive">{formError}</p>
+      {/if}
 
       <p class="text-sm text-muted-foreground">
         {#if !target}
           Select an account to see available years.
-        {:else if yearsLoading || existingYears === null}
+        {:else if yearsLoading}
           Loading existing budgets…
+        {:else if existingYears === null}
+          Could not load existing budgets. Retry to see which years are taken.
         {:else if noFreeYears}
           This account already has a budget for every available year.
         {:else}
@@ -243,22 +302,18 @@
       </p>
     </div>
 
-    <Dialog.Footer>
-      <Button
-        variant="outline"
-        onclick={() => {
-          open = false;
-        }}>Cancel</Button
-      >
-      <Button
-        onclick={handleSave}
-        disabled={loading ||
-          yearsLoading ||
-          (target !== null && existingYears === null) ||
-          noFreeYears}
-      >
-        {loading ? 'Saving...' : 'Add Budget'}
-      </Button>
-    </Dialog.Footer>
+    <DialogSaveFooter
+      mode="create"
+      saving={loading}
+      deleting={false}
+      confirmDelete={false}
+      saveLabel="Add budget"
+      {saveDisabled}
+      onDelete={() => {}}
+      onSave={handleSave}
+      onCancel={() => {
+        open = false;
+      }}
+    />
   </Dialog.Content>
 </Dialog.Root>

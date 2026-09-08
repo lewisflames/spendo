@@ -22,6 +22,7 @@
   } from '$lib/tauri';
   import { errMsg } from '$lib/utils/error';
   import { todayStr } from '$lib/utils/date-utils.svelte';
+  import { formatSessionCurrency } from '$lib/utils/format.svelte';
   import { flattenAccountsForPicker } from '$lib/features/accounts/account-picker-utils';
   import { FREQUENCY_OPTIONS } from './schedule-utils';
 
@@ -91,6 +92,9 @@
   function syncDefaults() {
     formError = '';
     confirmDelete = false;
+    saving = false;
+    deleting = false;
+    accountsLoading = false;
     if (mode === 'edit' && initial) {
       name = initial.name;
       frequency = initial.frequency;
@@ -589,7 +593,7 @@
           {:else if balanced}
             Balanced · splits sum to zero.
           {:else}
-            Out of balance by {balance.toFixed(2)} — debits must equal credits.
+            Out of balance by {formatSessionCurrency(balance)} — debits must equal credits.
           {/if}
         </div>
       </div>
