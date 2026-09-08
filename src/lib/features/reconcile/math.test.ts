@@ -3,6 +3,8 @@ import {
   clearedTotal,
   isBalanced,
   isReconcilable,
+  parseStatementAmount,
+  selectionState,
   statementDifference,
   targetBalance
 } from './math';
@@ -32,5 +34,24 @@ describe('reconcile statement math', () => {
     expect(isReconcilable('STOCK', false)).toBe(false);
     expect(isReconcilable('EXPENSE', false)).toBe(false);
     expect(isReconcilable('ROOT', false)).toBe(false);
+  });
+
+  it('parses statement amounts strictly', () => {
+    expect(parseStatementAmount('')).toBeNull();
+    expect(parseStatementAmount('   ')).toBeNull();
+    expect(parseStatementAmount('70')).toBe(70);
+    expect(parseStatementAmount(' 70.50 ')).toBeCloseTo(70.5, 10);
+    expect(parseStatementAmount('-12,5')).toBeCloseTo(-12.5, 10);
+    expect(parseStatementAmount('1,000.50')).toBeNull();
+    expect(parseStatementAmount('abc')).toBeNull();
+    expect(parseStatementAmount('12.34.56')).toBeNull();
+  });
+
+  it('derives header checkbox tri-state', () => {
+    const rows = [{ splitGuid: 'a' }, { splitGuid: 'b' }];
+    expect(selectionState(new Set(), rows)).toBe('none');
+    expect(selectionState(new Set(), [])).toBe('none');
+    expect(selectionState(new Set(['a']), rows)).toBe('some');
+    expect(selectionState(new Set(['a', 'b']), rows)).toBe('all');
   });
 });

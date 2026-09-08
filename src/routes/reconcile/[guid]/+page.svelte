@@ -32,6 +32,7 @@
   import {
     clearedTotal,
     isBalanced,
+    parseStatementAmount,
     statementDifference,
     targetBalance
   } from '$lib/features/reconcile/math';
@@ -106,16 +107,18 @@
   let amountByGuid = $derived(new Map(candidates.map((c) => [c.splitGuid, c.amount] as const)));
   let cleared = $derived(clearedTotal([...checked].map((g) => amountByGuid.get(g) ?? 0)));
   let target = $derived(targetBalance(startingBalance, cleared));
-  let endingBalance = $derived.by(() => {
-    const n = Number(endingBalanceInput);
-    return endingBalanceInput.trim() === '' || !Number.isFinite(n) ? null : n;
-  });
+  let endingBalance = $derived(parseStatementAmount(endingBalanceInput));
   let difference = $derived(
     endingBalance === null ? NaN : statementDifference(endingBalance, target)
   );
   let balanced = $derived(endingBalance !== null && isBalanced(difference));
+  let saving = $state(false);
+  let finishing = $state(false);
+  // Finish auto-saves dirty marks first, so dirty must not block it — only a
+  // missing/invalid ending balance, an unbalanced statement, or an empty
+  // selection does.
   let canFinish = $derived(
-    !!res.data && endingBalance !== null && balanced && !dirty && checked.size > 0
+    !!res.data && endingBalance !== null && balanced && !saving && !finishing && checked.size > 0
   );
 
   let filtered = $derived.by(() => {
@@ -131,7 +134,9 @@
       if (sort.sortBy === 'amount') return (a.amount - b.amount || 0) * dir;
       if (sort.sortBy === 'description')
         return (
-          ((a.description ?? '').toLowerCase() < (b.description ?? '').toLowerCase() ? -1 : 1) * dir
+          (a.description ?? '').localeCompare(b.description ?? '', undefined, {
+            sensitivity: 'base'
+          }) * dir
         );
       if (a.postDate !== b.postDate) return (a.postDate < b.postDate ? -1 : 1) * dir;
       return (a.splitGuid < b.splitGuid ? -1 : 1) * dir;
@@ -142,6 +147,13 @@
   function toggle(splitGuid: string, next: boolean) {
     if (next) checked.add(splitGuid);
     else checked.delete(splitGuid);
+  }
+
+  function toggleAll(next: boolean) {
+    for (const row of filtered) {
+      if (next) checked.add(row.splitGuid);
+      else checked.delete(row.splitGuid);
+    }
   }
 
   function pendingUpdates() {
@@ -155,9 +167,6 @@
         state: checked.has(c.splitGuid) ? 'c' : 'n'
       }));
   }
-
-  let saving = $state(false);
-  let finishing = $state(false);
 
   async function save() {
     const g = guid;
@@ -181,6 +190,12 @@
     if (!g || endingBalance === null) return;
     finishing = true;
     try {
+      // Auto-save dirty cleared marks first so Finish is a single click: the
+      // backend promotes every 'c' split at or before the statement date.
+      const updates = pendingUpdates();
+      if (updates.length > 0) {
+        await markReconcileSplits(g, updates);
+      }
       const out = await finishReconciliation(g, statementDate, endingBalance);
       toast.success(
         `Reconciled ${out.reconciledCount} split${out.reconciledCount === 1 ? '' : 's'}`
@@ -275,6 +290,7 @@
           sortDir={sort.sortDir}
           {onSort}
           onToggle={toggle}
+          onToggleAll={toggleAll}
         />
       {/if}
     {/if}

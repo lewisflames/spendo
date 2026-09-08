@@ -100,7 +100,9 @@
         {finishing ? 'Finishing…' : 'Finish reconciliation'}
       </Button>
       {#if dirty}
-        <p class="text-sm text-muted-foreground">Unsaved changes — save before finishing.</p>
+        <p class="text-sm text-muted-foreground">
+          Unsaved changes — save progress now, or they will be saved when you finish.
+        </p>
       {:else if !balanced}
         <p class="text-sm text-muted-foreground">
           Difference must be zero to finish. Check off cleared transactions.
