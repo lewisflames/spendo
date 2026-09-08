@@ -15,6 +15,7 @@ mod prices;
 mod reconcile;
 mod reports;
 mod schedules;
+mod search;
 mod settings;
 mod sql;
 mod transactions;
@@ -140,6 +141,7 @@ pub fn run() {
             schedules::skip_schedule_occurrence,
             portfolio::fetch_portfolio_data,
             portfolio::fetch_holding_detail,
+            search::search_global,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
