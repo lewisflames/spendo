@@ -2,11 +2,12 @@
   import { page } from '$app/state';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { isTauri } from '@tauri-apps/api/core';
-  import { ArrowLeft, ArrowRight } from '@lucide/svelte';
+  import { ArrowLeft, ArrowRight, SunMoon } from '@lucide/svelte';
   import { Button } from '$lib/components/ui/button';
   import { SidebarTrigger } from '$lib/components/ui/sidebar/index.js';
   import { breadcrumb, type BreadcrumbItem } from '$lib/stores/breadcrumb.svelte';
   import { goBack, goForward, navHistory } from '$lib/stores/nav-history.svelte';
+  import { appSettings, saveSettings, resolveTheme } from '$lib/stores/settings.svelte';
   import { routeTitle } from '$lib/routes';
   import * as Breadcrumb from '$lib/components/ui/breadcrumb';
   import PaletteTrigger from './palette-trigger.svelte';
@@ -46,6 +47,11 @@
 
   const canGoBack = $derived(navHistory.value.index > 0);
   const canGoForward = $derived(navHistory.value.index < navHistory.value.stack.length - 1);
+
+  function toggleTheme() {
+    // Toggling always lands on an explicit theme, leaving 'system' mode.
+    saveSettings({ theme: resolveTheme(appSettings.value.theme) === 'dark' ? 'light' : 'dark' });
+  }
 </script>
 
 <!-- Handlers implement Tauri window dragging/maximize, not document interaction. -->
@@ -86,6 +92,16 @@
         <ArrowRight class="size-4" />
       </Button>
       <PaletteTrigger />
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        class="text-muted-foreground"
+        aria-label="Toggle theme"
+        title="Toggle theme (Ctrl+Shift+T)"
+        onclick={toggleTheme}
+      >
+        <SunMoon class="size-4" />
+      </Button>
     </div>
 
     <Breadcrumb.Root>

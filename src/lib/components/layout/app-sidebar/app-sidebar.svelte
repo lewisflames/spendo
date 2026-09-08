@@ -26,7 +26,8 @@
         <Sidebar.Menu>
           <Sidebar.MenuItem>
             <Sidebar.MenuButton
-              isActive={page.url.pathname === '/transactions'}
+              isActive={page.url.pathname === '/transactions' ||
+                page.url.pathname.startsWith('/transactions/')}
               tooltipContent="Transactions"
             >
               {#snippet child({ props })}
@@ -93,7 +94,8 @@
           </Sidebar.MenuItem>
           <Sidebar.MenuItem>
             <Sidebar.MenuButton
-              isActive={page.url.pathname === '/budgets'}
+              isActive={page.url.pathname === '/budgets' ||
+                page.url.pathname.startsWith('/budgets/')}
               tooltipContent="Budgets"
             >
               {#snippet child({ props })}
