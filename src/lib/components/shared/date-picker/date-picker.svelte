@@ -11,12 +11,18 @@
     value = $bindable(''),
     placeholder = 'Pick a date',
     id,
-    class: className = ''
+    class: className = '',
+    invalid = false,
+    disabled = false,
+    describedBy = undefined
   }: {
     value?: string;
     placeholder?: string;
     id?: string;
     class?: string;
+    invalid?: boolean;
+    disabled?: boolean;
+    describedBy?: string;
   } = $props();
 
   let open = $state(false);
@@ -41,11 +47,19 @@
 </script>
 
 <Popover.Root bind:open>
-  <Popover.Trigger {id} class={className}>
+  <Popover.Trigger {id} class={className} {disabled}>
     {#snippet child({ props })}
-      <Button {...props} type="button" variant="outline">
+      <Button
+        {...props}
+        type="button"
+        variant="outline"
+        {disabled}
+        aria-invalid={invalid || undefined}
+        aria-describedby={describedBy}
+        class={invalid ? 'border-destructive' : ''}
+      >
         <CalendarIcon aria-hidden="true" class="size-4 shrink-0 text-muted-foreground" />
-        <span class="text-muted-foreground">{display}</span>
+        <span class={value ? '' : 'text-muted-foreground'}>{display}</span>
       </Button>
     {/snippet}
   </Popover.Trigger>

@@ -18,7 +18,8 @@
   } from '$lib/tauri';
   import type { TxInput } from '$lib/tauri';
   import { errMsg } from '$lib/utils/error';
-  import { todayStr } from '$lib/utils/date-utils.svelte';
+  import { isFutureDate, isIsoDate, todayStr } from '$lib/utils/date-utils.svelte';
+  import { formatSessionCurrency } from '$lib/utils/format.svelte';
   import { flattenAccountsForPicker } from '$lib/features/accounts/account-picker-utils';
 
   interface SplitDraft {
@@ -82,6 +83,8 @@
   function syncDefaults() {
     formError = '';
     confirmDelete = false;
+    saving = false;
+    deleting = false;
     if (mode === 'edit' && initial) {
       postDate = initial.postDate.slice(0, 10);
       description = initial.description ?? '';
@@ -147,8 +150,8 @@
 
   let dateError = $derived.by(() => {
     if (!postDate) return 'Date is required';
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(postDate)) return 'Use YYYY-MM-DD';
-    if (postDate > todayStr()) return 'Future dates are not allowed';
+    if (!isIsoDate(postDate)) return 'Use a valid date (YYYY-MM-DD)';
+    if (isFutureDate(postDate)) return 'Future dates are not allowed';
     return '';
   });
 
@@ -274,13 +277,20 @@
             bind:value={description}
             placeholder="e.g. Groceries"
             maxlength={500}
+            autofocus
           />
         </div>
         <div class="flex flex-col gap-1.5">
           <label for="tx-date" class="text-sm font-medium">Date</label>
-          <DatePicker id="tx-date" bind:value={postDate} placeholder="Pick a date" />
+          <DatePicker
+            id="tx-date"
+            bind:value={postDate}
+            placeholder="Pick a date"
+            invalid={!!dateError}
+            describedBy={dateError ? 'tx-date-error' : undefined}
+          />
           {#if dateError}
-            <p role="alert" class="text-xs text-destructive">{dateError}</p>
+            <p id="tx-date-error" role="alert" class="text-xs text-destructive">{dateError}</p>
           {/if}
         </div>
         <div class="flex flex-col gap-1.5">
@@ -346,7 +356,13 @@
                   placeholder={accountsLoading ? 'Loading accounts…' : 'Select an account'}
                   disabled={accountsLoading}
                   invalid={!!splitErrors[i] && !s.accountGuid}
+                  describedBy={splitErrors[i] ? `split-{s.key}-error` : undefined}
                 />
+                {#if splitErrors[i]}
+                  <p id="split-{s.key}-error" role="alert" class="text-xs text-destructive">
+                    {splitErrors[i]}
+                  </p>
+                {/if}
               </div>
               <div class="flex flex-col gap-1.5">
                 <label for="split-{s.key}-amount" class="text-xs text-muted-foreground"
@@ -427,7 +443,7 @@
           {:else if balanced}
             Balanced · splits sum to zero.
           {:else}
-            Out of balance by {balance.toFixed(2)} — debits must equal credits.
+            Out of balance by {formatSessionCurrency(balance)} — debits must equal credits.
           {/if}
         </div>
       </div>

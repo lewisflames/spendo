@@ -88,6 +88,9 @@
   function syncDefaults() {
     formError = '';
     confirmDelete = false;
+    saving = false;
+    deleting = false;
+    loading = false;
     if (mode === 'edit' && initial) {
       name = initial.name;
       accountType = initial.accountType;

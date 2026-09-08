@@ -1,8 +1,8 @@
 <script lang="ts">
   import * as Dialog from '$lib/components/ui/dialog';
+  import DialogSaveFooter from '$lib/components/shared/dialog-save-footer.svelte';
   import { useDialogReset } from '$lib/hooks/use-dialog-reset.svelte';
   import { Input } from '$lib/components/ui/input';
-  import { Button } from '$lib/components/ui/button';
 
   import { setBudgetYearAmount } from '$lib/tauri';
   import { errMsg } from '$lib/utils/error';
@@ -30,7 +30,10 @@
   let amount = $state(0);
 
   let loading = $state(false);
-  let amountError = $state('');
+  let formError = $state('');
+
+  let amountError = $derived(amount > 0 ? '' : 'Target must be greater than zero');
+  let saveDisabled = $derived(loading || amount <= 0);
 
   // Re-initialize the form whenever the dialog opens (user interaction), so
   // it always reflects the target year.
@@ -38,19 +41,22 @@
 
   function syncFromEntry() {
     amount = initialAmount;
-    amountError = '';
+    formError = '';
+    loading = false;
   }
 
   async function handleSave() {
-    amountError = amount > 0 ? '' : 'Target must be greater than zero';
     if (amount <= 0) return;
     loading = true;
+    formError = '';
     try {
       await setBudgetYearAmount(accountGuid, year, amount);
       open = false;
       onSave?.();
     } catch (e: unknown) {
-      onError?.(errMsg(e, 'Failed to save annual budget'));
+      const msg = errMsg(e, 'Failed to save annual budget');
+      formError = msg;
+      onError?.(msg);
     } finally {
       loading = false;
     }
@@ -70,8 +76,8 @@
 
     <div class="flex flex-col gap-4 py-4">
       <div class="flex flex-col gap-2">
-        <span class="text-sm font-medium">Year</span>
-        <p class="text-sm">{year}</p>
+        <span id="budget-year-label" class="text-sm font-medium">Year</span>
+        <p class="text-sm" aria-labelledby="budget-year-label">{year}</p>
       </div>
 
       <div class="flex flex-col gap-2">
@@ -87,6 +93,7 @@
             class="pr-16"
             aria-invalid={!!amountError}
             aria-describedby={amountError ? 'amount-error' : undefined}
+            autofocus
           />
           <span
             class="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-xs text-muted-foreground uppercase"
@@ -96,19 +103,24 @@
         {#if amountError}
           <p id="amount-error" role="alert" class="text-xs text-destructive">{amountError}</p>
         {/if}
+        {#if formError}
+          <p role="alert" class="text-sm text-destructive">{formError}</p>
+        {/if}
       </div>
     </div>
 
-    <Dialog.Footer>
-      <Button
-        variant="outline"
-        onclick={() => {
-          open = false;
-        }}>Cancel</Button
-      >
-      <Button onclick={handleSave} disabled={loading}>
-        {loading ? 'Saving...' : exists ? 'Save' : 'Create Budget'}
-      </Button>
-    </Dialog.Footer>
+    <DialogSaveFooter
+      mode="create"
+      saving={loading}
+      deleting={false}
+      confirmDelete={false}
+      saveLabel={exists ? 'Save' : 'Create budget'}
+      {saveDisabled}
+      onDelete={() => {}}
+      onSave={handleSave}
+      onCancel={() => {
+        open = false;
+      }}
+    />
   </Dialog.Content>
 </Dialog.Root>
