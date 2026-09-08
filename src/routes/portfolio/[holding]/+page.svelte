@@ -75,7 +75,9 @@
     }
   });
 
-  let notFound = $derived(res.error !== null && res.error.includes('Holding not found'));
+  let notFound = $derived(
+    res.data === null && res.error !== null && /holding not found/i.test(res.error)
+  );
 
   let holding = $derived(res.data?.holding ?? null);
   let name = $derived(holding ? holdingLabel(holding) : 'Holding');
@@ -96,8 +98,8 @@
   /** Activity/Prices tab selection (local; activity pagination owns the URL). */
   let tab = $state('activity');
 
-  const activityCols = useColumnVisibility(ACTIVITY_DEFAULT_COLUMNS);
-  const priceCols = useColumnVisibility(PRICE_DEFAULT_COLUMNS);
+  const activityCols = useColumnVisibility(ACTIVITY_DEFAULT_COLUMNS, 'cols:holding-activity:v1');
+  const priceCols = useColumnVisibility(PRICE_DEFAULT_COLUMNS, 'cols:holding-prices:v1');
 
   async function handleSymbolSave() {
     overridesRes.reload();
@@ -132,32 +134,20 @@
 </svelte:head>
 
 <BookGate title={name} description="Investment holding detail">
-  {#if dbBootstrapping.value || (res.loading && !res.data)}
+  {#if dbBootstrapping.value || (res.loading && !res.data && !res.error)}
     <div class="flex flex-col gap-6">
       <PageSkeleton variant="holding" />
     </div>
-  {:else if res.error && !notFound}
-    <ErrorCard message={res.error} onRetry={() => res.reload()} />
-  {:else if notFound || !res.data}
-    <EmptyState
-      card
-      title="Holding not found"
-      description="This security does not exist in your book."
-    >
-      {#snippet icon()}
-        <TrendingUp aria-hidden="true" class="text-muted-foreground" />
-      {/snippet}
-      {#snippet action()}
-        <Button variant="outline" href={resolve('/portfolio')}>
-          <ArrowLeft aria-hidden="true" class="size-3" />
-          Back to portfolio
-        </Button>
-      {/snippet}
-    </EmptyState>
-  {:else}
+  {:else if res.data}
     {@const holding = res.data.holding}
 
     <div class="flex flex-col gap-6">
+      {#if res.error}
+        <ErrorCard message={res.error} onRetry={() => res.reload()} />
+      {/if}
+      {#if overridesRes.error}
+        <ErrorCard message={overridesRes.error} onRetry={() => overridesRes.reload()} />
+      {/if}
       <HoldingDetailHeader
         {holding}
         {name}
@@ -167,7 +157,7 @@
       />
 
       <!-- KPI summary cards -->
-      <HoldingKpiCards {holding} />
+      <HoldingKpiCards {holding} {priceCurrency} />
 
       <SymbolOverrideDialog
         bind:open={symbolDialogOpen}
@@ -251,5 +241,23 @@
         </Tabs.Content>
       </Tabs.Root>
     </div>
+  {:else if notFound}
+    <EmptyState
+      card
+      title="Holding not found"
+      description="This security does not exist in your book."
+    >
+      {#snippet icon()}
+        <TrendingUp aria-hidden="true" class="text-muted-foreground" />
+      {/snippet}
+      {#snippet action()}
+        <Button variant="outline" href={resolve('/portfolio')}>
+          <ArrowLeft aria-hidden="true" class="size-3" />
+          Back to portfolio
+        </Button>
+      {/snippet}
+    </EmptyState>
+  {:else if res.error}
+    <ErrorCard message={res.error} onRetry={() => res.reload()} />
   {/if}
 </BookGate>

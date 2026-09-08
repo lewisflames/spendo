@@ -14,12 +14,13 @@
     markReconcileSplits,
     type TxSortKey
   } from '$lib/tauri';
-  import { sessionCurrency } from '$lib/utils/format.svelte';
+  import { sessionCurrency, plural } from '$lib/utils/format.svelte';
   import { errMsg } from '$lib/utils/error';
   import { todayStr } from '$lib/utils/date-utils.svelte';
   import BookGate from '$lib/components/shared/book-gate.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
+  import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
   import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
   import { SearchInput } from '$lib/components/shared/search-input';
@@ -44,6 +45,8 @@
   let endingBalanceInput = $state('');
   let searchInput = $state('');
   let search = useDebouncedSearch(() => searchInput);
+  // Oldest-first is deliberate for reconcile (check off in statement order),
+  // opposite of the ledger default (newest-first).
   const sort = useTableSort<'date' | 'description' | 'amount'>({ sortBy: 'date', sortDir: 'asc' }, [
     'amount'
   ]);
@@ -197,9 +200,7 @@
         await markReconcileSplits(g, updates);
       }
       const out = await finishReconciliation(g, statementDate, endingBalance);
-      toast.success(
-        `Reconciled ${out.reconciledCount} split${out.reconciledCount === 1 ? '' : 's'}`
-      );
+      toast.success(`Reconciled ${plural(out.reconciledCount, 'split')}`);
       void goto(resolve('/reconcile'));
     } catch (e) {
       toast.error(errMsg(e, 'Failed to finish reconciliation'));
@@ -238,61 +239,82 @@
       </Button>
     </PageHeader>
 
-    {#if res.error}
-      <ErrorCard message={res.error} onRetry={() => res.reload()} />
-    {:else}
-      <ReconcileStatementForm
-        bind:statementDate
-        bind:endingBalanceInput
-        {startingBalance}
-        {cleared}
-        {target}
-        {difference}
-        {balanced}
-        checkedCount={checked.size}
-        totalCount={candidates.length}
-        {dirty}
-        {saving}
-        {finishing}
-        {canFinish}
-        onSave={save}
-        onFinish={finish}
-      />
-
-      <div class="max-w-md">
-        <SearchInput
-          id="reconcile-search"
-          placeholder="Filter by description, number, memo…"
-          bind:value={searchInput}
-        />
-      </div>
-
-      {#if res.loading && !res.data}
-        <TableSkeleton cols={5} rows={8} />
-      {:else if filtered.length === 0}
-        <EmptyState
-          card
-          title="Nothing to reconcile"
-          description={search.value
-            ? 'No candidates match the current filter.'
-            : 'No unreconciled transactions at or before the statement date.'}
-        >
-          {#snippet icon()}
-            <CircleCheck aria-hidden="true" class="text-muted-foreground" />
-          {/snippet}
-        </EmptyState>
-      {:else}
-        <ReconcileTable
-          rows={filtered}
-          {checked}
-          {currency}
-          sortBy={sort.sortBy}
-          sortDir={sort.sortDir}
-          {onSort}
-          onToggle={toggle}
-          onToggleAll={toggleAll}
-        />
+    {#if res.loading && !res.data && !res.error}
+      <TableSkeleton cols={5} rows={8} />
+    {:else if res.data}
+      {#if res.error}
+        <ErrorCard message={res.error} onRetry={() => res.reload()} />
       {/if}
+      <DimWrapper active={res.loading} class="flex flex-col gap-6">
+        <ReconcileStatementForm
+          bind:statementDate
+          bind:endingBalanceInput
+          {startingBalance}
+          {cleared}
+          {target}
+          {difference}
+          {balanced}
+          checkedCount={checked.size}
+          totalCount={candidates.length}
+          {dirty}
+          {saving}
+          {finishing}
+          {canFinish}
+          onSave={save}
+          onFinish={finish}
+        />
+
+        <div class="max-w-md">
+          <SearchInput
+            id="reconcile-search"
+            label="Filter by description, number, memo"
+            placeholder="Filter by description, number, memo…"
+            bind:value={searchInput}
+          />
+        </div>
+
+        {#if filtered.length === 0}
+          <EmptyState
+            card
+            title="Nothing to reconcile"
+            description={search.value
+              ? 'No candidates match the current filter.'
+              : 'No unreconciled transactions at or before the statement date.'}
+          >
+            {#snippet icon()}
+              <CircleCheck aria-hidden="true" class="text-muted-foreground" />
+            {/snippet}
+            {#snippet action()}
+              {#if search.value}
+                <Button
+                  variant="outline"
+                  onclick={() => {
+                    searchInput = '';
+                    search.set('');
+                  }}
+                >
+                  Clear search
+                </Button>
+              {/if}
+            {/snippet}
+          </EmptyState>
+        {:else}
+          <ReconcileTable
+            rows={filtered}
+            {checked}
+            {currency}
+            sortBy={sort.sortBy}
+            sortDir={sort.sortDir}
+            {onSort}
+            onToggle={toggle}
+            onToggleAll={toggleAll}
+          />
+        {/if}
+      </DimWrapper>
+    {:else if res.error}
+      <ErrorCard message={res.error} onRetry={() => res.reload()} />
+    {:else if res.loading}
+      <TableSkeleton cols={5} rows={8} />
     {/if}
   </div>
 </BookGate>

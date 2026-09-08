@@ -40,6 +40,24 @@
 
 {#if loading && !hasData}
   <TableSkeleton cols={skeletonCols} rows={skeletonRows} />
+{:else if hasData}
+  {#if error}
+    <ErrorCard message={error} {onRetry} />
+  {/if}
+  {#if isEmpty}
+    <EmptyState card title={emptyTitle} description={emptyMessage} />
+  {:else}
+    <!-- Keep the previous table visible (dimmed) during refetches so the
+         page doesn't jump and expand/collapse state stays in place. -->
+    <DimWrapper active={loading}>
+      <TableShell>
+        {@render header()}
+        <Table.Body>
+          {@render children()}
+        </Table.Body>
+      </TableShell>
+    </DimWrapper>
+  {/if}
 {:else if error}
   <ErrorCard message={error} {onRetry} />
 {:else if isEmpty}

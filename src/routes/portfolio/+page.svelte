@@ -6,12 +6,15 @@
     signColor,
     sessionCurrency,
     formatSessionCurrency,
+    formatSignedCurrency,
+    fmtPct,
     formatDate
   } from '$lib/utils/format.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import KpiCard from '$lib/components/shared/kpi-card.svelte';
   import PageSkeleton from '$lib/components/shared/page-skeleton.svelte';
   import BookGate from '$lib/components/shared/book-gate.svelte';
+  import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
   import MissingFxWarning from '$lib/features/reports/missing-fx-warning.svelte';
   import { Button } from '$lib/components/ui/button';
@@ -121,65 +124,68 @@
     {#if dbBootstrapping.value || (res.loading && !res.data)}
       <PageSkeleton variant="portfolio" />
       <HoldingsTable loading {currency} holdings={[]} />
-    {:else if res.error}
-      <ErrorCard message={res.error} onRetry={() => res.reload()} />
     {:else if res.data}
       {@const d = res.data}
       {@const guidByMnemonic = new Map(d.holdings.map((h) => [h.mnemonic, h.commodityGuid]))}
+      {#if res.error}
+        <ErrorCard message={res.error} onRetry={() => res.reload()} />
+      {/if}
 
       <MissingFxWarning priceErrors={priceRefresh.errors} holdingGuidByMnemonic={guidByMnemonic} />
 
-      {#if d.holdings.length > 0}
-        <!-- KPI summary cards -->
-        <div class="grid grid-cols-1 gap-6 sm:grid-cols-3">
-          <KpiCard title="Market Value" value={fmt(d.totalMarketValue)} valueClass="text-success">
-            {#snippet icon()}
-              <TrendingUp aria-hidden="true" class="size-4 text-success" />
-            {/snippet}
-          </KpiCard>
-          <KpiCard title="Cost Basis" value={fmt(d.totalCostBasis)} valueClass="text-warning">
-            {#snippet icon()}
-              <Briefcase aria-hidden="true" class="size-4 text-muted-foreground" />
-            {/snippet}
-          </KpiCard>
-          <KpiCard title="Gain / Loss" valueClass={signColor(d.totalGainLoss)}>
-            {#snippet icon()}
-              {#if d.totalGainLoss >= 0}
+      <DimWrapper active={res.loading} class="flex flex-col gap-6">
+        {#if d.holdings.length > 0}
+          <!-- KPI summary cards -->
+          <div class="grid grid-cols-1 gap-6 sm:grid-cols-3">
+            <KpiCard title="Market Value" value={fmt(d.totalMarketValue)} valueClass="text-success">
+              {#snippet icon()}
                 <TrendingUp aria-hidden="true" class="size-4 text-success" />
-              {:else}
-                <TrendingDown aria-hidden="true" class="size-4 text-destructive" />
-              {/if}
-            {/snippet}
-            {#snippet value()}
-              {d.totalGainLoss >= 0 ? '+' : ''}{fmt(d.totalGainLoss)}
-              <span class="text-sm font-normal">
-                ({d.totalGainLoss >= 0 ? '+' : ''}{d.totalGainLossPct.toFixed(1)}%)
-              </span>
-            {/snippet}
-          </KpiCard>
-        </div>
-
-        <!-- Performance + allocation -->
-        <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
-          <div class="lg:col-span-2">
-            <PortfolioChart data={d.valueTrend} loading={false} />
+              {/snippet}
+            </KpiCard>
+            <KpiCard title="Cost Basis" value={fmt(d.totalCostBasis)} valueClass="text-warning">
+              {#snippet icon()}
+                <Briefcase aria-hidden="true" class="size-4 text-muted-foreground" />
+              {/snippet}
+            </KpiCard>
+            <KpiCard title="Gain / Loss" valueClass={signColor(d.totalGainLoss)}>
+              {#snippet icon()}
+                {#if d.totalGainLoss >= 0}
+                  <TrendingUp aria-hidden="true" class="size-4 text-success" />
+                {:else}
+                  <TrendingDown aria-hidden="true" class="size-4 text-destructive" />
+                {/if}
+              {/snippet}
+              {#snippet value()}
+                {formatSignedCurrency(d.totalGainLoss, currency)}
+                <span class="text-sm font-normal">({fmtPct(d.totalGainLossPct)})</span>
+              {/snippet}
+            </KpiCard>
           </div>
 
-          <!-- Allocation pie chart -->
-          <div class="lg:col-span-1">
-            <AllocationPie
-              data={pieData}
-              title="Allocation"
-              description="By market value"
-              centerLabel="Total"
-              centerValue={fmt(d.totalMarketValue)}
-              onSelect={(key) => openHolding(key)}
-            />
-          </div>
-        </div>
-      {/if}
+          <!-- Performance + allocation -->
+          <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
+            <div class="lg:col-span-2">
+              <PortfolioChart data={d.valueTrend} loading={false} />
+            </div>
 
-      <HoldingsTable holdings={d.holdings} {currency} />
+            <!-- Allocation pie chart -->
+            <div class="lg:col-span-1">
+              <AllocationPie
+                data={pieData}
+                title="Allocation"
+                description="By market value"
+                centerLabel="Total"
+                centerValue={fmt(d.totalMarketValue)}
+                onSelect={(key) => openHolding(key)}
+              />
+            </div>
+          </div>
+        {/if}
+
+        <HoldingsTable holdings={d.holdings} {currency} />
+      </DimWrapper>
+    {:else if res.error}
+      <ErrorCard message={res.error} onRetry={() => res.reload()} />
     {/if}
   </div>
 </BookGate>

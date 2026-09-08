@@ -176,7 +176,9 @@
       </DimWrapper>
     {:else if res.loading}
       <PageSkeleton variant="budget-detail" />
-    {:else if res.error}
+    {:else if res.error && detail === null}
+      <ErrorCard message={res.error} onRetry={() => res.reload()} />
+    {:else if detail === null && !res.error}
       <EmptyState
         card
         title="No budget for {by.year}"

@@ -131,9 +131,10 @@
 
     {#if (res.loading || dbBootstrapping.value) && !res.data}
       <PageSkeleton variant="accounts" />
-    {:else if res.error}
-      <ErrorCard message={res.error} onRetry={() => res.reload()} />
     {:else if res.data}
+      {#if res.error}
+        <ErrorCard message={res.error} onRetry={() => res.reload()} />
+      {/if}
       <!-- Summary cards by account category -->
       <DimWrapper active={res.loading} class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
         {#each kpiCards as card (card.key)}
@@ -187,6 +188,8 @@
           {/if}
         </p>
       {/if}
+    {:else if res.error}
+      <ErrorCard message={res.error} onRetry={() => res.reload()} />
     {/if}
   </div>
 </BookGate>

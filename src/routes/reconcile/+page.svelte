@@ -1,15 +1,15 @@
 <script lang="ts">
-  import { page } from '$app/state';
   import { Scale } from '@lucide/svelte';
   import { dbSession } from '$lib/stores/db.svelte';
-  import { setBreadcrumb } from '$lib/stores/breadcrumb.svelte';
   import { fetchAccounts } from '$lib/tauri';
   import { plural } from '$lib/utils/format.svelte';
   import BookGate from '$lib/components/shared/book-gate.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
+  import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
   import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
+  import { Button } from '$lib/components/ui/button';
   import { SearchInput } from '$lib/components/shared/search-input';
   import { useDebouncedSearch } from '$lib/hooks/use-debounced-search.svelte';
   import { useUrlParams, debouncedSearchParam } from '$lib/hooks/use-url-params.svelte';
@@ -48,11 +48,6 @@
         (r.code?.toLowerCase().includes(q) ?? false)
     );
   });
-
-  $effect(() => {
-    void page.url.pathname;
-    setBreadcrumb([{ name: 'Reconcile' }]);
-  });
 </script>
 
 <svelte:head>
@@ -75,6 +70,7 @@
     <div class="max-w-md">
       <SearchInput
         id="reconcile-account-search"
+        label="Filter accounts"
         placeholder="Filter accounts…"
         bind:value={searchInput}
       />
@@ -82,22 +78,42 @@
 
     {#if res.loading && !res.data}
       <TableSkeleton cols={4} rows={8} />
+    {:else if res.data}
+      {#if res.error}
+        <ErrorCard message={res.error} onRetry={() => res.reload()} />
+      {/if}
+      {#if filtered.length === 0}
+        <EmptyState
+          card
+          title="No reconcilable accounts"
+          description={search.value
+            ? 'No reconcilable accounts match the current filter.'
+            : 'Cash, bank and credit accounts show up here once your book has accounts.'}
+        >
+          {#snippet icon()}
+            <Scale aria-hidden="true" class="text-muted-foreground" />
+          {/snippet}
+          {#snippet action()}
+            {#if search.value}
+              <Button
+                variant="outline"
+                onclick={() => {
+                  searchInput = '';
+                  search.set('');
+                }}
+              >
+                Clear search
+              </Button>
+            {/if}
+          {/snippet}
+        </EmptyState>
+      {:else}
+        <DimWrapper active={res.loading}>
+          <ReconcileAccountTable rows={filtered} />
+        </DimWrapper>
+      {/if}
     {:else if res.error}
       <ErrorCard message={res.error} onRetry={() => res.reload()} />
-    {:else if filtered.length === 0}
-      <EmptyState
-        card
-        title="No reconcilable accounts"
-        description={search.value
-          ? 'No reconcilable accounts match the current filter.'
-          : 'Cash, bank and credit accounts show up here once your book has accounts.'}
-      >
-        {#snippet icon()}
-          <Scale aria-hidden="true" class="text-muted-foreground" />
-        {/snippet}
-      </EmptyState>
-    {:else}
-      <ReconcileAccountTable rows={filtered} />
     {/if}
   </div>
 </BookGate>

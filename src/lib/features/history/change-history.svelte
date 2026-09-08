@@ -16,7 +16,7 @@
   import { fetchChangeHistory, revertHistoryEntry } from '$lib/tauri';
   import type { ChangeEntry } from '$lib/tauri';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
-  import { formatDate, plural } from '$lib/utils/format.svelte';
+  import { formatDate, plural, EMPTY_DASH } from '$lib/utils/format.svelte';
   import { errMsg } from '$lib/utils/error';
   import { toast } from '$lib/components/ui/sonner';
 
@@ -90,9 +90,10 @@
 
 {#if res.loading && !res.data}
   <TableSkeleton cols={4} />
-{:else if res.error}
-  <ErrorCard message={res.error} onRetry={() => res.reload()} />
 {:else if res.data}
+  {#if res.error}
+    <ErrorCard message={res.error} onRetry={() => res.reload()} />
+  {/if}
   {#if res.data.entries.length === 0}
     <EmptyState
       card
@@ -113,17 +114,17 @@
       <TableShell>
         <Table.Header>
           <Table.Row class="bg-muted/75">
-            <Table.Head>Date</Table.Head>
-            <Table.Head>Change</Table.Head>
-            <Table.Head>Source</Table.Head>
-            <Table.Head class="w-24 text-right">Action</Table.Head>
+            <Table.Head class="text-muted-foreground">Date</Table.Head>
+            <Table.Head class="text-muted-foreground">Change</Table.Head>
+            <Table.Head class="text-muted-foreground">Source</Table.Head>
+            <Table.Head class="w-24 text-right text-muted-foreground">Action</Table.Head>
           </Table.Row>
         </Table.Header>
         <Table.Body>
           {#each res.data.entries as entry (entry.id)}
             {@const revertible = entry.id === res.data.revertibleId}
             {@const impact = impactLabel(entry)}
-            <Table.Row class="hover:bg-muted/50">
+            <Table.Row>
               <Table.Cell class="py-2.5 whitespace-nowrap">
                 <span class="tabular-nums">
                   {formatDate(entry.occurredAt, {
@@ -166,7 +167,7 @@
                     Revert
                   </Button>
                 {:else}
-                  <span class="text-xs text-muted-foreground">—</span>
+                  <span class="text-xs text-muted-foreground">{EMPTY_DASH}</span>
                 {/if}
               </Table.Cell>
             </Table.Row>
@@ -182,6 +183,8 @@
       />
     </DimWrapper>
   {/if}
+{:else if res.error}
+  <ErrorCard message={res.error} onRetry={() => res.reload()} />
 {/if}
 
 <Dialog.Root bind:open={confirmOpen}>
@@ -199,10 +202,10 @@
       <Button variant="outline" onclick={() => (confirmOpen = false)} disabled={reverting}>
         Cancel
       </Button>
-      <Button onclick={handleRevert} disabled={reverting || !pending}>
+      <Button variant="destructive" onclick={handleRevert} disabled={reverting || !pending}>
         {#if reverting}
           <LoaderCircle aria-hidden="true" class="size-3 animate-spin" />
-          Reverting...
+          Reverting…
         {:else}
           <Undo2 aria-hidden="true" class="size-3" />
           Revert change

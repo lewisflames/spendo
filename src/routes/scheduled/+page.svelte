@@ -144,9 +144,10 @@
 
     {#if (res.loading || dbBootstrapping.value) && !res.data}
       <PageSkeleton variant="scheduled" />
-    {:else if res.error}
-      <ErrorCard message={res.error} onRetry={() => res.reload()} />
     {:else if res.data}
+      {#if res.error}
+        <ErrorCard message={res.error} onRetry={() => res.reload()} />
+      {/if}
       {#if res.data.length === 0}
         <EmptyState
           card
@@ -177,6 +178,8 @@
           />
         </DimWrapper>
       {/if}
+    {:else if res.error}
+      <ErrorCard message={res.error} onRetry={() => res.reload()} />
     {/if}
   </div>
 </BookGate>

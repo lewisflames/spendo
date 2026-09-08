@@ -201,14 +201,24 @@
     <Card.Description>Number of transactions per day</Card.Description>
   </Card.Header>
   <Card.Content>
-    {#if res.error}
-      <ErrorCard message={res.error} onRetry={() => res.reload()} />
-    {:else if !mounted || (res.loading && columns.length === 0)}
+    {#if !mounted || (res.loading && columns.length === 0 && !res.error)}
       <Skeleton class="h-40 w-full" />
+    {:else if res.error && columns.length === 0}
+      <ErrorCard message={res.error} onRetry={() => res.reload()} />
     {:else if range.empty}
       <div class="py-6 text-center text-sm text-muted-foreground">No activity in this period.</div>
     {:else}
-      <div class="mx-auto w-full" style={`max-width: ${stripMaxWidth}px;`}>
+      {#if res.error}
+        <div class="mb-3">
+          <ErrorCard message={res.error} onRetry={() => res.reload()} />
+        </div>
+      {/if}
+      <div
+        class="mx-auto w-full transition-opacity {res.loading
+          ? 'pointer-events-none opacity-50'
+          : ''}"
+        style={`max-width: ${stripMaxWidth}px;`}
+      >
         <div role="img" aria-label="Number of transactions per day" class="flex gap-0.5">
           {#each columns as week (week.key)}
             <div class="flex min-w-0 flex-1 flex-col gap-0.5">

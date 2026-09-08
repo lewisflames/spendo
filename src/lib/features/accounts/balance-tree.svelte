@@ -10,6 +10,9 @@
   import { Tree } from 'layerchart/hierarchy';
   import * as Card from '$lib/components/ui/card';
   import { Skeleton } from '$lib/components/ui/skeleton';
+  import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
+  import EmptyState from '$lib/components/shared/empty-state.svelte';
+  import { FolderTree } from '@lucide/svelte';
   import { TYPE_COLOR } from '$lib/features/accounts/account-types';
   import { clampZero, formatSessionCurrency as fmt } from '$lib/utils/format.svelte';
   import type { AccountNode } from '$lib/tauri';
@@ -81,95 +84,102 @@
     <Card.Description>Account balances by type. Click a node to open its account.</Card.Description>
   </Card.Header>
   <Card.Content>
-    {#if loading}
+    {#if loading && data.length === 0}
       <Skeleton class="mx-auto h-120 w-full max-w-160" />
     {:else if data.length === 0}
-      <div class="py-6 text-center text-sm text-muted-foreground">No account balances found.</div>
+      <EmptyState card title="No balances" description="No account balances found.">
+        {#snippet icon()}
+          <FolderTree aria-hidden="true" class="text-muted-foreground" />
+        {/snippet}
+      </EmptyState>
     {:else}
-      <div class="flex flex-col gap-4">
-        <div class="mx-auto h-120 w-full max-w-160">
-          <Chart radial>
-            {#snippet children({ context })}
-              <Tree hierarchy={root} orientation="horizontal">
-                {#snippet children({ nodes, links })}
-                  <Layer>
-                    <Group center>
-                      {#each links as link (linkKey(link))}
-                        <Link data={link} type="straight" opacity={0.2} />
-                      {/each}
-                    </Group>
-                  </Layer>
+      <DimWrapper active={loading}>
+        <div class="flex flex-col gap-4">
+          <div class="mx-auto h-120 w-full max-w-160">
+            <Chart radial>
+              {#snippet children({ context })}
+                <Tree hierarchy={root} orientation="horizontal">
+                  {#snippet children({ nodes, links })}
+                    <Layer>
+                      <Group center>
+                        {#each links as link (linkKey(link))}
+                          <Link data={link} type="straight" opacity={0.2} />
+                        {/each}
+                      </Group>
+                    </Layer>
 
-                  <Layer type="html">
-                    <Group center>
-                      {#each nodes as node (node.data.guid ?? 'root')}
-                        {@const r = 10}
-                        {@const color = nodeColor(node)}
-                        {@const label = nodeLabel(node)}
-                        {@const x = node.y * Math.sin(node.x) - r}
-                        {@const y = -node.y * Math.cos(node.x) - r}
-                        <Group
-                          {x}
-                          {y}
-                          motion="tween"
-                          style={`width: ${r * 2}px; height: ${r * 2}px;`}
-                          onpointermove={(e) => {
-                            context.tooltip.show(e, node);
-                          }}
-                          onpointerleave={() => {
-                            context.tooltip.hide();
-                          }}
-                        >
-                          {#if node.data.guid}
-                            <a
-                              href={resolve('/accounts/[guid]', { guid: node.data.guid })}
-                              class="block h-full w-full cursor-pointer rounded-full border hover:scale-110"
-                              style={`background-color: ${nodeFill(node)}; border-color: ${color};`}
-                              aria-label={label}
-                            ></a>
-                          {:else}
-                            <div
-                              class="h-full w-full rounded-full border hover:scale-110"
-                              style={`background-color: ${nodeFill(node)}; border-color: ${color};`}
-                            ></div>
-                          {/if}
-                        </Group>
-                      {/each}
-                    </Group>
-                  </Layer>
-                {/snippet}
-              </Tree>
-              <ChartTooltip.Root variant="none">
-                {#snippet children({ data: node })}
-                  <div
-                    class="flex gap-2 rounded-lg bg-popover p-2.5 text-xs text-popover-foreground shadow-md ring-1 ring-foreground/10"
-                  >
-                    <div class="font-medium text-muted-foreground">{nodeLabel(node)}</div>
-                    <span class="font-medium tabular-nums">{fmt(clampZero(nodeBalance(node)))}</span
+                    <Layer type="html">
+                      <Group center>
+                        {#each nodes as node (node.data.guid ?? 'root')}
+                          {@const r = 10}
+                          {@const color = nodeColor(node)}
+                          {@const label = nodeLabel(node)}
+                          {@const x = node.y * Math.sin(node.x) - r}
+                          {@const y = -node.y * Math.cos(node.x) - r}
+                          <Group
+                            {x}
+                            {y}
+                            motion="tween"
+                            style={`width: ${r * 2}px; height: ${r * 2}px;`}
+                            onpointermove={(e) => {
+                              context.tooltip.show(e, node);
+                            }}
+                            onpointerleave={() => {
+                              context.tooltip.hide();
+                            }}
+                          >
+                            {#if node.data.guid}
+                              <a
+                                href={resolve('/accounts/[guid]', { guid: node.data.guid })}
+                                class="block h-full w-full cursor-pointer rounded-full border hover:scale-110"
+                                style={`background-color: ${nodeFill(node)}; border-color: ${color};`}
+                                aria-label={label}
+                              ></a>
+                            {:else}
+                              <div
+                                class="h-full w-full rounded-full border hover:scale-110"
+                                style={`background-color: ${nodeFill(node)}; border-color: ${color};`}
+                              ></div>
+                            {/if}
+                          </Group>
+                        {/each}
+                      </Group>
+                    </Layer>
+                  {/snippet}
+                </Tree>
+                <ChartTooltip.Root variant="none">
+                  {#snippet children({ data: node })}
+                    <div
+                      class="flex gap-2 rounded-lg bg-popover p-2.5 text-xs text-popover-foreground shadow-md ring-1 ring-foreground/10"
                     >
-                  </div>
-                {/snippet}
-              </ChartTooltip.Root>
-            {/snippet}
-          </Chart>
+                      <div class="font-medium text-muted-foreground">{nodeLabel(node)}</div>
+                      <span class="font-medium tabular-nums"
+                        >{fmt(clampZero(nodeBalance(node)))}</span
+                      >
+                    </div>
+                  {/snippet}
+                </ChartTooltip.Root>
+              {/snippet}
+            </Chart>
+          </div>
+          {#if legendTypes.length > 0}
+            <aside
+              aria-label="Account type legend"
+              class="flex shrink-0 flex-wrap justify-center gap-x-4 gap-y-2"
+            >
+              {#each legendTypes as type (type)}
+                <div class="flex items-center gap-2">
+                  <span
+                    class="size-2.5 shrink-0 rounded-full"
+                    style={`background-color: ${TYPE_COLOR[type] ?? 'var(--color-muted-foreground)'}`}
+                  ></span>
+                  <span class="text-xs text-muted-foreground">{type}</span>
+                </div>
+              {/each}
+            </aside>
+          {/if}
         </div>
-        {#if legendTypes.length > 0}
-          <aside
-            aria-label="Account type legend"
-            class="flex shrink-0 flex-wrap justify-center gap-x-4 gap-y-2"
-          >
-            {#each legendTypes as type (type)}
-              <div class="flex items-center gap-2">
-                <span
-                  class="size-2.5 shrink-0 rounded-full"
-                  style={`background-color: ${TYPE_COLOR[type] ?? 'var(--color-muted-foreground)'}`}
-                ></span>
-                <span class="text-xs text-muted-foreground">{type}</span>
-              </div>
-            {/each}
-          </aside>
-        {/if}
-      </div>
+      </DimWrapper>
     {/if}
   </Card.Content>
 </Card.Root>

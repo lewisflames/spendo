@@ -1,7 +1,13 @@
 <script lang="ts">
   import { dbBootstrapping, dbSession } from '$lib/stores/db.svelte';
   import { fetchPnlReport, fetchPnlTrend } from '$lib/tauri';
-  import { signColor, formatSessionCurrency, fmtPct, EMPTY_DASH } from '$lib/utils/format.svelte';
+  import {
+    signColor,
+    formatSessionCurrency,
+    formatSignedSessionCurrency,
+    fmtPct,
+    EMPTY_DASH
+  } from '$lib/utils/format.svelte';
   import { ArrowLeftRight, History, TrendingUp, Percent } from '@lucide/svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import KpiCard from '$lib/components/shared/kpi-card.svelte';
@@ -142,7 +148,7 @@
         value={pnlData && netVariance !== null
           ? isZeroVariance
             ? EMPTY_DASH
-            : `${netVariance >= 0 ? '+' : ''}${fmt(netVariance)}`
+            : formatSignedSessionCurrency(netVariance)
           : EMPTY_DASH}
         valueClass={pnlData && netVariance !== null && !isZeroVariance
           ? signColor(netVariance)
@@ -183,7 +189,14 @@
     {#if pnlData}
       <MissingFxWarning missing={pnlData.missingFx} reportCurrency={pnlData.reportCurrency} />
     {/if}
-    {#if trendError && !trendLoading && !trendData}
+    {#if trendData}
+      {#if trendError}
+        <ErrorCard message={trendError} onRetry={() => trend.reload()} />
+      {/if}
+      <DimWrapper active={trendLoading}>
+        <PnlTrend data={trendData} loading={false} />
+      </DimWrapper>
+    {:else if trendError}
       <ErrorCard message={trendError} onRetry={() => trend.reload()} />
     {:else if trendData || trendLoading}
       <PnlTrend data={trendData ?? []} loading={trendLoading} />
