@@ -3,6 +3,7 @@ mod accounts;
 mod accounts_mut;
 mod books;
 mod budgets;
+mod csv_import;
 mod db;
 mod export;
 mod fx;
@@ -97,6 +98,9 @@ pub fn run() {
             settings::set_book_setting,
             import::import_gnucash,
             import::reimport_last,
+            csv_import::csv_detect,
+            csv_import::csv_preview,
+            csv_import::csv_commit,
             history::fetch_change_history,
             history::revert_history_entry,
             accounts::fetch_accounts,
