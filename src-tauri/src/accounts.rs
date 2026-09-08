@@ -21,6 +21,7 @@ pub struct AccountNode {
     pub description: Option<String>,
     pub placeholder: bool,
     pub commodity: Option<String>,
+    pub commodity_guid: Option<String>,
     pub balance: f64,
     pub tx_count: i64,
     pub children: Vec<AccountNode>,
@@ -216,6 +217,7 @@ fn fetch_accounts_inner(
             description: row.description.clone(),
             placeholder: row.placeholder,
             commodity: row.commodity_mnemonic.clone(),
+            commodity_guid: row.commodity_guid.clone(),
             balance,
             tx_count: row.tx_count,
             children: vec![],
@@ -347,6 +349,7 @@ pub struct ChildAccountInfo {
     pub description: Option<String>,
     pub code: Option<String>,
     pub commodity: Option<String>,
+    pub commodity_guid: Option<String>,
     pub account_type: String,
     pub balance: f64,
     pub tx_count: i64,
@@ -415,6 +418,7 @@ pub fn fetch_children_and_subtree(
             description: c.description.clone(),
             code: c.code.clone(),
             commodity: c.commodity.clone(),
+            commodity_guid: c.commodity_guid.clone(),
             account_type: c.account_type.clone(),
             balance: c.balance,
             tx_count: c.tx_count,
@@ -438,6 +442,27 @@ pub async fn fetch_accounts(
         fetch_accounts_inner(conn, as_of_date.as_deref())
     })
     .await
+}
+
+/// Book currencies for the account commodity picker. Thin wrapper over the
+/// existing `fx::list_book_currencies` helper (previously backend-only).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BookCurrency {
+    pub guid: String,
+    pub mnemonic: String,
+}
+
+fn fetch_book_currencies_inner(conn: &Connection) -> Vec<BookCurrency> {
+    fx::list_book_currencies(conn)
+        .into_iter()
+        .map(|(guid, mnemonic)| BookCurrency { guid, mnemonic })
+        .collect()
+}
+
+#[tauri::command]
+pub async fn fetch_book_currencies(state: State<'_, AppState>) -> Result<Vec<BookCurrency>, String> {
+    run_blocking(state.db.clone(), |conn| Ok(fetch_book_currencies_inner(conn))).await
 }
 
 #[cfg(test)]

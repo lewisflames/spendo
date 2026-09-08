@@ -1,6 +1,11 @@
 <script lang="ts">
   import { page } from '$app/state';
+  import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
+  import { Pencil, Plus } from '@lucide/svelte';
+  import { toast } from '$lib/components/ui/sonner';
+  import { Button } from '$lib/components/ui/button';
+  import AccountDialog, { type AccountInitial } from '$lib/features/accounts/account-dialog.svelte';
   import { dbBootstrapping, dbSession } from '$lib/stores/db.svelte';
   import { appSettings, applyPageSize } from '$lib/stores/settings.svelte';
   import { setBreadcrumb } from '$lib/stores/breadcrumb.svelte';
@@ -114,6 +119,23 @@
   let loading = $derived(res.loading);
   let error = $derived(res.error);
 
+  let editOpen = $state(false);
+  let createOpen = $state(false);
+
+  let editInitial = $derived.by((): AccountInitial | null => {
+    const a = data?.account;
+    if (!a) return null;
+    return {
+      name: a.name,
+      accountType: a.accountType,
+      parentGuid: a.parentGuid,
+      code: a.code,
+      description: a.description,
+      commodityGuid: a.commodityGuid,
+      placeholder: a.placeholder
+    };
+  });
+
   // Direct children come with the detail payload — no second full-tree fetch.
   let subAccounts = $derived(data?.account.childAccounts ?? []);
 
@@ -178,7 +200,45 @@
     {#if (loading || dbBootstrapping.value) && !data}
       <PageHeaderSkeleton />
     {:else if data}
-      <AccountDetailHeader account={data.account} summary={data.summary} {isToday} bind:asOf />
+      <AccountDetailHeader account={data.account} summary={data.summary} {isToday} bind:asOf>
+        {#if dbSession.value}
+          <Button variant="outline" size="sm" onclick={() => (createOpen = true)}>
+            <Plus aria-hidden="true" class="size-3" />
+            Sub-account
+          </Button>
+          <Button variant="outline" size="sm" onclick={() => (editOpen = true)}>
+            <Pencil aria-hidden="true" class="size-3" />
+            Edit
+          </Button>
+        {/if}
+      </AccountDetailHeader>
+      {#if guid}
+        <AccountDialog
+          bind:open={editOpen}
+          mode="edit"
+          guid={data.account.guid}
+          initial={editInitial}
+          onSaved={() => {
+            res.reload();
+            toast.success('Account updated');
+          }}
+          onDeleted={() => {
+            toast.success('Account deleted');
+            void goto(resolve('/accounts'));
+          }}
+          onError={(msg) => toast.error(msg)}
+        />
+        <AccountDialog
+          bind:open={createOpen}
+          mode="create"
+          parentPreset={data.account.guid}
+          onSaved={() => {
+            res.reload();
+            toast.success('Account created');
+          }}
+          onError={(msg) => toast.error(msg)}
+        />
+      {/if}
     {/if}
 
     {#if (loading || dbBootstrapping.value) && !data}

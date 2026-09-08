@@ -68,6 +68,7 @@ export interface AccountNode {
   description: string | null;
   placeholder: boolean;
   commodity: string | null;
+  commodityGuid: string | null;
   balance: number;
   txCount: number;
   children: AccountNode[];
@@ -210,6 +211,7 @@ export interface ChildAccountInfo {
   description: string | null;
   code: string | null;
   commodity: string | null;
+  commodityGuid: string | null;
   accountType: string;
   balance: number;
   txCount: number;
@@ -222,6 +224,9 @@ export interface AccountDetailInfo {
   code: string | null;
   description: string | null;
   placeholder: boolean;
+  commodity: string | null;
+  commodityGuid: string | null;
+  parentGuid: string | null;
   balance: number;
   /** Whole subtree minus self — not direct children. */
   descendantsCount: number;
@@ -328,6 +333,34 @@ export const setBaseCurrency = (currency: string): Promise<EmptyBookResult> =>
 
 export const fetchAccounts = (asOfDate?: string): Promise<AccountsResult> =>
   invoke('fetch_accounts', { asOfDate: asOfDate ?? null });
+
+export interface BookCurrency {
+  guid: string;
+  mnemonic: string;
+}
+
+export const fetchBookCurrencies = (): Promise<BookCurrency[]> => invoke('fetch_book_currencies');
+
+export interface AccountInput {
+  name: string;
+  accountType: string;
+  parentGuid?: string | null;
+  code?: string | null;
+  description?: string | null;
+  commodityGuid?: string | null;
+  placeholder: boolean;
+}
+
+export const createAccount = (input: AccountInput): Promise<string> =>
+  invoke('create_account', { input });
+
+export const updateAccount = (guid: string, input: AccountInput): Promise<void> =>
+  invoke('update_account', { guid, input });
+
+export const moveAccount = (guid: string, newParentGuid?: string | null): Promise<void> =>
+  invoke('move_account', { guid, newParentGuid: newParentGuid ?? null });
+
+export const deleteAccount = (guid: string): Promise<void> => invoke('delete_account', { guid });
 
 export interface SplitInput {
   accountGuid: string;

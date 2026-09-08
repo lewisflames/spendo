@@ -1,7 +1,10 @@
 <script lang="ts">
-  import { Landmark, PiggyBank, CreditCard, TrendingUp } from '@lucide/svelte';
+  import { Landmark, PiggyBank, CreditCard, TrendingUp, Plus } from '@lucide/svelte';
   import { dbBootstrapping, dbSession } from '$lib/stores/db.svelte';
   import { fetchAccounts } from '$lib/tauri';
+  import { toast } from '$lib/components/ui/sonner';
+  import { Button } from '$lib/components/ui/button';
+  import AccountDialog from '$lib/features/accounts/account-dialog.svelte';
   import {
     CATEGORY_ORDER,
     CATEGORY_LABEL_PLURAL as CATEGORY_LABEL,
@@ -42,6 +45,7 @@
   };
 
   let asOf = $state(todayStr());
+  let dialogOpen = $state(false);
 
   useUrlParams([
     dateParam(
@@ -107,8 +111,26 @@
       title="Accounts"
       description={data ? `Chart of accounts · ${plural(data.totalAccounts, 'account')}` : ''}
     >
-      <AsOfPicker bind:value={asOf} />
+      <div class="flex items-center gap-3">
+        {#if dbSession.value}
+          <Button onclick={() => (dialogOpen = true)}>
+            <Plus aria-hidden="true" class="size-4" />
+            New account
+          </Button>
+        {/if}
+        <AsOfPicker bind:value={asOf} />
+      </div>
     </PageHeader>
+
+    <AccountDialog
+      bind:open={dialogOpen}
+      mode="create"
+      onSaved={() => {
+        res.reload();
+        toast.success('Account created');
+      }}
+      onError={(msg) => toast.error(msg)}
+    />
 
     {#if (loading || dbBootstrapping.value) && !data}
       <KpiCardRow count={4} />

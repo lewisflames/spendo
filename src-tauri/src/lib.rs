@@ -1,5 +1,6 @@
 mod account_detail;
 mod accounts;
+mod accounts_mut;
 mod books;
 mod budgets;
 mod db;
@@ -96,6 +97,11 @@ pub fn run() {
             history::fetch_change_history,
             history::revert_history_entry,
             accounts::fetch_accounts,
+            accounts::fetch_book_currencies,
+            accounts_mut::create_account,
+            accounts_mut::update_account,
+            accounts_mut::move_account,
+            accounts_mut::delete_account,
             transactions::fetch_transactions,
             transactions::fetch_transaction,
             transactions::fetch_transaction_heatmap,
