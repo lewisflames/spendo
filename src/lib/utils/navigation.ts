@@ -24,6 +24,11 @@ export function openBudget(accountGuid: string, year?: number): Promise<void> {
   return goto(year !== undefined ? `${base}?year=${year}` : base);
 }
 
+/** Navigate to an account's reconciliation session. */
+export function openReconcile(guid: string): Promise<void> {
+  return goto(resolve('/reconcile/[guid]', { guid }));
+}
+
 /**
  * Row-click navigation guard shared by every clickable table row. Ignores
  * clicks with modifier keys (open in new tab etc.) and clicks on interactive

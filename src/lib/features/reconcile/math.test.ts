@@ -1,0 +1,36 @@
+import { describe, expect, it } from 'vitest';
+import {
+  clearedTotal,
+  isBalanced,
+  isReconcilable,
+  statementDifference,
+  targetBalance
+} from './math';
+
+describe('reconcile statement math', () => {
+  it('sums cleared amounts and derives the target', () => {
+    expect(clearedTotal([10, -30.5])).toBeCloseTo(-20.5, 10);
+    expect(targetBalance(100, -30)).toBeCloseTo(70, 10);
+  });
+
+  it('computes the statement difference', () => {
+    expect(statementDifference(70, 70)).toBeCloseTo(0, 10);
+    expect(statementDifference(70, 50)).toBeCloseTo(20, 10);
+  });
+
+  it('balances within half-cent tolerance', () => {
+    expect(isBalanced(0)).toBe(true);
+    expect(isBalanced(0.004)).toBe(true);
+    expect(isBalanced(0.006)).toBe(false);
+    expect(isBalanced(-1)).toBe(false);
+  });
+
+  it('gates reconcilable account types', () => {
+    expect(isReconcilable('BANK', false)).toBe(true);
+    expect(isReconcilable('CREDIT', false)).toBe(true);
+    expect(isReconcilable('BANK', true)).toBe(false);
+    expect(isReconcilable('STOCK', false)).toBe(false);
+    expect(isReconcilable('EXPENSE', false)).toBe(false);
+    expect(isReconcilable('ROOT', false)).toBe(false);
+  });
+});

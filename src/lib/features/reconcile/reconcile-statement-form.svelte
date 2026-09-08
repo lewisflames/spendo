@@ -1,0 +1,111 @@
+<script lang="ts">
+  import * as Card from '$lib/components/ui/card';
+  import { Button } from '$lib/components/ui/button';
+  import { Input } from '$lib/components/ui/input';
+  import { formatSessionCurrency as fmt, signColor } from '$lib/utils/format.svelte';
+  import { plural } from '$lib/utils/format.svelte';
+  import { todayStr } from '$lib/utils/date-utils.svelte';
+
+  let {
+    statementDate = $bindable(),
+    endingBalanceInput = $bindable(),
+    startingBalance,
+    cleared,
+    target,
+    difference,
+    balanced,
+    checkedCount,
+    totalCount,
+    dirty,
+    saving,
+    finishing,
+    canFinish,
+    onSave,
+    onFinish
+  }: {
+    statementDate: string;
+    endingBalanceInput: string;
+    startingBalance: number;
+    cleared: number;
+    target: number;
+    difference: number;
+    balanced: boolean;
+    checkedCount: number;
+    totalCount: number;
+    dirty: boolean;
+    saving: boolean;
+    finishing: boolean;
+    canFinish: boolean;
+    onSave: () => void;
+    onFinish: () => void;
+  } = $props();
+</script>
+
+<Card.Root>
+  <Card.Header>
+    <Card.Title>Statement</Card.Title>
+    <Card.Description>
+      Enter the bank statement ending balance and date, then check off cleared transactions.
+      {plural(checkedCount, 'cleared')} of {plural(totalCount, 'candidate')}.
+    </Card.Description>
+  </Card.Header>
+  <Card.Content class="flex flex-col gap-4">
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div class="flex flex-col gap-1.5">
+        <label for="reconcile-statement-date" class="text-sm font-medium">Statement date</label>
+        <Input
+          id="reconcile-statement-date"
+          type="date"
+          bind:value={statementDate}
+          max={todayStr()}
+        />
+      </div>
+      <div class="flex flex-col gap-1.5">
+        <label for="reconcile-ending-balance" class="text-sm font-medium">Ending balance</label>
+        <Input
+          id="reconcile-ending-balance"
+          type="number"
+          step="0.01"
+          inputmode="decimal"
+          placeholder="0.00"
+          bind:value={endingBalanceInput}
+        />
+      </div>
+    </div>
+    <dl class="grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
+      <div>
+        <dt class="text-muted-foreground">Starting (reconciled)</dt>
+        <dd class="font-medium tabular-nums">{fmt(startingBalance)}</dd>
+      </div>
+      <div>
+        <dt class="text-muted-foreground">Cleared</dt>
+        <dd class="font-medium tabular-nums">{fmt(cleared)}</dd>
+      </div>
+      <div>
+        <dt class="text-muted-foreground">Target</dt>
+        <dd class="font-medium tabular-nums">{fmt(target)}</dd>
+      </div>
+      <div>
+        <dt class="text-muted-foreground">Difference</dt>
+        <dd class="font-medium tabular-nums {balanced ? 'text-success' : signColor(difference)}">
+          {fmt(difference)}
+        </dd>
+      </div>
+    </dl>
+    <div class="flex flex-wrap items-center gap-2">
+      <Button variant="outline" disabled={!dirty || saving || finishing} onclick={onSave}>
+        {saving ? 'Saving…' : 'Save progress'}
+      </Button>
+      <Button disabled={!canFinish || saving || finishing} onclick={onFinish}>
+        {finishing ? 'Finishing…' : 'Finish reconciliation'}
+      </Button>
+      {#if dirty}
+        <p class="text-sm text-muted-foreground">Unsaved changes — save before finishing.</p>
+      {:else if !balanced}
+        <p class="text-sm text-muted-foreground">
+          Difference must be zero to finish. Check off cleared transactions.
+        </p>
+      {/if}
+    </div>
+  </Card.Content>
+</Card.Root>
