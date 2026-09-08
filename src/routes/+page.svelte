@@ -14,10 +14,8 @@
   import WelcomeScreen from '$lib/features/home/welcome-screen.svelte';
   import ImportButton from '$lib/components/shared/import-button.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
-  import PageHeaderSkeleton from '$lib/components/shared/page-header-skeleton.svelte';
+  import PageSkeleton from '$lib/components/shared/page-skeleton.svelte';
   import KpiCard from '$lib/components/shared/kpi-card.svelte';
-  import KpiCardRow from '$lib/components/shared/kpi-card-row.svelte';
-  import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
   import { errMsg } from '$lib/utils/error';
   import { toast } from '$lib/components/ui/sonner';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
@@ -73,9 +71,7 @@
 {#if dbSessionLoading.value && !dbSession.value}
   <!-- ── Bootstrapping skeleton (matches the dashboard shape) ── -->
   <section class="flex flex-col gap-6">
-    <PageHeaderSkeleton />
-    <KpiCardRow />
-    <TableSkeleton cols={4} />
+    <PageSkeleton variant="home" />
   </section>
 {:else if dbSession.value}
   <!-- ── Data dashboard ── -->

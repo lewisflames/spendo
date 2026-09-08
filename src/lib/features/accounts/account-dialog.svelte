@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
   import * as Dialog from '$lib/components/ui/dialog';
+  import DialogSaveFooter from '$lib/components/shared/dialog-save-footer.svelte';
+  import { useDialogReset } from '$lib/hooks/use-dialog-reset.svelte';
   import * as Select from '$lib/components/ui/select';
   import { Select as SelectPrimitive } from 'bits-ui';
   import { Input } from '$lib/components/ui/input';
-  import { Button } from '$lib/components/ui/button';
   import { Switch } from '$lib/components/ui/switch';
   import { AccountPicker } from '$lib/components/shared/account-picker';
   import {
@@ -107,9 +107,7 @@
     }
   }
 
-  $effect.pre(() => {
-    if (open) untrack(() => syncDefaults());
-  });
+  useDialogReset(() => open, syncDefaults);
 
   $effect(() => {
     if (!open) return;
@@ -309,30 +307,18 @@
       {/if}
     </div>
 
-    <Dialog.Footer class="flex-col gap-2 sm:flex-row">
-      {#if mode === 'edit'}
-        <Button
-          type="button"
-          variant={confirmDelete ? 'destructive' : 'outline'}
-          onclick={handleDelete}
-          disabled={saving || deleting}
-          class="sm:mr-auto"
-        >
-          {deleting ? 'Deleting…' : confirmDelete ? 'Confirm delete' : 'Delete'}
-        </Button>
-      {/if}
-      <Button
-        type="button"
-        variant="outline"
-        onclick={() => {
-          open = false;
-        }}
-      >
-        Cancel
-      </Button>
-      <Button type="button" onclick={handleSave} disabled={!canSave}>
-        {saving ? 'Saving…' : mode === 'edit' ? 'Save changes' : 'Create account'}
-      </Button>
-    </Dialog.Footer>
+    <DialogSaveFooter
+      {mode}
+      {saving}
+      {deleting}
+      {confirmDelete}
+      saveLabel={mode === 'edit' ? 'Save changes' : 'Create account'}
+      saveDisabled={!canSave}
+      onDelete={handleDelete}
+      onSave={handleSave}
+      onCancel={() => {
+        open = false;
+      }}
+    />
   </Dialog.Content>
 </Dialog.Root>

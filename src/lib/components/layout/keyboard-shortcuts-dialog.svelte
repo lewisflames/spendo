@@ -2,7 +2,7 @@
   import { browser } from '$app/environment';
   import * as Dialog from '$lib/components/ui/dialog';
   import Kbd from '$lib/components/shared/kbd.svelte';
-  import { keyboardShortcutsDialog } from '$lib/stores/keyboard-shortcuts.svelte';
+  import { keyboardShortcutsDialog } from '$lib/stores/ui.svelte';
 
   /** The layout accepts Cmd on macOS; show the chord users actually press. */
   const modKey = browser && navigator.platform.toLowerCase().includes('mac') ? '⌘' : 'Ctrl';

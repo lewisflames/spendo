@@ -23,8 +23,10 @@
   import { Sonner } from '$lib/components/ui/sonner';
   import KeyboardShortcutsDialog from '$lib/components/layout/keyboard-shortcuts-dialog.svelte';
   import CommandPalette from '$lib/components/layout/command-palette.svelte';
-  import { keyboardShortcutsDialog as shortcutsDialog } from '$lib/stores/keyboard-shortcuts.svelte';
-  import { commandPalette } from '$lib/stores/command-palette.svelte';
+  import {
+    keyboardShortcutsDialog as shortcutsDialog,
+    commandPalette
+  } from '$lib/stores/ui.svelte';
   import '../app.css';
 
   let { children } = $props();

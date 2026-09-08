@@ -48,10 +48,11 @@
   // Debounce filter commits independently of the ledger table (which uses a
   // shorter debounce): the heatmap is a full-scan GROUP BY, so typing must
   // not remount the grid at table frequency. The first commit is synchronous
-  // so the initial fetch is not delayed.
+  // so the initial fetch is not delayed. `lastKey` is plain (untracked) so
+  // the effect only re-runs on filter changes, never on its own commits.
   let debouncedFilters = $state<Filters>({});
-  // Plain flag, deliberately untracked: only the snapshot content is reactive.
   let filtersCommitted = false;
+  let lastKey = '';
 
   $effect(() => {
     const snapshot: Filters = {
@@ -61,14 +62,17 @@
       ...(filters.accountName ? { accountName: filters.accountName } : {}),
       ...(filters.accountGuid ? { accountGuid: filters.accountGuid } : {})
     };
+    const key = JSON.stringify(snapshot);
     if (!filtersCommitted) {
       filtersCommitted = true;
+      lastKey = key;
       debouncedFilters = snapshot;
       return;
     }
-    const key = JSON.stringify(snapshot);
+    if (key === lastKey) return;
     const timer = setTimeout(() => {
-      if (JSON.stringify(debouncedFilters) !== key) debouncedFilters = snapshot;
+      lastKey = key;
+      debouncedFilters = snapshot;
     }, 500);
     return () => clearTimeout(timer);
   });
@@ -79,9 +83,6 @@
     fetch: () => fetchTransactionHeatmap(debouncedFilters),
     label: 'Failed to load activity'
   });
-
-  let loading = $derived(res.loading);
-  let error = $derived(res.error);
 
   // Backend dates are already `YYYY-MM-DD`, matching the grid keys below, so
   // no date parsing is needed for the counts lookup.
@@ -200,9 +201,9 @@
     <Card.Description>Number of transactions per day</Card.Description>
   </Card.Header>
   <Card.Content>
-    {#if error}
-      <ErrorCard message={error} onRetry={() => res.reload()} />
-    {:else if !mounted || (loading && columns.length === 0)}
+    {#if res.error}
+      <ErrorCard message={res.error} onRetry={() => res.reload()} />
+    {:else if !mounted || (res.loading && columns.length === 0)}
       <Skeleton class="h-40 w-full" />
     {:else if range.empty}
       <div class="py-6 text-center text-sm text-muted-foreground">No activity in this period.</div>

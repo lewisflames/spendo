@@ -1,7 +1,6 @@
 <script lang="ts">
-  import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
-  import { Button } from '$lib/components/ui/button';
-  import { Columns3, Receipt } from '@lucide/svelte';
+  import { Receipt } from '@lucide/svelte';
+  import { ColumnsMenu } from '$lib/components/shared/columns-menu';
   import { PaginationNav } from '$lib/components/shared/pagination-nav';
   import { appSettings } from '$lib/stores/settings.svelte';
   import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
@@ -11,7 +10,7 @@
   import TransactionFilters from '$lib/features/transactions/transaction-filters.svelte';
   import TransactionTable from '$lib/features/transactions/transaction-table.svelte';
   import { useColumnVisibility } from '$lib/hooks/use-column-visibility.svelte';
-  import type { AccountDetailResult } from '$lib/tauri';
+  import type { AccountDetailResult, TxSortKey } from '$lib/tauri';
 
   type ColumnId = 'transfer' | 'status' | 'amount' | 'runningBalance';
 
@@ -23,8 +22,6 @@
   ];
 
   const DEFAULT_COLUMNS: ColumnId[] = ['transfer', 'amount'];
-
-  type SortKey = 'date' | 'description' | 'amount';
 
   let {
     data,
@@ -50,9 +47,9 @@
     dateTo: string;
     /** Committed (debounced) search text for the empty-state message. */
     searchText: string;
-    sortBy: SortKey;
+    sortBy: TxSortKey;
     sortDir: 'asc' | 'desc';
-    onSort: (key: SortKey) => void;
+    onSort: (key: TxSortKey) => void;
     currency: string;
     page: number;
     onPageSizeChange: (size: number) => void;
@@ -67,29 +64,7 @@
 <!-- Filters -->
 <TransactionFilters bind:search={searchInput} bind:dateFrom bind:dateTo>
   {#snippet extra()}
-    <DropdownMenu.Root>
-      <DropdownMenu.Trigger>
-        {#snippet child({ props })}
-          <Button {...props} variant="outline">
-            <Columns3 aria-hidden="true" class="text-muted-foreground" />
-            Columns
-          </Button>
-        {/snippet}
-      </DropdownMenu.Trigger>
-      <DropdownMenu.Content align="end">
-        {#each COLUMNS as col (col.id)}
-          <DropdownMenu.CheckboxItem
-            checked={cols.isVisible(col.id)}
-            onCheckedChange={(checked) => cols.setVisible(col.id, checked)}
-            closeOnSelect={false}
-          >
-            {col.label}
-          </DropdownMenu.CheckboxItem>
-        {/each}
-        <DropdownMenu.Separator />
-        <DropdownMenu.Item onclick={() => cols.resetColumns()}>Reset to default</DropdownMenu.Item>
-      </DropdownMenu.Content>
-    </DropdownMenu.Root>
+    <ColumnsMenu columns={COLUMNS} {cols} />
   {/snippet}
 </TransactionFilters>
 

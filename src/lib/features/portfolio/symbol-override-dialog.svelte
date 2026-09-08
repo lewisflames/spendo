@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
   import * as Dialog from '$lib/components/ui/dialog';
+  import { useDialogReset } from '$lib/hooks/use-dialog-reset.svelte';
   import { Input } from '$lib/components/ui/input';
   import { Button } from '$lib/components/ui/button';
 
@@ -29,11 +29,8 @@
   let symbolError = $state('');
 
   // Re-initialize whenever the dialog opens so it always reflects the saved
-  // override. $effect.pre (not onOpenChange): bits-ui doesn't fire open
-  // changes for programmatic bind:open, the only way this dialog opens.
-  $effect.pre(() => {
-    if (open) untrack(() => syncFromEntry());
-  });
+  // override.
+  useDialogReset(() => open, syncFromEntry);
 
   function syncFromEntry() {
     symbol = currentSymbol ?? '';

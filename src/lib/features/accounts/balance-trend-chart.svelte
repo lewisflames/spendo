@@ -42,12 +42,11 @@
   // Hold the skeleton until the account type is known: painting with the
   // fallback color first and recoloring on detail arrival is a visible flash.
   let loading = $derived(res.loading || accountType == null);
-  let error = $derived(res.error);
   let currency = $derived(sessionCurrency());
 </script>
 
-{#if error}
-  <ErrorCard message={error} onRetry={() => res.reload()} />
+{#if res.error}
+  <ErrorCard message={res.error} onRetry={() => res.reload()} />
 {:else}
   <TimeSeriesChart
     title="Balance Over Time"

@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
   import * as Dialog from '$lib/components/ui/dialog';
+  import { useDialogReset } from '$lib/hooks/use-dialog-reset.svelte';
   import { Input } from '$lib/components/ui/input';
   import { Button } from '$lib/components/ui/button';
 
@@ -33,13 +33,8 @@
   let amountError = $state('');
 
   // Re-initialize the form whenever the dialog opens (user interaction), so
-  // it always reflects the target year. This must be an $effect: bits-ui only
-  // calls onOpenChange for its own internal open/close (trigger, Escape), not
-  // when `open` is set programmatically via bind:open — which is the only way
-  // this dialog is opened — so syncing there never runs.
-  $effect.pre(() => {
-    if (open) untrack(() => syncFromEntry());
-  });
+  // it always reflects the target year.
+  useDialogReset(() => open, syncFromEntry);
 
   function syncFromEntry() {
     amount = initialAmount;

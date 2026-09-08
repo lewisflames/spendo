@@ -34,16 +34,15 @@
   import { statusFor } from '$lib/utils/reconcile';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
   import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
-  import ImportPrompt from '$lib/components/shared/import-prompt.svelte';
+  import BookGate from '$lib/components/shared/book-gate.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
-  import PageHeaderSkeleton from '$lib/components/shared/page-header-skeleton.svelte';
-  import KpiCardRow from '$lib/components/shared/kpi-card-row.svelte';
+  import PageSkeleton from '$lib/components/shared/page-skeleton.svelte';
   import KpiCard from '$lib/components/shared/kpi-card.svelte';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
   import TableShell from '$lib/components/shared/table-shell.svelte';
-  import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
+  import NavRow from '$lib/components/shared/nav-row.svelte';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
-  import { handleRowClick, openAccount, openTransaction } from '$lib/utils/navigation';
+  import { openAccount, openTransaction } from '$lib/utils/navigation';
 
   let guid = $derived(page.params.id);
 
@@ -57,8 +56,6 @@
     label: 'Failed to load transaction'
   });
 
-  let loading = $derived(res.loading);
-  let error = $derived(res.error);
   let detail = $derived(res.data?.transaction ?? null);
   let prevGuid = $derived(res.data?.prevGuid ?? null);
   let nextGuid = $derived(res.data?.nextGuid ?? null);
@@ -68,6 +65,9 @@
   let editorOpen = $state(false);
 
   $effect(() => {
+    // Track navigation explicitly so the crumb refreshes even when the
+    // payload is unchanged; title-bar falls back to the route title otherwise.
+    void page.url.pathname;
     setBreadcrumb([
       { name: 'Transactions', href: resolve('/transactions') },
       { name: detail?.description || 'Transaction' }
@@ -104,14 +104,12 @@
   <meta name="description" content="Transaction details and splits." />
 </svelte:head>
 
-{#if dbSession.value || dbBootstrapping.value}
+<BookGate title="Transaction">
   <div class="flex flex-col gap-6">
-    {#if (loading || dbBootstrapping.value) && !detail}
-      <PageHeaderSkeleton />
-      <KpiCardRow gridClass="sm:grid-cols-2 lg:grid-cols-3" />
-      <TableSkeleton cols={4} rows={3} />
-    {:else if error}
-      <ErrorCard message={error} onRetry={() => res.reload()} />
+    {#if (res.loading || dbBootstrapping.value) && !detail}
+      <PageSkeleton variant="transaction-detail" />
+    {:else if res.error}
+      <ErrorCard message={res.error} onRetry={() => res.reload()} />
     {:else if !detail}
       <EmptyState
         card
@@ -139,7 +137,7 @@
             <Button
               variant="outline"
               size="icon"
-              disabled={!prevGuid || loading}
+              disabled={!prevGuid || res.loading}
               aria-label="Previous transaction"
               title="Previous transaction"
               onclick={() => {
@@ -151,7 +149,7 @@
             <Button
               variant="outline"
               size="icon"
-              disabled={!nextGuid || loading}
+              disabled={!nextGuid || res.loading}
               aria-label="Next transaction"
               title="Next transaction"
               onclick={() => {
@@ -220,7 +218,7 @@
 
       <!-- Keep the previous table visible (dimmed) during prev/next refetches
            so the page doesn't jump. -->
-      <DimWrapper active={loading}>
+      <DimWrapper active={res.loading}>
         <TableShell>
           <Table.Header>
             <Table.Row class="bg-muted/75">
@@ -234,10 +232,7 @@
             {#each d.splits as split (split.guid)}
               {@const qline = quantityLine(split)}
               {@const status = statusFor(split.reconcileState)}
-              <Table.Row
-                class="cursor-pointer hover:bg-muted/50"
-                onclick={(e) => handleRowClick(e, () => openAccount(split.accountGuid))}
-              >
+              <NavRow onNavigate={() => openAccount(split.accountGuid)}>
                 <Table.Cell class="py-2.5 font-medium">
                   <a
                     href={resolve('/accounts/[guid]', { guid: split.accountGuid })}
@@ -264,16 +259,11 @@
                     <p class="text-xs text-muted-foreground tabular-nums">{qline}</p>
                   {/if}
                 </Table.Cell>
-              </Table.Row>
+              </NavRow>
             {/each}
           </Table.Body>
         </TableShell>
       </DimWrapper>
     {/if}
   </div>
-{:else}
-  <div class="flex flex-col gap-6">
-    <PageHeader title="Transaction" />
-    <ImportPrompt />
-  </div>
-{/if}
+</BookGate>

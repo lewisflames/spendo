@@ -10,8 +10,8 @@
 </script>
 
 <script lang="ts">
-  import { untrack } from 'svelte';
   import * as Table from '$lib/components/ui/table';
+  import { useResetPageOnChange } from '$lib/hooks/use-page-reset.svelte';
   import { TrendingUp } from '@lucide/svelte';
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
@@ -26,6 +26,7 @@
     EMPTY_DASH
   } from '$lib/utils/format.svelte';
   import type { PriceHistoryEntry } from '$lib/tauri';
+  import { dayChangePct } from '$lib/features/portfolio/price-utils';
 
   let {
     priceHistory,
@@ -51,9 +52,10 @@
     const asc = [...priceHistory].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
     const withChange: PriceRow[] = asc.map((e, i) => {
       if (i === 0) return { ...e, changePct: null };
-      const prev = asc[i - 1].price;
-      if (prev === 0) return { ...e, changePct: null };
-      return { ...e, changePct: ((e.price - prev) / Math.abs(prev)) * 100 };
+      return {
+        ...e,
+        changePct: dayChangePct({ price: e.price, prevPrice: asc[i - 1].price })
+      };
     });
     return withChange.reverse();
   });
@@ -67,15 +69,15 @@
   $effect(() => {
     if (page > totalPages) page = totalPages;
   });
-  $effect(() => {
-    // New data (e.g. after a price refresh or holding switch) starts back on
-    // page 1. `page` is read untracked so navigating pages doesn't re-trigger
-    // this effect and snap back to 1.
-    void priceHistory.length;
-    untrack(() => {
-      if (page !== 1) page = 1;
-    });
-  });
+  // New data (e.g. after a price refresh or holding switch) starts back on
+  // page 1. Keyed on the array reference (not `.length`) so a same-length
+  // data swap still resets.
+  useResetPageOnChange(
+    () => priceHistory,
+    () => {
+      page = 1;
+    }
+  );
 
   let pageRows = $derived(rowsDesc.slice((page - 1) * pageSize, page * pageSize));
 </script>

@@ -14,7 +14,7 @@
     FolderTree
   } from '@lucide/svelte';
   import * as Sidebar from '$lib/components/ui/sidebar/index.js';
-  import { keyboardShortcutsDialog } from '$lib/stores/keyboard-shortcuts.svelte';
+  import { keyboardShortcutsDialog } from '$lib/stores/ui.svelte';
 </script>
 
 <Sidebar.Root class="top-(--header-height) h-[calc(100svh-var(--header-height))]!">

@@ -10,6 +10,7 @@ export const breadcrumb = $state<{ value: { items: BreadcrumbItem[]; route: stri
 });
 
 export function setBreadcrumb(items: BreadcrumbItem[]) {
-  breadcrumb.value.items = items;
-  breadcrumb.value.route = page.url.pathname;
+  // Replace the whole object (single notification), mirroring the other
+  // stores — never mutate `items`/`route` in place.
+  breadcrumb.value = { items, route: page.url.pathname };
 }

@@ -10,7 +10,8 @@
     formatSessionCurrency as fmt,
     EMPTY_DASH
   } from '$lib/utils/format.svelte';
-  import { handleRowClick, openAccount } from '$lib/utils/navigation';
+  import NavRow from '$lib/components/shared/nav-row.svelte';
+  import { openAccount } from '$lib/utils/navigation';
   import type { PortfolioHolding } from '$lib/tauri';
 
   let {
@@ -40,10 +41,7 @@
         {@const unitPrice = h.shares > 0 && h.price !== null ? h.price : 0}
         {@const gainPerShare = h.shares > 0 ? h.gainLoss / h.shares : 0}
         {@const acctGain = acct.shares * gainPerShare}
-        <Table.Row
-          class="cursor-pointer hover:bg-muted/50"
-          onclick={(e) => handleRowClick(e, () => openAccount(acct.accountGuid))}
-        >
+        <NavRow onNavigate={() => openAccount(acct.accountGuid)}>
           <Table.Cell class="py-2.5">
             <a
               href={resolve('/accounts/[guid]', { guid: acct.accountGuid })}
@@ -68,7 +66,7 @@
           <Table.Cell class="py-2.5 text-right tabular-nums {signColor(acctGain)}">
             {formatSignedCurrency(acctGain, currency)}
           </Table.Cell>
-        </Table.Row>
+        </NavRow>
       {/each}
     </Table.Body>
   </TableShell>

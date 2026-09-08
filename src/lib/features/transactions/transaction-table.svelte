@@ -11,11 +11,11 @@
   } from '$lib/utils/format.svelte';
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import SortHead from '$lib/components/shared/sort-head.svelte';
-  import { handleRowClick, openTransaction } from '$lib/utils/navigation';
+  import NavRow from '$lib/components/shared/nav-row.svelte';
+  import { openTransaction } from '$lib/utils/navigation';
   import { statusFor } from '$lib/utils/reconcile';
-  import type { DetailTransaction, TransactionRow } from '$lib/tauri';
+  import type { DetailTransaction, TransactionRow, TxSortKey } from '$lib/tauri';
 
-  type SortKey = 'date' | 'description' | 'amount';
   type AccountColumn = 'transfer' | 'status' | 'amount' | 'runningBalance';
 
   let {
@@ -29,10 +29,10 @@
   }: {
     transactions?: TransactionRow[] | DetailTransaction[];
     currency?: string;
-    sortBy?: SortKey | null;
+    sortBy?: TxSortKey | null;
     sortDir?: 'asc' | 'desc';
     /** Direction handling lives with the caller's sort state; just report the key. */
-    onSort?: (key: SortKey) => void;
+    onSort?: (key: TxSortKey) => void;
     /** `account` adds Transfer/Status/Amount/Balance columns for the ledger view. */
     variant?: 'all' | 'account';
     visibleColumns?: AccountColumn[];
@@ -98,10 +98,7 @@
   </Table.Header>
   <Table.Body>
     {#each transactions as txn (txn.guid)}
-      <Table.Row
-        class="cursor-pointer hover:bg-muted/50"
-        onclick={(e) => handleRowClick(e, () => openTransaction(txn.guid))}
-      >
+      <NavRow onNavigate={() => openTransaction(txn.guid)}>
         <Table.Cell class="py-2.5 whitespace-nowrap text-muted-foreground">
           {fmtDate(txn.postDate)}
         </Table.Cell>
@@ -172,7 +169,7 @@
             </Table.Cell>
           {/if}
         {/if}
-      </Table.Row>
+      </NavRow>
     {/each}
   </Table.Body>
 </TableShell>

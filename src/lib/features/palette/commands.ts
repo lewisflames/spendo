@@ -17,7 +17,7 @@ import {
   SunMoon
 } from '@lucide/svelte';
 import { appSettings, resolveTheme, saveSettings } from '$lib/stores/settings.svelte';
-import { keyboardShortcutsDialog } from '$lib/stores/keyboard-shortcuts.svelte';
+import { keyboardShortcutsDialog } from '$lib/stores/ui.svelte';
 import { goBack, goForward } from '$lib/stores/nav-history.svelte';
 
 export type PaletteGroup = 'Go to' | 'Actions';
