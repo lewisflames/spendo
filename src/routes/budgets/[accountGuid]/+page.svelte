@@ -4,7 +4,7 @@
   import { resolve } from '$app/paths';
   import { Button } from '$lib/components/ui/button';
   import * as Dialog from '$lib/components/ui/dialog';
-  import { dbBootstrapping, dbSession } from '$lib/stores/db.svelte';
+  import { dbSession } from '$lib/stores/db.svelte';
   import { sessionCurrency } from '$lib/utils/format.svelte';
   import {
     fetchBudgetDetail,
@@ -21,16 +21,14 @@
   import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
-  import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
-  import { Skeleton } from '$lib/components/ui/skeleton';
-  import KpiCardRow from '$lib/components/shared/kpi-card-row.svelte';
+  import PageSkeleton from '$lib/components/shared/page-skeleton.svelte';
   import BudgetEntryDialog from '$lib/features/budgets/budget-entry-dialog.svelte';
   import BudgetSummaryCards from '$lib/features/budgets/budget-summary-cards.svelte';
   import BudgetMonthlyTable from '$lib/features/budgets/budget-monthly-table.svelte';
   import BudgetYearStepper from '$lib/features/budgets/budget-year-stepper.svelte';
   import { accountNameMap } from '$lib/features/budgets/budget-utils';
   import { useBudgetYear } from '$lib/hooks/use-budget-year.svelte';
-  import ImportPrompt from '$lib/components/shared/import-prompt.svelte';
+  import BookGate from '$lib/components/shared/book-gate.svelte';
   import { setBreadcrumb } from '$lib/stores/breadcrumb.svelte';
 
   let accountGuid = $derived(page.params.accountGuid);
@@ -73,8 +71,6 @@
   );
   let dateRange = $derived(res.data?.range ?? null);
   let accountsData = $derived(res.data?.accounts ?? null);
-  let loading = $derived(res.loading);
-  let error = $derived(res.error);
   let formError = $state<string | null>(null);
 
   let showEditDialog = $state(false);
@@ -89,6 +85,9 @@
   let accountNames = $derived(accountNameMap(accountsData?.trees));
 
   $effect(() => {
+    // Track navigation explicitly so the crumb refreshes even when the
+    // payload is unchanged; title-bar falls back to the route title otherwise.
+    void page.url.pathname;
     setBreadcrumb([
       { name: 'Budgets', href: resolve('/budgets') },
       { name: budget?.accountDescription ?? budget?.accountName ?? 'Budget' }
@@ -133,24 +132,7 @@
   </span>
 {/snippet}
 
-{#snippet loadingSkeleton()}
-  <KpiCardRow count={4} />
-  <!-- Skeleton mirrors the pacing card + monthly table shape. -->
-  <div class="rounded-lg border p-4">
-    <div class="flex flex-wrap items-baseline justify-between gap-2">
-      <Skeleton class="h-4 w-52" />
-      <Skeleton class="h-4 w-44" />
-    </div>
-    <div class="mt-3 flex items-center gap-3">
-      <Skeleton class="h-2 flex-1" />
-      <Skeleton class="h-4 w-12" />
-    </div>
-    <Skeleton class="mt-2 h-3 w-72" />
-  </div>
-  <TableSkeleton cols={6} rows={6} />
-{/snippet}
-
-{#if dbSession.value || dbBootstrapping.value}
+<BookGate title="Budget">
   <div class="flex flex-col gap-6">
     <PageHeader title={accountName} description={headerDescription}>
       <div class="flex flex-wrap items-center gap-2">
@@ -165,7 +147,7 @@
         <Button
           variant="outline"
           onclick={() => (showEditDialog = true)}
-          disabled={detail === null && loading}
+          disabled={detail === null && res.loading}
         >
           <Pencil aria-hidden="true" />
           Set target
@@ -180,11 +162,11 @@
     {#if formError}
       <ErrorCard message={formError} />
     {/if}
-    {#if error && detail !== null}
-      <ErrorCard message={error} onRetry={() => res.reload()} />
+    {#if res.error && detail !== null}
+      <ErrorCard message={res.error} onRetry={() => res.reload()} />
     {/if}
     {#if detail !== null && summary !== null}
-      <DimWrapper active={loading} class="flex flex-col gap-6">
+      <DimWrapper active={res.loading} class="flex flex-col gap-6">
         <BudgetSummaryCards {summary} annualTarget={detail.budget.amount} {currency} />
         <BudgetMonthlyTable
           entries={monthlyEntries}
@@ -192,9 +174,9 @@
           {currency}
         />
       </DimWrapper>
-    {:else if loading}
-      {@render loadingSkeleton()}
-    {:else if error}
+    {:else if res.loading}
+      <PageSkeleton variant="budget-detail" />
+    {:else if res.error}
       <EmptyState
         card
         title="No budget for {by.year}"
@@ -211,15 +193,10 @@
       </EmptyState>
     {:else}
       <!-- Year-mismatch window before the refetch starts; same placeholder. -->
-      {@render loadingSkeleton()}
+      <PageSkeleton variant="budget-detail" />
     {/if}
   </div>
-{:else}
-  <div class="flex flex-col gap-6">
-    <PageHeader title="Budget" />
-    <ImportPrompt />
-  </div>
-{/if}
+</BookGate>
 
 {#if accountGuid}
   {#key `${showEditDialog}-${by.year}`}

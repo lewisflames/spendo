@@ -3,7 +3,8 @@
   import * as Table from '$lib/components/ui/table';
   import { formatNumber, formatSessionCurrency, clampZero } from '$lib/utils/format.svelte';
   import TableShell from '$lib/components/shared/table-shell.svelte';
-  import { handleRowClick, openAccount } from '$lib/utils/navigation';
+  import NavRow from '$lib/components/shared/nav-row.svelte';
+  import { openAccount } from '$lib/utils/navigation';
   import { dbSession } from '$lib/stores/db.svelte';
   import type { AccountNode, ChildAccountInfo } from '$lib/tauri';
   import CommodityBadge from './commodity-badge.svelte';
@@ -40,10 +41,7 @@
   </Table.Header>
   <Table.Body>
     {#each rows as node (node.guid)}
-      <Table.Row
-        class="cursor-pointer hover:bg-muted/50"
-        onclick={(e) => handleRowClick(e, () => openAccount(node.guid))}
-      >
+      <NavRow onNavigate={() => openAccount(node.guid)}>
         <Table.Cell class="p-0">
           <!-- Accessible link target for keyboard/middle-click; the row click
                is a convenience shortcut. -->
@@ -74,7 +72,7 @@
         <Table.Cell class="py-2.5 text-right font-medium whitespace-nowrap tabular-nums">
           {formatSessionCurrency(clampZero(node.balance))}
         </Table.Cell>
-      </Table.Row>
+      </NavRow>
     {/each}
   </Table.Body>
 </TableShell>

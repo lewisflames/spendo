@@ -1,0 +1,87 @@
+<script lang="ts">
+  import { Skeleton } from '$lib/components/ui/skeleton';
+  import ChartSkeleton from '$lib/components/shared/chart-skeleton.svelte';
+  import KpiCardRow from '$lib/components/shared/kpi-card-row.svelte';
+  import PageHeaderSkeleton from '$lib/components/shared/page-header-skeleton.svelte';
+  import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
+  import ToolbarSkeleton from '$lib/components/shared/toolbar-skeleton.svelte';
+
+  /**
+   * Full-page loading placeholder. Each variant mirrors the loaded layout of
+   * its page(s) so first paint doesn't jump when data arrives. Keep counts in
+   * sync with the loaded grids/tables they stand in for.
+   */
+  let {
+    variant
+  }: {
+    variant:
+      | 'home'
+      | 'accounts'
+      | 'transactions'
+      | 'transaction-detail'
+      | 'budgets'
+      | 'budget-detail'
+      | 'portfolio'
+      | 'holding';
+  } = $props();
+</script>
+
+{#if variant === 'home'}
+  <PageHeaderSkeleton />
+  <KpiCardRow />
+  <TableSkeleton cols={4} />
+{:else if variant === 'accounts'}
+  <KpiCardRow count={4} />
+  <TableSkeleton cols={3} />
+{:else if variant === 'transactions'}
+  <div class="flex flex-col gap-4">
+    <TableSkeleton cols={3} />
+    <div class="flex items-center justify-between">
+      <Skeleton class="h-5 w-32" />
+      <div class="flex items-center gap-2">
+        <Skeleton class="h-8 w-24" />
+        <Skeleton class="h-8 w-16" />
+      </div>
+    </div>
+  </div>
+{:else if variant === 'transaction-detail'}
+  <PageHeaderSkeleton />
+  <KpiCardRow gridClass="sm:grid-cols-2 lg:grid-cols-3" />
+  <TableSkeleton cols={4} rows={3} />
+{:else if variant === 'budgets'}
+  <!-- The table renders its own skeleton via BudgetsTable rows={null}. -->
+  <KpiCardRow />
+  <ToolbarSkeleton />
+{:else if variant === 'budget-detail'}
+  <KpiCardRow count={4} />
+  <!-- Mirrors the pacing card shape. -->
+  <div class="rounded-lg border p-4">
+    <div class="flex flex-wrap items-baseline justify-between gap-2">
+      <Skeleton class="h-4 w-52" />
+      <Skeleton class="h-4 w-44" />
+    </div>
+    <div class="mt-3 flex items-center gap-3">
+      <Skeleton class="h-2 flex-1" />
+      <Skeleton class="h-4 w-12" />
+    </div>
+    <Skeleton class="mt-2 h-3 w-72" />
+  </div>
+  <TableSkeleton cols={6} rows={6} />
+{:else if variant === 'portfolio'}
+  <!-- The holdings table renders its own skeleton via HoldingsTable loading. -->
+  <KpiCardRow />
+  <!-- Matches the loaded performance + allocation layout. -->
+  <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
+    <ChartSkeleton class="lg:col-span-2" withFilters />
+    <ChartSkeleton />
+  </div>
+{:else if variant === 'holding'}
+  <PageHeaderSkeleton />
+  <KpiCardRow count={4} />
+  <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
+    <ChartSkeleton withFilters />
+    <ChartSkeleton withFilters />
+  </div>
+  <TableSkeleton cols={6} rows={3} />
+  <TableSkeleton cols={5} rows={4} />
+{/if}

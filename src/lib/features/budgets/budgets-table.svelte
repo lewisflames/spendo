@@ -32,7 +32,8 @@
     signColor,
     EMPTY_DASH
   } from '$lib/utils/format.svelte';
-  import { handleRowClick, openBudget } from '$lib/utils/navigation';
+  import NavRow from '$lib/components/shared/nav-row.svelte';
+  import { openBudget } from '$lib/utils/navigation';
   import { Plus } from '@lucide/svelte';
   import { Button } from '$lib/components/ui/button';
   import type { BudgetActualRow } from '$lib/tauri';
@@ -112,10 +113,7 @@
     </Table.Header>
     <Table.Body>
       {#each rows as item (item.guid)}
-        <Table.Row
-          class="cursor-pointer hover:bg-muted/50"
-          onclick={(e) => handleRowClick(e, () => openBudget(item.accountGuid, year))}
-        >
+        <NavRow onNavigate={() => openBudget(item.accountGuid, year)}>
           <Table.Cell class="py-2.5">
             <!-- Accessible link target for keyboard/middle-click; the row click
                  is a convenience shortcut. -->
@@ -174,7 +172,7 @@
               {fmtSigned(item.remaining)}
             </Table.Cell>
           {/if}
-        </Table.Row>
+        </NavRow>
       {/each}
     </Table.Body>
   </TableShell>

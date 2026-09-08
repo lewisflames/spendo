@@ -42,10 +42,6 @@
     label: 'Failed to load changes history'
   });
 
-  let loading = $derived(res.loading);
-  let data = $derived(res.data);
-  let error = $derived(res.error);
-
   let confirmOpen = $state(false);
   let pending = $state<ChangeEntry | null>(null);
   let reverting = $state(false);
@@ -92,12 +88,12 @@
   }
 </script>
 
-{#if loading && !data}
+{#if res.loading && !res.data}
   <TableSkeleton cols={4} />
-{:else if error}
-  <ErrorCard message={error} onRetry={() => res.reload()} />
-{:else if data}
-  {#if data.entries.length === 0}
+{:else if res.error}
+  <ErrorCard message={res.error} onRetry={() => res.reload()} />
+{:else if res.data}
+  {#if res.data.entries.length === 0}
     <EmptyState
       card
       title="No changes yet"
@@ -113,7 +109,7 @@
   {:else}
     <!-- Keep the previous table visible (dimmed) during refetches so the
            page doesn't jump and pagination stays in place. -->
-    <DimWrapper active={loading} class="flex flex-col gap-4">
+    <DimWrapper active={res.loading} class="flex flex-col gap-4">
       <TableShell>
         <Table.Header>
           <Table.Row class="bg-muted/75">
@@ -124,8 +120,8 @@
           </Table.Row>
         </Table.Header>
         <Table.Body>
-          {#each data.entries as entry (entry.id)}
-            {@const revertible = entry.id === data.revertibleId}
+          {#each res.data.entries as entry (entry.id)}
+            {@const revertible = entry.id === res.data.revertibleId}
             {@const impact = impactLabel(entry)}
             <Table.Row class="hover:bg-muted/50">
               <Table.Cell class="py-2.5 whitespace-nowrap">
@@ -179,8 +175,8 @@
       </TableShell>
       <PaginationNav
         bind:page
-        totalPages={data.totalPages}
-        totalItems={data.total}
+        totalPages={res.data.totalPages}
+        totalItems={res.data.total}
         pageSize={appSettings.value.pageSize}
         onPageSizeChange={(size) => applyPageSize(size, (v) => (page = v))}
       />

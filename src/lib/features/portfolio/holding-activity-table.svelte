@@ -32,7 +32,8 @@
     formatDate,
     EMPTY_DASH
   } from '$lib/utils/format.svelte';
-  import { handleRowClick, openTransaction } from '$lib/utils/navigation';
+  import NavRow from '$lib/components/shared/nav-row.svelte';
+  import { openTransaction } from '$lib/utils/navigation';
   import type { HoldingTransaction } from '$lib/tauri';
 
   let {
@@ -111,10 +112,7 @@
       </Table.Header>
       <Table.Body>
         {#each transactions as t (t.guid)}
-          <Table.Row
-            class="cursor-pointer hover:bg-muted/50"
-            onclick={(e) => handleRowClick(e, () => openTransaction(t.guid))}
-          >
+          <NavRow onNavigate={() => openTransaction(t.guid)}>
             <Table.Cell class="py-2.5 whitespace-nowrap text-muted-foreground tabular-nums">
               {formatDate(t.postDate)}
             </Table.Cell>
@@ -175,7 +173,7 @@
                 {t.runningShares.toFixed(2)}
               </Table.Cell>
             {/if}
-          </Table.Row>
+          </NavRow>
         {/each}
       </Table.Body>
     </TableShell>

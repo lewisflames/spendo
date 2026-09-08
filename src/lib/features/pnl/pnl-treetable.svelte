@@ -8,7 +8,8 @@
     signColor,
     EMPTY_DASH
   } from '$lib/utils/format.svelte';
-  import { handleRowClick, openAccount } from '$lib/utils/navigation';
+  import NavRow from '$lib/components/shared/nav-row.svelte';
+  import { openAccount } from '$lib/utils/navigation';
   import ReportTable from '$lib/features/reports/report-table.svelte';
   import ReportAccountCell from '$lib/features/reports/report-account-cell.svelte';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
@@ -62,10 +63,7 @@
     {@const variance = row.currentAmount - row.previousAmount}
     {@const isZeroVariance = variance === 0}
     {@const isZeroPct = row.changePct === null || row.changePct === 0}
-    <Table.Row
-      class="cursor-pointer hover:bg-muted"
-      onclick={(e) => handleRowClick(e, () => openAccount(row.accountGuid))}
-    >
+    <NavRow onNavigate={() => openAccount(row.accountGuid)} class="cursor-pointer hover:bg-muted">
       <ReportAccountCell
         depth={item.depth}
         guid={row.accountGuid}
@@ -102,7 +100,7 @@
           {fmtPct(row.changePct)}
         {/if}
       </Table.Cell>
-    </Table.Row>
+    </NavRow>
   {/each}
 {/snippet}
 
@@ -118,7 +116,8 @@
   {@const pct = changePct(current, previous)}
   {@const isZeroVariance = variance === 0}
   {@const isZeroPct = pct === null || pct === 0}
-  <Table.Row
+  <NavRow
+    onNavigate={guid !== null ? () => openAccount(guid) : null}
     class={footer
       ? guid !== null
         ? 'cursor-pointer border-t-2 bg-muted/50 font-semibold hover:bg-muted'
@@ -126,7 +125,6 @@
       : guid !== null
         ? 'cursor-pointer border-t border-b bg-muted/50 font-semibold hover:bg-muted'
         : 'border-t-2 bg-muted/50 font-semibold'}
-    onclick={guid !== null ? (e) => handleRowClick(e, () => openAccount(guid)) : undefined}
   >
     <Table.Cell class="py-2.5 text-xs font-semibold tracking-wider uppercase">
       {#if guid !== null}
@@ -166,7 +164,7 @@
         {fmtPct(pct)}
       {/if}
     </Table.Cell>
-  </Table.Row>
+  </NavRow>
 {/snippet}
 
 {#if !pnlData && !loading && !error}

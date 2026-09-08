@@ -6,11 +6,23 @@
 
   let {
     columns,
-    cols
+    cols,
+    onHide
   }: {
     columns: { id: Id; label: string }[];
     cols: ColumnVisibility<Id>;
+    /** Called after a column is hidden (e.g. to reset a sort on that column). */
+    onHide?: (id: Id) => void;
   } = $props();
+
+  function handleCheckedChange(id: Id, checked: boolean) {
+    cols.setVisible(
+      id,
+      checked,
+      columns.map((c) => c.id)
+    );
+    if (!checked) onHide?.(id);
+  }
 </script>
 
 <DropdownMenu.Root>
@@ -26,12 +38,7 @@
     {#each columns as col (col.id)}
       <DropdownMenu.CheckboxItem
         checked={cols.isVisible(col.id)}
-        onCheckedChange={(checked) =>
-          cols.setVisible(
-            col.id,
-            checked,
-            columns.map((c) => c.id)
-          )}
+        onCheckedChange={(checked) => handleCheckedChange(col.id, checked)}
         closeOnSelect={false}
       >
         {col.label}

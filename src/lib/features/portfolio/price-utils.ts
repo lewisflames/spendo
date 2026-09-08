@@ -1,5 +1,6 @@
 import { toast } from '$lib/components/ui/sonner';
 import { parseLocalDate, plural } from '$lib/utils/format.svelte';
+import type { PricesResult } from '$lib/tauri';
 
 /** A cached price older than this many days is flagged stale in the UI. */
 export const STALE_PRICE_DAYS = 7;
@@ -35,18 +36,13 @@ export function range52w(
   return { high: Math.max(...prices), low: Math.min(...prices) };
 }
 
-/** Structural outcome of a Yahoo price refresh (matches the backend shape). */
-export interface PriceRefreshOutcome {
-  prices: { mnemonic: string; price: number; priceDate: string; currency: string }[];
-  errors: { mnemonic: string; error: string }[];
-}
-
 /**
  * Success/warning toasts for a price refresh; silent when nothing happened.
  * `fixHint` points at the Portfolio symbol overrides (for import flows).
+ * Accepts the full `PricesResult` (extra `fetchedAt` ignored).
  */
 export function toastPriceResult(
-  result: PriceRefreshOutcome | null | undefined,
+  result: Pick<PricesResult, 'prices' | 'errors'> | null | undefined,
   opts: { fixHint?: boolean } = {}
 ): void {
   if (!result) return;

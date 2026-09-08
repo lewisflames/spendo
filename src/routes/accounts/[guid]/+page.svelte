@@ -11,7 +11,7 @@
   import { setBreadcrumb } from '$lib/stores/breadcrumb.svelte';
   import { fetchAccountDetail } from '$lib/tauri';
   import { clampZero, sessionCurrency } from '$lib/utils/format.svelte';
-  import ImportPrompt from '$lib/components/shared/import-prompt.svelte';
+  import BookGate from '$lib/components/shared/book-gate.svelte';
   import { useDebouncedSearch } from '$lib/hooks/use-debounced-search.svelte';
   import {
     useUrlParams,
@@ -20,8 +20,8 @@
     dateParam
   } from '$lib/hooks/use-url-params.svelte';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
+  import { useResetPageOnChange } from '$lib/hooks/use-page-reset.svelte';
   import { useTableSort } from '$lib/hooks/use-table-sort.svelte';
-  import PageHeader from '$lib/components/layout/page-header.svelte';
   import PageHeaderSkeleton from '$lib/components/shared/page-header-skeleton.svelte';
   import * as Card from '$lib/components/ui/card';
   import { Skeleton } from '$lib/components/ui/skeleton';
@@ -92,6 +92,27 @@
   // As-of view state for balances.
   let isToday = $derived(!asOf || asOf === todayStr());
 
+  // Reset query state on account switch and page 1 on sort change. Runs
+  // before the fetch effect in the same flush, so the fetch sees the reset
+  // page immediately. `asOf` is intentionally left URL-driven (entering from
+  // the list starts at today).
+  useResetPageOnChange(
+    () => guid ?? '',
+    () => {
+      pg = 1;
+      searchInput = '';
+      search.set('');
+      dateFrom = '';
+      dateTo = '';
+    }
+  );
+  useResetPageOnChange(
+    () => `${sortBy}|${sortDir}`,
+    () => {
+      pg = 1;
+    }
+  );
+
   const res = useAsyncData({
     enabled: () => !!dbSession.value && !!guid,
     fetch: () => {
@@ -115,15 +136,11 @@
     }
   });
 
-  let data = $derived(res.data);
-  let loading = $derived(res.loading);
-  let error = $derived(res.error);
-
   let editOpen = $state(false);
   let createOpen = $state(false);
 
   let editInitial = $derived.by((): AccountInitial | null => {
-    const a = data?.account;
+    const a = res.data?.account;
     if (!a) return null;
     return {
       name: a.name,
@@ -137,12 +154,12 @@
   });
 
   // Direct children come with the detail payload — no second full-tree fetch.
-  let subAccounts = $derived(data?.account.childAccounts ?? []);
+  let subAccounts = $derived(res.data?.account.childAccounts ?? []);
 
-  let currentBalance = $derived(data?.account.balance ?? 0);
+  let currentBalance = $derived(res.data?.account.balance ?? 0);
 
-  let subtreeNode = $derived(data?.subtree ?? null);
-  let parentInfo = $derived(data?.parent ?? null);
+  let subtreeNode = $derived(res.data?.subtree ?? null);
+  let parentInfo = $derived(res.data?.parent ?? null);
   let hasPieData = $derived(
     !!subtreeNode && subtreeNode.children.some((c) => Math.abs(clampZero(c.balance)) >= 0.005)
   );
@@ -150,57 +167,36 @@
   // Charts loading gate: while the detail payload hasn't arrived we reserve
   // both chart slots (assuming the pie exists) so the trend chart settling
   // before/after the pie data never changes the grid shape mid-paint.
-  let chartsLoading = $derived((loading || dbBootstrapping.value) && !data);
+  let chartsLoading = $derived((res.loading || dbBootstrapping.value) && !res.data);
   let showPie = $derived(!chartsLoading && hasPieData);
 
-  let prevNavKey = '';
-  let prevSortKey = '';
-
-  // Reset query state on account switch and page 1 on sort change. Declared
-  // before the fetch effect so it runs first in the same flush. `asOf` is
-  // intentionally left URL-driven (entering from the list starts at today).
   $effect(() => {
-    if (!dbSession.value) {
-      prevNavKey = '';
-      return;
-    }
-
-    const g = guid ?? '';
-    if (prevNavKey && g !== prevNavKey) {
-      pg = 1;
-      searchInput = '';
-      search.set('');
-      dateFrom = '';
-      dateTo = '';
-    }
-    prevNavKey = g;
-
-    const sk = `${sortBy}|${sortDir}`;
-    if (prevSortKey && prevSortKey !== sk && pg !== 1) {
-      pg = 1;
-    }
-    prevSortKey = sk;
-  });
-
-  $effect(() => {
+    // Track navigation explicitly so the crumb refreshes even when the
+    // payload is unchanged; title-bar falls back to the route title otherwise.
+    void page.url.pathname;
     setBreadcrumb([
       { name: 'Accounts', href: resolve('/accounts') },
-      { name: data?.account.description ?? data?.account.name ?? 'Account' }
+      { name: res.data?.account.description ?? res.data?.account.name ?? 'Account' }
     ]);
   });
 </script>
 
 <svelte:head>
-  <title>{data ? `${data.account.name} — Spendo` : 'Account — Spendo'}</title>
+  <title>{res.data ? `${res.data.account.name} — Spendo` : 'Account — Spendo'}</title>
   <meta name="description" content="Account transactions and balance." />
 </svelte:head>
 
-{#if dbSession.value || dbBootstrapping.value}
+<BookGate title="Account">
   <div class="flex flex-col gap-6">
-    {#if (loading || dbBootstrapping.value) && !data}
+    {#if (res.loading || dbBootstrapping.value) && !res.data}
       <PageHeaderSkeleton />
-    {:else if data}
-      <AccountDetailHeader account={data.account} summary={data.summary} {isToday} bind:asOf>
+    {:else if res.data}
+      <AccountDetailHeader
+        account={res.data.account}
+        summary={res.data.summary}
+        {isToday}
+        bind:asOf
+      >
         {#if dbSession.value}
           <Button variant="outline" size="sm" onclick={() => (createOpen = true)}>
             <Plus aria-hidden="true" class="size-3" />
@@ -216,7 +212,7 @@
         <AccountDialog
           bind:open={editOpen}
           mode="edit"
-          guid={data.account.guid}
+          guid={res.data.account.guid}
           initial={editInitial}
           onSaved={() => {
             res.reload();
@@ -231,7 +227,7 @@
         <AccountDialog
           bind:open={createOpen}
           mode="create"
-          parentPreset={data.account.guid}
+          parentPreset={res.data.account.guid}
           onSaved={() => {
             res.reload();
             toast.success('Account created');
@@ -241,10 +237,10 @@
       {/if}
     {/if}
 
-    {#if (loading || dbBootstrapping.value) && !data}
+    {#if (res.loading || dbBootstrapping.value) && !res.data}
       <KpiCardRow />
-    {:else if data}
-      <AccountKpiCards summary={data.summary} {currentBalance} {isToday} {asOf} />
+    {:else if res.data}
+      <AccountKpiCards summary={res.data.summary} {currentBalance} {isToday} {asOf} />
     {/if}
 
     <!-- Balance over time + composition. The grid keeps its shape across the
@@ -255,7 +251,7 @@
       <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div class={showPie || chartsLoading ? 'lg:col-span-2' : 'lg:col-span-3'}>
           {#if dbSession.value}
-            <BalanceTrendChart {guid} accountType={data?.account.accountType} {asOf} />
+            <BalanceTrendChart {guid} accountType={res.data?.account.accountType} {asOf} />
           {:else}
             <Card.Root>
               <Card.Header>
@@ -269,7 +265,7 @@
           {/if}
         </div>
         {#if showPie}
-          <BalancePie node={subtreeNode} parent={parentInfo} {loading} />
+          <BalancePie node={subtreeNode} parent={parentInfo} loading={res.loading} />
         {:else if chartsLoading}
           <BalancePie node={null} parent={null} loading={true} />
         {/if}
@@ -282,9 +278,9 @@
     {/if}
 
     <AccountLedger
-      {data}
-      {loading}
-      {error}
+      data={res.data}
+      loading={res.loading}
+      error={res.error}
       bind:searchInput
       bind:dateFrom
       bind:dateTo
@@ -298,9 +294,4 @@
       onRetry={() => res.reload()}
     />
   </div>
-{:else}
-  <div class="flex flex-col gap-6">
-    <PageHeader title="Account" />
-    <ImportPrompt />
-  </div>
-{/if}
+</BookGate>

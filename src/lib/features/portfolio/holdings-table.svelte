@@ -1,19 +1,19 @@
 <script lang="ts">
   import * as Table from '$lib/components/ui/table';
-  import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
   import { Badge } from '$lib/components/ui/badge';
-  import { Button } from '$lib/components/ui/button';
   import { resolve } from '$app/paths';
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
   import ToolbarSkeleton from '$lib/components/shared/toolbar-skeleton.svelte';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
   import SortHead from '$lib/components/shared/sort-head.svelte';
+  import NavRow from '$lib/components/shared/nav-row.svelte';
+  import { ColumnsMenu } from '$lib/components/shared/columns-menu';
   import { SearchInput } from '$lib/components/shared/search-input';
-  import { TrendingUp, Columns3 } from '@lucide/svelte';
+  import { TrendingUp } from '@lucide/svelte';
   import type { PortfolioHolding } from '$lib/tauri';
   import { STALE_PRICE_DAYS, priceStaleDays } from './price-utils';
-  import { handleRowClick, openHolding } from '$lib/utils/navigation';
+  import { openHolding } from '$lib/utils/navigation';
   import { useDebouncedSearch } from '$lib/hooks/use-debounced-search.svelte';
   import { useTableSort } from '$lib/hooks/use-table-sort.svelte';
   import { useColumnVisibility } from '$lib/hooks/use-column-visibility.svelte';
@@ -88,18 +88,9 @@
     return cols.isVisible(id);
   }
 
-  function setVisible(id: ColumnId, checked: boolean) {
-    cols.setVisible(
-      id,
-      checked,
-      COLUMNS.map((c) => c.id)
-    );
-    // Don't leave an invisible sort in effect (default back to market value).
-    if (!checked && sortBy === id) sort.toggle('marketValue');
-  }
-
-  function resetColumns() {
-    cols.resetColumns();
+  // Don't leave an invisible sort in effect (default back to market value).
+  function handleHideColumn(id: ColumnId) {
+    if (sortBy === id) sort.toggle('marketValue');
   }
 
   let sortedHoldings = $derived.by(() => {
@@ -167,29 +158,7 @@
         bind:value={searchInput}
         class="w-60"
       />
-      <DropdownMenu.Root>
-        <DropdownMenu.Trigger>
-          {#snippet child({ props })}
-            <Button {...props} variant="outline" size="sm">
-              <Columns3 aria-hidden="true" class="text-muted-foreground" />
-              Columns
-            </Button>
-          {/snippet}
-        </DropdownMenu.Trigger>
-        <DropdownMenu.Content align="end">
-          {#each COLUMNS as col (col.id)}
-            <DropdownMenu.CheckboxItem
-              checked={isVisible(col.id)}
-              onCheckedChange={(checked) => setVisible(col.id, checked)}
-              closeOnSelect={false}
-            >
-              {col.label}
-            </DropdownMenu.CheckboxItem>
-          {/each}
-          <DropdownMenu.Separator />
-          <DropdownMenu.Item onclick={resetColumns}>Reset to default</DropdownMenu.Item>
-        </DropdownMenu.Content>
-      </DropdownMenu.Root>
+      <ColumnsMenu columns={COLUMNS} {cols} onHide={handleHideColumn} />
     </div>
     <TableShell>
       <Table.Header>
@@ -276,9 +245,11 @@
           {#each sortedHoldings as h (h.commodityGuid)}
             {@const isClosed = h.shares === 0 && h.accounts.length > 0}
             {@const isWatchOnly = h.shares === 0 && h.accounts.length === 0}
-            <Table.Row
-              class="cursor-pointer {isClosed || isWatchOnly ? 'text-muted-foreground' : ''}"
-              onclick={(e) => handleRowClick(e, () => openHolding(h.commodityGuid))}
+            <NavRow
+              onNavigate={() => openHolding(h.commodityGuid)}
+              class="cursor-pointer hover:bg-muted/50 {isClosed || isWatchOnly
+                ? 'text-muted-foreground'
+                : ''}"
             >
               <Table.Cell class="py-2">
                 <!-- Real link for keyboard/AT users; the row click stays as a
@@ -348,7 +319,7 @@
                   {h.allocationPct.toFixed(1)}%
                 </Table.Cell>
               {/if}
-            </Table.Row>
+            </NavRow>
           {/each}
         {/if}
       </Table.Body>

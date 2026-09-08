@@ -15,12 +15,11 @@
   import { todayStr } from '$lib/utils/date-utils.svelte';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
   import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
-  import ImportPrompt from '$lib/components/shared/import-prompt.svelte';
+  import BookGate from '$lib/components/shared/book-gate.svelte';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
-  import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
+  import PageSkeleton from '$lib/components/shared/page-skeleton.svelte';
   import KpiCard from '$lib/components/shared/kpi-card.svelte';
-  import KpiCardRow from '$lib/components/shared/kpi-card-row.svelte';
   import { AsOfPicker } from '$lib/components/shared/as-of-picker';
   import FutureAsOfNote from '$lib/components/shared/future-as-of-note.svelte';
   import MissingFxWarning from '$lib/features/reports/missing-fx-warning.svelte';
@@ -61,15 +60,11 @@
     label: 'Failed to load accounts'
   });
 
-  let data = $derived(res.data);
-  let loading = $derived(res.loading);
-  let error = $derived(res.error);
-
   // Top-level accounts only, in the canonical category order (unknown
   // categories sort last).
   let accounts = $derived.by(() => {
     const order = new Map(CATEGORY_ORDER.map((c, i) => [c, i]));
-    return [...(data?.trees ?? [])].sort(
+    return [...(res.data?.trees ?? [])].sort(
       (a, b) =>
         (order.get(nodeCategory(a.accountType)) ?? CATEGORY_ORDER.length) -
         (order.get(nodeCategory(b.accountType)) ?? CATEGORY_ORDER.length)
@@ -77,11 +72,11 @@
   });
 
   function categoryTotal(cat: Category): number {
-    return data?.byType[cat]?.totalBalance ?? 0;
+    return res.data?.byType[cat]?.totalBalance ?? 0;
   }
 
   let kpiCards = $derived.by(() => {
-    if (!data) return [];
+    if (!res.data) return [];
     return KPI_CATEGORIES.map((cat) => ({
       key: cat,
       title: CATEGORY_LABEL[cat],
@@ -92,8 +87,8 @@
     }));
   });
 
-  let retainedEarnings = $derived(data?.retainedEarnings ?? 0);
-  let balanced = $derived(data !== null && Math.abs(data?.balanceCheck ?? 0) < 0.005);
+  let retainedEarnings = $derived(res.data?.retainedEarnings ?? 0);
+  let balanced = $derived(res.data !== null && Math.abs(res.data?.balanceCheck ?? 0) < 0.005);
 
   function displayValue(n: number): string {
     return formatSessionCurrency(clampZero(n));
@@ -105,11 +100,13 @@
   <meta name="description" content="Chart of accounts." />
 </svelte:head>
 
-{#if dbSession.value || dbBootstrapping.value}
+<BookGate title="Accounts" description="Chart of accounts">
   <div class="flex flex-col gap-6">
     <PageHeader
       title="Accounts"
-      description={data ? `Chart of accounts · ${plural(data.totalAccounts, 'account')}` : ''}
+      description={res.data
+        ? `Chart of accounts · ${plural(res.data.totalAccounts, 'account')}`
+        : ''}
     >
       <div class="flex items-center gap-3">
         {#if dbSession.value}
@@ -132,15 +129,13 @@
       onError={(msg) => toast.error(msg)}
     />
 
-    {#if (loading || dbBootstrapping.value) && !data}
-      <KpiCardRow count={4} />
-
-      <TableSkeleton cols={3} />
-    {:else if error}
-      <ErrorCard message={error} onRetry={() => res.reload()} />
-    {:else if data}
+    {#if (res.loading || dbBootstrapping.value) && !res.data}
+      <PageSkeleton variant="accounts" />
+    {:else if res.error}
+      <ErrorCard message={res.error} onRetry={() => res.reload()} />
+    {:else if res.data}
       <!-- Summary cards by account category -->
-      <DimWrapper active={loading} class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+      <DimWrapper active={res.loading} class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
         {#each kpiCards as card (card.key)}
           <KpiCard title={card.title} value={displayValue(card.value)} valueClass={card.valueClass}>
             {#snippet icon()}
@@ -161,13 +156,13 @@
       </DimWrapper>
 
       <MissingFxWarning
-        missing={data.missingFx}
-        missingPrices={data.missingPrices}
-        reportCurrency={data.reportCurrency}
+        missing={res.data.missingFx}
+        missingPrices={res.data.missingPrices}
+        reportCurrency={res.data.reportCurrency}
       />
 
       <!-- Balance composition tree -->
-      <BalanceTree data={data?.trees ?? []} {loading} />
+      <BalanceTree data={res.data?.trees ?? []} loading={res.loading} />
 
       {#if accounts.length === 0}
         <EmptyState card title="No accounts found" description="No top-level accounts exist yet.">
@@ -176,27 +171,22 @@
           {/snippet}
         </EmptyState>
       {:else}
-        <DimWrapper active={loading}>
+        <DimWrapper active={res.loading}>
           <AccountTable rows={accounts} />
         </DimWrapper>
       {/if}
 
-      {#if !loading && !error}
+      {#if !res.loading && !res.error}
         <FutureAsOfNote {asOf} />
         <p class="text-xs text-muted-foreground">
           {#if balanced}
             Balanced · Assets = Liabilities + Equity (incl. unrealized gains) + Retained earnings.
           {:else}
-            Out of balance by {formatSessionCurrency(data.balanceCheck)} — usually a missing FX rate,
+            Out of balance by {formatSessionCurrency(res.data.balanceCheck)} — usually a missing FX rate,
             an unpriced security, or currency translation in a book without trading accounts.
           {/if}
         </p>
       {/if}
     {/if}
   </div>
-{:else}
-  <div class="flex flex-col gap-6">
-    <PageHeader title="Accounts" description="Chart of accounts" />
-    <ImportPrompt />
-  </div>
-{/if}
+</BookGate>

@@ -1,4 +1,5 @@
 import { afterNavigate } from '$app/navigation';
+import { closeAllOverlays } from '$lib/stores/ui.svelte';
 
 export interface NavHistoryState {
   stack: string[];
@@ -11,8 +12,16 @@ export const navHistory = $state<{ value: NavHistoryState }>({
 
 const MAX_STACK = 200;
 
+/**
+ * Tracks in-app navigations for the title-bar back/forward buttons.
+ * Limitation: a deep link starts with `stack=[href], index=0`, so Back is
+ * disabled even when the browser itself could go back (to an external page).
+ * This mirrors in-app history only by design — like a browser, going back
+ * past the first in-app entry would leave the app.
+ */
 export function initNavHistory() {
   afterNavigate(({ to, type, delta }) => {
+    closeAllOverlays();
     if (!to) return;
     const href = to.url.href;
 

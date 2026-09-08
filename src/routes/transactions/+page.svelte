@@ -12,9 +12,8 @@
   import { Plus } from '@lucide/svelte';
   import { PaginationNav } from '$lib/components/shared/pagination-nav';
   import PageHeader from '$lib/components/layout/page-header.svelte';
-  import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
-  import { Skeleton } from '$lib/components/ui/skeleton';
-  import ImportPrompt from '$lib/components/shared/import-prompt.svelte';
+  import PageSkeleton from '$lib/components/shared/page-skeleton.svelte';
+  import BookGate from '$lib/components/shared/book-gate.svelte';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
   import { toast } from '$lib/components/ui/sonner';
   import { useDebouncedSearch } from '$lib/hooks/use-debounced-search.svelte';
@@ -25,6 +24,7 @@
     dateParam
   } from '$lib/hooks/use-url-params.svelte';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
+  import { useResetPageOnChange } from '$lib/hooks/use-page-reset.svelte';
   import { useTableSort } from '$lib/hooks/use-table-sort.svelte';
   import { plural, sessionCurrency } from '$lib/utils/format.svelte';
   import { ArrowLeftRight } from '@lucide/svelte';
@@ -88,6 +88,15 @@
 
   let currency = $derived(sessionCurrency());
 
+  // Reset to page 1 whenever the query shape changes. Runs before the fetch
+  // effect in the same flush, so the fetch sees the reset page immediately.
+  useResetPageOnChange(
+    () => JSON.stringify({ filters, sortBy, sortDir }),
+    () => {
+      page = 1;
+    }
+  );
+
   const res = useAsyncData({
     enabled: () => !!dbSession.value,
     fetch: async () => {
@@ -102,23 +111,6 @@
       return r;
     },
     label: 'Failed to load transactions'
-  });
-
-  let loading = $derived(res.loading);
-  let data = $derived(res.data);
-  let error = $derived(res.error);
-
-  let prevFilterKey = '';
-
-  // Reset to page 1 whenever the query shape changes. Declared before the
-  // hook's effect so it runs first in the same flush: the fetch sees the
-  // reset page immediately instead of firing a doomed request.
-  $effect(() => {
-    const fk = JSON.stringify({ filters, sortBy, sortDir });
-    if (prevFilterKey && prevFilterKey !== fk && page !== 1) {
-      page = 1;
-    }
-    prevFilterKey = fk;
   });
 
   // Let the ledger table win the initial backend race: the account filter
@@ -154,9 +146,12 @@
   <meta name="description" content="Transaction ledger with filters." />
 </svelte:head>
 
-{#if dbSession.value || dbBootstrapping.value}
+<BookGate title="Transactions" description="Transaction ledger with filters">
   <div class="flex flex-col gap-6">
-    <PageHeader title="Transactions" description={data ? plural(data.total, 'transaction') : ''}>
+    <PageHeader
+      title="Transactions"
+      description={res.data ? plural(res.data.total, 'transaction') : ''}
+    >
       {#if dbSession.value}
         <Button onclick={() => (editorOpen = true)}>
           <Plus aria-hidden="true" class="size-4" />
@@ -185,23 +180,13 @@
       {accounts}
     />
 
-    {#if (loading || dbBootstrapping.value) && !data}
-      <!-- Same wrapper as the loaded DimWrapper content so the pagination
-           placeholder holds its height and nothing jumps on first load. -->
-      <div class="flex flex-col gap-4">
-        <TableSkeleton cols={3} />
-        <div class="flex items-center justify-between">
-          <Skeleton class="h-5 w-32" />
-          <div class="flex items-center gap-2">
-            <Skeleton class="h-8 w-24" />
-            <Skeleton class="h-8 w-16" />
-          </div>
-        </div>
-      </div>
-    {:else if error}
-      <ErrorCard message={error} onRetry={() => res.reload()} />
-    {:else if data}
-      {#if data.transactions.length === 0}
+    {#if (res.loading || dbBootstrapping.value) && !res.data}
+      <!-- Pagination placeholder holds its height so nothing jumps on first load. -->
+      <PageSkeleton variant="transactions" />
+    {:else if res.error}
+      <ErrorCard message={res.error} onRetry={() => res.reload()} />
+    {:else if res.data}
+      {#if res.data.transactions.length === 0}
         <EmptyState
           card
           title="No transactions"
@@ -216,9 +201,9 @@
       {:else}
         <!-- Keep the previous table visible (dimmed) during refetches so the
              page doesn't jump and pagination stays in place. -->
-        <DimWrapper active={loading} class="flex flex-col gap-4">
+        <DimWrapper active={res.loading} class="flex flex-col gap-4">
           <TransactionTable
-            transactions={data.transactions}
+            transactions={res.data.transactions}
             {currency}
             {sortBy}
             {sortDir}
@@ -226,8 +211,8 @@
           />
           <PaginationNav
             bind:page
-            totalPages={data.totalPages}
-            totalItems={data.total}
+            totalPages={res.data.totalPages}
+            totalItems={res.data.total}
             pageSize={appSettings.value.pageSize}
             onPageSizeChange={(size) => applyPageSize(size, (v) => (page = v))}
           />
@@ -235,9 +220,4 @@
       {/if}
     {/if}
   </div>
-{:else}
-  <div class="flex flex-col gap-6">
-    <PageHeader title="Transactions" description="Transaction ledger with filters" />
-    <ImportPrompt />
-  </div>
-{/if}
+</BookGate>

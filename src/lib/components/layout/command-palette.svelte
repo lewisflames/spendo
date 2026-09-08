@@ -7,7 +7,7 @@
     PALETTE_GROUPS,
     type PaletteCommand
   } from '$lib/features/palette/commands';
-  import { commandPalette } from '$lib/stores/command-palette.svelte';
+  import { commandPalette } from '$lib/stores/ui.svelte';
   import { dbSession } from '$lib/stores/db.svelte';
 
   let search = $state('');

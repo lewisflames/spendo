@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
   import * as Dialog from '$lib/components/ui/dialog';
+  import { useDialogReset } from '$lib/hooks/use-dialog-reset.svelte';
   import * as Select from '$lib/components/ui/select';
   import { Select as SelectPrimitive } from 'bits-ui';
   import { Input } from '$lib/components/ui/input';
@@ -67,13 +67,7 @@
   let freeYears = $derived(yearOptions.filter((o) => !takenSet.has(Number(o.value))));
 
   // Re-initialize the form whenever the dialog opens (user interaction).
-  // This must be an $effect: bits-ui only calls onOpenChange for its own
-  // internal open/close (trigger, Escape), not when `open` is set
-  // programmatically via bind:open — which is the only way this dialog is
-  // opened — so syncing there never runs.
-  $effect.pre(() => {
-    if (open) untrack(() => syncDefaults());
-  });
+  useDialogReset(() => open, syncDefaults);
 
   function syncDefaults() {
     const y = by.clampYear(initialYear ?? new Date().getFullYear());

@@ -2,7 +2,7 @@
   import { Button } from '$lib/components/ui/button';
   import { SearchInput } from '$lib/components/shared/search-input';
   import { cn } from '$lib/utils';
-  import { dbBootstrapping, dbSession } from '$lib/stores/db.svelte';
+  import { dbSession } from '$lib/stores/db.svelte';
   import { sessionCurrency, formatSessionCurrency } from '$lib/utils/format.svelte';
   import { fetchBudgetVsActual, fetchAccounts, fetchBudgetDateRange } from '$lib/tauri';
   import { openBudget } from '$lib/utils/navigation';
@@ -11,7 +11,7 @@
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import { Plus, PiggyBank, Wallet, TrendingDown } from '@lucide/svelte';
   import { toast } from '$lib/components/ui/sonner';
-  import ImportPrompt from '$lib/components/shared/import-prompt.svelte';
+  import BookGate from '$lib/components/shared/book-gate.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import KpiCard from '$lib/components/shared/kpi-card.svelte';
   import KpiCardRow from '$lib/components/shared/kpi-card-row.svelte';
@@ -71,7 +71,6 @@
   let accountsData = $derived(res.data?.accounts ?? null);
   let dateRange = $derived(res.data?.range ?? null);
 
-  let error = $derived(res.error);
   let formError = $state<string | null>(null);
   // Dim during refetches only; the initial load shows the skeleton instead.
   let yearLoading = $derived(res.loading && res.data !== null);
@@ -111,7 +110,7 @@
   <meta name="description" content="Yearly spending targets." />
 </svelte:head>
 
-{#if dbSession.value || dbBootstrapping.value}
+<BookGate title="Budgets" description="Yearly spending targets">
   <div class="flex flex-col gap-6">
     <PageHeader title="Budgets" description="Yearly spending targets · carryover always applied">
       <div class="flex flex-wrap items-center gap-2">
@@ -131,8 +130,8 @@
     {#if formError}
       <ErrorCard message={formError} />
     {/if}
-    {#if error}
-      <ErrorCard message={error} onRetry={() => res.reload()} />
+    {#if res.error}
+      <ErrorCard message={res.error} onRetry={() => res.reload()} />
     {/if}
 
     <!-- KPI summary cards -->
@@ -216,12 +215,7 @@
       />
     </DimWrapper>
   </div>
-{:else}
-  <div class="flex flex-col gap-6">
-    <PageHeader title="Budgets" description="Yearly spending targets" />
-    <ImportPrompt />
-  </div>
-{/if}
+</BookGate>
 
 {#key showAddDialog}
   <BudgetYearDialog
