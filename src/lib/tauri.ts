@@ -149,7 +149,7 @@ export interface SplitDetail extends SplitInfo {
   accountDescription?: string | null;
 }
 
-interface TransactionDetail {
+export interface TransactionDetail {
   guid: string;
   postDate: string;
   description: string | null;
@@ -159,7 +159,7 @@ interface TransactionDetail {
   totalAmount: number;
 }
 
-interface TransactionDetailResult {
+export interface TransactionDetailResult {
   transaction: TransactionDetail;
   prevGuid?: string | null;
   nextGuid?: string | null;
@@ -328,6 +328,30 @@ export const setBaseCurrency = (currency: string): Promise<EmptyBookResult> =>
 
 export const fetchAccounts = (asOfDate?: string): Promise<AccountsResult> =>
   invoke('fetch_accounts', { asOfDate: asOfDate ?? null });
+
+export interface SplitInput {
+  accountGuid: string;
+  amount: number;
+  quantity?: number | null;
+  memo?: string | null;
+}
+
+export interface TxInput {
+  postDate: string;
+  description?: string | null;
+  num?: string | null;
+  notes?: string | null;
+  splits: SplitInput[];
+}
+
+export const createTransaction = (input: TxInput): Promise<string> =>
+  invoke('create_transaction', { input });
+
+export const updateTransaction = (guid: string, input: TxInput): Promise<void> =>
+  invoke('update_transaction', { guid, input });
+
+export const deleteTransaction = (guid: string): Promise<void> =>
+  invoke('delete_transaction', { guid });
 
 export const fetchTransactions = (
   page: number,

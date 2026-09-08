@@ -7,6 +7,9 @@
   import TransactionFilters from '$lib/features/transactions/transaction-filters.svelte';
   import TransactionTable from '$lib/features/transactions/transaction-table.svelte';
   import TransactionHeatmap from '$lib/features/transactions/transaction-heatmap.svelte';
+  import TransactionEditorDialog from '$lib/features/transactions/transaction-editor-dialog.svelte';
+  import { Button } from '$lib/components/ui/button';
+  import { Plus } from '@lucide/svelte';
   import { PaginationNav } from '$lib/components/shared/pagination-nav';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
@@ -130,6 +133,7 @@
   });
 
   let accounts = $state<AccountInfo[]>([]);
+  let editorOpen = $state(false);
 
   useAsyncData({
     enabled: () => !!dbSession.value && accountsUnlocked,
@@ -152,7 +156,24 @@
 
 {#if dbSession.value || dbBootstrapping.value}
   <div class="flex flex-col gap-6">
-    <PageHeader title="Transactions" description={data ? plural(data.total, 'transaction') : ''} />
+    <PageHeader title="Transactions" description={data ? plural(data.total, 'transaction') : ''}>
+      {#if dbSession.value}
+        <Button onclick={() => (editorOpen = true)}>
+          <Plus aria-hidden="true" class="size-4" />
+          New transaction
+        </Button>
+      {/if}
+    </PageHeader>
+
+    <TransactionEditorDialog
+      bind:open={editorOpen}
+      mode="create"
+      onSaved={() => {
+        res.reload();
+        toast.success('Transaction created');
+      }}
+      onError={(msg) => toast.error(msg)}
+    />
 
     <TransactionHeatmap {filters} />
 
