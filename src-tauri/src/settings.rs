@@ -55,6 +55,7 @@ pub struct BookSettings {
     pub price_auto_refresh: String,
     pub export_csv_delimiter: String,
     pub export_date_format: String,
+    pub reminders_lookahead_days: u8,
 }
 
 fn default_book_settings() -> BookSettings {
@@ -64,6 +65,7 @@ fn default_book_settings() -> BookSettings {
         price_auto_refresh: "off".to_string(),
         export_csv_delimiter: ",".to_string(),
         export_date_format: "iso".to_string(),
+        reminders_lookahead_days: 14,
     }
 }
 
@@ -116,6 +118,16 @@ fn validate_book_setting(key: &str, value: &str) -> Result<(), String> {
             "iso" | "locale" => Ok(()),
             _ => Err(format!("Invalid value for {key}: {value}")),
         },
+        "reminders_lookahead_days" => {
+            let days: u8 = value
+                .parse()
+                .map_err(|_| format!("Invalid value for {key}: {value}"))?;
+            if (1..=90).contains(&days) {
+                Ok(())
+            } else {
+                Err(format!("Invalid value for {key}: {value}"))
+            }
+        }
         _ => Err(format!("Unknown book setting: {key}")),
     }
 }
@@ -151,6 +163,12 @@ fn get_book_settings_inner(conn: &Connection) -> Result<BookSettings, String> {
             "export_date_format",
             defaults.export_date_format.clone(),
         ),
+        reminders_lookahead_days: pick(
+            "reminders_lookahead_days",
+            defaults.reminders_lookahead_days.to_string(),
+        )
+        .parse()
+        .unwrap_or(14),
     })
 }
 
@@ -234,6 +252,8 @@ mod tests {
         assert_eq!(updated.export_csv_delimiter, ";");
         let updated = set_book_setting_inner(&conn, "export_date_format", "locale").unwrap();
         assert_eq!(updated.export_date_format, "locale");
+        let updated = set_book_setting_inner(&conn, "reminders_lookahead_days", "30").unwrap();
+        assert_eq!(updated.reminders_lookahead_days, 30);
         // Full snapshot persists.
         assert_eq!(get_book_settings_inner(&conn).unwrap(), updated);
     }
@@ -250,6 +270,9 @@ mod tests {
             ("price_auto_refresh", "hourly"),
             ("export_csv_delimiter", "|"),
             ("export_date_format", "us"),
+            ("reminders_lookahead_days", "0"),
+            ("reminders_lookahead_days", "91"),
+            ("reminders_lookahead_days", "soon"),
         ] {
             assert!(
                 set_book_setting_inner(&conn, key, value).is_err(),

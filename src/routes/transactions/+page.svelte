@@ -10,6 +10,7 @@
   import TransactionEditorDialog from '$lib/features/transactions/transaction-editor-dialog.svelte';
   import { Button } from '$lib/components/ui/button';
   import { Plus } from '@lucide/svelte';
+  import { resolve } from '$app/paths';
   import { PaginationNav } from '$lib/components/shared/pagination-nav';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import PageSkeleton from '$lib/components/shared/page-skeleton.svelte';
@@ -27,7 +28,7 @@
   import { useResetPageOnChange } from '$lib/hooks/use-page-reset.svelte';
   import { useTableSort } from '$lib/hooks/use-table-sort.svelte';
   import { plural, sessionCurrency } from '$lib/utils/format.svelte';
-  import { ArrowLeftRight } from '@lucide/svelte';
+  import { ArrowLeftRight, CalendarClock } from '@lucide/svelte';
   import type { AccountInfo } from '$lib/tauri';
 
   let pageSize = $derived(appSettings.value.pageSize);
@@ -153,6 +154,10 @@
       description={res.data ? plural(res.data.total, 'transaction') : ''}
     >
       {#if dbSession.value}
+        <Button variant="outline" href={resolve('/scheduled')}>
+          <CalendarClock aria-hidden="true" class="size-4" />
+          Recurring
+        </Button>
         <Button onclick={() => (editorOpen = true)}>
           <Plus aria-hidden="true" class="size-4" />
           New transaction

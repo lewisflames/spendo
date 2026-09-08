@@ -316,6 +316,7 @@ export interface BookSettings {
   priceAutoRefresh: PriceAutoRefresh;
   exportCsvDelimiter: CsvDelimiter;
   exportDateFormat: ExportDateFormat;
+  remindersLookaheadDays: number;
 }
 
 export const getBookSettings = (): Promise<BookSettings> =>
@@ -419,6 +420,91 @@ export const fetchTransactionHeatmap = (filters?: Filters): Promise<HeatmapPoint
 /** `null` when no transaction with that GUID exists. */
 export const fetchTransaction = (guid: string): Promise<TransactionDetailResult | null> =>
   invoke<TransactionDetailResult | null>('fetch_transaction', { guid });
+
+// ── Recurring schedules (manual remind + post; in-app reminders only) ──
+
+export type ScheduleFrequency =
+  'daily' | 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'yearly';
+
+export interface ScheduleSplit {
+  accountGuid: string;
+  accountName?: string | null;
+  amount: number;
+  quantity?: number | null;
+  memo?: string | null;
+}
+
+export interface Schedule {
+  guid: string;
+  name: string;
+  frequency: ScheduleFrequency;
+  intervalMult: number;
+  /** YYYY-MM-DD of the first occurrence. */
+  startDate: string;
+  /** YYYY-MM-DD, or null when indefinite. */
+  endDate: string | null;
+  maxOccurrences: number | null;
+  occurrencesPosted: number;
+  /** YYYY-MM-DD, or null when completed. */
+  nextDueDate: string | null;
+  active: boolean;
+  description: string | null;
+  num?: string | null;
+  notes?: string | null;
+  splits: ScheduleSplit[];
+  /** Sum of the positive template split amounts (a raw sum is always 0). */
+  previewAmount: number;
+  createdAt: string;
+}
+
+export interface ScheduleInput {
+  name: string;
+  frequency: ScheduleFrequency;
+  intervalMult?: number | null;
+  startDate: string;
+  endDate?: string | null;
+  maxOccurrences?: number | null;
+  description?: string | null;
+  num?: string | null;
+  notes?: string | null;
+  splits: SplitInput[];
+}
+
+export interface UpcomingReminder {
+  scheduleGuid: string;
+  name: string;
+  frequency: ScheduleFrequency;
+  /** YYYY-MM-DD */
+  nextDueDate: string;
+  overdueDays: number;
+  previewAmount: number;
+  description: string | null;
+}
+
+export const fetchSchedules = (): Promise<Schedule[]> => invoke<Schedule[]>('fetch_schedules');
+
+export const createSchedule = (input: ScheduleInput): Promise<Schedule> =>
+  invoke<Schedule>('create_schedule', { input });
+
+export const updateSchedule = (guid: string, input: ScheduleInput): Promise<Schedule> =>
+  invoke<Schedule>('update_schedule', { guid, input });
+
+export const deleteSchedule = (guid: string): Promise<void> =>
+  invoke<void>('delete_schedule', { guid });
+
+export const setScheduleActive = (guid: string, active: boolean): Promise<Schedule> =>
+  invoke<Schedule>('set_schedule_active', { guid, active });
+
+export const fetchUpcomingReminders = (lookaheadDays?: number): Promise<UpcomingReminder[]> =>
+  invoke<UpcomingReminder[]>('fetch_upcoming_reminders', { lookaheadDays: lookaheadDays ?? null });
+
+/** Posts the due occurrence; resolves with the new transaction GUID. */
+export const postScheduleOccurrence = (guid: string): Promise<string> =>
+  invoke<string>('post_schedule_occurrence', { guid });
+
+/** Skips the due occurrence; resolves with the new pointer (`null` = completed). */
+export const skipScheduleOccurrence = (guid: string): Promise<string | null> =>
+  invoke<string | null>('skip_schedule_occurrence', { guid });
 
 /** One row per split for the settings CSV export (GnuCash multi-split shape). */
 export interface ExportSplitRow {

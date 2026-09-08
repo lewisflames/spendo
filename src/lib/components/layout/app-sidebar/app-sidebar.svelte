@@ -10,6 +10,7 @@
     Receipt,
     PiggyBank,
     Briefcase,
+    CalendarClock,
     CircleHelp,
     FolderTree,
     Scale
@@ -55,6 +56,20 @@
                 <a href={resolve('/transactions')} {...props}>
                   <ArrowLeftRight aria-hidden="true" />
                   <span class="group-data-[collapsible=icon]:hidden">Transactions</span>
+                </a>
+              {/snippet}
+            </Sidebar.MenuButton>
+          </Sidebar.MenuItem>
+          <Sidebar.MenuItem>
+            <Sidebar.MenuButton
+              isActive={page.url.pathname === '/scheduled' ||
+                page.url.pathname.startsWith('/scheduled/')}
+              tooltipContent="Scheduled"
+            >
+              {#snippet child({ props })}
+                <a href={resolve('/scheduled')} {...props}>
+                  <CalendarClock aria-hidden="true" />
+                  <span class="group-data-[collapsible=icon]:hidden">Scheduled</span>
                 </a>
               {/snippet}
             </Sidebar.MenuButton>

@@ -11,6 +11,7 @@
   import { formatDateRange } from '$lib/utils/format.svelte';
   import { toastPriceResult } from '$lib/features/portfolio/price-utils';
   import ChangeHistory from '$lib/features/home/change-history.svelte';
+  import UpcomingCard from '$lib/features/schedules/upcoming-card.svelte';
   import WelcomeScreen from '$lib/features/home/welcome-screen.svelte';
   import ImportButton from '$lib/components/shared/import-button.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
@@ -122,6 +123,7 @@
       {#if importError}
         <ErrorCard message={importError} />
       {/if}
+      <UpcomingCard />
       <ChangeHistory />
     </div>
   </section>

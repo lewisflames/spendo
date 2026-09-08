@@ -99,6 +99,14 @@
     { value: 'last_12_months', label: 'Last 12 months' }
   ];
 
+  const lookaheadOptions: { value: string; label: string }[] = [
+    { value: '7', label: 'Next 7 days' },
+    { value: '14', label: 'Next 14 days' },
+    { value: '30', label: 'Next 30 days' },
+    { value: '60', label: 'Next 60 days' },
+    { value: '90', label: 'Next 90 days' }
+  ];
+
   const DEFAULT_CUSTOM_PRIMARY = '#3b82f6';
 
   const accents: { value: AccentId; label: string; swatch: string }[] = [
@@ -160,7 +168,8 @@
   );
 
   async function handleBookSetting<
-    K extends 'fiscalYearStartMonth' | 'defaultPnlPeriod' | 'priceAutoRefresh'
+    K extends
+      'fiscalYearStartMonth' | 'defaultPnlPeriod' | 'priceAutoRefresh' | 'remindersLookaheadDays'
   >(field: K, value: BookSettings[K]) {
     if (!dbSession.value || savingBookKey) return;
     savingBookKey = true;
@@ -776,6 +785,38 @@
           aria-label="Auto-refresh prices on portfolio open"
         />
       </div>
+      <div class="flex items-center justify-between gap-4">
+        <div class="flex flex-col gap-1">
+          <span class="text-sm font-medium">Reminder lookahead</span>
+          <span class="text-xs text-muted-foreground">
+            How far ahead scheduled transactions surface as reminders
+          </span>
+        </div>
+        {#if dbSession.value}
+          <Select.Root
+            type="single"
+            value={String(bookSettings.value.remindersLookaheadDays)}
+            onValueChange={(v) => {
+              const days = Number(v);
+              if (Number.isInteger(days) && days >= 1 && days <= 90)
+                void handleBookSetting('remindersLookaheadDays', days);
+            }}
+            items={lookaheadOptions}
+            disabled={savingBookKey}
+          >
+            <Select.Trigger class="w-44">
+              <SelectPrimitive.Value placeholder="Select window" />
+            </Select.Trigger>
+            <Select.Content>
+              {#each lookaheadOptions as o (o.value)}
+                <Select.Item value={o.value} label={o.label}>{o.label}</Select.Item>
+              {/each}
+            </Select.Content>
+          </Select.Root>
+        {:else}
+          <span class="text-xs text-muted-foreground">No book open.</span>
+        {/if}
+      </div>
       {#if !dbSession.value}
         <p class="text-xs text-muted-foreground">
           Open or create a book to change reporting defaults — they travel with the file.
@@ -799,7 +840,8 @@
         <div class="flex flex-col gap-1">
           <span class="text-sm font-medium">Clear all data</span>
           <span class="text-xs text-muted-foreground">
-            Delete accounts, transactions, budgets, prices and history from this book
+            Delete accounts, transactions, scheduled transactions, budgets, prices and history from
+            this book
           </span>
         </div>
         <Dialog.Root bind:open={clearDialogOpen}>
@@ -814,8 +856,9 @@
             <Dialog.Header>
               <Dialog.Title>Clear all data?</Dialog.Title>
               <Dialog.Description>
-                This will permanently delete all accounts, transactions, budgets, prices, symbol
-                overrides and changes history. Your appearance preferences will be preserved.
+                This will permanently delete all accounts, transactions, scheduled transactions,
+                budgets, prices, symbol overrides and changes history. Your appearance preferences
+                will be preserved.
               </Dialog.Description>
             </Dialog.Header>
             <Dialog.Footer>

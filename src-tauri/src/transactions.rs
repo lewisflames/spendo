@@ -220,15 +220,28 @@ fn to_quantity_rational(qty: f64) -> Result<(i64, i64), AppError> {
     Ok((num, QUANTITY_DENOM))
 }
 
-fn opt_text(s: &Option<String>) -> Option<String> {
+/// Trimmed `None`-when-empty helper, shared with `schedules.rs` template storage.
+pub(crate) fn opt_text(s: &Option<String>) -> Option<String> {
     s.as_ref().map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
 }
 
 /// Shared validation for create/update: ≥2 splits, accounts exist and are not
 /// placeholders, finite amounts, zero-sum balance. Returns the normalized
 /// post-date string.
-fn validate_tx_input(conn: &Connection, input: &TxInput) -> Result<String, AppError> {
+/// Full manual validation including the future-date block. `pub(crate)` for
+/// `schedules.rs`: posting a due occurrence must pass the same gate as a
+/// hand-entered transaction (due dates are always ≤ today by construction).
+pub(crate) fn validate_tx_input(conn: &Connection, input: &TxInput) -> Result<String, AppError> {
     let post_date = validate_post_date(&input.post_date)?;
+    validate_tx_body(conn, input)?;
+    Ok(post_date)
+}
+
+/// Body-only half of [`validate_tx_input`] (no post-date check): schedule
+/// templates reuse it because a template is future intent, not a posting.
+/// `pub(crate)` for `schedules.rs`; the post path re-validates with the full
+/// date-aware check at posting time.
+pub(crate) fn validate_tx_body(conn: &Connection, input: &TxInput) -> Result<(), AppError> {
     if input.splits.len() < 2 {
         return Err(AppError::Validation("A transaction needs at least two splits".to_string()));
     }
@@ -305,7 +318,7 @@ fn validate_tx_input(conn: &Connection, input: &TxInput) -> Result<String, AppEr
         }
     }
     let _ = seen_accounts;
-    Ok(post_date)
+    Ok(())
 }
 
 fn tx_label(input: &TxInput) -> String {
@@ -796,7 +809,9 @@ pub async fn fetch_transaction(
 
 // ── Manual editor: create / update / delete ─────────────────────────────────
 
-fn insert_split_rows(
+/// `pub(crate)` for `schedules.rs` (posting a due occurrence reuses the exact
+/// manual-entry split encoding: fixed denominators, `'n'` reconcile state).
+pub(crate) fn insert_split_rows(
     conn: &Connection,
     tx_guid: &str,
     splits: &[SplitInput],
@@ -811,7 +826,7 @@ fn insert_split_rows(
             "INSERT INTO splits
               (guid, tx_guid, account_guid, value_num, value_denom,
                quantity_num, quantity_denom, reconcile_state, reconciled, memo)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'n', 0, ?8)",
+              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'n', 0, ?8)",
             params![
                 split_guid,
                 tx_guid,
