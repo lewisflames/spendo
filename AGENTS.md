@@ -6,18 +6,19 @@ Local-first personal finance manager (portable `.spendo` books). Rust backend (`
 
 ## Commands
 
-| Action      | Command                                                                                  |
-| ----------- | ---------------------------------------------------------------------------------------- |
-| Dev server  | `bun run dev` (`vite dev`)                                                               |
-| Build       | `bun run build` (`vite build`)                                                           |
-| Prepare     | `bun run prepare` (svelte-kit sync)                                                      |
-| Type-check  | `bun run check` (runs `svelte-kit sync` first)                                           |
-| Lint        | `bun run lint` (`prettier --check . && eslint .`)                                        |
-| Format      | `bun run format` (`prettier --write .`)                                                  |
-| Tauri dev   | `bun run tauri:dev` (runs `generate-icons` first)                                        |
-| Tauri build | `bun run tauri:build` (runs `generate-icons` first, `tauri build --features production`) |
+| Action          | Command                                                                                  |
+| --------------- | ---------------------------------------------------------------------------------------- |
+| Dev server      | `bun run dev` (`vite dev`)                                                               |
+| Build           | `bun run build` (`vite build`)                                                           |
+| Prepare         | `bun run prepare` (svelte-kit sync)                                                      |
+| Type-check      | `bun run check` (runs `svelte-kit sync` first)                                           |
+| Test (frontend) | `bun run test` (`vitest run`, colocated `src/**/*.test.ts`)                              |
+| Lint            | `bun run lint` (`prettier --check . && eslint .`)                                        |
+| Format          | `bun run format` (`prettier --write .`)                                                  |
+| Tauri dev       | `bun run tauri:dev` (runs `generate-icons` first)                                        |
+| Tauri build     | `bun run tauri:build` (runs `generate-icons` first, `tauri build --features production`) |
 
-No `preview` script (no `vite preview` wrapper). No frontend test framework. Rust unit tests (colocated in `src-tauri/src/` modules) run with `cargo test` (in `src-tauri/`); frontend is verified via `bun run check` + `bun run lint`.
+No `preview` script (no `vite preview` wrapper). Frontend unit tests are pure-helper `vitest` suites colocated as `src/**/*.test.ts` (`bun run test`); Rust unit tests (colocated in `src-tauri/src/` modules) run with `cargo test` (in `src-tauri/`); frontend is verified via `bun run check` + `bun run lint` + `bun run test`.
 
 ## Code style
 
@@ -33,7 +34,7 @@ No `preview` script (no `vite preview` wrapper). No frontend test framework. Rus
 
 - **Tauri v2** desktop app. Frontend is static SvelteKit (adapter-static, SPA, no SSR). Backend is Rust in `src-tauri/src/`.
 - **All backend calls** go through `@tauri-apps/api/core` `invoke()` via `$lib/tauri.ts`. No `+server.ts` / `+page.server.ts`.
-- **Rust modules** (`src-tauri/src/`): `db`, `accounts`, `account_detail`, `transactions`, `prices`, `import`, `home`, `reports`, `budgets`, `portfolio`, `settings`, `books`, `utils`, plus support modules `fx`, `sql`, `tree`, `yahoo`. Cargo crate: `spendo_app_lib`.
+- **Rust modules** (`src-tauri/src/`): `db`, `accounts`, `accounts_mut`, `account_detail`, `transactions`, `prices`, `import`, `home`, `reports`, `budgets`, `portfolio`, `settings`, `books`, `export`, `history`, `init`, `utils`, plus support modules `fx`, `sql`, `tree`, `yahoo`. Cargo crate: `spendo_app_lib`. `reports` owns only P&L (`/accounts` is the balance-sheet view).
 - **DB**: SQLite via `rusqlite`. Document model: one active `.spendo` book opened in place; connection held as `Arc<Mutex<Connection>>` in Tauri state (`AppState` also carries `db_path: Mutex<Option<PathBuf>>` — `None` while book-less — plus `app_data_dir`). Book switching (`books.rs`: `open_book`/`create_book_at`/`save_book_as`) replaces the `Connection` via `db::run_swap_blocking` (the mutable counterpart of `run_blocking`) and remembers the path in `app_data_dir/last_book.json`. Books are stamped with `PRAGMA application_id` (`SPENDO_APP_ID`) so Open can reject GnuCash sources / random SQLite. Legacy single `spendo.db` in `app_data_dir` is auto-adopted on upgrade. Schema created on first use in `db::init_db`. No migrations by design (pre-release): `SCHEMA` is the single source of truth; schema changes require a database reset (Settings → Clear all data, or delete the book file) followed by re-import.
 - **Routes**: `/`, `/accounts`, `/accounts/[guid]`, `/budgets`, `/budgets/[accountGuid]`, `/reports/pnl`, `/portfolio`, `/portfolio/[holding]`, `/transactions`, `/transactions/[id]`, `/settings`, `/about` (plus dev-only `/dev/force-test`). `/accounts` is the single balance-sheet view (as-of picker + accounting identity); `/reports` holds only period reports (P&L).
 - **Frontend layout**: routes contain only route files (`+page.svelte` etc.). Page-specific components/types live in `$lib/features/<domain>/` (`home`, `accounts`, `budgets`, `pnl`, `reports`, `portfolio`, `transactions`). Domain utilities in `$lib/utils/` (`csv`, `export`, `error`, `format.svelte.ts`, `date-utils.svelte.ts`, plus `navigation.ts`, `reconcile.ts`).
@@ -65,6 +66,7 @@ No `preview` script (no `vite preview` wrapper). No frontend test framework. Rus
 ## Backend conventions
 
 - **Every DB-touching command** runs through `db::run_blocking(state.db.clone(), move |conn| …)` — never lock the connection directly inside an `async fn` (it blocks a tokio worker). File I/O (hashing, dialogs) happens before acquiring the lock. Book switching uses the mutable counterpart `db::run_swap_blocking` (see `books.rs`).
+- **Transactions**: use `db::with_tx_err(conn, || …)` instead of manual `BEGIN`/`COMMIT`/`ROLLBACK` (RAII rollback on drop). `*_inner` functions return `Result<T, db::AppError>` (`NotFound`/`Validation`/`Db`) and convert to `String` only at the `#[tauri::command]` boundary (`From<AppError>` keeps messages identical). Never match SQLite errors by message text — `DbError` carries the extended code (`is_foreign_key()`).
 - **Visibility window**: future-dated transactions are excluded from every "current state" query via `utils::VISIBLE_TX_FILTER`. Don't hand-write the predicate — new money queries must use it or net worth/PnL/budgets diverge.
 - **SQL fragments**: reuse `utils::RAW_AMOUNT` / `QUANTITY_AMOUNT` / `signed_amount_expr` and the `sql::WhereBuilder` for dynamic WHERE clauses (auto-numbered `?N`, `param_offset` reserves leading indices). Escape user search input with `utils::escape_like` + `ESCAPE '\'`.
 - **Pagination**: clamp client input at the boundary with `utils::clamp_page_size` / `clamp_page`; compute totals with `utils::total_pages`.
@@ -77,5 +79,13 @@ No `preview` script (no `vite preview` wrapper). No frontend test framework. Rus
 - **URL state**: compose specs from the factories in `use-url-params.svelte.ts` (`pageParam`, `debouncedSearchParam`, `dateParam`, `yearParam`); free-form specs only when no factory fits.
 - **Search inputs**: always debounce through `useDebouncedSearch`.
 - **Formatting**: dates parse through `parseLocalDate` (date-only strings are local, not UTC); counts use `plural(n, 'word')`; ranges use `formatDateRange`. Route titles come from `$lib/routes.ts` (`routeTitle`).
+- **Dialogs**: form reset goes through `useDialogReset(() => open, sync)` (bits-ui never fires `onOpenChange` for programmatic `bind:open`); create/edit footers use `<DialogSaveFooter>` — never copy the reset effect or footer buttons.
 - **Barrels**: named exports only in `index.ts` re-export files (no default+named duplication).
 - **tauri.ts**: leaf payload types are module-private; only export types that other modules import.
+
+## Naming glossary (do not invent synonyms)
+
+- `guid: string` = stable entity id (accounts, transactions, commodities). `id: number` is only the numeric history row (`ChangeEntry.id`, `revert_history_entry(id)`); route `transactions/[id]` holds a GUID and should become `[guid]` when renamed.
+- `asOf: string` (TS) / `as_of: Option<String>` (Rust) = point-in-time `YYYY-MM-DD` for balance queries. Always `asOf`, never `asOfDate`.
+- `commodity` = DB row (security/currency), `holding` = aggregated position for one commodity, `symbol` = Yahoo ticker override, `mnemonic` = display code. Route `portfolio/[holding]` holds a `commodityGuid`.
+- IPC args are single `camelCase` keys in TS mapping to `snake_case` in Rust via `#[tauri::command]`; prefer one `Input` struct with `rename_all = "camelCase"` for new commands.
