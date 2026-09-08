@@ -8,15 +8,6 @@ use crate::fx;
 use crate::tree;
 use crate::utils;
 
-/// Reject malformed `as_of` dates before they reach SQL: `date('bad',
-/// '+1 day')` is NULL, and `< NULL` is never true, so every balance would
-/// silently report zero instead of erroring.
-fn validate_as_of(as_of: &str) -> Result<(), String> {
-    chrono::NaiveDate::parse_from_str(as_of, "%Y-%m-%d")
-        .map(|_| ())
-        .map_err(|_| format!("Invalid as_of date (expected YYYY-MM-DD): {as_of}"))
-}
-
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProfitLossRow {
@@ -46,6 +37,8 @@ pub struct ProfitLossReport {
     pub total_expenses: f64,
     pub total_expenses_prev: f64,
     pub net_income: f64,
+    pub net_income_prev: f64,
+    pub net_income_change_pct: Option<f64>,
     pub missing_fx: Vec<String>,
 }
 
@@ -418,325 +411,12 @@ fn build_tree<R>(
     result
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BalanceSheetRow {
-    pub account_guid: String,
-    pub account_name: String,
-    pub account_description: Option<String>,
-    pub indent: i32,
-    pub amount: f64,
-}
+/// Balance-sheet reporting lives in `accounts.rs` (`/accounts` is the single
+/// balance-sheet view). This module owns only P&L (`fetch_pnl_report`,
+/// `fetch_pnl_trend`). The previous `BalanceSheet*` implementation was removed
+/// as dead code; see git history if needed.
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BalanceSheetReport {
-    pub as_of: String,
-    pub report_currency: String,
-    pub asset_rows: Vec<BalanceSheetRow>,
-    pub liability_rows: Vec<BalanceSheetRow>,
-    pub equity_rows: Vec<BalanceSheetRow>,
-    pub total_assets: f64,
-    pub total_liabilities: f64,
-    pub total_equity: f64,
-    pub net_income: f64,
-    pub unrealized_gains: f64,
-    pub balance_check: f64,
-    pub missing_fx: Vec<String>,
-    pub missing_prices: Vec<fx::MissingPrice>,
-}
-
-struct ComputedBalance {
-    guid: String,
-    name: String,
-    description: Option<String>,
-    account_type: String,
-    parent_guid: Option<String>,
-    placeholder: bool,
-    amount: f64,
-    /// Market minus FX-converted cost for priced investments, else 0.
-    /// Mark-to-market lifts assets with no offsetting entry, so the sheet
-    /// needs this back as an equity line (like GnuCash's Unrealized Gains).
-    unrealized: f64,
-}
-
-/// Cumulative balances as of `as_of` with investment mark-to-market (mirrors
-/// `accounts.rs`) and FX conversion. Returns rows, sorted missing-FX list,
-/// sorted missing-price list and report currency.
-fn compute_balances_as_of(
-    conn: &Connection,
-    as_of: &str,
-) -> Result<
-    (
-        Vec<ComputedBalance>,
-        Vec<String>,
-        Vec<fx::MissingPrice>,
-        String,
-    ),
-    String,
-> {
-    use crate::prices::get_cached_prices_map;
-
-    let visible_now = utils::VISIBLE_NOW_EXPR;
-    let raw = utils::RAW_AMOUNT;
-    let qty = utils::QUANTITY_AMOUNT;
-    // Cumulative: everything strictly before the day after `as_of`, capped at
-    // the shared visibility window so a future `as_of` never leaks future txs.
-    let balance_case =
-        format!("CASE WHEN t.post_date IS NULL THEN 0 WHEN t.post_date < min(date(?1, '+1 day'), {visible_now}) THEN {raw} ELSE 0 END");
-    let quantity_case =
-        format!("CASE WHEN t.post_date IS NULL THEN 0 WHEN t.post_date < min(date(?1, '+1 day'), {visible_now}) THEN {qty} ELSE 0 END");
-
-    let sql = format!(
-        "SELECT a.guid, a.name, a.description, a.account_type, a.parent_guid, a.placeholder,
-                c.mnemonic as commodity, c.guid as commodity_guid,
-                COALESCE(SUM({balance_case}), 0) as balance_raw,
-                COALESCE(SUM({quantity_case}), 0) as quantity_raw
-         FROM accounts a
-         LEFT JOIN commodities c ON c.guid = a.commodity_guid
-         LEFT JOIN splits s ON s.account_guid = a.guid
-         LEFT JOIN transactions t ON t.guid = s.tx_guid
-         WHERE a.account_type != 'ROOT'
-         GROUP BY a.guid, a.name, a.description, a.account_type, a.parent_guid, a.placeholder, c.mnemonic, c.guid
-         ORDER BY a.name"
-    );
-
-    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-    let rows: Vec<(
-        String,
-        String,
-        Option<String>,
-        String,
-        Option<String>,
-        i64,
-        Option<String>,
-        Option<String>,
-        f64,
-        f64,
-    )> = stmt
-        .query_map([as_of], |row| {
-            Ok((
-                row.get(0)?,
-                row.get(1)?,
-                row.get(2)?,
-                row.get(3)?,
-                row.get(4)?,
-                row.get(5)?,
-                row.get(6)?,
-                row.get(7)?,
-                row.get(8)?,
-                row.get(9)?,
-            ))
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
-
-    let report = fx::get_report_currency_mnemonic(conn).unwrap_or_default();
-    let fx_map = fx::get_fx_map(conn, Some(as_of))?;
-    let prices = get_cached_prices_map(conn).unwrap_or_default();
-    let mut missing = HashSet::new();
-    let mut missing_prices: HashMap<String, Option<String>> = HashMap::new();
-
-    // The investment cost leg converts silently (`None`): the holding is
-    // either priced (market dominates, cost is only the unrealized baseline)
-    // or flagged in `missing_prices`. Either way it must never pollute the
-    // genuine-currency `missing` FX set with security mnemonics.
-
-    let mut out = Vec::with_capacity(rows.len());
-    for (
-        guid,
-        name,
-        description,
-        account_type,
-        parent_guid,
-        placeholder,
-        commodity,
-        commodity_guid,
-        balance_raw,
-        quantity_raw,
-    ) in rows
-    {
-        let signed_balance = if utils::is_credit_normal(&account_type) {
-            -balance_raw
-        } else {
-            balance_raw
-        };
-        let (amount, unrealized) = if utils::INVESTMENT_TYPES.contains(&account_type.as_str()) {
-            let signed_qty = if utils::is_credit_normal(&account_type) {
-                -quantity_raw
-            } else {
-                quantity_raw
-            };
-            match commodity.as_deref().and_then(|m| prices.get(m)) {
-                Some(price) => {
-                    let market = signed_qty * price;
-                    let cost = match commodity.as_deref() {
-                        Some(m) => fx::convert_tracked(signed_balance, m, &report, &fx_map, None),
-                        None => signed_balance,
-                    };
-                    (market, market - cost)
-                }
-                None => {
-                    // No cached Yahoo price: contribute zero (matching
-                    // `accounts.rs`, home net worth and portfolio market
-                    // value) and flag the security (not an FX gap) so the UI
-                    // can point at the holding's symbol.
-                    if let Some(m) = commodity.as_deref() {
-                        missing_prices.entry(m.to_string()).or_insert(commodity_guid);
-                        (0.0, 0.0)
-                    } else {
-                        (signed_balance, 0.0)
-                    }
-                }
-            }
-        } else {
-            let cost = match commodity.as_deref() {
-                Some(m) => fx::convert_tracked(signed_balance, m, &report, &fx_map, Some(&mut missing)),
-                None => signed_balance,
-            };
-            (cost, 0.0)
-        };
-        out.push(ComputedBalance {
-            guid,
-            name,
-            description,
-            account_type,
-            parent_guid,
-            placeholder: placeholder != 0,
-            amount,
-            unrealized,
-        });
-    }
-
-    let mut missing: Vec<String> = missing.into_iter().collect();
-    missing.sort();
-    let mut missing_prices: Vec<fx::MissingPrice> = missing_prices
-        .into_iter()
-        .map(|(mnemonic, commodity_guid)| fx::MissingPrice {
-            mnemonic,
-            commodity_guid,
-        })
-        .collect();
-    missing_prices.sort_by(|a, b| a.mnemonic.cmp(&b.mnemonic));
-    Ok((out, missing, missing_prices, report))
-}
-
-// No live IPC command calls this (`/accounts` is the balance-sheet view);
-// kept for the accounting-identity tests below.
-#[allow(dead_code)]
-fn generate_balance_sheet_inner(
-    conn: &Connection,
-    as_of: &str,
-) -> Result<BalanceSheetReport, String> {
-    validate_as_of(as_of)?;
-    let (rows, missing_fx, missing_prices, report_currency) =
-        compute_balances_as_of(conn, as_of)?;
-
-    // walk_tree sums `balance` fields; ComputedBalance has `amount`, so adapt
-    // via a RawAccountBalance view for the generic walker.
-    let raw_view: Vec<RawAccountBalance> = rows
-        .iter()
-        .map(|r| RawAccountBalance {
-            guid: r.guid.clone(),
-            name: r.name.clone(),
-            description: r.description.clone(),
-            account_type: r.account_type.clone(),
-            parent_guid: r.parent_guid.clone(),
-            placeholder: r.placeholder,
-            balance: r.amount,
-        })
-        .collect();
-    let push_raw = |r: &RawAccountBalance, indent: i32, total: f64| -> BalanceSheetRow {
-        BalanceSheetRow {
-            account_guid: r.guid.clone(),
-            account_name: r.name.clone(),
-            account_description: r.description.clone(),
-            indent,
-            amount: total,
-        }
-    };
-    let asset_rows = build_tree(&raw_view, &utils::ASSET_TYPES, push_raw);
-    let liability_rows = build_tree(&raw_view, &utils::LIABILITY_TYPES, push_raw);
-    let mut equity_rows = build_tree(&raw_view, &utils::EQUITY_TYPES, push_raw);
-
-    // Unrealized mark-to-market gains rolled up like every other total:
-    // per-account values double count children, so sum top-level rows only.
-    let unreal_view: Vec<RawAccountBalance> = rows
-        .iter()
-        .map(|r| RawAccountBalance {
-            guid: r.guid.clone(),
-            name: r.name.clone(),
-            description: r.description.clone(),
-            account_type: r.account_type.clone(),
-            parent_guid: r.parent_guid.clone(),
-            placeholder: r.placeholder,
-            balance: r.unrealized,
-        })
-        .collect();
-    let unrealized_gains: f64 = build_tree(&unreal_view, &utils::INVESTMENT_TYPES, push_raw)
-        .iter()
-        .filter(|r| r.indent == 0)
-        .map(|r| r.amount)
-        .sum();
-    // Synthetic equity row. Empty guid is the "no account page" contract (the
-    // frontend renders it as plain text); it is always a leaf so it never
-    // enters the expand set, and the table keys rows by guid+name so it can't
-    // collide with a real account.
-    equity_rows.push(BalanceSheetRow {
-        account_guid: String::new(),
-        account_name: "Unrealized gains".to_string(),
-        account_description: Some("Mark-to-market above cost".to_string()),
-        indent: 0,
-        amount: unrealized_gains,
-    });
-
-    let sum_roots = |rows: &[BalanceSheetRow]| -> f64 {
-        rows.iter()
-            .filter(|r| r.indent == 0)
-            .map(|r| r.amount)
-            .sum()
-    };
-    let total_assets = sum_roots(&asset_rows);
-    let total_liabilities = sum_roots(&liability_rows);
-    let total_equity = sum_roots(&equity_rows);
-
-    // Cumulative income minus expenses = retained earnings; needed for the
-    // accounting check since INCOME/EXPENSE are excluded from the trees.
-    // Per-account amounts double count children, so roll up via the same tree
-    // walker and sum only top-level rows.
-    let income_tree = build_tree(&raw_view, &["INCOME"], push_raw);
-    let expense_tree = build_tree(&raw_view, &["EXPENSE"], push_raw);
-    let income_rolled: f64 = income_tree
-        .iter()
-        .filter(|r| r.indent == 0)
-        .map(|r| r.amount)
-        .sum();
-    let expense_rolled: f64 = expense_tree
-        .iter()
-        .filter(|r| r.indent == 0)
-        .map(|r| r.amount)
-        .sum();
-    let net_income = income_rolled - expense_rolled;
-    let balance_check =
-        total_assets - (total_liabilities + total_equity + net_income);
-
-    Ok(BalanceSheetReport {
-        as_of: as_of.to_string(),
-        report_currency,
-        asset_rows,
-        liability_rows,
-        equity_rows,
-        total_assets,
-        total_liabilities,
-        total_equity,
-        net_income,
-        unrealized_gains,
-        balance_check,
-        missing_fx,
-        missing_prices,
-    })
-}
+/// (Balance-sheet helpers removed; see `accounts.rs`.)
 
 /// Percent change for P&L rows. `None` when both periods are zero; a new
 /// account with no prior balance reports 100% (matches the frontend
@@ -889,6 +569,8 @@ fn fetch_pnl_report_inner(
         .find(|r| r.indent == 0)
         .map(|r| r.account_guid.clone());
 
+    let net_income = income_total - expense_total;
+    let net_income_prev = income_prev_total - expense_prev_total;
     Ok(ProfitLossReport {
         date_from: date_from.to_string(),
         date_to: date_to.to_string(),
@@ -903,7 +585,9 @@ fn fetch_pnl_report_inner(
         expense_root_guid,
         total_expenses: expense_total,
         total_expenses_prev: expense_prev_total,
-        net_income: income_total - expense_total,
+        net_income,
+        net_income_prev,
+        net_income_change_pct: pnl_change_pct(net_income, net_income_prev),
         missing_fx,
     })
 }
@@ -991,7 +675,7 @@ mod tests {
     use crate::db::init_db;
     use rusqlite::params;
 
-    fn setup_balance_sheet() -> Connection {
+    fn setup_pnl_fixture() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
         init_db(&conn).unwrap();
         conn.execute(
@@ -1068,115 +752,8 @@ mod tests {
     }
 
     #[test]
-    fn balance_sheet_identity_holds_with_mark_to_market() {
-        let conn = setup_balance_sheet();
-        let report = generate_balance_sheet_inner(&conn, "2024-12-31").unwrap();
-        // Checking: 1000 + 2000 - 500 - 1000 = 1500; broker at market 1200.
-        assert_eq!(report.total_assets, 2700.0);
-        assert_eq!(report.total_liabilities, 0.0);
-        // Opening equity 1000 plus the synthetic unrealized-gains row (+200).
-        assert_eq!(report.unrealized_gains, 200.0);
-        assert_eq!(report.total_equity, 1200.0);
-        assert!(report.equity_rows.iter().any(|r| r.account_guid.is_empty()
-            && r.account_name == "Unrealized gains"
-            && r.amount == 200.0));
-        // Salary 2000 - rent 500 = 1500 retained.
-        assert_eq!(report.net_income, 1500.0);
-        assert!(report.balance_check.abs() < 0.01, "check={}", report.balance_check);
-        assert_eq!(report.report_currency, "EUR");
-        // Priced securities must not leak into either warning list.
-        assert!(report.missing_fx.is_empty());
-        assert!(report.missing_prices.is_empty());
-    }
-
-    #[test]
-    fn balance_sheet_flags_unpriced_security_not_fx() {
-        let conn = setup_balance_sheet();
-        conn.execute("DELETE FROM prices", [],).unwrap();
-        let report = generate_balance_sheet_inner(&conn, "2024-12-31").unwrap();
-        // Unpriced securities contribute zero (matching accounts/home/portfolio):
-        // checking 1500 + broker 0. The sheet is out of balance by the missing
-        // cost (1000) until a price exists.
-        assert_eq!(report.total_assets, 1500.0);
-        assert_eq!(report.unrealized_gains, 0.0);
-        assert!((report.balance_check + 1000.0).abs() < 0.01, "check={}", report.balance_check);
-        // The security is reported as a missing price (with holding link
-        // target), never as a missing FX rate.
-        assert!(report.missing_fx.is_empty());
-        assert_eq!(report.missing_prices.len(), 1);
-        assert_eq!(report.missing_prices[0].mnemonic, "AAPL");
-        assert_eq!(
-            report.missing_prices[0].commodity_guid.as_deref(),
-            Some("c-aapl")
-        );
-    }
-
-    #[test]
-    fn balance_sheet_ignores_zero_balance_currencies() {
-        let conn = setup_balance_sheet();
-        // USD account with no transactions: zero converts to zero at any
-        // rate, so it must not raise a missing-FX warning.
-        conn.execute(
-            "INSERT INTO accounts (guid, name, account_type, parent_guid, placeholder, commodity_guid)
-             VALUES ('spare', 'Spare', 'BANK', 'root', 0, 'c-usd')",
-            [],
-        )
-        .unwrap();
-        let report = generate_balance_sheet_inner(&conn, "2024-12-31").unwrap();
-        assert!(report.missing_fx.is_empty());
-    }
-
-    #[test]
-    fn balance_sheet_includes_trading_accounts() {
-        let conn = Connection::open_in_memory().unwrap();
-        init_db(&conn).unwrap();
-        conn.execute(
-            "INSERT INTO commodities (guid, mnemonic, namespace) VALUES ('c-eur', 'EUR', 'CURRENCY')",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO accounts (guid, name, account_type, parent_guid, placeholder, commodity_guid)
-             VALUES ('root', 'Root', 'ROOT', NULL, 0, 'c-eur'),
-                    ('cash', 'Cash', 'BANK', 'root', 0, 'c-eur'),
-                    ('equity', 'Opening', 'EQUITY', 'root', 0, 'c-eur'),
-                    ('trade', 'Trading', 'TRADING', 'root', 0, 'c-eur')",
-            [],
-        )
-        .unwrap();
-        // Opening 1000, then a 50 trading gain booked against cash.
-        for (tag, debit, credit, amount) in [
-            ("u0", "cash", "equity", 100_000i64),
-            ("u1", "cash", "trade", 5_000i64),
-        ] {
-            conn.execute(
-                "INSERT INTO transactions (guid, post_date) VALUES (?1, '2024-01-01')",
-                params![tag],
-            )
-            .unwrap();
-            conn.execute(
-                "INSERT INTO splits (guid, tx_guid, account_guid, value_num, value_denom, quantity_num, quantity_denom)
-                 VALUES (?1, ?2, ?3, ?4, 100, ?4, 100)",
-                params![format!("s-{tag}-d"), tag, debit, amount],
-            )
-            .unwrap();
-            conn.execute(
-                "INSERT INTO splits (guid, tx_guid, account_guid, value_num, value_denom, quantity_num, quantity_denom)
-                 VALUES (?1, ?2, ?3, ?4, 100, ?4, 100)",
-                params![format!("s-{tag}-c"), tag, credit, -amount],
-            )
-            .unwrap();
-        }
-        let report = generate_balance_sheet_inner(&conn, "2024-12-31").unwrap();
-        assert_eq!(report.total_assets, 1050.0);
-        // Trading gain reads positive in equity; nothing dropped.
-        assert_eq!(report.total_equity, 1050.0);
-        assert!(report.balance_check.abs() < 0.01, "check={}", report.balance_check);
-    }
-
-    #[test]
     fn pnl_rejects_inverted_range() {
-        let conn = setup_balance_sheet();
+        let conn = setup_pnl_fixture();
         assert!(
             fetch_pnl_report_inner(&conn, "2024-04-01", "2024-01-01", None, None).is_err()
         );
@@ -1184,7 +761,7 @@ mod tests {
 
     #[test]
     fn pnl_converts_each_month_at_its_month_end_rate() {
-        let conn = setup_balance_sheet();
+        let conn = setup_pnl_fixture();
         conn.execute(
             "INSERT INTO accounts (guid, name, account_type, parent_guid, placeholder, commodity_guid)
              VALUES ('consult', 'Consulting', 'INCOME', 'root', 0, 'c-usd')",
@@ -1241,7 +818,7 @@ mod tests {
 
     #[test]
     fn pnl_trend_buckets_months_and_zero_fills() {
-        let conn = setup_balance_sheet();
+        let conn = setup_pnl_fixture();
         let points = fetch_pnl_trend_inner(&conn, "2024-01-01", "2024-03-31").unwrap();
         assert_eq!(points.len(), 3);
         assert_eq!(points[0].month, "2024-01");
@@ -1255,7 +832,7 @@ mod tests {
 
     #[test]
     fn pnl_trend_rejects_inverted_range() {
-        let conn = setup_balance_sheet();
+        let conn = setup_pnl_fixture();
         assert!(fetch_pnl_trend_inner(&conn, "2024-04-01", "2024-01-01").is_err());
     }
 
@@ -1269,7 +846,7 @@ mod tests {
 
     #[test]
     fn pnl_totals_and_prev_merge() {
-        let conn = setup_balance_sheet();
+        let conn = setup_pnl_fixture();
         let report = fetch_pnl_report_inner(
             &conn,
             "2024-02-01",
@@ -1284,6 +861,8 @@ mod tests {
         assert_eq!(report.net_income, 1500.0);
         assert_eq!(report.total_income_prev, 0.0);
         assert_eq!(report.total_expenses_prev, 0.0);
+        assert_eq!(report.net_income_prev, 0.0);
+        assert_eq!(report.net_income_change_pct, Some(100.0));
         assert_eq!(report.income_rows.len(), 1);
         assert_eq!(report.income_rows[0].current_amount, 2000.0);
         assert_eq!(report.income_rows[0].previous_amount, 0.0);
@@ -1295,7 +874,7 @@ mod tests {
 
     #[test]
     fn pnl_reports_missing_fx_from_either_window() {
-        let conn = setup_balance_sheet();
+        let conn = setup_pnl_fixture();
         conn.execute(
             "INSERT INTO accounts (guid, name, account_type, parent_guid, placeholder, commodity_guid)
              VALUES ('consult', 'Consulting', 'INCOME', 'root', 0, 'c-usd')",
