@@ -28,7 +28,7 @@
       · {plural(account.descendantsCount, 'sub-account')}
     {/if}
     {#if summary.totalTransactions > 0}
-      · {plural(summary.totalTransactions, 'txn')}
+      · {plural(summary.totalTransactions, 'transaction')}
     {/if}
     {#if !isToday}
       · as of {formatDate(asOf)}

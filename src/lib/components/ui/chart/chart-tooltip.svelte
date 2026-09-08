@@ -4,6 +4,7 @@
   import { getPayloadConfigFromPayload, useChart, type TooltipPayload } from './chart-utils.js';
   import { getChartContext, Tooltip as TooltipPrimitive } from 'layerchart';
   import ChartTooltipRow from './chart-tooltip-row.svelte';
+  import { formatNumber } from '$lib/utils/format.svelte';
   import type { Snippet } from 'svelte';
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -165,7 +166,7 @@
             value={item.value !== undefined
               ? valueFormatter
                 ? valueFormatter(item.value)
-                : item.value.toLocaleString()
+                : formatNumber(Number(item.value))
               : undefined}
           />
         {/if}

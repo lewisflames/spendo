@@ -3,6 +3,7 @@
   import { resolve } from '$app/paths';
   import {
     formatSessionCurrency as fmt,
+    formatSignedSessionCurrency,
     fmtPct,
     formatDateRange,
     signColor,
@@ -63,7 +64,7 @@
     {@const variance = row.currentAmount - row.previousAmount}
     {@const isZeroVariance = variance === 0}
     {@const isZeroPct = row.changePct === null || row.changePct === 0}
-    <NavRow onNavigate={() => openAccount(row.accountGuid)} class="cursor-pointer hover:bg-muted">
+    <NavRow onNavigate={() => openAccount(row.accountGuid)} class="hover:bg-muted/50">
       <ReportAccountCell
         depth={item.depth}
         guid={row.accountGuid}
@@ -85,7 +86,7 @@
         {#if isZeroVariance}
           {EMPTY_DASH}
         {:else}
-          {variance >= 0 ? '+' : ''}{fmt(variance)}
+          {formatSignedSessionCurrency(variance)}
         {/if}
       </Table.Cell>
       <Table.Cell
@@ -120,10 +121,10 @@
     onNavigate={guid !== null ? () => openAccount(guid) : null}
     class={footer
       ? guid !== null
-        ? 'cursor-pointer border-t-2 bg-muted/50 font-semibold hover:bg-muted'
+        ? 'border-t-2 bg-muted/50 font-semibold hover:bg-muted/50'
         : 'border-t-2 bg-muted/50 font-semibold'
       : guid !== null
-        ? 'cursor-pointer border-t border-b bg-muted/50 font-semibold hover:bg-muted'
+        ? 'border-t border-b bg-muted/50 font-semibold hover:bg-muted/50'
         : 'border-t-2 bg-muted/50 font-semibold'}
   >
     <Table.Cell class="py-2.5 text-xs font-semibold tracking-wider uppercase">
@@ -151,7 +152,7 @@
       {#if isZeroVariance}
         {EMPTY_DASH}
       {:else}
-        {variance >= 0 ? '+' : ''}{fmt(variance)}
+        {formatSignedSessionCurrency(variance)}
       {/if}
     </Table.Cell>
     <Table.Cell
