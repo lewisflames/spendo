@@ -224,7 +224,7 @@ export interface AccountDetailInfo {
   placeholder: boolean;
   balance: number;
   /** Whole subtree minus self — not direct children. */
-  descendantCount: number;
+  descendantsCount: number;
   childAccounts: ChildAccountInfo[];
 }
 

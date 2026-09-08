@@ -21,8 +21,8 @@
   {#snippet description()}
     {account.accountType}
     {#if account.placeholder}· Placeholder{/if}
-    {#if account.descendantCount > 0}
-      · {plural(account.descendantCount, 'sub-account')}
+    {#if account.descendantsCount > 0}
+      · {plural(account.descendantsCount, 'sub-account')}
     {/if}
     {#if summary.totalTransactions > 0}
       · {plural(summary.totalTransactions, 'txn')}
