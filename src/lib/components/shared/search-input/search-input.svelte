@@ -5,7 +5,7 @@
   let {
     id,
     label,
-    placeholder = 'Search...',
+    placeholder = 'Search…',
     value = $bindable(''),
     class: className = ''
   }: {

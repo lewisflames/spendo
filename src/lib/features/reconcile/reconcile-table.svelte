@@ -96,10 +96,11 @@
           {fmtDate(row.postDate)}
         </Table.Cell>
         <Table.Cell class="max-w-md py-2.5 font-medium">
+          <!-- Underline disambiguates the navigate link from the row-toggle action. -->
           <a
             href={resolve('/transactions/[id]', { id: row.txGuid })}
             title="Open transaction"
-            class="block truncate hover:underline"
+            class="block truncate underline-offset-2 hover:underline"
           >
             {#if row.num}<span class="mr-1 text-muted-foreground">#{row.num}</span>{/if}
             {row.description || EMPTY_DASH}

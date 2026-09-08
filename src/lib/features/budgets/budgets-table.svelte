@@ -34,7 +34,7 @@
   } from '$lib/utils/format.svelte';
   import NavRow from '$lib/components/shared/nav-row.svelte';
   import { openBudget } from '$lib/utils/navigation';
-  import { Plus } from '@lucide/svelte';
+  import { Plus, SearchX } from '@lucide/svelte';
   import { Button } from '$lib/components/ui/button';
   import type { BudgetActualRow } from '$lib/tauri';
   import type { ColumnVisibility } from '$lib/hooks/use-column-visibility.svelte';
@@ -85,7 +85,11 @@
     {/snippet}
   </EmptyState>
 {:else if rows.length === 0}
-  <EmptyState card title="No matching budgets" description="Try adjusting your search." />
+  <EmptyState card title="No matching budgets" description="Try adjusting your search.">
+    {#snippet icon()}
+      <SearchX aria-hidden="true" class="text-muted-foreground" />
+    {/snippet}
+  </EmptyState>
 {:else}
   <TableShell>
     <Table.Header>
