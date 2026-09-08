@@ -1,7 +1,7 @@
 /// Account types displayed with reversed sign (credit balances read positive).
 /// TRADING is included: GnuCash trading books accumulate currency/commodity
 /// trading gains as net credits, and the balance-sheet identity only holds if
-/// they are negated like other credit-normal types (see `reports.rs`).
+/// they are negated like other credit-normal types (see `accounts.rs`).
 pub const CREDIT_NORMAL: [&str; 6] = [
     "INCOME",
     "LIABILITY",
@@ -16,21 +16,7 @@ pub const INVESTMENT_TYPES: [&str; 3] = ["STOCK", "MUTUAL", "FUND"];
 /// Cash-like balance-sheet types: everything asset-side except investments
 /// (which are marked to market separately).
 pub const CASH_LIKE_TYPES: [&str; 5] = ["ASSET", "BANK", "CASH", "CURRENCY", "RECEIVABLE"];
-/// Full asset-side types: cash-like plus investments.
-pub const ASSET_TYPES: [&str; 8] = [
-    "ASSET",
-    "BANK",
-    "CASH",
-    "STOCK",
-    "MUTUAL",
-    "FUND",
-    "CURRENCY",
-    "RECEIVABLE",
-];
 pub const LIABILITY_TYPES: [&str; 3] = ["LIABILITY", "CREDIT", "PAYABLE"];
-/// TRADING books accumulate currency/commodity trading gains as net credits,
-/// so they roll up with equity (see `CREDIT_NORMAL`).
-pub const EQUITY_TYPES: [&str; 2] = ["EQUITY", "TRADING"];
 
 /// `'STOCK','MUTUAL','FUND'` fragment for SQL `IN (...)` lists, derived from
 /// [`INVESTMENT_TYPES`] so query filters can never drift from Rust-side checks.
