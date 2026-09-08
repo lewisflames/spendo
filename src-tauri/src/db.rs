@@ -250,6 +250,31 @@ CREATE TABLE IF NOT EXISTS symbol_overrides (
 	symbol TEXT NOT NULL
 );
 
+-- Recurring transaction schedules (Scheduled feature). Future intent lives
+-- here, never in `transactions`: rows there must stay within the visibility
+-- window (`VISIBLE_TX_FILTER`) and the manual future-date block. A schedule
+-- holds a serialized `TxInput`-shaped template; posting materializes one real
+-- transaction per due occurrence and advances `next_due_date`. `NULL`
+-- `next_due_date` means completed (end date / occurrence cap reached).
+-- Deliberately outside `DATA_TABLES`: schedule definitions are not part of
+-- linear undo, and the GnuCash orphan sweep must never delete them.
+CREATE TABLE IF NOT EXISTS recurring_schedules (
+	guid TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	frequency TEXT NOT NULL,
+	interval_mult INTEGER NOT NULL DEFAULT 1,
+	start_date TEXT NOT NULL,
+	end_date TEXT,
+	max_occurrences INTEGER,
+	occurrences_posted INTEGER NOT NULL DEFAULT 0,
+	next_due_date TEXT,
+	active INTEGER NOT NULL DEFAULT 1,
+	template_json TEXT NOT NULL,
+	created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_schedules_active_due ON recurring_schedules(active, next_due_date);
+
 CREATE TABLE IF NOT EXISTS app_settings (
 	key TEXT PRIMARY KEY,
 	value TEXT NOT NULL
@@ -343,9 +368,10 @@ pub fn clear_db(conn: &Connection) -> Result<()> {
           DROP TABLE IF EXISTS change_snapshots;
           DROP TABLE IF EXISTS change_log;
           DROP TABLE IF EXISTS import_log;
-          DROP TABLE IF EXISTS refresh_log;
-          DROP TABLE IF EXISTS symbol_overrides;
-          DROP TABLE IF EXISTS app_settings;
+           DROP TABLE IF EXISTS refresh_log;
+           DROP TABLE IF EXISTS symbol_overrides;
+           DROP TABLE IF EXISTS recurring_schedules;
+           DROP TABLE IF EXISTS app_settings;
           PRAGMA foreign_keys = ON;",
     )?;
     init_db(conn)
@@ -450,6 +476,7 @@ mod tests {
             "change_snapshots",
             "commodities",
             "prices",
+            "recurring_schedules",
             "refresh_log",
             "splits",
             "symbol_overrides",

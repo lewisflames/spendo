@@ -22,7 +22,8 @@
       | 'budgets'
       | 'budget-detail'
       | 'portfolio'
-      | 'holding';
+      | 'holding'
+      | 'scheduled';
   } = $props();
 </script>
 
@@ -84,4 +85,7 @@
   </div>
   <TableSkeleton cols={6} rows={3} />
   <TableSkeleton cols={5} rows={4} />
+{:else if variant === 'scheduled'}
+  <PageHeaderSkeleton />
+  <TableSkeleton cols={7} rows={4} />
 {/if}

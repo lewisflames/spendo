@@ -14,6 +14,7 @@ mod portfolio;
 mod prices;
 mod reconcile;
 mod reports;
+mod schedules;
 mod settings;
 mod sql;
 mod transactions;
@@ -129,6 +130,14 @@ pub fn run() {
             budgets::fetch_budget_vs_actual,
             budgets::fetch_budget_detail,
             budgets::fetch_budget_date_range,
+            schedules::create_schedule,
+            schedules::update_schedule,
+            schedules::delete_schedule,
+            schedules::set_schedule_active,
+            schedules::fetch_schedules,
+            schedules::fetch_upcoming_reminders,
+            schedules::post_schedule_occurrence,
+            schedules::skip_schedule_occurrence,
             portfolio::fetch_portfolio_data,
             portfolio::fetch_holding_detail,
         ])

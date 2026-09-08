@@ -9,7 +9,8 @@ const FIELD_TO_KEY: Record<BookSettingField, string> = {
   defaultPnlPeriod: 'default_pnl_period',
   priceAutoRefresh: 'price_auto_refresh',
   exportCsvDelimiter: 'export_csv_delimiter',
-  exportDateFormat: 'export_date_format'
+  exportDateFormat: 'export_date_format',
+  remindersLookaheadDays: 'reminders_lookahead_days'
 };
 
 export const DEFAULT_BOOK_SETTINGS: BookSettings = {
@@ -17,7 +18,8 @@ export const DEFAULT_BOOK_SETTINGS: BookSettings = {
   defaultPnlPeriod: 'last_12_months',
   priceAutoRefresh: 'off',
   exportCsvDelimiter: ',',
-  exportDateFormat: 'iso'
+  exportDateFormat: 'iso',
+  remindersLookaheadDays: 14
 };
 
 export const bookSettings = $state<{ value: BookSettings }>({
