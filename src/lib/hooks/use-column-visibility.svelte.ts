@@ -1,6 +1,8 @@
 /**
  * Column visibility state shared by tables with a columns menu
  * (account ledger, holdings). Preserves `COLUMNS` order on show.
+ * Pass a stable `storageKey` (e.g. `cols:ledger:v1`) to persist across
+ * mounts; otherwise state is memory-only.
  */
 export interface ColumnVisibility<Id extends string> {
   readonly visibleColumns: Id[];
@@ -9,26 +11,66 @@ export interface ColumnVisibility<Id extends string> {
   resetColumns: () => void;
 }
 
-export function useColumnVisibility<Id extends string>(defaults: Id[]): ColumnVisibility<Id> {
+function loadStored<Id extends string>(key: string, defaults: Id[]): Id[] | null {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return null;
+    // Keep only known ids, preserve defaults order.
+    const set = new Set(parsed.filter((v): v is Id => typeof v === 'string'));
+    const ordered = defaults.filter((d) => set.has(d));
+    // Include any stored ids not in defaults (forward-compat), then validate non-empty.
+    for (const v of set) if (!ordered.includes(v)) ordered.push(v);
+    return ordered.length > 0 ? ordered : null;
+  } catch {
+    return null;
+  }
+}
+
+export function useColumnVisibility<Id extends string>(
+  defaults: Id[],
+  storageKey?: string
+): ColumnVisibility<Id> {
   let visibleColumns = $state<Id[]>([...defaults]);
+
+  if (storageKey) {
+    const stored = typeof localStorage !== 'undefined' ? loadStored(storageKey, defaults) : null;
+    if (stored) visibleColumns = stored;
+  }
+
+  function persist(next: Id[]) {
+    if (!storageKey) return;
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(next));
+    } catch {
+      // Storage full/blocked — visibility stays memory-only.
+    }
+  }
 
   function isVisible(id: Id): boolean {
     return visibleColumns.includes(id);
   }
 
   function setVisible(id: Id, checked: boolean, allIds?: Id[]): void {
+    let next: Id[];
     if (checked) {
-      if (!visibleColumns.includes(id)) {
-        const order = allIds ?? [...visibleColumns, id];
-        visibleColumns = order.filter((c) => c === id || visibleColumns.includes(c));
-      }
+      if (visibleColumns.includes(id)) return;
+      const order = allIds ?? [...visibleColumns, id];
+      next = order.filter((c) => c === id || visibleColumns.includes(c));
     } else {
-      visibleColumns = visibleColumns.filter((c) => c !== id);
+      if (!visibleColumns.includes(id)) return;
+      next = visibleColumns.filter((c) => c !== id);
+      // Never persist an empty set — keep at least one column visible.
+      if (next.length === 0) return;
     }
+    visibleColumns = next;
+    persist(next);
   }
 
   function resetColumns(): void {
     visibleColumns = [...defaults];
+    persist([...defaults]);
   }
 
   return {
@@ -37,6 +79,7 @@ export function useColumnVisibility<Id extends string>(defaults: Id[]): ColumnVi
     },
     set visibleColumns(v: Id[]) {
       visibleColumns = v;
+      persist(v);
     },
     isVisible,
     setVisible,

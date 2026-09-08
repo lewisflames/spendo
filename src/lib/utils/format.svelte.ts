@@ -64,6 +64,11 @@ export function formatSignedCurrency(n: number, currency: string): string {
   return `${n > 0 ? '+' : ''}${formatCurrency(n, currency)}`;
 }
 
+/** Signed variant in the report currency (P&L variances, gain/loss). */
+export function formatSignedSessionCurrency(n: number): string {
+  return formatSignedCurrency(n, sessionCurrency());
+}
+
 /**
  * Split amount for double-entry tables: an explicit '+' marks credits while
  * debits rely on the cell's sign color (GnuCash-style direction encoding).
@@ -76,6 +81,23 @@ export function formatSplitAmount(n: number, currency: string): string {
 
 export function formatNumber(n: number): string {
   return cachedNumberFormat(appSettings.value.locale, {}).format(n);
+}
+
+/** Shares/quantities with exactly 2 fraction digits, locale-aware. */
+export function formatShares(n: number): string {
+  return cachedNumberFormat(appSettings.value.locale, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(n);
+}
+
+/** Allocation-style percent (1 decimal, no sign prefix). */
+export function formatAllocPct(n: number): string {
+  const formatted = cachedNumberFormat(appSettings.value.locale, {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1
+  }).format(n);
+  return `${formatted}%`;
 }
 
 export function formatCurrency(n: number, currency: string): string {
