@@ -95,14 +95,14 @@ struct AccountRow {
 
 fn fetch_accounts_inner(
     conn: &Connection,
-    as_of_date: Option<&str>,
+    as_of: Option<&str>,
 ) -> Result<AccountsResult, String> {
     // Half-open everywhere: `post_date` is `YYYY-MM-DD HH:MM:SS`, so
     // `< date(?,'+1 day')` includes the whole as-of day. `None` means current
     // state (today), matching `VISIBLE_TX_FILTER` semantics. The upper bound
     // is capped at the shared visibility window so a future as-of never leaks
     // future transactions (mirrors `reports.rs`).
-    let date_expr: String = match as_of_date {
+    let date_expr: String = match as_of {
         Some(d) => d.to_string(),
         None => Utc::now().format("%Y-%m-%d").to_string(),
     };
@@ -154,7 +154,7 @@ fn fetch_accounts_inner(
 
     let unified_prices = get_cached_prices_map(conn).unwrap_or_default();
     let report_currency = fx::get_report_currency_mnemonic(conn).unwrap_or_default();
-    let fx_map = fx::get_fx_map(conn, as_of_date)?;
+    let fx_map = fx::get_fx_map(conn, as_of)?;
 
     let mut node_map: HashMap<String, AccountNode> = HashMap::new();
     let mut by_type: HashMap<String, TypeSummary> = HashMap::new();
@@ -436,10 +436,10 @@ pub fn fetch_children_and_subtree(
 #[tauri::command]
 pub async fn fetch_accounts(
     state: State<'_, AppState>,
-    as_of_date: Option<String>,
+    as_of: Option<String>,
 ) -> Result<AccountsResult, String> {
     run_blocking(state.db.clone(), move |conn| {
-        fetch_accounts_inner(conn, as_of_date.as_deref())
+        fetch_accounts_inner(conn, as_of.as_deref())
     })
     .await
 }
