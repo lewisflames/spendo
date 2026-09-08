@@ -18,6 +18,7 @@ function node(partial: Partial<AccountNode> & { guid: string }): AccountNode {
     description: null,
     placeholder: false,
     commodity: null,
+    commodityGuid: null,
     balance: 0,
     txCount: 0,
     children: [],

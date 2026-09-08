@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { Snippet } from 'svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import { AsOfPicker } from '$lib/components/shared/as-of-picker';
   import { formatDate, plural } from '$lib/utils/format.svelte';
@@ -8,12 +9,14 @@
     account,
     summary,
     isToday,
-    asOf = $bindable()
+    asOf = $bindable(),
+    children = undefined
   }: {
     account: AccountDetailInfo;
     summary: AccountSummary;
     isToday: boolean;
     asOf: string;
+    children?: Snippet;
   } = $props();
 </script>
 
@@ -31,5 +34,10 @@
       · as of {formatDate(asOf)}
     {/if}
   {/snippet}
-  <AsOfPicker bind:value={asOf} />
+  <div class="flex items-center gap-2">
+    {#if children}
+      {@render children()}
+    {/if}
+    <AsOfPicker bind:value={asOf} />
+  </div>
 </PageHeader>

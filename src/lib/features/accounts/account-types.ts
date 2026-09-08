@@ -18,6 +18,25 @@ const TYPE_TO_CATEGORY: Record<string, string> = {
 
 export const CATEGORY_ORDER = ['ASSET', 'LIABILITY', 'EQUITY', 'INCOME', 'EXPENSE'];
 
+/** Creatable account types (mirrors backend `ACCOUNT_TYPES`; ROOT is internal). */
+export const ACCOUNT_TYPES = [
+  'ASSET',
+  'BANK',
+  'CASH',
+  'STOCK',
+  'MUTUAL',
+  'FUND',
+  'CURRENCY',
+  'RECEIVABLE',
+  'LIABILITY',
+  'CREDIT',
+  'PAYABLE',
+  'INCOME',
+  'EXPENSE',
+  'EQUITY',
+  'TRADING'
+];
+
 /** Category of an account type, falling back to the raw type when unknown. */
 export function nodeCategory(accountType: string): string {
   return TYPE_TO_CATEGORY[accountType] ?? accountType;

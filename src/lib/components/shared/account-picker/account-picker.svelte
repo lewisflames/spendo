@@ -1,0 +1,99 @@
+<script lang="ts">
+  import * as Popover from '$lib/components/ui/popover';
+  import * as Command from '$lib/components/ui/command';
+  import { Button } from '$lib/components/ui/button';
+  import { Badge } from '$lib/components/ui/badge';
+  import { Check, ChevronsUpDown } from '@lucide/svelte';
+  import { cn } from '$lib/utils.js';
+  import type { PickerAccount } from '$lib/features/accounts/account-picker-utils';
+
+  let {
+    value = $bindable(''),
+    options = [],
+    placeholder = 'Select an account',
+    id,
+    disabled = false,
+    invalid = false,
+    describedBy = undefined,
+    emptyText = 'No matching accounts.'
+  }: {
+    value?: string;
+    options?: PickerAccount[];
+    placeholder?: string;
+    id?: string;
+    disabled?: boolean;
+    invalid?: boolean;
+    describedBy?: string | undefined;
+    emptyText?: string;
+  } = $props();
+
+  let open = $state(false);
+  let search = $state('');
+
+  let selected = $derived(options.find((o) => o.guid === value) ?? null);
+
+  // Fresh query on every open so a previous search never leaks through.
+  $effect(() => {
+    if (!open) search = '';
+  });
+
+  function select(guid: string) {
+    value = guid;
+    open = false;
+  }
+</script>
+
+<Popover.Root bind:open>
+  <Popover.Trigger {id} {disabled} aria-invalid={invalid} aria-describedby={describedBy}>
+    {#snippet child({ props })}
+      <Button
+        {...props}
+        type="button"
+        variant="outline"
+        role="combobox"
+        aria-expanded={open}
+        {disabled}
+        class={cn('w-full justify-between font-normal', !selected && 'text-muted-foreground')}
+      >
+        <span class="min-w-0 flex-1 truncate text-left">
+          {selected ? selected.label : placeholder}
+        </span>
+        {#if selected}
+          <Badge
+            variant="outline"
+            class="ml-2 hidden shrink-0 text-[10px] leading-none sm:inline-flex"
+          >
+            {selected.accountType}
+          </Badge>
+        {/if}
+        <ChevronsUpDown aria-hidden="true" class="ml-2 size-4 shrink-0 opacity-50" />
+      </Button>
+    {/snippet}
+  </Popover.Trigger>
+  <Popover.Content class="w-(--bits-popover-anchor-width) p-0" align="start">
+    <Command.Root label="Select an account">
+      <Command.Input bind:value={search} placeholder="Search accounts…" />
+      <Command.List>
+        <Command.Empty>{emptyText}</Command.Empty>
+        <Command.Group>
+          {#each options as opt (opt.guid)}
+            <Command.Item
+              value={opt.label}
+              keywords={opt.commodity ? [opt.accountType, opt.commodity] : [opt.accountType]}
+              onSelect={() => select(opt.guid)}
+            >
+              <Check
+                aria-hidden="true"
+                class={cn('mr-1 size-4', value === opt.guid ? 'opacity-100' : 'opacity-0')}
+              />
+              <span class="min-w-0 flex-1 truncate">{opt.label}</span>
+              <Badge variant="outline" class="shrink-0 text-[10px] leading-none">
+                {opt.accountType}
+              </Badge>
+            </Command.Item>
+          {/each}
+        </Command.Group>
+      </Command.List>
+    </Command.Root>
+  </Popover.Content>
+</Popover.Root>

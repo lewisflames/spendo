@@ -59,6 +59,9 @@ pub struct AccountDetailInfo {
     pub code: Option<String>,
     pub description: Option<String>,
     pub placeholder: bool,
+    pub commodity: Option<String>,
+    pub commodity_guid: Option<String>,
+    pub parent_guid: Option<String>,
     pub balance: f64,
     /// Whole subtree size minus self (`subaccount_guids` includes the account
     /// itself), i.e. the number of descendants — not direct children.
@@ -135,12 +138,18 @@ struct AccountHeader {
     code: Option<String>,
     description: Option<String>,
     placeholder: bool,
+    commodity: Option<String>,
+    commodity_guid: Option<String>,
+    parent_guid: Option<String>,
 }
 
 fn load_account_header(conn: &Connection, guid: &str) -> Result<AccountHeader, String> {
     conn.query_row(
-        "SELECT guid, name, account_type, code, description, placeholder
-         FROM accounts WHERE guid = ?1",
+        "SELECT a.guid, a.name, a.account_type, a.code, a.description, a.placeholder,
+                c.mnemonic, a.commodity_guid, a.parent_guid
+         FROM accounts a
+         LEFT JOIN commodities c ON c.guid = a.commodity_guid
+         WHERE a.guid = ?1",
         [guid],
         |row| {
             Ok(AccountHeader {
@@ -150,6 +159,9 @@ fn load_account_header(conn: &Connection, guid: &str) -> Result<AccountHeader, S
                 code: row.get(3)?,
                 description: row.get(4)?,
                 placeholder: row.get::<_, i64>(5)? != 0,
+                commodity: row.get(6)?,
+                commodity_guid: row.get(7)?,
+                parent_guid: row.get(8)?,
             })
         },
     )
@@ -310,6 +322,9 @@ fn fetch_account_detail_inner(
             code: header.code,
             description: header.description,
             placeholder: header.placeholder,
+            commodity: header.commodity,
+            commodity_guid: header.commodity_guid,
+            parent_guid: header.parent_guid,
             balance,
             descendants_count,
             child_accounts,
