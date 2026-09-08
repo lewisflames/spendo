@@ -12,6 +12,7 @@ mod import;
 mod init;
 mod portfolio;
 mod prices;
+mod reconcile;
 mod reports;
 mod settings;
 mod sql;
@@ -109,6 +110,9 @@ pub fn run() {
             transactions::create_transaction,
             transactions::update_transaction,
             transactions::delete_transaction,
+            reconcile::fetch_reconcile_info,
+            reconcile::mark_reconcile_splits,
+            reconcile::finish_reconciliation,
             export::fetch_export_transactions,
             export::fetch_export_accounts,
             prices::refresh_prices,
