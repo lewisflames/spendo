@@ -1,15 +1,18 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import * as Table from '$lib/components/ui/table';
   import { Badge } from '$lib/components/ui/badge';
+  import { Checkbox } from '$lib/components/ui/checkbox';
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import SortHead from '$lib/components/shared/sort-head.svelte';
-  import { statusFor } from '$lib/utils/reconcile';
+  import { handleRowClick } from '$lib/utils/navigation';
   import {
     formatDate as fmtDate,
     formatSignedCurrency,
     signColor,
     EMPTY_DASH
   } from '$lib/utils/format.svelte';
+  import { selectionState } from '$lib/features/reconcile/math';
   import type { ReconcileCandidate, TxSortKey } from '$lib/tauri';
 
   let {
@@ -19,7 +22,8 @@
     sortBy,
     sortDir,
     onSort,
-    onToggle
+    onToggle,
+    onToggleAll
   }: {
     rows: ReconcileCandidate[];
     checked: Set<string>;
@@ -28,14 +32,28 @@
     sortDir: 'asc' | 'desc';
     onSort: (key: TxSortKey) => void;
     onToggle: (splitGuid: string, next: boolean) => void;
+    onToggleAll: (next: boolean) => void;
   } = $props();
+
+  let select = $derived(selectionState(checked, rows));
+  let headerLabel = $derived(
+    select === 'all'
+      ? `Unmark all ${rows.length} filtered transactions`
+      : `Mark all ${rows.length} filtered transactions cleared`
+  );
 </script>
 
 <TableShell>
   <Table.Header>
     <Table.Row class="bg-muted/75">
       <Table.Head class="w-10 text-muted-foreground">
-        <span class="sr-only">Cleared</span>
+        <Checkbox
+          checked={select === 'all'}
+          indeterminate={select === 'some'}
+          disabled={rows.length === 0}
+          aria-label={headerLabel}
+          onCheckedChange={(v) => onToggleAll(v === true)}
+        />
       </Table.Head>
       <SortHead
         label="Date"
@@ -61,26 +79,31 @@
   </Table.Header>
   <Table.Body>
     {#each rows as row (row.splitGuid)}
-      {@const status = statusFor(row.reconcileState)}
       {@const isChecked = checked.has(row.splitGuid)}
-      <Table.Row data-checked={isChecked}>
+      <Table.Row
+        data-checked={isChecked}
+        class="cursor-pointer hover:bg-muted/50"
+        onclick={(e) => handleRowClick(e, () => onToggle(row.splitGuid, !isChecked))}
+      >
         <Table.Cell class="py-2.5">
-          <input
-            type="checkbox"
-            class="size-4 accent-primary"
+          <Checkbox
             checked={isChecked}
             aria-label="Mark {row.description ?? row.postDate} cleared"
-            onchange={(e) => onToggle(row.splitGuid, e.currentTarget.checked)}
+            onCheckedChange={(v) => onToggle(row.splitGuid, v === true)}
           />
         </Table.Cell>
         <Table.Cell class="py-2.5 whitespace-nowrap text-muted-foreground">
           {fmtDate(row.postDate)}
         </Table.Cell>
         <Table.Cell class="max-w-md py-2.5 font-medium">
-          <span class="block truncate" title={row.description ?? undefined}>
+          <a
+            href={resolve('/transactions/[id]', { id: row.txGuid })}
+            title="Open transaction"
+            class="block truncate hover:underline"
+          >
             {#if row.num}<span class="mr-1 text-muted-foreground">#{row.num}</span>{/if}
             {row.description || EMPTY_DASH}
-          </span>
+          </a>
           {#if row.memo}
             <p class="truncate text-xs font-normal text-muted-foreground" title={row.memo}>
               {row.memo}
@@ -88,8 +111,8 @@
           {/if}
         </Table.Cell>
         <Table.Cell class="py-2.5">
-          <Badge variant={isChecked ? 'warning' : status.variant}>
-            {isChecked ? 'Cleared' : status.label}
+          <Badge variant={isChecked ? 'warning' : 'secondary'}>
+            {isChecked ? 'Cleared' : 'New'}
           </Badge>
         </Table.Cell>
         <Table.Cell
