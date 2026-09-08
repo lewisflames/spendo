@@ -1,15 +1,15 @@
 use rusqlite::Connection;
 use tauri::State;
 
-use crate::db::{run_blocking, AppState};
+use crate::db::{run_blocking, with_tx_err, AppError, AppState};
 use crate::home::{get_summary, HomeDataResult};
 
 /// Validate a user-supplied currency mnemonic: exactly 3 ASCII letters.
 /// Returns the normalized (trimmed, uppercased) mnemonic.
-pub(crate) fn normalize_mnemonic(raw: &str) -> Result<String, String> {
+pub(crate) fn normalize_mnemonic(raw: &str) -> Result<String, AppError> {
     let mnemonic = raw.trim().to_uppercase();
     if mnemonic.len() != 3 || !mnemonic.chars().all(|c| c.is_ascii_uppercase()) {
-        return Err(format!("Invalid currency code: '{raw}' (expected 3 letters, e.g. EUR)"));
+        return Err(AppError::Validation(format!("Invalid currency code: '{raw}' (expected 3 letters, e.g. EUR)")));
     }
     Ok(mnemonic)
 }
@@ -17,44 +17,37 @@ pub(crate) fn normalize_mnemonic(raw: &str) -> Result<String, String> {
 /// Insert the base-currency commodity + ROOT account into a fresh database.
 /// Takes an already-normalized mnemonic; owns its transaction. Shared by
 /// `create_empty_book_inner` (tests) and `books::create_book_at` (new file).
-pub(crate) fn seed_empty_book(conn: &Connection, mnemonic: &str) -> Result<(), String> {
+pub(crate) fn seed_empty_book(conn: &Connection, mnemonic: &str) -> Result<(), AppError> {
     let commodity_guid = uuid::Uuid::new_v4().to_string();
     let root_guid = uuid::Uuid::new_v4().to_string();
 
-    conn.execute_batch("BEGIN TRANSACTION")
-        .map_err(|e| e.to_string())?;
-    let tx_result = (|| -> Result<(), String> {
+    with_tx_err(conn, || {
         conn.execute(
             "INSERT INTO commodities (guid, mnemonic, namespace, fullname) VALUES (?1, ?2, 'CURRENCY', ?3)",
             rusqlite::params![commodity_guid, mnemonic, mnemonic],
         )
-        .map_err(|e| e.to_string())?;
+        ?;
         conn.execute(
             "INSERT INTO accounts (guid, name, account_type, parent_guid, code, description, placeholder, commodity_guid)
              VALUES (?1, 'Root Account', 'ROOT', NULL, NULL, NULL, 0, ?2)",
             rusqlite::params![root_guid, commodity_guid],
         )
-        .map_err(|e| e.to_string())?;
+        ?;
         Ok(())
-    })();
-    if let Err(e) = tx_result {
-        conn.execute_batch("ROLLBACK").ok();
-        return Err(e);
-    }
-    conn.execute_batch("COMMIT").map_err(|e| e.to_string())
+    })
 }
 
 // No live IPC command calls this (books are created via `create_book_at`);
 // kept for the init tests below.
 #[allow(dead_code)]
-fn create_empty_book_inner(conn: &Connection, currency: &str) -> Result<HomeDataResult, String> {
+fn create_empty_book_inner(conn: &Connection, currency: &str) -> Result<HomeDataResult, AppError> {
     let mnemonic = normalize_mnemonic(currency)?;
 
     let existing: i64 = conn
         .query_row("SELECT COUNT(*) FROM accounts", [], |row| row.get(0))
-        .map_err(|e| e.to_string())?;
+        ?;
     if existing > 0 {
-        return Err("Database already initialized — clear all data first".to_string());
+        return Err(AppError::Validation("Database already initialized — clear all data first".to_string()));
     }
 
     seed_empty_book(conn, &mnemonic)?;
@@ -65,7 +58,7 @@ fn create_empty_book_inner(conn: &Connection, currency: &str) -> Result<HomeData
     })
 }
 
-fn set_base_currency_inner(conn: &Connection, currency: &str) -> Result<HomeDataResult, String> {
+fn set_base_currency_inner(conn: &Connection, currency: &str) -> Result<HomeDataResult, AppError> {
     let mnemonic = normalize_mnemonic(currency)?;
 
     let root: Option<(String, Option<String>)> = conn
@@ -76,7 +69,7 @@ fn set_base_currency_inner(conn: &Connection, currency: &str) -> Result<HomeData
         )
         .ok();
     let Some((root_guid, _)) = root else {
-        return Err("No database yet — create an empty book first".to_string());
+        return Err(AppError::NotFound("No database yet — create an empty book first".to_string()));
     };
 
     let existing_guid: Option<String> = conn
@@ -95,7 +88,7 @@ fn set_base_currency_inner(conn: &Connection, currency: &str) -> Result<HomeData
                 "INSERT INTO commodities (guid, mnemonic, namespace, fullname) VALUES (?1, ?2, 'CURRENCY', ?3)",
                 rusqlite::params![guid, mnemonic, mnemonic],
             )
-            .map_err(|e| e.to_string())?;
+            ?;
             guid
         }
     };
@@ -104,7 +97,7 @@ fn set_base_currency_inner(conn: &Connection, currency: &str) -> Result<HomeData
         "UPDATE accounts SET commodity_guid = ?1 WHERE guid = ?2",
         rusqlite::params![commodity_guid, root_guid],
     )
-    .map_err(|e| e.to_string())?;
+    ?;
 
     Ok(HomeDataResult {
         has_data: true,
@@ -118,7 +111,7 @@ pub async fn set_base_currency(
     currency: String,
 ) -> Result<HomeDataResult, String> {
     run_blocking(state.db.clone(), move |conn| {
-        set_base_currency_inner(conn, &currency)
+        set_base_currency_inner(conn, &currency).map_err(String::from)
     })
     .await
 }
@@ -162,7 +155,7 @@ mod tests {
             Ok(_) => panic!("expected already-initialized error"),
             Err(e) => e,
         };
-        assert!(err.contains("already initialized"));
+        assert!(err.to_string().contains("already initialized"));
     }
 
     #[test]
