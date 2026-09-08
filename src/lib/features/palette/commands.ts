@@ -13,6 +13,7 @@ import {
   PanelLeft,
   PiggyBank,
   Receipt,
+  Scale,
   Settings,
   SunMoon
 } from '@lucide/svelte';
@@ -37,6 +38,7 @@ function goTo(
     | '/accounts'
     | '/budgets'
     | '/portfolio'
+    | '/reconcile'
     | '/reports/pnl'
     | '/settings'
     | '/transactions'
@@ -78,6 +80,14 @@ export const PALETTE_COMMANDS: PaletteCommand[] = [
     icon: Receipt,
     keywords: ['profit', 'loss', 'pnl', 'income', 'expenses', 'report'],
     run: goTo('/reports/pnl')
+  },
+  {
+    id: 'go-reconcile',
+    title: 'Go to Reconcile',
+    group: 'Go to',
+    icon: Scale,
+    keywords: ['reconcile', 'reconciliation', 'bank statement', 'cleared'],
+    run: goTo('/reconcile')
   },
   {
     id: 'go-budgets',

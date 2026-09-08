@@ -2,7 +2,7 @@
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
-  import { Pencil, Plus } from '@lucide/svelte';
+  import { Pencil, Plus, CircleCheck } from '@lucide/svelte';
   import { toast } from '$lib/components/ui/sonner';
   import { Button } from '$lib/components/ui/button';
   import AccountDialog, { type AccountInitial } from '$lib/features/accounts/account-dialog.svelte';
@@ -33,6 +33,7 @@
   import AccountDetailHeader from '$lib/features/accounts/account-detail-header.svelte';
   import AccountKpiCards from '$lib/features/accounts/account-kpi-cards.svelte';
   import AccountLedger from '$lib/features/accounts/account-ledger.svelte';
+  import { isReconcilable } from '$lib/features/reconcile/math';
 
   let guid = $derived(page.params.guid);
   let pageSize = $derived(appSettings.value.pageSize);
@@ -198,6 +199,12 @@
         bind:asOf
       >
         {#if dbSession.value}
+          {#if guid && res.data && isReconcilable(res.data.account.accountType, res.data.account.placeholder)}
+            <Button variant="outline" size="sm" href={resolve('/reconcile/[guid]', { guid })}>
+              <CircleCheck aria-hidden="true" class="size-3" />
+              Reconcile
+            </Button>
+          {/if}
           <Button variant="outline" size="sm" onclick={() => (createOpen = true)}>
             <Plus aria-hidden="true" class="size-3" />
             Sub-account

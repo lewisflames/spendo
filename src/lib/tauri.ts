@@ -734,3 +734,79 @@ export const fetchHoldingDetail = (
     pageSize,
     search: search ?? null
   });
+
+// ── Reconciliation (statement workflow for cash-like accounts) ──
+
+export interface ReconcileCandidate {
+  splitGuid: string;
+  txGuid: string;
+  postDate: string;
+  description: string | null;
+  num?: string | null;
+  memo?: string | null;
+  /** Signed display amount for the reconciled account. */
+  amount: number;
+  /** Normalized 'n' | 'c' (source NULL reads as 'n'). */
+  reconcileState: string;
+}
+
+export interface ReconcileInfo {
+  accountGuid: string;
+  accountName: string;
+  accountType: string;
+  commodity: string | null;
+  statementDate: string;
+  /** Sum of 'y' splits at or before the statement date. */
+  startingBalance: number;
+  /** Unreconciled splits at or before the statement date, oldest first. */
+  candidates: ReconcileCandidate[];
+}
+
+interface SplitStateUpdate {
+  splitGuid: string;
+  state: string;
+}
+
+interface MarkReconcileInput {
+  accountGuid: string;
+  updates: SplitStateUpdate[];
+}
+
+export interface MarkReconcileResult {
+  updated: number;
+}
+
+interface FinishReconcileInput {
+  accountGuid: string;
+  statementDate: string;
+  endingBalance: number;
+}
+
+export interface FinishReconcileResult {
+  reconciledCount: number;
+  startingBalance: number;
+  endingBalance: number;
+}
+
+export const fetchReconcileInfo = (
+  accountGuid: string,
+  statementDate: string
+): Promise<ReconcileInfo> =>
+  invoke<ReconcileInfo>('fetch_reconcile_info', { accountGuid, statementDate });
+
+export const markReconcileSplits = (
+  accountGuid: string,
+  updates: { splitGuid: string; state: string }[]
+): Promise<MarkReconcileResult> =>
+  invoke<MarkReconcileResult>('mark_reconcile_splits', {
+    input: { accountGuid, updates } satisfies MarkReconcileInput
+  });
+
+export const finishReconciliation = (
+  accountGuid: string,
+  statementDate: string,
+  endingBalance: number
+): Promise<FinishReconcileResult> =>
+  invoke<FinishReconcileResult>('finish_reconciliation', {
+    input: { accountGuid, statementDate, endingBalance } satisfies FinishReconcileInput
+  });

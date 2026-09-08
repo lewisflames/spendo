@@ -11,7 +11,8 @@
     PiggyBank,
     Briefcase,
     CircleHelp,
-    FolderTree
+    FolderTree,
+    Scale
   } from '@lucide/svelte';
   import * as Sidebar from '$lib/components/ui/sidebar/index.js';
   import { keyboardShortcutsDialog } from '$lib/stores/ui.svelte';
@@ -54,6 +55,20 @@
                 <a href={resolve('/transactions')} {...props}>
                   <ArrowLeftRight aria-hidden="true" />
                   <span class="group-data-[collapsible=icon]:hidden">Transactions</span>
+                </a>
+              {/snippet}
+            </Sidebar.MenuButton>
+          </Sidebar.MenuItem>
+          <Sidebar.MenuItem>
+            <Sidebar.MenuButton
+              isActive={page.url.pathname === '/reconcile' ||
+                page.url.pathname.startsWith('/reconcile/')}
+              tooltipContent="Reconcile"
+            >
+              {#snippet child({ props })}
+                <a href={resolve('/reconcile')} {...props}>
+                  <Scale aria-hidden="true" />
+                  <span class="group-data-[collapsible=icon]:hidden">Reconcile</span>
                 </a>
               {/snippet}
             </Sidebar.MenuButton>
