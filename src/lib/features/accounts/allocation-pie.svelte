@@ -2,6 +2,7 @@
   import * as Card from '$lib/components/ui/card';
   import * as Chart from '$lib/components/ui/chart';
   import { Skeleton } from '$lib/components/ui/skeleton';
+  import { formatAllocPct } from '$lib/utils/format.svelte';
   import { PieChart } from 'layerchart';
   import ChartTooltipRow from '$lib/components/ui/chart/chart-tooltip-row.svelte';
 
@@ -79,7 +80,7 @@
                   <ChartTooltipRow
                     color={item.color as string}
                     label={datum?.label ?? String(item.label ?? item.key)}
-                    value={datum?.sharePct != null ? `${datum.sharePct.toFixed(1)}%` : undefined}
+                    value={datum?.sharePct != null ? formatAllocPct(datum.sharePct) : undefined}
                   />
                 {/snippet}
               </Chart.Tooltip>

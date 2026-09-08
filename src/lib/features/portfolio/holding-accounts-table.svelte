@@ -8,6 +8,7 @@
     signColor,
     formatSignedCurrency,
     formatSessionCurrency as fmt,
+    formatShares,
     EMPTY_DASH
   } from '$lib/utils/format.svelte';
   import NavRow from '$lib/components/shared/nav-row.svelte';
@@ -52,7 +53,7 @@
             </a>
           </Table.Cell>
           <Table.Cell class="py-2.5 text-right tabular-nums">
-            {acct.shares.toFixed(2)}
+            {formatShares(acct.shares)}
           </Table.Cell>
           <Table.Cell class="py-2.5 text-right text-muted-foreground tabular-nums">
             {acct.shares > 0 ? fmt(acct.costBasis / acct.shares) : EMPTY_DASH}

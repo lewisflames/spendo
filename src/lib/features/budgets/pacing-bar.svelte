@@ -1,6 +1,7 @@
 <script lang="ts">
   import * as Tooltip from '$lib/components/ui/tooltip';
   import { Progress } from '$lib/components/ui/progress';
+  import { formatAllocPct } from '$lib/utils/format.svelte';
   import { cn } from '$lib/utils';
 
   let {
@@ -43,7 +44,7 @@
             class={cn(
               pctClass,
               pacingPercentage > 100 ? 'font-medium text-destructive' : 'text-muted-foreground'
-            )}>{Math.max(0, pacingPercentage).toFixed(1)}%</span
+            )}>{formatAllocPct(Math.max(0, pacingPercentage))}</span
           >
         </span>
       {/snippet}
@@ -74,7 +75,7 @@
       class={cn(
         pctClass,
         pacingPercentage > 100 ? 'font-medium text-destructive' : 'text-muted-foreground'
-      )}>{Math.max(0, pacingPercentage).toFixed(1)}%</span
+      )}>{formatAllocPct(Math.max(0, pacingPercentage))}</span
     >
   </span>
 {/if}

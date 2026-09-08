@@ -1,6 +1,6 @@
 <script lang="ts">
   import { TYPE_COLOR } from '$lib/features/accounts/account-types';
-  import { clampZero } from '$lib/utils/format.svelte';
+  import { clampZero, formatAllocPct } from '$lib/utils/format.svelte';
   import type { AccountNode, ParentAccountInfo } from '$lib/tauri';
   import AllocationPie from './allocation-pie.svelte';
 
@@ -50,9 +50,9 @@
   );
   let centerValue = $derived(
     parentSharePct !== null
-      ? `${parentSharePct.toFixed(1)}%`
+      ? formatAllocPct(parentSharePct)
       : accountBalance >= 0.005 && node
-        ? '100.0%'
+        ? formatAllocPct(100)
         : null
   );
 </script>

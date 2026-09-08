@@ -37,7 +37,13 @@
   import { errMsg } from '$lib/utils/error';
   import { flattenAccountsForPicker } from '$lib/features/accounts/account-picker-utils';
   import { guessMapping } from '$lib/features/csv-import/guess';
-  import { formatCurrency, formatDate, plural, sessionCurrency } from '$lib/utils/format.svelte';
+  import {
+    formatCurrency,
+    formatDate,
+    plural,
+    sessionCurrency,
+    EMPTY_DASH
+  } from '$lib/utils/format.svelte';
 
   type Step = 'file' | 'mapping' | 'preview' | 'done';
 
@@ -63,6 +69,8 @@
   let preview = $state<CsvPreviewResult | null>(null);
   let selected = new SvelteSet<number>();
   let page = $state(1);
+  // Local preview pagination (deliberately not the global pageSize: the wizard
+  // shows dense 50-row dry-run pages independent of ledger preferences).
   let pageSize = $state(50);
 
   let picking = $state(false);
@@ -236,7 +244,7 @@
       });
       commitResult = result;
       step = 'done';
-      toast.success(`Imported ${result.created} ${plural(result.created, 'transaction')}`);
+      toast.success(`Imported ${plural(result.created, 'transaction')}`);
       try {
         const home = await fetchHomeData();
         setDbSession(home.summary);
@@ -308,9 +316,8 @@
       <Card.Header>
         <Card.Title>{filename || 'Map columns'}</Card.Title>
         <Card.Description>
-          {detect.rowCount}
-          {plural(detect.rowCount, 'data row')} · {detect.columnCount}
-          {plural(detect.columnCount, 'column')} · {detect.encoding} · delimiter
+          {plural(detect.rowCount, 'data row')} · {plural(detect.columnCount, 'column')} · {detect.encoding}
+          · delimiter
           {detect.delimiter === '\t' ? 'tab' : `“${detect.delimiter}”`}
         </Card.Description>
       </Card.Header>
@@ -490,7 +497,9 @@
             {#each detect.sampleRows as row, i (i)}
               <Table.Row>
                 {#each row as cell, j (j)}
-                  <Table.Cell class="max-w-56 truncate py-2" title={cell}>{cell || '—'}</Table.Cell>
+                  <Table.Cell class="max-w-56 truncate py-2" title={cell}
+                    >{cell || EMPTY_DASH}</Table.Cell
+                  >
                 {/each}
               </Table.Row>
             {/each}
@@ -567,13 +576,13 @@
                   />
                 </Table.Cell>
                 <Table.Cell class="whitespace-nowrap">
-                  {row.postDate ? formatDate(row.postDate) : '—'}
+                  {row.postDate ? formatDate(row.postDate) : EMPTY_DASH}
                 </Table.Cell>
                 <Table.Cell class="max-w-md truncate font-medium" title={row.description ?? ''}>
-                  {row.description || '—'}
+                  {row.description || EMPTY_DASH}
                 </Table.Cell>
                 <Table.Cell class="text-right">
-                  {row.amount !== null ? formatCurrency(row.amount, currency) : '—'}
+                  {row.amount !== null ? formatCurrency(row.amount, currency) : EMPTY_DASH}
                 </Table.Cell>
                 <Table.Cell>
                   {#if !row.valid}
@@ -623,8 +632,7 @@
           Importing…
         {:else}
           <Upload aria-hidden="true" class="size-4" />
-          Import {selected.size}
-          {plural(selected.size, 'row')}
+          Import {plural(selected.size, 'row')}
         {/if}
       </Button>
     </div>
@@ -640,9 +648,11 @@
     </Card.Header>
     <Card.Content class="flex flex-col gap-4">
       <p class="text-sm text-muted-foreground">
-        Created {commitResult.created}
-        {plural(commitResult.created, 'transaction')} · skipped {commitResult.skippedDuplicates} duplicates
-        · skipped {commitResult.skippedErrors} errors. Revert from Settings → History if needed.
+        Created {plural(commitResult.created, 'transaction')} · skipped {plural(
+          commitResult.skippedDuplicates,
+          'duplicate'
+        )} · skipped {plural(commitResult.skippedErrors, 'error')}. Revert from Settings → History
+        if needed.
       </p>
       <div class="flex flex-wrap gap-2">
         <Button href={resolve('/transactions')}>

@@ -30,6 +30,7 @@
     formatSignedCurrency,
     formatCurrency,
     formatDate,
+    formatShares,
     EMPTY_DASH
   } from '$lib/utils/format.svelte';
   import NavRow from '$lib/components/shared/nav-row.svelte';
@@ -151,7 +152,7 @@
             {/if}
             {#if isVisible('shares')}
               <Table.Cell class="py-2.5 text-right tabular-nums {signColor(t.sharesDelta)}">
-                {t.sharesDelta >= 0 ? '+' : ''}{t.sharesDelta.toFixed(2)}
+                {t.sharesDelta >= 0 ? '+' : ''}{formatShares(Math.abs(t.sharesDelta))}
               </Table.Cell>
             {/if}
             {#if isVisible('price')}
@@ -170,7 +171,7 @@
                 class="py-2.5 text-right text-muted-foreground tabular-nums"
                 title="Share balance after this transaction"
               >
-                {t.runningShares.toFixed(2)}
+                {formatShares(t.runningShares)}
               </Table.Cell>
             {/if}
           </NavRow>

@@ -46,7 +46,7 @@
     <Card.Title>Statement</Card.Title>
     <Card.Description>
       Enter the bank statement ending balance and date, then check off cleared transactions.
-      {plural(checkedCount, 'cleared')} of {plural(totalCount, 'candidate')}.
+      {checkedCount} of {plural(totalCount, 'candidate')} cleared.
     </Card.Description>
   </Card.Header>
   <Card.Content class="flex flex-col gap-4">

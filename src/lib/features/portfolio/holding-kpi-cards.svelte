@@ -1,14 +1,26 @@
 <script lang="ts">
   import { TrendingUp, TrendingDown, ChartLine, Layers } from '@lucide/svelte';
   import KpiCard from '$lib/components/shared/kpi-card.svelte';
-  import { signColor, formatSessionCurrency as fmt, EMPTY_DASH } from '$lib/utils/format.svelte';
+  import {
+    signColor,
+    formatSessionCurrency as fmt,
+    formatSignedCurrency,
+    sessionCurrency,
+    formatShares,
+    formatCurrency,
+    EMPTY_DASH
+  } from '$lib/utils/format.svelte';
   import type { PortfolioHolding } from '$lib/tauri';
 
   let {
-    holding: h
+    holding: h,
+    priceCurrency = null
   }: {
     holding: PortfolioHolding;
+    priceCurrency?: string | null;
   } = $props();
+
+  let currency = $derived(sessionCurrency());
 </script>
 
 <!-- KPI summary cards -->
@@ -30,7 +42,7 @@
       {/if}
     {/snippet}
     {#snippet value()}
-      {h.gainLoss >= 0 ? '+' : ''}{fmt(h.gainLoss)}
+      {formatSignedCurrency(h.gainLoss, currency)}
     {/snippet}
   </KpiCard>
   <KpiCard title="Current Price">
@@ -38,7 +50,7 @@
       <ChartLine aria-hidden="true" class="size-4 text-muted-foreground" />
     {/snippet}
     {#snippet value()}
-      {h.price === null ? EMPTY_DASH : fmt(h.price)}
+      {h.price === null ? EMPTY_DASH : formatCurrency(h.price, priceCurrency ?? currency)}
     {/snippet}
   </KpiCard>
   <KpiCard title="Shares">
@@ -46,7 +58,7 @@
       <Layers aria-hidden="true" class="size-4 text-muted-foreground" />
     {/snippet}
     {#snippet value()}
-      {h.shares.toFixed(2)}
+      {formatShares(h.shares)}
     {/snippet}
   </KpiCard>
 </div>

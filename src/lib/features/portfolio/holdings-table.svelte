@@ -23,6 +23,8 @@
     signColor,
     fmtPct,
     formatSignedCurrency,
+    formatShares,
+    formatAllocPct,
     EMPTY_DASH
   } from '$lib/utils/format.svelte';
 
@@ -65,17 +67,14 @@
   let sortBy = $derived(sort.sortBy);
   let sortDir = $derived(sort.sortDir);
 
-  const cols = useColumnVisibility<ColumnId>(DEFAULT_COLUMNS);
+  const cols = useColumnVisibility<ColumnId>(DEFAULT_COLUMNS, 'cols:holdings:v1');
   let visibleColumns = $derived(cols.visibleColumns);
 
   let searchInput = $state('');
-  let search = useDebouncedSearch(
-    () => searchInput,
-    (v) => v.trim().toLowerCase()
-  );
+  let search = useDebouncedSearch(() => searchInput);
 
   let filteredHoldings = $derived.by(() => {
-    const q = search.value;
+    const q = search.value.trim().toLowerCase();
     if (!q) return holdings;
     return holdings.filter(
       (h) => (h.fullName ?? '').toLowerCase().includes(q) || h.mnemonic.toLowerCase().includes(q)
@@ -137,7 +136,7 @@
 
 {#if loading}
   <!-- Same wrapper as the loaded toolbar + table so neither pops in late. -->
-  <div class="flex flex-col gap-3">
+  <div class="flex flex-col gap-4">
     <ToolbarSkeleton />
     <TableSkeleton cols={skeletonCols} rows={4} />
   </div>
@@ -149,12 +148,12 @@
   </EmptyState>
 {:else}
   <!-- One wrapper so the page-level flex gap doesn't open up between toolbar and table. -->
-  <div class="flex flex-col gap-3">
+  <div class="flex flex-col gap-4">
     <div class="flex items-center justify-between gap-2">
       <SearchInput
         id="holdings-search"
         label="Search holdings"
-        placeholder="Search name or ticker..."
+        placeholder="Search name or ticker…"
         bind:value={searchInput}
         class="w-60"
       />
@@ -238,7 +237,7 @@
         {#if filteredHoldings.length === 0}
           <Table.Row>
             <Table.Cell class="h-24 text-center text-muted-foreground" colspan={skeletonCols}>
-              No holdings match “{search.value}”.
+              No holdings match “{searchInput.trim()}”.
             </Table.Cell>
           </Table.Row>
         {:else}
@@ -247,11 +246,9 @@
             {@const isWatchOnly = h.shares === 0 && h.accounts.length === 0}
             <NavRow
               onNavigate={() => openHolding(h.commodityGuid)}
-              class="cursor-pointer hover:bg-muted/50 {isClosed || isWatchOnly
-                ? 'text-muted-foreground'
-                : ''}"
+              class={isClosed || isWatchOnly ? 'text-muted-foreground' : ''}
             >
-              <Table.Cell class="py-2">
+              <Table.Cell class="py-2.5">
                 <!-- Real link for keyboard/AT users; the row click stays as a
                  convenience target for pointer input. -->
                 <a
@@ -274,7 +271,8 @@
                 </a>
               </Table.Cell>
               {#if isVisible('shares')}
-                <Table.Cell class="py-2.5 text-right tabular-nums">{h.shares.toFixed(2)}</Table.Cell
+                <Table.Cell class="py-2.5 text-right tabular-nums"
+                  >{formatShares(h.shares)}</Table.Cell
                 >
               {/if}
               {#if isVisible('avgCost')}
@@ -316,7 +314,7 @@
               {/if}
               {#if isVisible('alloc')}
                 <Table.Cell class="py-2.5 text-right tabular-nums">
-                  {h.allocationPct.toFixed(1)}%
+                  {formatAllocPct(h.allocationPct)}
                 </Table.Cell>
               {/if}
             </NavRow>
