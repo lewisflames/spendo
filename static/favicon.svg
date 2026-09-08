@@ -9,7 +9,7 @@
       <stop offset="1" stop-color="#B45309"/>
     </linearGradient>
   </defs>
-  <rect x="0" y="0" width="512" height="512" rx="232" fill="url(#tileGrad)"/>
+  <rect x="0" y="0" width="1024" height="1024" rx="232" fill="url(#tileGrad)"/>
   <rect x="30" y="30" width="964" height="964" rx="204" fill="none" stroke="#78350F" stroke-width="10" opacity="0.30"/>
   <circle cx="512" cy="540" r="360" fill="none" stroke="#FDE68A" stroke-width="22" opacity="0.55"/>
   <path d="M 652 398
