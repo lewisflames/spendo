@@ -842,6 +842,23 @@ fn existing_split_guids(conn: &Connection, tx_guid: &str) -> Result<Vec<String>,
     Ok(guids)
 }
 
+/// Manual edits re-create splits, so they must not touch cleared/reconciled
+/// rows — those transitions belong to the reconcile workflow.
+fn reject_when_reconciled(conn: &Connection, tx_guid: &str, action: &str) -> Result<(), AppError> {
+    let locked: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM splits
+         WHERE tx_guid = ?1 AND reconcile_state IN ('c', 'y')",
+        params![tx_guid],
+        |row| row.get(0),
+    )?;
+    if locked > 0 {
+        return Err(AppError::Validation(format!(
+            "Cannot {action} — this transaction has cleared or reconciled splits. Adjust them on the reconcile page first"
+        )));
+    }
+    Ok(())
+}
+
 fn create_transaction_inner(conn: &Connection, input: TxInput) -> Result<String, AppError> {
 
     let post_date = validate_tx_input(conn, &input)?;
@@ -913,6 +930,10 @@ fn update_transaction_inner(
     if !exists {
         return Err(AppError::NotFound("Transaction not found — it may have been removed".to_string()));
     }
+    // Manual edits delete + re-insert splits as `'n'`, which would silently
+    // wipe reconciliation state. Block edits while any split is cleared or
+    // reconciled — the reconcile page owns those transitions.
+    reject_when_reconciled(conn, guid, "edit")?;
     let old_splits = existing_split_guids(conn, guid)?;
     let label = tx_label(&input);
     let detail = tx_detail_json(&post_date);
@@ -996,6 +1017,7 @@ fn delete_transaction_inner(conn: &Connection, guid: &str) -> Result<(), AppErro
     if !exists {
         return Err(AppError::NotFound("Transaction not found — it may have been removed".to_string()));
     }
+    reject_when_reconciled(conn, guid, "delete")?;
     let old_splits = existing_split_guids(conn, guid)?;
     let label = before
         .as_deref()
