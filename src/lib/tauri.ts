@@ -896,3 +896,44 @@ export const finishReconciliation = (
   invoke<FinishReconcileResult>('finish_reconciliation', {
     input: { accountGuid, statementDate, endingBalance } satisfies FinishReconcileInput
   });
+
+// ── Global search (Ctrl+K palette) ──
+
+export interface SearchAccount {
+  guid: string;
+  name: string;
+  fullPath: string;
+  accountType: string;
+  code: string | null;
+}
+
+export interface SearchTransaction {
+  guid: string;
+  postDate: string;
+  description: string | null;
+  num: string | null;
+}
+
+export interface SearchHolding {
+  commodityGuid: string;
+  mnemonic: string;
+  fullName: string | null;
+  namespace: string;
+}
+
+export interface SearchBudget {
+  accountGuid: string;
+  accountName: string;
+  /** Most recent year with a budget row for the account. */
+  year: number;
+}
+
+export interface GlobalSearchResult {
+  accounts: SearchAccount[];
+  transactions: SearchTransaction[];
+  holdings: SearchHolding[];
+  budgets: SearchBudget[];
+}
+
+export const searchGlobal = (query: string, limitPerGroup?: number): Promise<GlobalSearchResult> =>
+  invoke<GlobalSearchResult>('search_global', { query, limitPerGroup: limitPerGroup ?? null });
