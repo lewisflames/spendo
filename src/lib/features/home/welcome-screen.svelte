@@ -3,7 +3,7 @@
   import { Button } from '$lib/components/ui/button';
   import * as Select from '$lib/components/ui/select';
   import { Select as SelectPrimitive } from 'bits-ui';
-  import { Wallet, FolderPlus, FolderOpen, LoaderCircle } from '@lucide/svelte';
+  import { FolderPlus, FolderOpen, LoaderCircle } from '@lucide/svelte';
   import { setActiveBookPath, setDbSession } from '$lib/stores/db.svelte';
   import { appSettings } from '$lib/stores/settings.svelte';
   import { BOOK_CURRENCIES, defaultCurrencyForLocale } from '$lib/utils/currency';
@@ -80,9 +80,7 @@
   <WelcomeBackground />
 
   <div class="relative z-10 flex flex-col items-center gap-6 text-center">
-    <div class="flex size-20 items-center justify-center rounded-2xl bg-primary/10">
-      <Wallet aria-hidden="true" class="size-10 text-primary" />
-    </div>
+    <img src="/favicon.svg" alt="Spendo application icon" class="size-24 rounded-2xl shadow-md" />
     <div class="flex flex-col items-center gap-3">
       <p class="text-xs font-medium tracking-widest text-muted-foreground uppercase">
         Local-first finance manager
