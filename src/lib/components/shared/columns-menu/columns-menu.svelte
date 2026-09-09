@@ -28,7 +28,7 @@
 <DropdownMenu.Root>
   <DropdownMenu.Trigger>
     {#snippet child({ props })}
-      <Button {...props} variant="outline" size="sm">
+      <Button {...props} variant="outline">
         <Columns3 aria-hidden="true" class="text-muted-foreground" />
         Columns
       </Button>
