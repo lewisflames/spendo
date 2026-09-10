@@ -1,5 +1,5 @@
 /** Minimal shape for indent-based report rows (P&L, balance sheet). */
-export interface IndentedRow {
+interface IndentedRow {
   accountGuid: string;
   indent: number;
 }

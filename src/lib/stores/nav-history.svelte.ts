@@ -1,7 +1,7 @@
 import { afterNavigate } from '$app/navigation';
 import { closeAllOverlays } from '$lib/stores/ui.svelte';
 
-export interface NavHistoryState {
+interface NavHistoryState {
   stack: string[];
   index: number;
 }

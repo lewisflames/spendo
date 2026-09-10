@@ -3,7 +3,7 @@
  * the title-bar breadcrumb fallback; sidebar nav labels stay inline next to
  * their icons.
  */
-export const ROUTE_TITLES: Record<string, string> = {
+const ROUTE_TITLES: Record<string, string> = {
   '/accounts': 'Accounts',
   '/transactions': 'Transactions',
   '/transactions/new': 'New transaction',

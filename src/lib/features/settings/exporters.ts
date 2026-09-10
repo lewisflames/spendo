@@ -85,7 +85,7 @@ export function mapExportAccountRow(r: ExportAccountRow): string[] {
   ];
 }
 
-export interface BookExportOptions {
+interface BookExportOptions {
   delimiter?: ',' | ';';
   /** ISO keeps `YYYY-MM-DD` (machine-readable); locale renders via Intl. */
   dateFormat?: 'iso' | 'locale';

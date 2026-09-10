@@ -4,7 +4,7 @@ import { dbSession } from '$lib/stores/db.svelte';
 import { refreshPrices } from '$lib/tauri';
 import { errMsg } from '$lib/utils/error';
 
-export interface PriceFetchError {
+interface PriceFetchError {
   mnemonic: string;
   error: string;
 }

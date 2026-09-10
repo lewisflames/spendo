@@ -4,10 +4,10 @@ export type Locale = 'en-US' | 'en-GB' | 'en-IE' | 'de-DE' | 'fr-FR' | 'ja-JP' |
 export type Theme = 'light' | 'dark' | 'system';
 export type Density = 'comfortable' | 'compact';
 
-export const ACCENT_IDS = ['zinc', 'blue', 'emerald', 'amber', 'rose', 'violet', 'custom'] as const;
+const ACCENT_IDS = ['zinc', 'blue', 'emerald', 'amber', 'rose', 'violet', 'custom'] as const;
 export type AccentId = (typeof ACCENT_IDS)[number];
 
-export interface AppSettings {
+interface AppSettings {
   locale: Locale;
   theme: Theme;
   accent: AccentId;
@@ -55,7 +55,7 @@ function isHexColorOrNull(v: unknown): v is string | null {
 }
 
 /** Readable text color (near-white or near-black) on top of a custom hex primary. */
-export function customPrimaryForeground(hex: string): string {
+function customPrimaryForeground(hex: string): string {
   const channel = (i: number) => {
     const c = parseInt(hex.slice(i, i + 2), 16) / 255;
     return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
@@ -65,7 +65,7 @@ export function customPrimaryForeground(hex: string): string {
 }
 
 /** Inline `<html>` overrides for a user-picked primary: rings, sidebar and chart-1 follow it. */
-export function customAccentVars(hex: string): Record<string, string> {
+function customAccentVars(hex: string): Record<string, string> {
   const foreground = customPrimaryForeground(hex);
   return {
     '--primary': hex,

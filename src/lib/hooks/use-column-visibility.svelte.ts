@@ -77,10 +77,6 @@ export function useColumnVisibility<Id extends string>(
     get visibleColumns(): Id[] {
       return visibleColumns;
     },
-    set visibleColumns(v: Id[]) {
-      visibleColumns = v;
-      persist(v);
-    },
     isVisible,
     setVisible,
     resetColumns

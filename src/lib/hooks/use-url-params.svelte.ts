@@ -2,7 +2,7 @@ import { untrack } from 'svelte';
 import { page } from '$app/state';
 import { goto } from '$app/navigation';
 
-export interface UrlParamSpec {
+interface UrlParamSpec {
   key: string;
   get: () => string | null;
   apply: (value: string | null) => void;

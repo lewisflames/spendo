@@ -21,7 +21,7 @@ import { appSettings, resolveTheme, saveSettings } from '$lib/stores/settings.sv
 import { keyboardShortcutsDialog } from '$lib/stores/ui.svelte';
 import { goBack, goForward } from '$lib/stores/nav-history.svelte';
 
-export type PaletteGroup = 'Go to' | 'Actions';
+type PaletteGroup = 'Go to' | 'Actions';
 
 export interface PaletteCommand {
   id: string;

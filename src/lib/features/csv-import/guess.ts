@@ -1,6 +1,6 @@
 /** Pure column-guessing for the CSV mapping step (unit-tested, no Tauri). */
 
-export interface GuessedMapping {
+interface GuessedMapping {
   dateCol: number;
   descCol: number;
   amountCol: number | null;

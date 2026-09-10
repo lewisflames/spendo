@@ -1,7 +1,7 @@
 /** Pure statement math for the reconcile page (tested, no Svelte state). */
 
 /** Half-cent tolerance matching the backend `BALANCE_EPS`. */
-export const RECONCILE_EPS = 0.005;
+const RECONCILE_EPS = 0.005;
 
 /** Sum of checked candidate amounts (signed display amounts). */
 export function clearedTotal(amounts: number[]): number {
