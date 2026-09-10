@@ -752,7 +752,12 @@ fn fetch_transaction_inner(
 ) -> Result<Option<TransactionDetailResult>, String> {
     let base = conn
         .query_row(
-            "SELECT guid, post_date, description, num, notes FROM transactions WHERE guid = ?1",
+            &format!(
+                "SELECT t.guid, t.post_date, t.description, t.num, t.notes
+                 FROM transactions t
+                 WHERE t.guid = ?1 AND {}",
+                utils::VISIBLE_TX_FILTER
+            ),
             [guid],
             |row| {
                 Ok(TxRow {
