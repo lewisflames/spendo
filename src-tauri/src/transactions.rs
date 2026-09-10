@@ -862,6 +862,15 @@ fn existing_split_guids(conn: &Connection, tx_guid: &str) -> Result<Vec<String>,
     Ok(guids)
 }
 
+/// Distinct account GUIDs currently touched by a transaction's splits, for
+/// the history entry's `accounts_affected` metadata.
+fn affected_account_guids(conn: &Connection, tx_guid: &str) -> Result<HashSet<String>, AppError> {
+    let mut stmt = conn.prepare("SELECT DISTINCT account_guid FROM splits WHERE tx_guid = ?1")?;
+    let rows = stmt.query_map(params![tx_guid], |row| row.get(0))?;
+    let guids = rows.collect::<Result<HashSet<String>, _>>()?;
+    Ok(guids)
+}
+
 /// Manual edits re-create splits, so they must not touch cleared/reconciled
 /// rows — those transitions belong to the reconcile workflow.
 fn reject_when_reconciled(conn: &Connection, tx_guid: &str, action: &str) -> Result<(), AppError> {
@@ -955,15 +964,11 @@ fn update_transaction_inner(
     // reconciled — the reconcile page owns those transitions.
     reject_when_reconciled(conn, guid, "edit")?;
     let old_splits = existing_split_guids(conn, guid)?;
+    let mut affected_accounts = affected_account_guids(conn, guid)?;
+    affected_accounts.extend(input.splits.iter().map(|s| s.account_guid.clone()));
+    let accounts_affected = affected_accounts.len() as i64;
     let label = tx_label(&input);
     let detail = tx_detail_json(&post_date);
-    let accounts_affected = input
-        .splits
-        .iter()
-        .map(|s| s.account_guid.clone())
-        .chain(old_splits.iter().map(|_| String::new()))
-        .collect::<HashSet<_>>()
-        .len() as i64;
 
     with_tx_err(conn, || {
         let mut snapshots = vec![history::Snapshot {
@@ -1039,6 +1044,7 @@ fn delete_transaction_inner(conn: &Connection, guid: &str) -> Result<(), AppErro
     }
     reject_when_reconciled(conn, guid, "delete")?;
     let old_splits = existing_split_guids(conn, guid)?;
+    let accounts_affected = affected_account_guids(conn, guid)?.len() as i64;
     let label = before
         .as_deref()
         .map(|d| {
@@ -1076,7 +1082,7 @@ fn delete_transaction_inner(conn: &Connection, guid: &str) -> Result<(), AppErro
             &label,
             "manual",
             1,
-            0,
+            accounts_affected,
             None,
             &snapshots,
         )?;
@@ -1315,5 +1321,16 @@ mod tests {
                 .unwrap()
         };
         assert_eq!(kinds, vec!["tx_create", "tx_update", "tx_delete"]);
+        // Every history entry reports the real number of affected accounts.
+        let affected: Vec<i64> = {
+            let mut stmt = conn
+                .prepare("SELECT accounts_affected FROM change_log ORDER BY id")
+                .unwrap();
+            stmt.query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert_eq!(affected, vec![2, 2, 2]);
     }
 }
