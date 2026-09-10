@@ -347,18 +347,22 @@ fn write_history_prices(
     if history.is_empty() {
         return Ok(());
     }
-    let now = utils::iso_now();
-    let dates: Vec<String> = history
+    // Drop points whose timestamp can't be converted instead of stamping them
+    // with today's date — a fabricated date is worse than a missing quote.
+    let dated: Vec<(String, f64)> = history
         .iter()
-        .map(|(ts, _)| {
+        .filter_map(|(ts, price)| {
             chrono::DateTime::from_timestamp(*ts, 0)
-                .map(|dt| dt.format("%Y-%m-%d").to_string())
-                .unwrap_or_else(|| now.clone())
+                .map(|dt| (dt.format("%Y-%m-%d").to_string(), *price))
         })
         .collect();
-    let (min_date, max_date) = dates.iter().fold((dates[0].clone(), dates[0].clone()), |(mn, mx), d| {
-        (mn.min(d.clone()), mx.max(d.clone()))
-    });
+    if dated.is_empty() {
+        return Ok(());
+    }
+    let (min_date, max_date) = dated.iter().fold(
+        (dated[0].0.clone(), dated[0].0.clone()),
+        |(mn, mx), (d, _)| (mn.min(d.clone()), mx.max(d.clone())),
+    );
     conn.execute(
         "DELETE FROM prices WHERE commodity_guid = ?1 AND substr(date, 1, 10) BETWEEN ?2 AND ?3",
         rusqlite::params![commodity_guid, min_date, max_date],
@@ -371,7 +375,7 @@ fn write_history_prices(
     );
     let mut insert = conn.prepare(&insert_sql).map_err(|e| e.to_string())?;
 
-    for ((_, price), date_str) in history.iter().zip(dates.iter()) {
+    for (date_str, price) in &dated {
         let price_guid = format!("{}-{}", commodity_guid, date_str);
         let value_num = (*price * PRICE_SCALE as f64).round() as i64;
         insert
