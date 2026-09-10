@@ -316,7 +316,6 @@ export interface BookSettings {
   priceAutoRefresh: PriceAutoRefresh;
   exportCsvDelimiter: CsvDelimiter;
   exportDateFormat: ExportDateFormat;
-  remindersLookaheadDays: number;
 }
 
 export const getBookSettings = (): Promise<BookSettings> =>
@@ -543,17 +542,6 @@ export interface ScheduleInput {
   splits: SplitInput[];
 }
 
-export interface UpcomingReminder {
-  scheduleGuid: string;
-  name: string;
-  frequency: ScheduleFrequency;
-  /** YYYY-MM-DD */
-  nextDueDate: string;
-  overdueDays: number;
-  previewAmount: number;
-  description: string | null;
-}
-
 export const fetchSchedules = (): Promise<Schedule[]> => invoke<Schedule[]>('fetch_schedules');
 
 export const fetchSchedule = (guid: string): Promise<Schedule> =>
@@ -570,9 +558,6 @@ export const deleteSchedule = (guid: string): Promise<void> =>
 
 export const setScheduleActive = (guid: string, active: boolean): Promise<Schedule> =>
   invoke<Schedule>('set_schedule_active', { guid, active });
-
-export const fetchUpcomingReminders = (lookaheadDays?: number): Promise<UpcomingReminder[]> =>
-  invoke<UpcomingReminder[]>('fetch_upcoming_reminders', { lookaheadDays: lookaheadDays ?? null });
 
 /** Posts the due occurrence; resolves with the new transaction GUID. */
 export const postScheduleOccurrence = (guid: string): Promise<string> =>

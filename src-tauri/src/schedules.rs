@@ -21,12 +21,6 @@ pub const FREQUENCIES: [&str; 6] = [
     "yearly",
 ];
 
-/// Reminder lookahead fallback (days) when the caller passes no explicit
-/// window. The frontend normally passes the book's `remindersLookaheadDays`
-/// setting instead.
-pub const DEFAULT_LOOKAHEAD_DAYS: i64 = 14;
-const MAX_LOOKAHEAD_DAYS: i64 = 90;
-
 // ── Wire structs ─────────────────────────────────────────────────────────────
 
 /// Create/update payload: recurrence rule + a transaction template. One flat
@@ -75,21 +69,9 @@ pub struct Schedule {
     pub notes: Option<String>,
     pub splits: Vec<ScheduleSplit>,
     /// Sum of the positive template split amounts: the transfer size behind a
-    /// balanced template. Rendered in list/reminder rows (a raw sum is always 0).
+    /// balanced template. Rendered in list rows (a raw sum is always 0).
     pub preview_amount: f64,
     pub created_at: String,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UpcomingReminder {
-    pub schedule_guid: String,
-    pub name: String,
-    pub frequency: String,
-    pub next_due_date: String,
-    pub overdue_days: i64,
-    pub preview_amount: f64,
-    pub description: Option<String>,
 }
 
 // ── Stored template ──────────────────────────────────────────────────────────
@@ -580,54 +562,6 @@ fn fetch_schedules_inner(conn: &Connection) -> Result<Vec<Schedule>, AppError> {
     rows.into_iter().map(|r| to_schedule(conn, r)).collect()
 }
 
-// ── Reminders ────────────────────────────────────────────────────────────────
-
-fn fetch_upcoming_reminders_inner(
-    conn: &Connection,
-    lookahead_days: Option<i64>,
-) -> Result<Vec<UpcomingReminder>, AppError> {
-    let days = lookahead_days
-        .unwrap_or(DEFAULT_LOOKAHEAD_DAYS)
-        .clamp(1, MAX_LOOKAHEAD_DAYS);
-    // The one money query allowed to look forward (opposite of
-    // `VISIBLE_TX_FILTER`): paused and completed schedules never surface.
-    let sql = format!(
-        "SELECT {SELECT_COLS} FROM recurring_schedules
-         WHERE active = 1 AND next_due_date IS NOT NULL
-           AND next_due_date < date('now', '+' || CAST(?1 AS TEXT) || ' days')
-         ORDER BY next_due_date, name"
-    );
-    let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt
-        .query_map(params![days], read_row)?
-        .collect::<Result<Vec<_>, _>>()?;
-    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
-    let today_date =
-        NaiveDate::parse_from_str(&today, "%Y-%m-%d").map_err(|_| {
-            AppError::Validation("Failed to determine the current date".to_string())
-        })?;
-    rows
-        .into_iter()
-        .map(|r| {
-            let due = r
-                .next_due_date
-                .clone()
-                .ok_or_else(|| AppError::Validation("Corrupt schedule data".to_string()))?;
-            let due_date = parse_stored_date(&due)?;
-            let template = parse_template(&r.template_json)?;
-            Ok(UpcomingReminder {
-                schedule_guid: r.guid,
-                name: r.name,
-                frequency: r.frequency,
-                next_due_date: due,
-                overdue_days: (today_date - due_date).num_days().max(0),
-                preview_amount: preview_amount(&template.splits),
-                description: template.description,
-            })
-        })
-        .collect()
-}
-
 // ── Post / skip ──────────────────────────────────────────────────────────────
 
 fn schedule_tx_label(template: &StoredTemplate, schedule_name: &str) -> String {
@@ -856,17 +790,6 @@ pub async fn fetch_schedule(state: State<'_, AppState>, guid: String) -> Result<
     .await
 }
 
-#[tauri::command]
-pub async fn fetch_upcoming_reminders(
-    state: State<'_, AppState>,
-    lookahead_days: Option<i64>,
-) -> Result<Vec<UpcomingReminder>, String> {
-    run_blocking(state.db.clone(), move |conn| {
-        fetch_upcoming_reminders_inner(conn, lookahead_days).map_err(String::from)
-    })
-    .await
-}
-
 /// Post the due occurrence now. Returns the new transaction GUID so the
 /// frontend can navigate to its detail page.
 #[tauri::command]
@@ -1043,30 +966,6 @@ mod tests {
     }
 
     #[test]
-    fn upcoming_filters_paused_completed_and_far_future() {
-        let conn = setup();
-        // Due long ago → surfaces (overdue).
-        let overdue = create_schedule_inner(&conn, balanced_input()).unwrap();
-        // Far-future start → outside the window.
-        let mut future = balanced_input();
-        future.name = "Future".to_string();
-        future.start_date = "2099-01-01".to_string();
-        create_schedule_inner(&conn, future).unwrap();
-        // Paused schedule → hidden.
-        let mut paused = balanced_input();
-        paused.name = "Paused".to_string();
-        set_schedule_active_inner(&conn, &create_schedule_inner(&conn, paused).unwrap().guid, false)
-            .unwrap();
-
-        let upcoming = fetch_upcoming_reminders_inner(&conn, Some(14)).unwrap();
-        assert_eq!(upcoming.len(), 1);
-        assert_eq!(upcoming[0].schedule_guid, overdue.guid);
-        assert_eq!(upcoming[0].next_due_date, "2024-01-01");
-        assert!(upcoming[0].overdue_days > 0);
-        assert_eq!(upcoming[0].preview_amount, 1000.0);
-    }
-
-    #[test]
     fn post_creates_visible_transaction_and_advances() {
         let conn = setup();
         let s = create_schedule_inner(&conn, balanced_input()).unwrap();
@@ -1145,10 +1044,6 @@ mod tests {
         assert_eq!(after.occurrences_posted, 1);
         // No occurrences remain.
         assert!(post_schedule_occurrence_inner(&conn, &s.guid).is_err());
-        assert!(fetch_upcoming_reminders_inner(&conn, Some(90))
-            .unwrap()
-            .iter()
-            .all(|r| r.schedule_guid != s.guid));
     }
 
     #[test]
