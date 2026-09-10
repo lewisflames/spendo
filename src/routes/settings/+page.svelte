@@ -161,6 +161,16 @@
     });
   });
 
+  /** Reload book settings after a switch/save and clear a stale error card. */
+  async function refreshBookSettings() {
+    bookSettingsError = null;
+    try {
+      await loadBookSettings(true);
+    } catch (e: unknown) {
+      bookSettingsError = errMsg(e, 'Failed to load book settings');
+    }
+  }
+
   const fyMonths = $derived(
     Array.from({ length: 12 }, (_, i) => ({
       value: String(i + 1),
@@ -201,10 +211,7 @@
       const result = await openBook(selected);
       setDbSession(result.summary);
       setActiveBookPath(selected);
-      bookSettingsError = null;
-      await loadBookSettings(true).catch((e: unknown) => {
-        bookSettingsError = errMsg(e, 'Failed to load book settings');
-      });
+      await refreshBookSettings();
       toast.success(`Opened ${await basename(selected)}`);
     } catch (e: unknown) {
       toast.error(errMsg(e, 'Failed to open book'));
@@ -233,10 +240,7 @@
       const result = await createBookAt(file, currency);
       setDbSession(result.summary);
       setActiveBookPath(file);
-      bookSettingsError = null;
-      await loadBookSettings(true).catch((e: unknown) => {
-        bookSettingsError = errMsg(e, 'Failed to load book settings');
-      });
+      await refreshBookSettings();
       toast.success(`Book created (${currency})`);
     } catch (e: unknown) {
       toast.error(errMsg(e, 'Failed to create book'));
@@ -264,10 +268,7 @@
       const result = await saveBookAs(file);
       setDbSession(result.summary);
       setActiveBookPath(file);
-      bookSettingsError = null;
-      await loadBookSettings(true).catch((e: unknown) => {
-        bookSettingsError = errMsg(e, 'Failed to load book settings');
-      });
+      await refreshBookSettings();
       toast.success(`Book saved as ${await basename(file)}`);
     } catch (e: unknown) {
       toast.error(errMsg(e, 'Failed to save book'));
@@ -701,10 +702,7 @@
     </IconCardHeader>
     <Card.Content class="flex flex-col gap-4">
       {#if bookSettingsError}
-        <ErrorCard
-          message={bookSettingsError}
-          onRetry={() => void loadBookSettings(true).catch(() => {})}
-        />
+        <ErrorCard message={bookSettingsError} onRetry={() => void refreshBookSettings()} />
       {/if}
       <div class="flex items-center justify-between gap-4">
         <div class="flex flex-col gap-1">
