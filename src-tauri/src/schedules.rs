@@ -454,7 +454,7 @@ fn fetch_row(conn: &Connection, guid: &str) -> Result<ScheduleRow, AppError> {
         })
 }
 
-fn fetch_schedule(conn: &Connection, guid: &str) -> Result<Schedule, AppError> {
+fn fetch_schedule_inner(conn: &Connection, guid: &str) -> Result<Schedule, AppError> {
     to_schedule(conn, fetch_row(conn, guid)?)
 }
 
@@ -490,7 +490,7 @@ fn create_schedule_inner(
             created_at,
         ],
     )?;
-    fetch_schedule(conn, &guid)
+    fetch_schedule_inner(conn, &guid)
 }
 
 fn update_schedule_inner(
@@ -543,7 +543,7 @@ fn update_schedule_inner(
             guid,
         ],
     )?;
-    fetch_schedule(conn, guid)
+    fetch_schedule_inner(conn, guid)
 }
 
 fn delete_schedule_inner(conn: &Connection, guid: &str) -> Result<(), AppError> {
@@ -565,7 +565,7 @@ fn set_schedule_active_inner(
         "UPDATE recurring_schedules SET active = ?1 WHERE guid = ?2",
         params![if active { 1 } else { 0 }, guid],
     )?;
-    fetch_schedule(conn, guid)
+    fetch_schedule_inner(conn, guid)
 }
 
 fn fetch_schedules_inner(conn: &Connection) -> Result<Vec<Schedule>, AppError> {
@@ -849,6 +849,14 @@ pub async fn fetch_schedules(state: State<'_, AppState>) -> Result<Vec<Schedule>
 }
 
 #[tauri::command]
+pub async fn fetch_schedule(state: State<'_, AppState>, guid: String) -> Result<Schedule, String> {
+    run_blocking(state.db.clone(), move |conn| {
+        fetch_schedule_inner(conn, &guid).map_err(String::from)
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn fetch_upcoming_reminders(
     state: State<'_, AppState>,
     lookahead_days: Option<i64>,
@@ -1094,7 +1102,7 @@ mod tests {
         assert_eq!((kind.as_str(), source.as_str()), ("tx_create", "schedule"));
 
         // Pointer advanced one month, posted count bumped.
-        let after = fetch_schedule(&conn, &s.guid).unwrap();
+        let after = fetch_schedule_inner(&conn, &s.guid).unwrap();
         assert_eq!(after.next_due_date.as_deref(), Some("2024-02-01"));
         assert_eq!(after.occurrences_posted, 1);
     }
@@ -1132,7 +1140,7 @@ mod tests {
         one.max_occurrences = Some(1);
         let s = create_schedule_inner(&conn, one).unwrap();
         post_schedule_occurrence_inner(&conn, &s.guid).unwrap();
-        let after = fetch_schedule(&conn, &s.guid).unwrap();
+        let after = fetch_schedule_inner(&conn, &s.guid).unwrap();
         assert_eq!(after.next_due_date, None);
         assert_eq!(after.occurrences_posted, 1);
         // No occurrences remain.
@@ -1180,7 +1188,7 @@ mod tests {
         let conn = setup();
         let s = create_schedule_inner(&conn, balanced_input()).unwrap();
         delete_schedule_inner(&conn, &s.guid).unwrap();
-        assert!(fetch_schedule(&conn, &s.guid).is_err());
+        assert!(fetch_schedule_inner(&conn, &s.guid).is_err());
         assert!(fetch_schedules_inner(&conn).unwrap().is_empty());
     }
 

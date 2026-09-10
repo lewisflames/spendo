@@ -556,6 +556,9 @@ export interface UpcomingReminder {
 
 export const fetchSchedules = (): Promise<Schedule[]> => invoke<Schedule[]>('fetch_schedules');
 
+export const fetchSchedule = (guid: string): Promise<Schedule> =>
+  invoke<Schedule>('fetch_schedule', { guid });
+
 export const createSchedule = (input: ScheduleInput): Promise<Schedule> =>
   invoke<Schedule>('create_schedule', { input });
 

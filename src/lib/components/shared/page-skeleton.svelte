@@ -19,6 +19,7 @@
       | 'accounts'
       | 'transactions'
       | 'transaction-detail'
+      | 'form'
       | 'budgets'
       | 'budget-detail'
       | 'portfolio'
@@ -87,4 +88,10 @@
 {:else if variant === 'scheduled'}
   <PageHeaderSkeleton />
   <TableSkeleton cols={7} rows={4} />
+{:else if variant === 'form'}
+  <PageHeaderSkeleton />
+  <div class="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
+    <Skeleton class="order-2 h-72 w-full rounded-lg lg:order-1" />
+    <Skeleton class="order-1 h-80 w-full rounded-lg lg:order-2" />
+  </div>
 {/if}

@@ -98,7 +98,7 @@
         <Table.Cell class="max-w-md py-2.5 font-medium">
           <!-- Underline disambiguates the navigate link from the row-toggle action. -->
           <a
-            href={resolve('/transactions/[id]', { id: row.txGuid })}
+            href={resolve('/transactions/[guid]', { guid: row.txGuid })}
             title="Open transaction"
             class="block truncate underline-offset-2 hover:underline"
           >
