@@ -7,8 +7,9 @@ use tauri::State;
 use crate::db::{run_blocking, with_tx_err, AppError, AppState};
 use crate::history;
 use crate::sql;
-use crate::transactions::{opt_text, SplitInput, TxInput};
+use crate::transactions::{SplitInput, TxInput};
 use crate::utils;
+use crate::utils::opt_text;
 
 /// Frequencies supported by recurring schedules (v1: simple presets only —
 /// no RRULE/cron, no weekday rules).
@@ -199,12 +200,8 @@ fn validate_frequency(raw: &str) -> Result<String, AppError> {
 }
 
 fn parse_iso_date(raw: &str, field: &str) -> Result<String, AppError> {
-    let trimmed = raw.trim();
-    NaiveDate::parse_from_str(trimmed, "%Y-%m-%d")
-        .map(|d| d.format("%Y-%m-%d").to_string())
-        .map_err(|_| {
-            AppError::Validation(format!("Invalid {field} (expected YYYY-MM-DD): {raw}"))
-        })
+    utils::validate_iso_date(raw)
+        .map_err(|_| AppError::Validation(format!("Invalid {field} (expected YYYY-MM-DD): {raw}")))
 }
 
 fn parse_stored_date(raw: &str) -> Result<NaiveDate, AppError> {

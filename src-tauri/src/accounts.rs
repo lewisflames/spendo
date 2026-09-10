@@ -107,7 +107,7 @@ fn fetch_accounts_inner(
         None => Utc::now().format("%Y-%m-%d").to_string(),
     };
 
-    let sql = &format!("SELECT a.guid, a.name, a.account_type, a.parent_guid, a.code, a.description, a.placeholder,
+    let sql = format!("SELECT a.guid, a.name, a.account_type, a.parent_guid, a.code, a.description, a.placeholder,
                       c.mnemonic as commodity_mnemonic, c.guid as commodity_guid,
                       COALESCE(b.balance, 0) as balance,
                       COALESCE(b.quantity, 0) as quantity,
@@ -121,15 +121,15 @@ fn fetch_accounts_inner(
                         COUNT(DISTINCT s.tx_guid) as tx_count
                  FROM splits s
                  JOIN transactions t ON t.guid = s.tx_guid
-                 WHERE t.post_date < min(date(?1, '+1 day'), date('now', '+1 day'))
+                 WHERE t.post_date < min(date(?1, '+1 day'), {})
                  GROUP BY s.account_guid
                ) b ON b.account_guid = a.guid
                WHERE a.account_type != 'ROOT'
                ORDER BY a.account_type, a.name",
-        utils::RAW_AMOUNT, utils::QUANTITY_AMOUNT
+        utils::RAW_AMOUNT, utils::QUANTITY_AMOUNT, utils::VISIBLE_NOW_EXPR
     );
 
-    let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
 
     let rows: Vec<AccountRow> = stmt
         .query_map(params![date_expr], |row| {

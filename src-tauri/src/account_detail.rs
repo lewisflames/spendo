@@ -206,7 +206,10 @@ fn compute_summary(
     // Point-in-time cap (the ledger's own date filters don't apply here by
     // design); half-open and visibility-capped like the balance queries.
     w.add(
-        "t.post_date < min(date({}, '+1 day'), date('now', '+1 day'))",
+        &format!(
+            "t.post_date < min(date({{}}, '+1 day'), {})",
+            utils::VISIBLE_NOW_EXPR
+        ),
         vec![Box::new(effective_as_of(as_of))],
     );
     let sum_extra_sql = w.and_clause("AND");
@@ -778,14 +781,16 @@ fn subtree_deltas_by_day(
          JOIN commodities c ON c.guid = a.commodity_guid
          JOIN transactions t ON t.guid = s.tx_guid
          WHERE s.account_guid IN ({}) {}
-           AND t.post_date >= ?{} AND t.post_date < date(?{}, '+1 day')
+           AND t.post_date >= ?{}
+           AND t.post_date < min(date(?{}, '+1 day'), {})
          GROUP BY t.post_date, c.mnemonic
          ORDER BY t.post_date ASC",
         amount_expr,
         sql::in_clause(n),
         type_filter,
         n + 1,
-        n + 2
+        n + 2,
+        utils::VISIBLE_NOW_EXPR
     );
     let mut params = sql::string_param_refs(sub_guids);
     params.push(&start_date);
