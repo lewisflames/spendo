@@ -616,43 +616,55 @@ fn enrich_page_transactions(
         notes_map.extend(rows);
     }
 
-    // Split details for each transaction
-    let mut split_stmt = conn
-        .prepare(&format!(
+    // Split details for the page's transactions in one chunked query instead
+    // of one query per row.
+    let mut splits_by_guid: HashMap<String, Vec<DetailSplit>> = HashMap::new();
+    for chunk in page_guids.chunks(sql::MAX_IN_PARAMS) {
+        let split_sql = format!(
             "SELECT s.guid, s.account_guid, a.name as account_name, a.description as account_description,
                     a.account_type,
                     s.memo,
                     {} as amount,
-                    s.reconcile_state
+                    s.reconcile_state,
+                    s.tx_guid
              FROM splits s
              JOIN accounts a ON a.guid = s.account_guid
-             WHERE s.tx_guid = ?1
-             ORDER BY ABS(s.value_num) DESC",
+             WHERE s.tx_guid IN ({})
+             ORDER BY s.tx_guid, ABS(s.value_num) DESC",
             utils::RAW_AMOUNT,
-        ))
-        .map_err(|e| e.to_string())?;
+            sql::in_clause(chunk.len()),
+        );
+        let mut split_stmt = conn.prepare(&split_sql).map_err(|e| e.to_string())?;
+        let rows = split_stmt
+            .query_map(sql::string_param_refs(chunk).as_slice(), |row| {
+                Ok((
+                    row.get::<_, String>(8)?, // tx_guid
+                    DetailSplit {
+                        guid: row.get(0)?,
+                        account_guid: row.get(1)?,
+                        account_name: row.get(2)?,
+                        account_description: row.get(3)?,
+                        account_type: row.get(4)?,
+                        amount: row.get(6)?,
+                        memo: row.get(5)?,
+                        reconcile_state: row.get(7)?,
+                    },
+                ))
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        for (tx_guid, split) in rows {
+            splits_by_guid.entry(tx_guid).or_default().push(split);
+        }
+    }
 
     let sub_set: HashSet<&str> = sub_guids.iter().map(|s| s.as_str()).collect();
 
     let mut transactions: Vec<DetailTransaction> = vec![];
     for tx_guid in page_guids {
         let (post_date, description, num, _) = &tx_map[tx_guid];
-        let splits: Vec<DetailSplit> = split_stmt
-            .query_map([tx_guid], |row| {
-                Ok(DetailSplit {
-                    guid: row.get(0)?,
-                    account_guid: row.get(1)?,
-                    account_name: row.get(2)?,
-                    account_description: row.get(3)?,
-                    account_type: row.get(4)?,
-                    amount: row.get(6)?,
-                    memo: row.get(5)?,
-                    reconcile_state: row.get(7)?,
-                })
-            })
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?;
+        let splits = splits_by_guid.remove(tx_guid).unwrap_or_default();
 
         // Counter-accounts: distinct descriptions (falling back to name) of
         // splits outside the viewed subtree, in largest-magnitude-first

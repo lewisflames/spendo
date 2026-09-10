@@ -374,6 +374,12 @@ fn build_filter_conditions(
 /// Per-transaction split rows plus the FX-converted transaction total.
 type SplitMaps = (std::collections::HashMap<String, Vec<SplitData>>, std::collections::HashMap<String, f64>);
 
+/// SQLite caps bound parameters per statement; chunk large GUID lists so a
+/// full-width transaction page (or export) can never hit "too many SQL
+/// variables". Each chunk holds whole transaction GUIDs, so per-transaction
+/// ordering/totals are unaffected.
+const MAX_IN_PARAMS: usize = sql::MAX_IN_PARAMS;
+
 fn fetch_splits_for_txns(conn: &Connection, guids: &[String]) -> Result<SplitMaps, String> {
     if guids.is_empty() {
         return Ok((
@@ -382,76 +388,78 @@ fn fetch_splits_for_txns(conn: &Connection, guids: &[String]) -> Result<SplitMap
         ));
     }
 
-    let sql = format!(
-        "SELECT s.guid, s.tx_guid, s.account_guid, a.name as account_name, a.account_type,
-                s.memo,
-                {} as amount,
-                {} as signed_amount,
-                t.post_date,
-                c.mnemonic as commodity,
-                {} as quantity,
-                s.reconciled,
-                a.description as account_description,
-                s.reconcile_state
-         FROM splits s
-         JOIN accounts a ON a.guid = s.account_guid
-         JOIN commodities c ON c.guid = a.commodity_guid
-         JOIN transactions t ON t.guid = s.tx_guid
-         WHERE s.tx_guid IN ({})
-         ORDER BY s.tx_guid, ABS(s.value_num) DESC",
-        utils::RAW_AMOUNT,
-        utils::signed_amount_expr(utils::RAW_AMOUNT, "a.account_type"),
-        utils::QUANTITY_AMOUNT,
-        sql::in_clause(guids.len())
-    );
-
-    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-
-    let param_refs = sql::string_param_refs(guids);
-
     let report_currency = fx::get_report_currency_mnemonic(conn)?.unwrap_or_default();
     let fx_history = fx::FxHistory::load(conn)?;
-
-    let rows: Vec<(String, SplitData, f64, String)> = stmt
-        .query_map(param_refs.as_slice(), |row| {
-            Ok((
-                row.get::<_, String>(1)?, // tx_guid
-                SplitData {
-                    info: SplitInfo {
-                        guid: row.get(0)?,
-                        account_guid: row.get(2)?,
-                        account_name: row.get(3)?,
-                        account_type: row.get(4)?,
-                        amount: row.get(6)?,
-                        memo: row.get(5)?,
-                    },
-                    commodity: row.get::<_, Option<String>>(9)?,
-                    quantity: row.get(10)?,
-                    reconciled: row.get::<_, i64>(11)? != 0,
-                    account_description: row.get::<_, Option<String>>(12)?,
-                    reconcile_state: row.get::<_, Option<String>>(13)?,
-                },
-                row.get::<_, f64>(7)?,    // signed_amount
-                row.get::<_, String>(8)?, // post_date
-            ))
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
 
     let mut map: std::collections::HashMap<String, Vec<SplitData>> =
         std::collections::HashMap::new();
     let mut totals: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
-    for (tx_guid, split, signed_amount, post_date) in rows {
-        // Sorted by |raw amount| desc, so the first split per transaction is its
-        // largest-magnitude one. Its signed value is the transaction total,
-        // converted to the report currency at the transaction date's FX.
-        totals.entry(tx_guid.clone()).or_insert_with(|| {
-            let fx_at = fx_history.map_for_date(&post_date);
-            let currency = split.commodity.as_deref().unwrap_or(&report_currency);
-            fx::convert(signed_amount, currency, &report_currency, &fx_at)
-        });
-        map.entry(tx_guid).or_default().push(split);
+
+    for chunk in guids.chunks(MAX_IN_PARAMS) {
+        let sql = format!(
+            "SELECT s.guid, s.tx_guid, s.account_guid, a.name as account_name, a.account_type,
+                    s.memo,
+                    {} as amount,
+                    {} as signed_amount,
+                    t.post_date,
+                    c.mnemonic as commodity,
+                    {} as quantity,
+                    s.reconciled,
+                    a.description as account_description,
+                    s.reconcile_state
+             FROM splits s
+             JOIN accounts a ON a.guid = s.account_guid
+             JOIN commodities c ON c.guid = a.commodity_guid
+             JOIN transactions t ON t.guid = s.tx_guid
+             WHERE s.tx_guid IN ({})
+             ORDER BY s.tx_guid, ABS(s.value_num) DESC",
+            utils::RAW_AMOUNT,
+            utils::signed_amount_expr(utils::RAW_AMOUNT, "a.account_type"),
+            utils::QUANTITY_AMOUNT,
+            sql::in_clause(chunk.len())
+        );
+
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+        let param_refs = sql::string_param_refs(chunk);
+
+        let rows: Vec<(String, SplitData, f64, String)> = stmt
+            .query_map(param_refs.as_slice(), |row| {
+                Ok((
+                    row.get::<_, String>(1)?, // tx_guid
+                    SplitData {
+                        info: SplitInfo {
+                            guid: row.get(0)?,
+                            account_guid: row.get(2)?,
+                            account_name: row.get(3)?,
+                            account_type: row.get(4)?,
+                            amount: row.get(6)?,
+                            memo: row.get(5)?,
+                        },
+                        commodity: row.get::<_, Option<String>>(9)?,
+                        quantity: row.get(10)?,
+                        reconciled: row.get::<_, i64>(11)? != 0,
+                        account_description: row.get::<_, Option<String>>(12)?,
+                        reconcile_state: row.get::<_, Option<String>>(13)?,
+                    },
+                    row.get::<_, f64>(7)?,    // signed_amount
+                    row.get::<_, String>(8)?, // post_date
+                ))
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+
+        for (tx_guid, split, signed_amount, post_date) in rows {
+            // Sorted by |raw amount| desc, so the first split per transaction is
+            // its largest-magnitude one. Its signed value is the transaction
+            // total, converted to the report currency at the transaction date's FX.
+            totals.entry(tx_guid.clone()).or_insert_with(|| {
+                let fx_at = fx_history.map_for_date(&post_date);
+                let currency = split.commodity.as_deref().unwrap_or(&report_currency);
+                fx::convert(signed_amount, currency, &report_currency, &fx_at)
+            });
+            map.entry(tx_guid).or_default().push(split);
+        }
     }
     Ok((map, totals))
 }

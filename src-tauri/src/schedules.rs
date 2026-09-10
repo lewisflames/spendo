@@ -389,14 +389,19 @@ fn preview_amount(splits: &[StoredSplit]) -> f64 {
         .sum()
 }
 
-fn to_schedule(conn: &Connection, row: ScheduleRow) -> Result<Schedule, AppError> {
-    let template = parse_template(&row.template_json)?;
-    let guids: Vec<String> = template
+fn template_account_guids(template_json: &str) -> Result<Vec<String>, AppError> {
+    Ok(parse_template(template_json)?
         .splits
         .iter()
         .map(|s| s.account_guid.clone())
-        .collect();
-    let names = account_names(conn, &guids)?;
+        .collect())
+}
+
+fn to_schedule_with_names(
+    row: ScheduleRow,
+    names: &HashMap<String, String>,
+) -> Result<Schedule, AppError> {
+    let template = parse_template(&row.template_json)?;
     Ok(Schedule {
         guid: row.guid,
         name: row.name,
@@ -425,6 +430,12 @@ fn to_schedule(conn: &Connection, row: ScheduleRow) -> Result<Schedule, AppError
         preview_amount: preview_amount(&template.splits),
         created_at: row.created_at,
     })
+}
+
+fn to_schedule(conn: &Connection, row: ScheduleRow) -> Result<Schedule, AppError> {
+    let guids = template_account_guids(&row.template_json)?;
+    let names = account_names(conn, &guids)?;
+    to_schedule_with_names(row, &names)
 }
 
 fn fetch_row(conn: &Connection, guid: &str) -> Result<ScheduleRow, AppError> {
@@ -559,7 +570,15 @@ fn fetch_schedules_inner(conn: &Connection) -> Result<Vec<Schedule>, AppError> {
     let rows = stmt
         .query_map([], read_row)?
         .collect::<Result<Vec<_>, _>>()?;
-    rows.into_iter().map(|r| to_schedule(conn, r)).collect()
+    // One account-name lookup for the whole list instead of per schedule.
+    let mut guids: Vec<String> = Vec::new();
+    for row in &rows {
+        guids.extend(template_account_guids(&row.template_json)?);
+    }
+    let names = account_names(conn, &guids)?;
+    rows.into_iter()
+        .map(|r| to_schedule_with_names(r, &names))
+        .collect()
 }
 
 // ── Post / skip ──────────────────────────────────────────────────────────────
