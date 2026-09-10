@@ -822,9 +822,13 @@ pub async fn import_gnucash(
     path: String,
     filename: String,
 ) -> Result<ImportResult, String> {
-    utils::validate_gnucash_path(&path)?;
-    // Hash before acquiring the DB lock so the lock isn't held during file I/O.
-    let sha256 = file_sha256(&path)?;
+    // Validate + hash on a blocking thread, before the DB lock is touched.
+    let hash_path = path.clone();
+    let sha256 = db::run_io(move || {
+        utils::validate_gnucash_path(&hash_path)?;
+        file_sha256(&hash_path)
+    })
+    .await?;
     // Capture the active book before merging: if the user switches books while
     // the import (or its price fetch) is in flight, the price write is dropped.
     let generation = state.book_generation.load(std::sync::atomic::Ordering::SeqCst);
@@ -848,8 +852,12 @@ pub async fn reimport_last(state: State<'_, AppState>) -> Result<ImportResult, S
     // import log so books imported before the rewrite can still reimport.
     let (file_path, filename) =
         db::run_blocking(state.db.clone(), history::last_import_source).await?;
-    utils::validate_gnucash_path(&file_path)?;
-    let sha256 = file_sha256(&file_path)?;
+    let hash_path = file_path.clone();
+    let sha256 = db::run_io(move || {
+        utils::validate_gnucash_path(&hash_path)?;
+        file_sha256(&hash_path)
+    })
+    .await?;
     let generation = state.book_generation.load(std::sync::atomic::Ordering::SeqCst);
 
     let mut result = db::run_blocking(state.db.clone(), move |conn| {

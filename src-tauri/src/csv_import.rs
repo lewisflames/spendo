@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use tauri::State;
 
-use crate::db::{run_blocking, with_tx_err, AppError, AppState};
+use crate::db::{run_blocking, run_io, with_tx_err, AppError, AppState};
 use crate::history;
 use crate::transactions;
 
@@ -850,7 +850,12 @@ fn duplicate_flags(
 
 #[tauri::command]
 pub async fn csv_detect(path: String) -> Result<CsvDetectResult, String> {
-    let bytes = read_file_bytes(&path).map_err(String::from)?;
+    // File read + parsing run on a blocking thread (the file may be ~10 MiB).
+    run_io(move || csv_detect_inner(&path)).await
+}
+
+fn csv_detect_inner(path: &str) -> Result<CsvDetectResult, String> {
+    let bytes = read_file_bytes(path).map_err(String::from)?;
     let (text, encoding) = decode_bytes(&bytes, None);
     let (_, delimiter) = parse_delimiter(None, &text).map_err(String::from)?;
     let delim_byte = delimiter.as_bytes()[0];
@@ -886,9 +891,12 @@ pub async fn csv_detect(path: String) -> Result<CsvDetectResult, String> {
     })
 }
 
-fn preview_inner(conn: &Connection, input: CsvPreviewInput) -> Result<CsvPreviewResult, AppError> {
-    let bytes = read_file_bytes(&input.path)?;
-    let (text, _) = decode_bytes(&bytes, input.encoding.as_deref());
+fn preview_inner(
+    conn: &Connection,
+    input: CsvPreviewInput,
+    bytes: &[u8],
+) -> Result<CsvPreviewResult, AppError> {
+    let (text, _) = decode_bytes(bytes, input.encoding.as_deref());
     let (delim_byte, _) = parse_delimiter(input.delimiter.as_deref(), &text)?;
     let records = parse_records(&text, delim_byte)?;
     let has_header = input.has_header.unwrap_or_else(|| {
@@ -974,13 +982,21 @@ pub async fn csv_preview(
     state: State<'_, AppState>,
     input: CsvPreviewInput,
 ) -> Result<CsvPreviewResult, String> {
-    let db = state.db.clone();
-    run_blocking(db, move |conn| preview_inner(conn, input).map_err(String::from)).await
+    // Read the file off the runtime and before the DB lock.
+    let path = input.path.clone();
+    let bytes = run_io(move || read_file_bytes(&path).map_err(String::from)).await?;
+    run_blocking(state.db.clone(), move |conn| {
+        preview_inner(conn, input, &bytes).map_err(String::from)
+    })
+    .await
 }
 
-fn commit_inner(conn: &Connection, input: CsvCommitInput) -> Result<CsvCommitResult, AppError> {
-    let bytes = read_file_bytes(&input.path)?;
-    let (text, _) = decode_bytes(&bytes, input.encoding.as_deref());
+fn commit_inner(
+    conn: &Connection,
+    input: CsvCommitInput,
+    bytes: &[u8],
+) -> Result<CsvCommitResult, AppError> {
+    let (text, _) = decode_bytes(bytes, input.encoding.as_deref());
     let (delim_byte, _) = parse_delimiter(input.delimiter.as_deref(), &text)?;
     let records = parse_records(&text, delim_byte)?;
     let has_header = input.has_header.unwrap_or_else(|| {
@@ -1164,8 +1180,12 @@ pub async fn csv_commit(
     state: State<'_, AppState>,
     input: CsvCommitInput,
 ) -> Result<CsvCommitResult, String> {
-    let db = state.db.clone();
-    run_blocking(db, move |conn| commit_inner(conn, input).map_err(String::from)).await
+    let path = input.path.clone();
+    let bytes = run_io(move || read_file_bytes(&path).map_err(String::from)).await?;
+    run_blocking(state.db.clone(), move |conn| {
+        commit_inner(conn, input, &bytes).map_err(String::from)
+    })
+    .await
 }
 
 #[cfg(test)]
@@ -1291,7 +1311,8 @@ mod tests {
         let path = write_temp_csv("preview-commit", csv);
         let input = preview_input(&path);
 
-        let first = preview_inner(&conn, input.clone()).expect("preview runs");
+        let bytes = read_file_bytes(&path).unwrap();
+        let first = preview_inner(&conn, input.clone(), &bytes).expect("preview runs");
         assert_eq!(first.total_rows, 2);
         assert_eq!(first.valid_count, 2);
         assert_eq!(first.duplicate_count, 0);
@@ -1308,7 +1329,7 @@ mod tests {
             date_preference: Some("dmy".to_string()),
             selected_keys: vec![0, 1],
         };
-        let result = commit_inner(&conn, commit).expect("commit runs");
+        let result = commit_inner(&conn, commit, &bytes).expect("commit runs");
         assert_eq!(result.created, 2);
         let tx_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM transactions", [], |r| r.get(0))
@@ -1324,7 +1345,7 @@ mod tests {
         assert_eq!((kind.as_str(), source.as_str()), ("import", "csv"));
 
         // Second preview of the same file flags both rows as duplicates.
-        let second = preview_inner(&conn, input).expect("re-preview runs");
+        let second = preview_inner(&conn, input, &bytes).expect("re-preview runs");
         assert_eq!(second.valid_count, 0);
         assert_eq!(second.duplicate_count, 2);
 
@@ -1343,7 +1364,8 @@ mod tests {
         let conn = csv_e2e_setup();
         let csv = "Date,Description,Amount\n2024-02-01,Shop,-5.00\n2024-02-01,Shop,-5.00\n";
         let path = write_temp_csv("intra-dup", csv);
-        let report = preview_inner(&conn, preview_input(&path)).expect("preview runs");
+        let bytes = read_file_bytes(&path).unwrap();
+        let report = preview_inner(&conn, preview_input(&path), &bytes).expect("preview runs");
         assert_eq!(report.valid_count, 1);
         assert_eq!(report.duplicate_count, 1);
         std::fs::remove_file(&path).ok();
