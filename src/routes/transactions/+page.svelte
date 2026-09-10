@@ -117,13 +117,7 @@
   // Let the ledger table win the initial backend race: the account filter
   // options load once the first table request settles. One-shot so later
   // table refetches never wipe the options (a disabled hook clears data).
-  let accountsUnlocked = $state(false);
-
-  $effect(() => {
-    if (!accountsUnlocked && !res.loading && (res.data !== null || res.error !== null)) {
-      accountsUnlocked = true;
-    }
-  });
+  let accountsUnlocked = $derived(res.data !== null || res.error !== null);
 
   let accounts = $state<AccountInfo[]>([]);
 
