@@ -24,7 +24,8 @@ mod tree;
 mod utils;
 mod yahoo;
 
-use std::sync::Mutex;
+use std::sync::atomic::AtomicU64;
+use std::sync::{Arc, Mutex};
 
 use db::AppState;
 use tauri::Manager;
@@ -78,7 +79,8 @@ pub fn run() {
             };
 
             app.manage(AppState {
-                db: std::sync::Arc::new(Mutex::new(conn)),
+                db: Arc::new(Mutex::new(conn)),
+                book_generation: Arc::new(AtomicU64::new(0)),
                 db_path: Mutex::new(active_path),
                 app_data_dir,
             });

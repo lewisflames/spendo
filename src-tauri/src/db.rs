@@ -1,9 +1,15 @@
 use rusqlite::{Connection, Result};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
 
 pub struct AppState {
     pub db: Arc<Mutex<Connection>>,
+    /// Bumped on every connection swap (open/create/save-as) while the DB lock
+    /// is held. Long-running callers that await the network (price refresh,
+    /// import) capture it before their fetch and discard the write if it
+    /// changed, so results can never land in a different book.
+    pub book_generation: Arc<AtomicU64>,
     /// Absolute path of the active book file. `None` while on the in-memory
     /// placeholder (no book opened or created yet) — see `books::fetch_active_book`.
     pub db_path: Mutex<Option<PathBuf>>,

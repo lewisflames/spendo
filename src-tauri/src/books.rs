@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering;
 use tauri::State;
 
 use crate::db::{self, AppState};
@@ -127,9 +128,11 @@ async fn activate_book(
     new_path: PathBuf,
     new_conn: rusqlite::Connection,
 ) -> Result<HomeDataResult, String> {
+    let generation = state.book_generation.clone();
     let summary = db::run_swap_blocking(state.db.clone(), move |conn| {
         db::checkpoint(conn);
         *conn = new_conn;
+        generation.fetch_add(1, Ordering::SeqCst);
         get_summary(conn)
     })
     .await?;
@@ -211,6 +214,7 @@ pub async fn save_book_as(
     // copies the file, then the fresh file is opened and swapped atomically.
     let escaped = escape_path_for_sql(&new_path);
     let fresh_path = new_path.clone();
+    let generation = state.book_generation.clone();
     let summary = db::run_swap_blocking(state.db.clone(), move |conn| {
         conn.execute_batch(&format!("VACUUM INTO '{escaped}';"))
             .map_err(|e| format!("Failed to save book: {}", e))?;
@@ -218,6 +222,7 @@ pub async fn save_book_as(
             db::connect_db(&fresh_path).map_err(|e| format!("Failed to open saved book: {}", e))?;
         db::stamp_app_id(&fresh);
         *conn = fresh;
+        generation.fetch_add(1, Ordering::SeqCst);
         get_summary(conn)
     })
     .await?;

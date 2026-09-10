@@ -1,6 +1,7 @@
 use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::Ordering;
 use tauri::State;
 
 use crate::db::{self, AppError, AppState};
@@ -953,11 +954,21 @@ pub(crate) fn write_prices_and_log(
 
 #[tauri::command]
 pub async fn refresh_prices(state: State<'_, AppState>) -> Result<PricesResult, String> {
+    let generation = state.book_generation.load(Ordering::SeqCst);
     let pre = db::run_blocking(state.db.clone(), read_price_data).await?;
 
     let (result, write_data) = fetch_prices_remote(pre).await?;
 
+    // Discard the write if the active book changed while the fetch was in
+    // flight; the check runs while the DB lock is held, so it cannot race the
+    // swap (which bumps the generation under the same lock).
+    let gen_check = state.book_generation.clone();
     db::run_blocking(state.db.clone(), move |conn| {
+        if gen_check.load(Ordering::SeqCst) != generation {
+            return Err(
+                "Book changed while prices were refreshing — results discarded".to_string(),
+            );
+        }
         write_prices_and_log(conn, &write_data).map_err(String::from)
     })
     .await?;
