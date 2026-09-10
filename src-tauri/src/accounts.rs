@@ -93,10 +93,10 @@ struct AccountRow {
     tx_count: i64,
 }
 
-fn fetch_accounts_inner(
-    conn: &Connection,
-    as_of: Option<&str>,
-) -> Result<AccountsResult, String> {
+/// Load every account (excluding ROOT) with its as-of balance, quantity and
+/// transaction count. `as_of` bounds splits through the shared visibility
+/// window; `None` means current state.
+fn load_account_rows(conn: &Connection, as_of: Option<&str>) -> Result<Vec<AccountRow>, String> {
     // Half-open everywhere: `post_date` is `YYYY-MM-DD HH:MM:SS`, so
     // `< date(?,'+1 day')` includes the whole as-of day. `None` means current
     // state (today), matching `VISIBLE_TX_FILTER` semantics. The upper bound
@@ -152,17 +152,33 @@ fn fetch_accounts_inner(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
 
-    let unified_prices = get_cached_prices_map(conn)?;
-    let report_currency = fx::get_report_currency_mnemonic(conn)?.unwrap_or_default();
-    let fx_map = fx::get_fx_map(conn, as_of)?;
+    Ok(rows)
+}
 
+/// Account nodes plus the aggregates accumulated while valuing each row.
+struct AccountValuation {
+    node_map: HashMap<String, AccountNode>,
+    by_type: HashMap<String, TypeSummary>,
+    missing_fx_set: HashSet<String>,
+    missing_prices_map: HashMap<String, Option<String>>,
+    unrealized_gains: f64,
+}
+
+/// Apply credit-normal signs, investment mark-to-market and FX conversion to
+/// every row, collecting nodes, type summaries and missing-price/FX warnings.
+fn value_account_rows(
+    rows: &[AccountRow],
+    unified_prices: &HashMap<String, f64>,
+    report_currency: &str,
+    fx_map: &HashMap<String, f64>,
+) -> AccountValuation {
     let mut node_map: HashMap<String, AccountNode> = HashMap::new();
     let mut by_type: HashMap<String, TypeSummary> = HashMap::new();
     let mut missing_fx_set: HashSet<String> = HashSet::new();
     let mut missing_prices_map: HashMap<String, Option<String>> = HashMap::new();
     let mut unrealized_gains = 0.0;
 
-    for row in &rows {
+    for row in rows {
         let mut balance = if utils::is_credit_normal(&row.account_type) {
             -row.balance
         } else {
@@ -233,6 +249,56 @@ fn fetch_accounts_inner(
         entry.total_balance += balance;
     }
 
+    AccountValuation {
+        node_map,
+        by_type,
+        missing_fx_set,
+        missing_prices_map,
+        unrealized_gains,
+    }
+}
+
+/// Recursively clone the subtree for `guid`, stopping at already-visited nodes
+/// so corrupt `parent_guid` cycles cannot recurse forever.
+fn build_subtree(
+    node_map: &HashMap<String, AccountNode>,
+    children: &HashMap<String, Vec<String>>,
+    guid: &str,
+    visited: &mut HashSet<String>,
+) -> Option<AccountNode> {
+    if !visited.insert(guid.to_string()) {
+        return None;
+    }
+    let mut node = node_map.get(guid)?.clone();
+    if let Some(kids) = children.get(guid) {
+        for child_guid in kids {
+            if let Some(child) = build_subtree(node_map, children, child_guid, visited) {
+                node.children.push(child);
+            }
+        }
+    }
+    Some(node)
+}
+
+/// Roll child balances and transaction counts up into placeholder parents.
+/// Non-placeholder accounts keep the values from their direct splits.
+fn propagate_placeholder(nodes: &mut [AccountNode]) {
+    for node in nodes.iter_mut() {
+        propagate_placeholder(&mut node.children);
+        if node.placeholder {
+            for child in &node.children {
+                node.balance += child.balance;
+                node.tx_count += child.tx_count;
+            }
+        }
+    }
+}
+
+/// Assemble the name-sorted account forest from the valued node map.
+fn build_account_tree(
+    rows: &[AccountRow],
+    node_map: &HashMap<String, AccountNode>,
+) -> Vec<AccountNode> {
     // Build the parent→children index (name-sorted, orphans become roots).
     let index = {
         let triples = rows
@@ -241,53 +307,34 @@ fn fetch_accounts_inner(
         tree::build_index(triples)
     };
 
-    // Recursively build tree from the adjacency map. The visited set guards
-    // against `parent_guid` cycles in corrupt data (would otherwise recurse
-    // until stack overflow).
-    fn build_subtree(
-        node_map: &HashMap<String, AccountNode>,
-        children: &HashMap<String, Vec<String>>,
-        guid: &str,
-        visited: &mut HashSet<String>,
-    ) -> Option<AccountNode> {
-        if !visited.insert(guid.to_string()) {
-            return None;
-        }
-        let mut node = node_map.get(guid)?.clone();
-        if let Some(kids) = children.get(guid) {
-            for child_guid in kids {
-                if let Some(child) = build_subtree(node_map, children, child_guid, visited) {
-                    node.children.push(child);
-                }
-            }
-        }
-        Some(node)
-    }
-
     let mut root_nodes: Vec<AccountNode> = vec![];
     let mut visited = HashSet::new();
     for guid in &index.roots {
-        if let Some(node) = build_subtree(&node_map, &index.children, guid, &mut visited) {
+        if let Some(node) = build_subtree(node_map, &index.children, guid, &mut visited) {
             root_nodes.push(node);
         }
     }
 
-    // Propagate child balances/txns into placeholder parents.
-    // Non-placeholder accounts already have their own values from direct splits.
-    fn propagate_placeholder(nodes: &mut [AccountNode]) {
-        for node in nodes.iter_mut() {
-            propagate_placeholder(&mut node.children);
-            if node.placeholder {
-                for child in &node.children {
-                    node.balance += child.balance;
-                    node.tx_count += child.tx_count;
-                }
-            }
-        }
-    }
     propagate_placeholder(&mut root_nodes);
 
-    let total_accounts = rows.len() as i64;
+    root_nodes
+}
+
+/// Compute retained earnings, the balance check and the sorted missing
+/// FX/price warning lists, then pack everything into the response.
+fn assemble_accounts_result(
+    total_accounts: i64,
+    trees: Vec<AccountNode>,
+    report_currency: String,
+    valuation: AccountValuation,
+) -> AccountsResult {
+    let AccountValuation {
+        by_type,
+        missing_fx_set,
+        missing_prices_map,
+        unrealized_gains,
+        ..
+    } = valuation;
 
     let total_of = |key: &str| by_type.get(key).map(|s| s.total_balance).unwrap_or(0.0);
     let retained_earnings = total_of("INCOME") - total_of("EXPENSE");
@@ -304,8 +351,8 @@ fn fetch_accounts_inner(
         .collect();
     missing_prices.sort_by(|a, b| a.mnemonic.cmp(&b.mnemonic));
 
-    Ok(AccountsResult {
-        trees: root_nodes,
+    AccountsResult {
+        trees,
         by_type,
         total_accounts,
         report_currency,
@@ -314,7 +361,28 @@ fn fetch_accounts_inner(
         balance_check,
         missing_fx,
         missing_prices,
-    })
+    }
+}
+
+fn fetch_accounts_inner(
+    conn: &Connection,
+    as_of: Option<&str>,
+) -> Result<AccountsResult, String> {
+    let rows = load_account_rows(conn, as_of)?;
+
+    let unified_prices = get_cached_prices_map(conn)?;
+    let report_currency = fx::get_report_currency_mnemonic(conn)?.unwrap_or_default();
+    let fx_map = fx::get_fx_map(conn, as_of)?;
+
+    let valuation = value_account_rows(&rows, &unified_prices, &report_currency, &fx_map);
+    let trees = build_account_tree(&rows, &valuation.node_map);
+
+    Ok(assemble_accounts_result(
+        rows.len() as i64,
+        trees,
+        report_currency,
+        valuation,
+    ))
 }
 
 pub fn get_subaccount_guids(conn: &Connection, guid: &str) -> Result<Vec<String>, String> {

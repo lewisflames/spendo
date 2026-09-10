@@ -52,11 +52,9 @@ fn root_guid(conn: &Connection) -> Result<String, AppError> {
     .ok_or_else(|| AppError::NotFound("Book has no ROOT account — re-create the book".to_string()))
 }
 
-fn validate_account_input(
-    conn: &Connection,
-    input: &AccountInput,
-    self_guid: Option<&str>,
-) -> Result<String, AppError> {
+/// Trimmed name plus all scalar field constraints (required, lengths and
+/// allowed account type).
+fn validate_scalar_fields(input: &AccountInput) -> Result<&str, AppError> {
     let name = input.name.trim();
     if name.is_empty() {
         return Err(AppError::Validation("Account name is required".to_string()));
@@ -77,7 +75,14 @@ fn validate_account_input(
             return Err(AppError::Validation("Description is too long (max 500)".to_string()));
         }
     }
-    if let Some(ref cg) = input.commodity_guid {
+    Ok(name)
+}
+
+fn validate_commodity_exists(
+    conn: &Connection,
+    commodity_guid: Option<&str>,
+) -> Result<(), AppError> {
+    if let Some(cg) = commodity_guid {
         let exists: bool = conn
             .query_row(
                 "SELECT 1 FROM commodities WHERE guid = ?1",
@@ -91,10 +96,18 @@ fn validate_account_input(
             return Err(AppError::Validation("Selected currency does not exist".to_string()));
         }
     }
+    Ok(())
+}
 
-    // Resolve + validate the parent (None = top-level under ROOT).
-    let parent = match opt_text(&input.parent_guid) {
-        None => root_guid(conn)?,
+/// Resolve the stored parent guid (`None` = top-level under ROOT) and reject
+/// self/descendant parents with a cycle-guarded ancestor walk.
+fn resolve_parent(
+    conn: &Connection,
+    parent_guid: Option<String>,
+    self_guid: Option<&str>,
+) -> Result<String, AppError> {
+    match parent_guid {
+        None => root_guid(conn),
         Some(p) => {
             if Some(p.as_str()) == self_guid {
                 return Err(AppError::Validation("An account cannot be its own parent".to_string()));
@@ -111,7 +124,7 @@ fn validate_account_input(
                 return Err(AppError::NotFound("Parent account not found".to_string()));
             };
             if pt == "ROOT" {
-                root_guid(conn)?
+                root_guid(conn)
             } else {
                 // Cycle guard: walk the ancestor chain; it must never reach self.
                 if let Some(self_g) = self_guid {
@@ -138,12 +151,19 @@ fn validate_account_input(
                             .flatten();
                     }
                 }
-                p
+                Ok(p)
             }
         }
-    };
+    }
+}
 
-    // Sibling-name uniqueness (same parent, different row).
+/// Sibling-name uniqueness: same parent, different row.
+fn validate_sibling_name_unique(
+    conn: &Connection,
+    parent: &str,
+    name: &str,
+    self_guid: Option<&str>,
+) -> Result<(), AppError> {
     let clash: bool = conn
         .query_row(
             "SELECT 1 FROM accounts
@@ -158,7 +178,18 @@ fn validate_account_input(
     if clash {
         return Err(AppError::Validation("An account with this name already exists under the same parent".to_string()));
     }
+    Ok(())
+}
 
+fn validate_account_input(
+    conn: &Connection,
+    input: &AccountInput,
+    self_guid: Option<&str>,
+) -> Result<String, AppError> {
+    let name = validate_scalar_fields(input)?;
+    validate_commodity_exists(conn, input.commodity_guid.as_deref())?;
+    let parent = resolve_parent(conn, opt_text(&input.parent_guid), self_guid)?;
+    validate_sibling_name_unique(conn, &parent, name, self_guid)?;
     Ok(parent)
 }
 

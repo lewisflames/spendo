@@ -612,6 +612,85 @@ struct ParsedFile {
     rows: Vec<ParsedRow>,
 }
 
+impl ParsedRow {
+    /// Error row; `value_num` mirrors `amount` so hashes match the valid path.
+    fn invalid(
+        key: i64,
+        cells: &[String],
+        post_date: Option<String>,
+        description: &str,
+        amount: Option<f64>,
+        num: Option<String>,
+        notes: Option<String>,
+        error: String,
+    ) -> Self {
+        Self {
+            key,
+            raw: cells.to_vec(),
+            post_date,
+            description: Some(description.to_string()),
+            amount,
+            value_num: amount.map(amount_to_value_num),
+            num,
+            notes,
+            error: Some(error),
+        }
+    }
+}
+
+fn parse_date_cell(
+    cells: &[String],
+    col: usize,
+    date_preference: &str,
+) -> Result<String, AppError> {
+    parse_csv_date(&cell_at(cells, Some(col)), date_preference)
+}
+
+/// Resolve a row's signed amount from either the single Amount column or the
+/// Debit/Credit pair; money out of the target is negative.
+fn parse_amount_cell(
+    cells: &[String],
+    use_pair: bool,
+    mapping: &CsvMapping,
+) -> Result<f64, AppError> {
+    if use_pair {
+        let d_raw = cell_at(cells, mapping.debit_col);
+        let c_raw = cell_at(cells, mapping.credit_col);
+        let d_empty = d_raw.trim().is_empty();
+        let c_empty = c_raw.trim().is_empty();
+        if d_empty && c_empty {
+            return Err(AppError::Validation(
+                "Amount is required (debit or credit)".to_string(),
+            ));
+        }
+        let d = if d_empty {
+            0.0
+        } else {
+            parse_csv_amount(&d_raw)?
+        };
+        let c = if c_empty {
+            0.0
+        } else {
+            parse_csv_amount(&c_raw)?
+        };
+        if d != 0.0 && c != 0.0 {
+            return Err(AppError::Validation(
+                "Enter either debit or credit, not both".to_string(),
+            ));
+        }
+        // Debit counts as money out of the target, credit as money in —
+        // magnitudes only, so `-50` and `50` in Debit both read as −50.
+        if d != 0.0 {
+            Ok(-d.abs())
+        } else {
+            Ok(c.abs())
+        }
+    } else {
+        let a_raw = cell_at(cells, mapping.amount_col);
+        parse_csv_amount(&a_raw)
+    }
+}
+
 fn parse_file_rows(
     conn: &Connection,
     records: &[Vec<String>],
@@ -633,145 +712,54 @@ fn parse_file_rows(
     let mut rows = Vec::with_capacity(data.len());
     for (i, cells) in data.iter().enumerate() {
         let key = i as i64;
-        let date_raw = cell_at(cells, Some(mapping.date_col));
-        let desc_raw = cell_at(cells, Some(mapping.desc_col));
-        let num_raw = cell_at(cells, mapping.num_col);
-        let notes_raw = cell_at(cells, mapping.notes_col);
+        let description = cell_at(cells, Some(mapping.desc_col)).trim().to_string();
 
-        let post_date = match parse_csv_date(&date_raw, date_preference) {
-            Ok(d) => Some(d),
+        let post_date = match parse_date_cell(cells, mapping.date_col, date_preference) {
+            Ok(d) => d,
             Err(e) => {
-                rows.push(ParsedRow {
+                rows.push(ParsedRow::invalid(
                     key,
-                    raw: cells.clone(),
-                    post_date: None,
-                    description: Some(desc_raw.trim().to_string()),
-                    amount: None,
-                    value_num: None,
-                    num: None,
-                    notes: None,
-                    error: Some(e.to_string()),
-                });
+                    cells,
+                    None,
+                    &description,
+                    None,
+                    None,
+                    None,
+                    e.to_string(),
+                ));
                 continue;
             }
         };
 
-        let amount = if use_pair {
-            let d_raw = cell_at(cells, mapping.debit_col);
-            let c_raw = cell_at(cells, mapping.credit_col);
-            let d_empty = d_raw.trim().is_empty();
-            let c_empty = c_raw.trim().is_empty();
-            if d_empty && c_empty {
-                rows.push(ParsedRow {
+        let amount = match parse_amount_cell(cells, use_pair, mapping) {
+            Ok(a) => a,
+            Err(e) => {
+                rows.push(ParsedRow::invalid(
                     key,
-                    raw: cells.clone(),
-                    post_date: post_date.clone(),
-                    description: Some(desc_raw.trim().to_string()),
-                    amount: None,
-                    value_num: None,
-                    num: None,
-                    notes: None,
-                    error: Some("Amount is required (debit or credit)".to_string()),
-                });
+                    cells,
+                    Some(post_date.clone()),
+                    &description,
+                    None,
+                    None,
+                    None,
+                    e.to_string(),
+                ));
                 continue;
-            }
-            let d = if d_empty {
-                0.0
-            } else {
-                match parse_csv_amount(&d_raw) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        rows.push(ParsedRow {
-                            key,
-                            raw: cells.clone(),
-                            post_date: post_date.clone(),
-                            description: Some(desc_raw.trim().to_string()),
-                            amount: None,
-                            value_num: None,
-                            num: None,
-                            notes: None,
-                            error: Some(e.to_string()),
-                        });
-                        continue;
-                    }
-                }
-            };
-            let c = if c_empty {
-                0.0
-            } else {
-                match parse_csv_amount(&c_raw) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        rows.push(ParsedRow {
-                            key,
-                            raw: cells.clone(),
-                            post_date: post_date.clone(),
-                            description: Some(desc_raw.trim().to_string()),
-                            amount: None,
-                            value_num: None,
-                            num: None,
-                            notes: None,
-                            error: Some(e.to_string()),
-                        });
-                        continue;
-                    }
-                }
-            };
-            if d != 0.0 && c != 0.0 {
-                rows.push(ParsedRow {
-                    key,
-                    raw: cells.clone(),
-                    post_date: post_date.clone(),
-                    description: Some(desc_raw.trim().to_string()),
-                    amount: None,
-                    value_num: None,
-                    num: None,
-                    notes: None,
-                    error: Some("Enter either debit or credit, not both".to_string()),
-                });
-                continue;
-            }
-            // Debit counts as money out of the target, credit as money in —
-            // magnitudes only, so `-50` and `50` in Debit both read as −50.
-            if d != 0.0 {
-                -d.abs()
-            } else {
-                c.abs()
-            }
-        } else {
-            let a_raw = cell_at(cells, mapping.amount_col);
-            match parse_csv_amount(&a_raw) {
-                Ok(v) => v,
-                Err(e) => {
-                    rows.push(ParsedRow {
-                        key,
-                        raw: cells.clone(),
-                        post_date: post_date.clone(),
-                        description: Some(desc_raw.trim().to_string()),
-                        amount: None,
-                        value_num: None,
-                        num: None,
-                        notes: None,
-                        error: Some(e.to_string()),
-                    });
-                    continue;
-                }
             }
         };
 
-        let description = desc_raw.trim().to_string();
         let num = {
-            let t = num_raw.trim().to_string();
+            let t = cell_at(cells, mapping.num_col).trim().to_string();
             if t.is_empty() { None } else { Some(t) }
         };
         let notes = {
-            let t = notes_raw.trim().to_string();
+            let t = cell_at(cells, mapping.notes_col).trim().to_string();
             if t.is_empty() { None } else { Some(t) }
         };
         // Reuse the manual-editor gate (future-date block, placeholder and
         // balance checks) so preview errors match commit errors exactly.
         let tx = transactions::TxInput {
-            post_date: post_date.clone().unwrap_or_default(),
+            post_date: post_date.clone(),
             description: if description.is_empty() { None } else { Some(description.clone()) },
             num: num.clone(),
             notes: notes.clone(),
@@ -791,23 +779,22 @@ fn parse_file_rows(
             ],
         };
         if let Err(e) = transactions::validate_tx_input(conn, &tx) {
-            rows.push(ParsedRow {
+            rows.push(ParsedRow::invalid(
                 key,
-                raw: cells.clone(),
-                post_date: post_date.clone(),
-                description: Some(description),
-                amount: Some(amount),
-                value_num: Some(amount_to_value_num(amount)),
+                cells,
+                Some(post_date.clone()),
+                &description,
+                Some(amount),
                 num,
                 notes,
-                error: Some(e.to_string()),
-            });
+                e.to_string(),
+            ));
             continue;
         }
         rows.push(ParsedRow {
             key,
             raw: cells.clone(),
-            post_date,
+            post_date: Some(post_date),
             description: Some(description),
             amount: Some(amount),
             value_num: Some(amount_to_value_num(amount)),
@@ -822,6 +809,12 @@ fn parse_file_rows(
 /// One validated CSV row staged for insert: date, description, original key,
 /// optional num/notes, and the signed target-leg amount.
 type StagedRow = (String, String, String, Option<String>, Option<String>, f64);
+
+struct StagedSelection {
+    to_insert: Vec<StagedRow>,
+    skipped_duplicates: i64,
+    skipped_errors: i64,
+}
 
 fn duplicate_flags(
     rows: &[ParsedRow],
@@ -844,6 +837,28 @@ fn duplicate_flags(
         flags.insert(row.key, is_dup);
     }
     flags
+}
+
+/// Duplicate flags for a parsed file, keyed by row key. The DB window spans
+/// the valid dates only; first occurrence wins (DB + intra-file).
+fn duplicate_flags_for_rows(
+    conn: &Connection,
+    target_guid: &str,
+    rows: &[ParsedRow],
+) -> Result<HashMap<i64, bool>, AppError> {
+    let mut dates: Vec<String> = rows
+        .iter()
+        .filter(|r| r.error.is_none())
+        .filter_map(|r| r.post_date.clone())
+        .collect();
+    dates.sort();
+    let existing = match (dates.first(), dates.last()) {
+        (Some(min), Some(max)) => {
+            load_existing_hashes(conn, target_guid, min, max)?
+        }
+        _ => HashSet::new(),
+    };
+    Ok(duplicate_flags(rows, &existing))
 }
 
 // ── Commands ─────────────────────────────────────────────────────────────────
@@ -913,22 +928,7 @@ fn preview_inner(
         date_preference,
     )?;
 
-    // Duplicate window from the valid dates only.
-    let mut dates: Vec<String> = parsed
-        .rows
-        .iter()
-        .filter(|r| r.error.is_none())
-        .filter_map(|r| r.post_date.clone())
-        .collect();
-    dates.sort();
-    let existing = match (dates.first(), dates.last()) {
-        (Some(min), Some(max)) => {
-            load_existing_hashes(conn, &input.target_account_guid, min, max)?
-        }
-        _ => HashSet::new(),
-    };
-    // First-occurrence-wins flagging (existing DB + intra-file).
-    let dup_flags = duplicate_flags(&parsed.rows, &existing);
+    let dup_flags = duplicate_flags_for_rows(conn, &input.target_account_guid, &parsed.rows)?;
 
     let mut out_rows = Vec::with_capacity(parsed.rows.len());
     let mut valid_count = 0;
@@ -996,6 +996,35 @@ fn commit_inner(
     input: CsvCommitInput,
     bytes: &[u8],
 ) -> Result<CsvCommitResult, AppError> {
+    let parsed = parse_commit_rows(conn, &input, bytes)?;
+    let selection = select_rows_to_insert(
+        conn,
+        &input.target_account_guid,
+        &parsed.rows,
+        input.selected_keys,
+    )?;
+    let (entry_id, label) = insert_staged_rows(
+        conn,
+        &input.path,
+        &input.target_account_guid,
+        &input.offset_account_guid,
+        &selection.to_insert,
+    )?;
+    Ok(CsvCommitResult {
+        created: selection.to_insert.len() as i64,
+        skipped_duplicates: selection.skipped_duplicates,
+        skipped_errors: selection.skipped_errors,
+        entry_id,
+        label,
+    })
+}
+
+/// Decode, parse and validate the commit input into rows.
+fn parse_commit_rows(
+    conn: &Connection,
+    input: &CsvCommitInput,
+    bytes: &[u8],
+) -> Result<ParsedFile, AppError> {
     let (text, _) = decode_bytes(bytes, input.encoding.as_deref());
     let (delim_byte, _) = parse_delimiter(input.delimiter.as_deref(), &text)?;
     let records = parse_records(&text, delim_byte)?;
@@ -1013,7 +1042,7 @@ fn commit_inner(
         offset_account_guid: input.offset_account_guid.clone(),
         date_preference: Some(date_preference.to_string()),
     };
-    let parsed = parse_file_rows(
+    parse_file_rows(
         conn,
         &records,
         has_header,
@@ -1021,27 +1050,22 @@ fn commit_inner(
         &preview_input.target_account_guid,
         &preview_input.offset_account_guid,
         date_preference,
-    )?;
+    )
+}
 
-    let mut dates: Vec<String> = parsed
-        .rows
-        .iter()
-        .filter(|r| r.error.is_none())
-        .filter_map(|r| r.post_date.clone())
-        .collect();
-    dates.sort();
-    let existing = match (dates.first(), dates.last()) {
-        (Some(min), Some(max)) => {
-            load_existing_hashes(conn, &input.target_account_guid, min, max)?
-        }
-        _ => HashSet::new(),
-    };
-    let dup_flags = duplicate_flags(&parsed.rows, &existing);
+/// Filter the selected keys down to insertable rows, counting skipped
+/// duplicates and errors. Errors when nothing is left to import.
+fn select_rows_to_insert(
+    conn: &Connection,
+    target_guid: &str,
+    rows: &[ParsedRow],
+    selected_keys: Vec<i64>,
+) -> Result<StagedSelection, AppError> {
+    let dup_flags = duplicate_flags_for_rows(conn, target_guid, rows)?;
 
-    let selected: HashSet<i64> = input.selected_keys.into_iter().collect();
+    let selected: HashSet<i64> = selected_keys.into_iter().collect();
     // Index parsed rows by key for O(1) selection.
-    let by_key: HashMap<i64, &ParsedRow> =
-        parsed.rows.iter().map(|r| (r.key, r)).collect();
+    let by_key: HashMap<i64, &ParsedRow> = rows.iter().map(|r| (r.key, r)).collect();
 
     let mut to_insert: Vec<StagedRow> = Vec::new();
     let mut skipped_duplicates = 0;
@@ -1084,13 +1108,26 @@ fn commit_inner(
             "Nothing to import — all selected rows are duplicates or errors".to_string(),
         ));
     }
+    Ok(StagedSelection {
+        to_insert,
+        skipped_duplicates,
+        skipped_errors,
+    })
+}
 
-    let filename = filename_of(&input.path);
-    let target_guid = input.target_account_guid.clone();
-    let offset_guid = input.offset_account_guid.clone();
+/// Insert the staged rows inside one transaction and record a history entry.
+/// Returns `(entry_id, label)`.
+fn insert_staged_rows(
+    conn: &Connection,
+    path: &str,
+    target_guid: &str,
+    offset_guid: &str,
+    to_insert: &[StagedRow],
+) -> Result<(i64, String), AppError> {
+    let filename = filename_of(path);
     let label = format!("CSV import {filename} ({} transactions)", to_insert.len());
     let detail = serde_json::json!({
-        "filePath": input.path,
+        "filePath": path,
         "filename": filename,
         "targetAccountGuid": target_guid,
         "offsetAccountGuid": offset_guid,
@@ -1098,11 +1135,11 @@ fn commit_inner(
     })
     .to_string();
 
-    with_tx_err(conn, || {
+    let entry_id = with_tx_err(conn, || {
         let mut snapshots: Vec<history::Snapshot<'_>> = Vec::new();
         // Own the GUID strings inside the txn so snapshot borrows stay valid.
         let mut owned_guids: Vec<(String, Vec<String>)> = Vec::new();
-        for (date, desc, _, num, notes, amount) in &to_insert {
+        for (date, desc, _, num, notes, amount) in to_insert {
             let tx_guid = uuid::Uuid::new_v4().to_string();
             let description = {
                 let t = desc.trim();
@@ -1121,13 +1158,13 @@ fn commit_inner(
             )?;
             let splits = vec![
                 transactions::SplitInput {
-                    account_guid: target_guid.clone(),
+                    account_guid: target_guid.to_string(),
                     amount: *amount,
                     quantity: None,
                     memo: None,
                 },
                 transactions::SplitInput {
-                    account_guid: offset_guid.clone(),
+                    account_guid: offset_guid.to_string(),
                     amount: -*amount,
                     quantity: None,
                     memo: None,
@@ -1150,9 +1187,7 @@ fn commit_inner(
                 });
             }
         }
-        let distinct_accounts: HashSet<&str> = [target_guid.as_str(), offset_guid.as_str()]
-            .into_iter()
-            .collect();
+        let distinct_accounts: HashSet<&str> = [target_guid, offset_guid].into_iter().collect();
         let entry_id = history::insert_change_entry(
             conn,
             "import",
@@ -1165,14 +1200,8 @@ fn commit_inner(
         )
         .map_err(AppError::from)?;
         Ok::<i64, AppError>(entry_id)
-    })
-    .map(|entry_id| CsvCommitResult {
-        created: to_insert.len() as i64,
-        skipped_duplicates,
-        skipped_errors,
-        entry_id,
-        label,
-    })
+    })?;
+    Ok((entry_id, label))
 }
 
 #[tauri::command]

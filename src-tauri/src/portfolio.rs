@@ -185,6 +185,29 @@ fn load_holding_splits(
     Ok(rows)
 }
 
+#[derive(Clone)]
+struct CommodityMeta {
+    mnemonic: String,
+    full_name: Option<String>,
+    namespace: String,
+}
+
+struct CommodityGroup {
+    mnemonic: String,
+    full_name: Option<String>,
+    namespace: String,
+    total_shares: f64,
+    total_cost: f64,
+    accounts: Vec<HoldingAccount>,
+}
+
+/// Commodity metadata plus the GUID sets used to seed the holding groups.
+struct HoldingUniverse {
+    meta_by_guid: HashMap<String, CommodityMeta>,
+    with_splits: HashSet<String>,
+    priced: HashSet<String>,
+}
+
 /// Build one entry per tracked commodity: every non-currency commodity that has
 /// either splits in investment accounts or at least one stored price. Commodities
 /// without positions surface as zero-share rows so sold-out / watch-only
@@ -194,19 +217,21 @@ fn build_holdings(
     filter: Option<&str>,
 ) -> Result<Vec<PortfolioHolding>, String> {
     let rows = load_holding_splits(conn, filter)?;
+    let universe = resolve_holding_universe(conn, &rows, filter)?;
+    let commodity_map = build_commodity_groups(conn, &rows, &universe)?;
+    value_commodity_groups(conn, commodity_map)
+}
 
-    // Universe of displayable commodities. When filtering for one GUID, the
-    // split row itself carries the metadata; otherwise enumerate the book.
-    #[derive(Clone)]
-    struct CommodityMeta {
-        mnemonic: String,
-        full_name: Option<String>,
-        namespace: String,
-    }
-
+/// Universe of displayable commodities. When filtering for one GUID, the
+/// split row itself carries the metadata; otherwise enumerate the book.
+fn resolve_holding_universe(
+    conn: &Connection,
+    rows: &[HoldingSplit],
+    filter: Option<&str>,
+) -> Result<HoldingUniverse, String> {
     let mut meta_by_guid: HashMap<String, CommodityMeta> = HashMap::new();
     let mut with_splits: HashSet<String> = HashSet::new();
-    for r in &rows {
+    for r in rows {
         with_splits.insert(r.commodity_guid.clone());
         meta_by_guid
             .entry(r.commodity_guid.clone())
@@ -250,15 +275,20 @@ fn build_holdings(
 
     let priced = priced_commodity_guids(conn)?;
 
-    struct CommodityGroup {
-        mnemonic: String,
-        full_name: Option<String>,
-        namespace: String,
-        total_shares: f64,
-        total_cost: f64,
-        accounts: Vec<HoldingAccount>,
-    }
+    Ok(HoldingUniverse {
+        meta_by_guid,
+        with_splits,
+        priced,
+    })
+}
 
+/// Seed one group per displayable commodity and fold each split row into its
+/// group, converting cost to the report currency.
+fn build_commodity_groups(
+    conn: &Connection,
+    rows: &[HoldingSplit],
+    universe: &HoldingUniverse,
+) -> Result<HashMap<String, CommodityGroup>, String> {
     let report_currency = fx::get_report_currency_mnemonic(conn)?.unwrap_or_default();
     let fx_map = fx::get_fx_map(conn, None)?;
     // Cost-basis currency per commodity: its latest price quote currency.
@@ -267,11 +297,11 @@ fn build_holdings(
     let mut commodity_map: HashMap<String, CommodityGroup> = HashMap::new();
 
     // Seed groups: everything with splits, plus priced-only commodities.
-    for guid in meta_by_guid.keys() {
-        if !with_splits.contains(guid) && !priced.contains(guid) {
+    for guid in universe.meta_by_guid.keys() {
+        if !universe.with_splits.contains(guid) && !universe.priced.contains(guid) {
             continue;
         }
-        let meta = &meta_by_guid[guid];
+        let meta = &universe.meta_by_guid[guid];
         commodity_map.insert(
             guid.clone(),
             CommodityGroup {
@@ -285,7 +315,7 @@ fn build_holdings(
         );
     }
 
-    for r in &rows {
+    for r in rows {
         let quote_currency = quote_currencies
             .get(&r.mnemonic)
             .cloned()
@@ -312,6 +342,15 @@ fn build_holdings(
         });
     }
 
+    Ok(commodity_map)
+}
+
+/// Valuation pass: value each group at its latest cached price and derive the
+/// per-holding metrics (allocation is finalized later by `finalize_totals`).
+fn value_commodity_groups(
+    conn: &Connection,
+    commodity_map: HashMap<String, CommodityGroup>,
+) -> Result<Vec<PortfolioHolding>, String> {
     let prices_with_date_map = get_cached_prices_with_date_map(conn)?;
     let prev_prices_map = get_cached_prev_prices_map(conn)?;
 

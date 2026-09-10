@@ -434,14 +434,37 @@ fn compute_cumulative_carryovers(
     Ok(carryovers)
 }
 
-fn fetch_budget_vs_actual_inner(
-    conn: &Connection,
-    year: i32,
-) -> Result<Vec<BudgetActualRow>, String> {
-    validate_year(year)?;
-    let period_start = format!("{year:04}-01-01");
-    let period_end = format!("{:04}-01-01", year + 1);
+/// (guid, account_guid, name, description, type, budget, commodity, actual)
+type RawBudgetRow = (
+    String,
+    String,
+    String,
+    Option<String>,
+    String,
+    f64,
+    Option<String>,
+    f64,
+);
 
+#[derive(Clone)]
+struct BudgetAgg {
+    guid: String,
+    account_guid: String,
+    account_name: String,
+    account_description: Option<String>,
+    account_type: String,
+    budget_amount: f64,
+    actual_amount: f64,
+}
+
+/// Fetch one raw row per budget/commodity with its in-window, unconverted
+/// actual amount.
+fn fetch_budget_actual_raw_rows(
+    conn: &Connection,
+    period_start: &str,
+    period_end: &str,
+    year: i32,
+) -> Result<Vec<RawBudgetRow>, String> {
     let mut stmt = conn
         .prepare(&format!(
             "{}
@@ -470,20 +493,9 @@ fn fetch_budget_vs_actual_inner(
         ))
         .map_err(|e| e.to_string())?;
 
-    /// (guid, account_guid, name, description, type, budget, commodity, actual)
-    type RawBudgetRow = (
-        String,
-        String,
-        String,
-        Option<String>,
-        String,
-        f64,
-        Option<String>,
-        f64,
-    );
     let raw_rows: Vec<RawBudgetRow> = stmt
         .query_map(
-            rusqlite::params![&period_start, &period_end, year],
+            rusqlite::params![period_start, period_end, year],
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,
@@ -500,22 +512,16 @@ fn fetch_budget_vs_actual_inner(
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
+    Ok(raw_rows)
+}
 
-    let report_currency = fx::get_report_currency_mnemonic(conn)?.unwrap_or_default();
-    let fx_map = fx::get_fx_map(conn, Some(&period_end))?;
-
-    // Aggregate actuals per budget, converting each currency to the report currency.
-    #[derive(Clone)]
-    struct BudgetAgg {
-        guid: String,
-        account_guid: String,
-        account_name: String,
-        account_description: Option<String>,
-        account_type: String,
-        budget_amount: f64,
-        actual_amount: f64,
-    }
-
+/// Aggregate actuals per budget, converting each currency to the report
+/// currency.
+fn aggregate_budget_actuals(
+    raw_rows: Vec<RawBudgetRow>,
+    report_currency: &str,
+    fx_map: &HashMap<String, f64>,
+) -> (HashMap<String, BudgetAgg>, Vec<String>) {
     let mut aggs: HashMap<String, BudgetAgg> = HashMap::new();
     let mut agg_order: Vec<String> = vec![];
     for (
@@ -530,7 +536,7 @@ fn fetch_budget_vs_actual_inner(
     ) in raw_rows
     {
         let converted =
-            fx::convert_optional(actual_amount, commodity.as_deref(), &report_currency, &fx_map);
+            fx::convert_optional(actual_amount, commodity.as_deref(), report_currency, fx_map);
         match aggs.get_mut(&account_guid) {
             Some(agg) => agg.actual_amount += converted,
             None => {
@@ -550,10 +556,16 @@ fn fetch_budget_vs_actual_inner(
             }
         }
     }
+    (aggs, agg_order)
+}
 
-    let carryovers = compute_cumulative_carryovers(conn, year)?;
-    let elapsed = elapsed_months_for_year(year);
-
+/// Assemble the per-budget rows with carryover and pacing applied.
+fn build_budget_actual_rows(
+    aggs: &HashMap<String, BudgetAgg>,
+    agg_order: &[String],
+    carryovers: &HashMap<String, f64>,
+    elapsed: i32,
+) -> Vec<BudgetActualRow> {
     let mut rows: Vec<BudgetActualRow> = agg_order
         .iter()
         .map(|guid| {
@@ -586,7 +598,33 @@ fn fetch_budget_vs_actual_inner(
 
     // Deterministic order (already ordered by account name in SQL).
     rows.sort_by(|a, b| a.account_name.cmp(&b.account_name));
-    Ok(rows)
+    rows
+}
+
+fn fetch_budget_vs_actual_inner(
+    conn: &Connection,
+    year: i32,
+) -> Result<Vec<BudgetActualRow>, String> {
+    validate_year(year)?;
+    let period_start = format!("{year:04}-01-01");
+    let period_end = format!("{:04}-01-01", year + 1);
+
+    let raw_rows = fetch_budget_actual_raw_rows(conn, &period_start, &period_end, year)?;
+
+    let report_currency = fx::get_report_currency_mnemonic(conn)?.unwrap_or_default();
+    let fx_map = fx::get_fx_map(conn, Some(&period_end))?;
+
+    let (aggs, agg_order) = aggregate_budget_actuals(raw_rows, &report_currency, &fx_map);
+
+    let carryovers = compute_cumulative_carryovers(conn, year)?;
+    let elapsed = elapsed_months_for_year(year);
+
+    Ok(build_budget_actual_rows(
+        &aggs,
+        &agg_order,
+        &carryovers,
+        elapsed,
+    ))
 }
 
 fn fetch_budget_detail_inner(
