@@ -82,8 +82,8 @@
         <Command.Group>
           {#each options as opt (opt.guid)}
             <Command.Item
-              value={opt.label}
-              keywords={opt.commodity ? [opt.accountType, opt.commodity] : [opt.accountType]}
+              value={opt.guid}
+              keywords={[opt.label, opt.display, opt.accountType, opt.commodity ?? '']}
               title={opt.label}
               onSelect={() => select(opt.guid)}
             >
