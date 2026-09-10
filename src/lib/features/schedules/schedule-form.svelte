@@ -259,10 +259,8 @@
               <div class="flex items-center gap-2">
                 <Input
                   id="sched-mult"
-                  type="number"
-                  min={1}
-                  max={100}
-                  step={1}
+                  type="text"
+                  inputmode="numeric"
                   bind:value={intervalMult}
                   class="w-24"
                 />
@@ -303,10 +301,8 @@
               <div class="flex items-center gap-2">
                 <Input
                   id="sched-count"
-                  type="number"
-                  min={1}
-                  max={1200}
-                  step={1}
+                  type="text"
+                  inputmode="numeric"
                   bind:value={maxOccurrences}
                   placeholder="No limit"
                   class="w-32"

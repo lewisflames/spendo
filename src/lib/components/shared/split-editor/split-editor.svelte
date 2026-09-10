@@ -97,8 +97,8 @@
           />
           <Input
             id="{idPrefix}-{s.key}-amount"
-            type="number"
-            step="0.01"
+            type="text"
+            inputmode="decimal"
             bind:value={s.amount}
             placeholder="0.00"
             aria-label="Split {i + 1} amount"
@@ -108,8 +108,8 @@
             {#if s.showQuantity}
               <Input
                 id="{idPrefix}-{s.key}-qty"
-                type="number"
-                step="any"
+                type="text"
+                inputmode="decimal"
                 bind:value={s.quantity}
                 placeholder="Qty"
                 aria-label="Split {i + 1} quantity"
