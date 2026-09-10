@@ -80,6 +80,11 @@
     flattenAccountsForPicker(accountsData?.trees, { excludeGuids: excludedGuids })
   );
 
+  let currencyItems = $derived([
+    { value: '', label: 'None' },
+    ...currencies.map((c) => ({ value: c.guid, label: c.mnemonic }))
+  ]);
+
   let descendantCount = $derived(
     mode === 'edit' && guid && accountsData?.trees
       ? Math.max(0, subtreeGuids(accountsData.trees, guid).size - 1)
@@ -250,7 +255,7 @@
         </div>
         <div class="flex flex-col gap-1.5">
           <label for="acct-currency" class="text-sm font-medium">Currency (optional)</label>
-          <Select.Root type="single" bind:value={commodityGuid}>
+          <Select.Root type="single" bind:value={commodityGuid} items={currencyItems}>
             <Select.Trigger id="acct-currency" class="w-full">
               <SelectPrimitive.Value placeholder="None" />
             </Select.Trigger>
