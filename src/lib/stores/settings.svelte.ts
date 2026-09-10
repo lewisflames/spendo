@@ -160,3 +160,8 @@ export function resolveTheme(theme: Theme): 'light' | 'dark' {
   if (!browser) return 'light';
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
+
+/** Toggle to the opposite explicit theme (leaves 'system' mode). */
+export function toggleTheme(): void {
+  saveSettings({ theme: resolveTheme(appSettings.value.theme) === 'dark' ? 'light' : 'dark' });
+}

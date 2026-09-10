@@ -5,7 +5,7 @@
   import { SidebarTrigger } from '$lib/components/ui/sidebar/index.js';
   import { breadcrumb, type BreadcrumbItem } from '$lib/stores/breadcrumb.svelte';
   import { goBack, goForward, navHistory } from '$lib/stores/nav-history.svelte';
-  import { appSettings, saveSettings, resolveTheme } from '$lib/stores/settings.svelte';
+  import { toggleTheme } from '$lib/stores/settings.svelte';
   import { routeTitle } from '$lib/routes';
   import { useWindowDrag } from '$lib/hooks/use-window-drag.svelte';
   import * as Breadcrumb from '$lib/components/ui/breadcrumb';
@@ -27,11 +27,6 @@
 
   const canGoBack = $derived(navHistory.value.index > 0);
   const canGoForward = $derived(navHistory.value.index < navHistory.value.stack.length - 1);
-
-  function toggleTheme() {
-    // Toggling always lands on an explicit theme, leaving 'system' mode.
-    saveSettings({ theme: resolveTheme(appSettings.value.theme) === 'dark' ? 'light' : 'dark' });
-  }
 </script>
 
 <!-- Handlers implement Tauri window dragging/maximize, not document interaction. -->

@@ -10,7 +10,7 @@
     saveSettings,
     applyAccent,
     applyDensity,
-    resolveTheme
+    toggleTheme
   } from '$lib/stores/settings.svelte';
   import { goBack, goForward, initNavHistory } from '$lib/stores/nav-history.svelte';
   import {
@@ -112,8 +112,7 @@
     if (!(e.ctrlKey || e.metaKey)) return;
     if (e.key.toLowerCase() === 't' && e.shiftKey) {
       e.preventDefault();
-      // Toggling always lands on an explicit theme, leaving 'system' mode.
-      saveSettings({ theme: resolveTheme(appSettings.value.theme) === 'dark' ? 'light' : 'dark' });
+      toggleTheme();
       return;
     }
     if (e.key.toLowerCase() === 'b') {
