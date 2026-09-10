@@ -15,9 +15,9 @@
 <BookGate title="Import CSV" description="Bank-statement CSV with mapping and preview">
   <div class="flex flex-col gap-6">
     <PageHeader title="Import CSV" description="Map columns, dry-run the preview, then import.">
-      <Button variant="outline" href={resolve('/transactions')}>
+      <Button variant="outline" href={resolve('/settings')}>
         <ArrowLeft aria-hidden="true" class="size-4" />
-        Transactions
+        Settings
       </Button>
     </PageHeader>
     <CsvImporter />
