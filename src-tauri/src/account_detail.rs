@@ -355,19 +355,64 @@ fn load_tx_page(
     let TxQuery {
         page,
         page_size,
-        date_from,
-        date_to,
-        search,
         sort_by,
         sort_dir,
         // The ledger keeps its own date filters; as-of caps balances only.
         as_of: _,
+        ..
     } = *query;
+
+    let total = count_subtree_transactions(conn, sub_guids, query)?;
+    let (page_size, total_pages, safe_page, _) = utils::paginate(total, page, page_size);
+
+    let (tx_map, tx_order) = group_tx_effects(fetch_tx_effects(conn, sub_guids, query)?);
+    let balances = accumulate_running_balances(conn, ctx, &tx_order, &tx_map)?;
+
+    let page_guids = order_page_guids(
+        &tx_order,
+        &tx_map,
+        &balances.amount_by_guid,
+        sort_by,
+        sort_dir,
+        safe_page,
+        page_size,
+    );
+
+    let transactions = enrich_page_transactions(
+        conn,
+        &page_guids,
+        &tx_map,
+        &balances.running_by_guid,
+        &balances.amount_by_guid,
+        sub_guids,
+    )?;
+
+    Ok(TxPage {
+        transactions,
+        total,
+        safe_page,
+        total_pages,
+        page_size,
+    })
+}
+
+/// Count for pagination: distinct transactions matching the ledger filters in
+/// the subtree.
+fn count_subtree_transactions(
+    conn: &Connection,
+    sub_guids: &[String],
+    query: &TxQuery<'_>,
+) -> Result<i64, String> {
     let placeholders_str = sql::in_clause(sub_guids.len());
     let sub_params = sql::string_param_refs(sub_guids);
 
-    // Count for pagination.
-    let w = filter_clauses(date_from, date_to, search, sub_guids.len(), true);
+    let w = filter_clauses(
+        query.date_from,
+        query.date_to,
+        query.search,
+        sub_guids.len(),
+        true,
+    );
     let count_sql = format!(
         "SELECT COUNT(DISTINCT t.guid) as cnt
          FROM transactions t
@@ -385,17 +430,22 @@ fn load_tx_page(
         .chain(w.params.iter().map(|p| p.as_ref()))
         .collect();
 
-    let total: i64 = count_stmt
+    count_stmt
         .query_row(count_params.as_slice(), |row| row.get(0))
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())
+}
 
-    let (page_size, total_pages, safe_page, _) = utils::paginate(total, page, page_size);
-
-    // Transactions with per-currency effects; the running balance is
-    // accumulated in report currency in Rust so multi-currency subtrees
-    // convert each currency at the transaction's own date. The recursive CTE
-    // re-derives the subtree starting at ?1, so filter params start at ?2.
-    let w = filter_clauses(date_from, date_to, search, 1, true);
+/// Per-currency transaction effects from the subtree CTE, in
+/// (post_date, guid) order. The running balance is accumulated in report
+/// currency in Rust so multi-currency subtrees convert each currency at the
+/// transaction's own date. The recursive CTE re-derives the subtree starting
+/// at ?1, so filter params start at ?2.
+fn fetch_tx_effects(
+    conn: &Connection,
+    sub_guids: &[String],
+    query: &TxQuery<'_>,
+) -> Result<Vec<TxEffect>, String> {
+    let w = filter_clauses(query.date_from, query.date_to, query.search, 1, true);
 
     let grouped_balance = utils::signed_amount_expr("t.raw_amount", "t.account_type");
 
@@ -455,7 +505,11 @@ fn load_tx_page(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
 
-    // Group per transaction, preserving (post_date, guid) order.
+    Ok(tx_effects)
+}
+
+/// Group per transaction, preserving (post_date, guid) order.
+fn group_tx_effects(tx_effects: Vec<TxEffect>) -> (TxGroups, Vec<String>) {
     let mut tx_map: TxGroups = HashMap::new();
     let mut tx_order: Vec<String> = vec![];
     for e in tx_effects {
@@ -475,13 +529,27 @@ fn load_tx_page(
             }
         }
     }
+    (tx_map, tx_order)
+}
 
-    // Running balance in report currency: convert each currency at the transaction date.
+/// Report-currency running balance and per-transaction delta, keyed by GUID.
+struct RunningBalances {
+    running_by_guid: HashMap<String, f64>,
+    amount_by_guid: HashMap<String, f64>,
+}
+
+/// Running balance in report currency: convert each currency at the transaction date.
+fn accumulate_running_balances(
+    conn: &Connection,
+    ctx: &FxCtx,
+    tx_order: &[String],
+    tx_map: &TxGroups,
+) -> Result<RunningBalances, String> {
     let fx_history = fx::FxHistory::load(conn)?;
     let mut running = 0.0;
     let mut running_by_guid: HashMap<String, f64> = HashMap::new();
     let mut amount_by_guid: HashMap<String, f64> = HashMap::new();
-    for guid in &tx_order {
+    for guid in tx_order {
         let (post_date, _, _, effects) = &tx_map[guid];
         let fx_at = fx_history.map_for_date(post_date);
         let prev = running;
@@ -492,32 +560,9 @@ fn load_tx_page(
         running_by_guid.insert(guid.clone(), running);
         amount_by_guid.insert(guid.clone(), running - prev);
     }
-
-    let page_guids = order_page_guids(
-        &tx_order,
-        &tx_map,
-        &amount_by_guid,
-        sort_by,
-        sort_dir,
-        safe_page,
-        page_size,
-    );
-
-    let transactions = enrich_page_transactions(
-        conn,
-        &page_guids,
-        &tx_map,
-        &running_by_guid,
-        &amount_by_guid,
-        sub_guids,
-    )?;
-
-    Ok(TxPage {
-        transactions,
-        total,
-        safe_page,
-        total_pages,
-        page_size,
+    Ok(RunningBalances {
+        running_by_guid,
+        amount_by_guid,
     })
 }
 
@@ -600,8 +645,42 @@ fn enrich_page_transactions(
     amount_by_guid: &HashMap<String, f64>,
     sub_guids: &[String],
 ) -> Result<Vec<DetailTransaction>, String> {
-    // Notes for the page's transactions (kept out of the main CTE to avoid
-    // widening the grouping query).
+    let notes_map = load_page_notes(conn, page_guids)?;
+    let mut splits_by_guid = load_page_splits(conn, page_guids)?;
+
+    let sub_set: HashSet<&str> = sub_guids.iter().map(|s| s.as_str()).collect();
+
+    let mut transactions: Vec<DetailTransaction> = vec![];
+    for tx_guid in page_guids {
+        let (post_date, description, num, _) = &tx_map[tx_guid];
+        let splits = splits_by_guid.remove(tx_guid).unwrap_or_default();
+
+        let (counter_accounts, reconcile_state) =
+            split_counter_and_reconcile_state(&splits, &sub_set);
+
+        transactions.push(DetailTransaction {
+            guid: tx_guid.clone(),
+            post_date: post_date.clone(),
+            description: description.clone(),
+            num: num.clone(),
+            notes: notes_map.get(tx_guid).cloned().flatten(),
+            splits,
+            counter_accounts,
+            amount: amount_by_guid[tx_guid],
+            running_balance: running_by_guid[tx_guid],
+            reconcile_state,
+        });
+    }
+
+    Ok(transactions)
+}
+
+/// Notes for the page's transactions (kept out of the main CTE to avoid
+/// widening the grouping query).
+fn load_page_notes(
+    conn: &Connection,
+    page_guids: &[String],
+) -> Result<HashMap<String, Option<String>>, String> {
     let mut notes_map: HashMap<String, Option<String>> = HashMap::new();
     if !page_guids.is_empty() {
         let notes_sql = format!(
@@ -618,9 +697,15 @@ fn enrich_page_transactions(
             .map_err(|e| e.to_string())?;
         notes_map.extend(rows);
     }
+    Ok(notes_map)
+}
 
-    // Split details for the page's transactions in one chunked query instead
-    // of one query per row.
+/// Split details for the page's transactions in one chunked query instead of
+/// one query per row.
+fn load_page_splits(
+    conn: &Connection,
+    page_guids: &[String],
+) -> Result<HashMap<String, Vec<DetailSplit>>, String> {
     let mut splits_by_guid: HashMap<String, Vec<DetailSplit>> = HashMap::new();
     for chunk in page_guids.chunks(sql::MAX_IN_PARAMS) {
         let split_sql = format!(
@@ -661,60 +746,44 @@ fn enrich_page_transactions(
             splits_by_guid.entry(tx_guid).or_default().push(split);
         }
     }
+    Ok(splits_by_guid)
+}
 
-    let sub_set: HashSet<&str> = sub_guids.iter().map(|s| s.as_str()).collect();
-
-    let mut transactions: Vec<DetailTransaction> = vec![];
-    for tx_guid in page_guids {
-        let (post_date, description, num, _) = &tx_map[tx_guid];
-        let splits = splits_by_guid.remove(tx_guid).unwrap_or_default();
-
-        // Counter-accounts: distinct descriptions (falling back to name) of
-        // splits outside the viewed subtree, in largest-magnitude-first
-        // order. The transaction's reconcile status comes from its splits
-        // inside the subtree.
-        let mut counter_accounts: Vec<String> = vec![];
-        let mut seen_accounts: HashSet<&str> = HashSet::new();
-        let mut has_y = false;
-        let mut has_c = false;
-        for s in &splits {
-            if sub_set.contains(s.account_guid.as_str()) {
-                match s.reconcile_state.as_deref() {
-                    Some("y") => has_y = true,
-                    Some("c") => has_c = true,
-                    _ => {}
-                }
-            } else if seen_accounts.insert(s.account_guid.as_str()) {
-                let label = s.account_description.as_deref().unwrap_or(&s.account_name);
-                counter_accounts.push(label.to_string());
+/// Counter-account labels and aggregated reconcile state for one transaction:
+/// distinct descriptions (falling back to name) of splits outside the viewed
+/// subtree in largest-magnitude-first order, plus the subtree's state
+/// ('y' wins over 'c').
+fn split_counter_and_reconcile_state(
+    splits: &[DetailSplit],
+    sub_set: &HashSet<&str>,
+) -> (Vec<String>, Option<String>) {
+    let mut counter_accounts: Vec<String> = vec![];
+    let mut seen_accounts: HashSet<&str> = HashSet::new();
+    let mut has_y = false;
+    let mut has_c = false;
+    for s in splits {
+        if sub_set.contains(s.account_guid.as_str()) {
+            match s.reconcile_state.as_deref() {
+                Some("y") => has_y = true,
+                Some("c") => has_c = true,
+                _ => {}
             }
+        } else if seen_accounts.insert(s.account_guid.as_str()) {
+            let label = s.account_description.as_deref().unwrap_or(&s.account_name);
+            counter_accounts.push(label.to_string());
         }
-        let reconcile_state = if has_y {
-            Some("y".to_string())
-        } else if has_c {
-            Some("c".to_string())
-        } else {
-            splits
-                .iter()
-                .filter(|s| sub_set.contains(s.account_guid.as_str()))
-                .find_map(|s| s.reconcile_state.clone())
-        };
-
-        transactions.push(DetailTransaction {
-            guid: tx_guid.clone(),
-            post_date: post_date.clone(),
-            description: description.clone(),
-            num: num.clone(),
-            notes: notes_map.get(tx_guid).cloned().flatten(),
-            splits,
-            counter_accounts,
-            amount: amount_by_guid[tx_guid],
-            running_balance: running_by_guid[tx_guid],
-            reconcile_state,
-        });
     }
-
-    Ok(transactions)
+    let reconcile_state = if has_y {
+        Some("y".to_string())
+    } else if has_c {
+        Some("c".to_string())
+    } else {
+        splits
+            .iter()
+            .filter(|s| sub_set.contains(s.account_guid.as_str()))
+            .find_map(|s| s.reconcile_state.clone())
+    };
+    (counter_accounts, reconcile_state)
 }
 
 #[tauri::command]

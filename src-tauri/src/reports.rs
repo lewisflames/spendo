@@ -424,6 +424,76 @@ fn pnl_change_pct(current: f64, previous: f64) -> Option<f64> {
     }
 }
 
+/// One P&L window in report currency: converted monthly buckets, the
+/// per-account rollup for the tree walker, missing-FX mnemonics and the
+/// window's report currency.
+struct PnlWindow {
+    rows: Vec<RawAccountBalance>,
+    converted: Vec<ConvertedBucket>,
+    missing: Vec<String>,
+    report_currency: String,
+}
+
+/// Load one P&L window: monthly buckets, month-end conversion and the
+/// per-account rollup consumed by the tree walker.
+fn fetch_pnl_window(
+    conn: &Connection,
+    date_from: &str,
+    date_to: &str,
+) -> Result<PnlWindow, String> {
+    let buckets = fetch_monthly_buckets(conn, date_from, date_to)?;
+    let (converted, missing, report_currency) = convert_buckets(conn, &buckets)?;
+    let rows = roll_up_buckets(&converted);
+    Ok(PnlWindow {
+        rows,
+        converted,
+        missing,
+        report_currency,
+    })
+}
+
+fn resolve_pnl_prev_window(
+    date_from: &str,
+    date_to: &str,
+    prev_date_from: Option<&str>,
+    prev_date_to: Option<&str>,
+) -> Result<(String, String), String> {
+    Ok(match (prev_date_from, prev_date_to) {
+        (Some(pf), Some(pt)) => (pf.to_string(), pt.to_string()),
+        (Some(pf), None) => (pf.to_string(), date_from.to_string()),
+        (None, Some(pt)) => (date_from.to_string(), pt.to_string()),
+        (None, None) => {
+            let f = utils::month_number(date_from)?;
+            let t = utils::month_number(date_to)?;
+            let span = t - f;
+            let prev_start = utils::format_month(f - span - 1);
+            let prev_end = utils::format_month(f - 1);
+            (prev_start, prev_end)
+        }
+    })
+}
+
+fn merge_prev_amount(mut r: ProfitLossRow, prev_map: &HashMap<String, f64>) -> ProfitLossRow {
+    r.previous_amount = *prev_map.get(&r.account_guid).unwrap_or(&0.0);
+    r.change_pct = pnl_change_pct(r.current_amount, r.previous_amount);
+    r
+}
+
+/// Merge previous-window row totals into current rows by account guid.
+fn merge_pnl_prev_amounts(
+    current_rows: Vec<ProfitLossRow>,
+    prev_rows: &[ProfitLossRow],
+) -> Vec<ProfitLossRow> {
+    let mut prev_map: HashMap<String, f64> = HashMap::new();
+    for r in prev_rows {
+        prev_map.insert(r.account_guid.clone(), r.current_amount);
+    }
+    current_rows
+        .into_iter()
+        .map(|r| merge_prev_amount(r, &prev_map))
+        .collect()
+}
+
 fn fetch_pnl_report_inner(
     conn: &Connection,
     date_from: &str,
@@ -434,9 +504,7 @@ fn fetch_pnl_report_inner(
     if date_from > date_to {
         return Err("dateFrom must not be after dateTo".to_string());
     }
-    let cur_buckets = fetch_monthly_buckets(conn, date_from, date_to)?;
-    let (converted_cur, missing_current, report_currency) = convert_buckets(conn, &cur_buckets)?;
-    let current_rows = roll_up_buckets(&converted_cur);
+    let current = fetch_pnl_window(conn, date_from, date_to)?;
 
     let push_pnl = |r: &RawAccountBalance, indent: i32, total: f64| -> ProfitLossRow {
         ProfitLossRow {
@@ -451,31 +519,15 @@ fn fetch_pnl_report_inner(
     };
 
     // Previous period — subtract span to get same-length prior window
-    let (prev_date_from_owned, prev_date_to_owned) = match (prev_date_from, prev_date_to) {
-        (Some(pf), Some(pt)) => (pf.to_string(), pt.to_string()),
-        (Some(pf), None) => (pf.to_string(), date_from.to_string()),
-        (None, Some(pt)) => (date_from.to_string(), pt.to_string()),
-        (None, None) => {
-            let f = utils::month_number(date_from)?;
-            let t = utils::month_number(date_to)?;
-            let span = t - f;
-            let prev_start = utils::format_month(f - span - 1);
-            let prev_end = utils::format_month(f - 1);
-            (prev_start, prev_end)
-        }
-    };
-
-    let prev_buckets =
-        fetch_monthly_buckets(conn, &prev_date_from_owned, &prev_date_to_owned)?;
-    let (converted_prev, missing_prev, report_currency_prev) =
-        convert_buckets(conn, &prev_buckets)?;
-    let prev_rows = roll_up_buckets(&converted_prev);
+    let (prev_date_from_owned, prev_date_to_owned) =
+        resolve_pnl_prev_window(date_from, date_to, prev_date_from, prev_date_to)?;
+    let prev = fetch_pnl_window(conn, &prev_date_from_owned, &prev_date_to_owned)?;
 
     // Re-attach inactive placeholder parents (and union prev-only accounts)
     // so the trees keep their hierarchy instead of promoting children to
     // roots. Totals are unaffected: injected rows carry zero balances.
     let meta = fetch_account_meta(conn)?;
-    let (current_rows, prev_rows) = augment_pnl_rows(current_rows, prev_rows, &meta);
+    let (current_rows, prev_rows) = augment_pnl_rows(current.rows, prev.rows, &meta);
 
     let income_rows = build_tree(&current_rows, &["INCOME"], push_pnl);
     let expense_rows = build_tree(&current_rows, &["EXPENSE"], push_pnl);
@@ -495,11 +547,12 @@ fn fetch_pnl_report_inner(
     // 1.0 parity, so either can skew its totals. Only currencies on
     // INCOME/EXPENSE buckets matter here: the trees below drop non-P&L types,
     // so their mnemonics must not raise a warning.
-    let mut missing_set: HashSet<String> = missing_current.into_iter().collect();
-    missing_set.extend(missing_prev);
-    let pnl_currencies: HashSet<&str> = converted_cur
+    let mut missing_set: HashSet<String> = current.missing.into_iter().collect();
+    missing_set.extend(prev.missing);
+    let pnl_currencies: HashSet<&str> = current
+        .converted
         .iter()
-        .chain(converted_prev.iter())
+        .chain(prev.converted.iter())
         .filter(|b| b.account_type == "INCOME" || b.account_type == "EXPENSE")
         .filter_map(|b| b.commodity.as_deref())
         .collect();
@@ -508,39 +561,17 @@ fn fetch_pnl_report_inner(
         .filter(|m| pnl_currencies.contains(m.as_str()))
         .collect();
     missing_fx.sort();
-    let report_currency = if report_currency.is_empty() {
-        report_currency_prev
+    let report_currency = if current.report_currency.is_empty() {
+        prev.report_currency
     } else {
-        report_currency
+        current.report_currency
     };
 
     let prev_income_rows = build_tree(&prev_rows, &["INCOME"], push_pnl);
     let prev_expense_rows = build_tree(&prev_rows, &["EXPENSE"], push_pnl);
 
-    let mut prev_income_map: HashMap<String, f64> = HashMap::new();
-    for r in &prev_income_rows {
-        prev_income_map.insert(r.account_guid.clone(), r.current_amount);
-    }
-    let mut prev_expense_map: HashMap<String, f64> = HashMap::new();
-    for r in &prev_expense_rows {
-        prev_expense_map.insert(r.account_guid.clone(), r.current_amount);
-    }
-
-    fn merge_prev_amount(mut r: ProfitLossRow, prev_map: &HashMap<String, f64>) -> ProfitLossRow {
-        r.previous_amount = *prev_map.get(&r.account_guid).unwrap_or(&0.0);
-        r.change_pct = pnl_change_pct(r.current_amount, r.previous_amount);
-        r
-    }
-
-    let income_rows: Vec<ProfitLossRow> = income_rows
-        .into_iter()
-        .map(|r| merge_prev_amount(r, &prev_income_map))
-        .collect();
-
-    let expense_rows: Vec<ProfitLossRow> = expense_rows
-        .into_iter()
-        .map(|r| merge_prev_amount(r, &prev_expense_map))
-        .collect();
+    let income_rows = merge_pnl_prev_amounts(income_rows, &prev_income_rows);
+    let expense_rows = merge_pnl_prev_amounts(expense_rows, &prev_expense_rows);
 
     let income_prev_total: f64 = income_rows
         .iter()
