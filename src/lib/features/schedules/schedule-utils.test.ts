@@ -1,12 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Schedule } from '$lib/tauri';
-import {
-  frequencyLabel,
-  isPostable,
-  occurrenceLabel,
-  scheduleStatus,
-  scheduleToInput
-} from './schedule-utils';
+import { frequencyLabel, isPostable, occurrenceLabel, scheduleStatus } from './schedule-utils';
 
 function schedule(partial: Partial<Schedule> = {}): Schedule {
   return {
@@ -66,29 +60,6 @@ describe('isPostable', () => {
     expect(isPostable('2024-05-01', '2024-05-01')).toBe(true);
     expect(isPostable('2024-04-01', '2024-05-01')).toBe(true);
     expect(isPostable('2024-06-01', '2024-05-01')).toBe(false);
-  });
-});
-
-describe('scheduleToInput', () => {
-  it('round-trips editable fields', () => {
-    const input = scheduleToInput(
-      schedule({
-        intervalMult: 2,
-        endDate: '2024-12-31',
-        maxOccurrences: 12,
-        splits: [{ accountGuid: 'a', accountName: 'A', amount: 10, quantity: null, memo: null }]
-      })
-    );
-    expect(input).toMatchObject({
-      name: 'Rent',
-      frequency: 'monthly',
-      intervalMult: 2,
-      startDate: '2024-01-01',
-      endDate: '2024-12-31',
-      maxOccurrences: 12,
-      description: 'Monthly rent'
-    });
-    expect(input.splits).toEqual([{ accountGuid: 'a', amount: 10, quantity: null, memo: null }]);
   });
 });
 

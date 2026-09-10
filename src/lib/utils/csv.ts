@@ -41,27 +41,3 @@ export function downloadCsv(
 ): void {
   saveCsv(filename, buildCsvText(headers, rows, delimiter));
 }
-
-export interface ReportCsvOptions {
-  /** Key/value preamble (period, currency…) rendered as `Key,Value` lines. */
-  meta?: [string, string][];
-  headers: string[];
-  rows: string[][];
-  /** Totals block after a blank line (same column shape as rows). */
-  totals?: string[][];
-  delimiter?: ',' | ';';
-}
-
-/**
- * Report export: meta preamble + full data rows + totals. Numbers stay raw
- * (`String(n)`, machine-readable) — display formatting belongs in the UI.
- */
-export function downloadReportCsv(filename: string, opts: ReportCsvOptions): void {
-  const delimiter = opts.delimiter ?? ',';
-  const lines: string[][] = [];
-  for (const [key, value] of opts.meta ?? []) lines.push([key, value]);
-  if (lines.length > 0) lines.push([]);
-  lines.push(opts.headers, ...opts.rows);
-  if (opts.totals && opts.totals.length > 0) lines.push([], ...opts.totals);
-  saveCsv(filename, toCsvText(lines, delimiter));
-}

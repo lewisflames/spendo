@@ -7,7 +7,6 @@
     deleting,
     confirmDelete,
     saveLabel,
-    savingLabel = 'Saving…',
     saveDisabled,
     onDelete,
     onSave,
@@ -18,7 +17,6 @@
     deleting: boolean;
     confirmDelete: boolean;
     saveLabel: string;
-    savingLabel?: string;
     saveDisabled: boolean;
     onDelete: () => void;
     onSave: () => void;
@@ -42,6 +40,6 @@
   {/if}
   <Button type="button" variant="outline" onclick={onCancel}>Cancel</Button>
   <Button type="button" onclick={onSave} disabled={saveDisabled}>
-    {saving ? savingLabel : saveLabel}
+    {saving ? 'Saving…' : saveLabel}
   </Button>
 </div>

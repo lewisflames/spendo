@@ -4,7 +4,6 @@
   import KpiCardRow from '$lib/components/shared/kpi-card-row.svelte';
   import PageHeaderSkeleton from '$lib/components/shared/page-header-skeleton.svelte';
   import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
-  import ToolbarSkeleton from '$lib/components/shared/toolbar-skeleton.svelte';
 
   /**
    * Full-page loading placeholder. Each variant mirrors the loaded layout of
@@ -20,7 +19,6 @@
       | 'transactions'
       | 'transaction-detail'
       | 'form'
-      | 'budgets'
       | 'budget-detail'
       | 'portfolio'
       | 'holding'
@@ -49,10 +47,6 @@
   <PageHeaderSkeleton />
   <KpiCardRow gridClass="sm:grid-cols-2 lg:grid-cols-3" />
   <TableSkeleton cols={4} rows={3} />
-{:else if variant === 'budgets'}
-  <!-- The table renders its own skeleton via BudgetsTable rows={null}. -->
-  <KpiCardRow />
-  <ToolbarSkeleton />
 {:else if variant === 'budget-detail'}
   <KpiCardRow count={4} />
   <!-- Mirrors the pacing card shape. -->

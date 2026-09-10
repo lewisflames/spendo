@@ -1,4 +1,4 @@
-import type { Schedule, ScheduleFrequency, ScheduleInput } from '$lib/tauri';
+import type { Schedule, ScheduleFrequency } from '$lib/tauri';
 
 export const FREQUENCY_OPTIONS: { value: ScheduleFrequency; label: string }[] = [
   { value: 'daily', label: 'Daily' },
@@ -67,27 +67,6 @@ export function scheduleStatus(schedule: Schedule, today: string): ScheduleStatu
 /** A reminder can be posted once its due date has arrived (never before). */
 export function isPostable(nextDueDate: string, today: string): boolean {
   return nextDueDate <= today;
-}
-
-/** Prefill for the editor in edit mode (round-trips through `ScheduleInput`). */
-export function scheduleToInput(schedule: Schedule): ScheduleInput {
-  return {
-    name: schedule.name,
-    frequency: schedule.frequency,
-    intervalMult: schedule.intervalMult,
-    startDate: schedule.startDate,
-    endDate: schedule.endDate,
-    maxOccurrences: schedule.maxOccurrences,
-    description: schedule.description,
-    num: schedule.num ?? null,
-    notes: schedule.notes ?? null,
-    splits: schedule.splits.map((s) => ({
-      accountGuid: s.accountGuid,
-      amount: s.amount,
-      quantity: s.quantity ?? null,
-      memo: s.memo ?? null
-    }))
-  };
 }
 
 /** "3 of 12" / "3 posted" / "—" occurrence progress for table rows. */
