@@ -52,6 +52,7 @@
   import IconCardHeader from '$lib/components/shared/icon-card-header.svelte';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
   import DataExport from '$lib/features/settings/data-export.svelte';
+  import DataImport from '$lib/features/settings/data-import.svelte';
 
   import {
     dbSession,
@@ -827,6 +828,9 @@
       {/if}
     </Card.Content>
   </Card.Root>
+
+  <!-- Data import -->
+  <DataImport onImported={() => dataRes.reload()} />
 
   <!-- Data export -->
   <DataExport />

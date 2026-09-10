@@ -11,13 +11,17 @@
 
   let {
     label = 'Import from GnuCash',
+    disabled = false,
     onError,
     onStatusChange,
+    onImported,
     ...rest
   }: {
     label?: string;
+    disabled?: boolean;
     onError?: (msg: string) => void;
     onStatusChange?: (importing: boolean) => void;
+    onImported?: () => void;
   } & Omit<ButtonProps, 'onclick' | 'disabled'> = $props();
 
   let importing = $state(false);
@@ -40,6 +44,7 @@
       setDbSession(result.summary);
       toast.success(`Imported ${filename}`);
       toastPriceResult(result.prices, { fixHint: true });
+      onImported?.();
     } catch (e: unknown) {
       const msg = errMsg(e, 'Import failed');
       if (onError) {
@@ -53,7 +58,7 @@
   }
 </script>
 
-<Button onclick={handleImport} disabled={importing} {...rest}>
+<Button onclick={handleImport} disabled={importing || disabled} {...rest}>
   {#if importing}
     <LoaderCircle aria-hidden="true" class="size-4 animate-spin" />
   {:else}

@@ -655,9 +655,9 @@
         if needed.
       </p>
       <div class="flex flex-wrap gap-2">
-        <Button href={resolve('/transactions')}>
+        <Button href={resolve('/settings')}>
           <ArrowLeft aria-hidden="true" class="size-4" />
-          Back to Transactions
+          Back to Settings
         </Button>
         <Button variant="outline" onclick={resetWizard}>Import another file</Button>
       </div>

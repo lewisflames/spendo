@@ -111,7 +111,7 @@
         <Card.Title>Open or create a book</Card.Title>
         <Card.Description>
           Books are portable .spendo files stored wherever you choose. Using GnuCash? Create or open
-          a book first, then bring it in via Import on the Transactions page.
+          a book first, then import it from Settings → Data import.
         </Card.Description>
       </Card.Header>
       <Card.Content class="flex flex-1 flex-col gap-3">
