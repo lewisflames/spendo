@@ -1,29 +1,13 @@
 <script lang="ts">
-  import { getCurrentWindow } from '@tauri-apps/api/window';
-  import { isTauri } from '@tauri-apps/api/core';
+  import { useWindowDrag } from '$lib/hooks/use-window-drag.svelte';
   import WindowControls from './window-controls.svelte';
 
-  // Synchronous runtime check (prerender-safe); see window-controls.svelte.
-  const inTauri = isTauri();
-  let isMac = $state(false);
-
-  $effect(() => {
-    if (!inTauri) return;
-    isMac = /Mac|iPhone|iPad/.test(navigator.userAgent);
-  });
-
-  function onHeaderMouseDown(e: MouseEvent) {
-    if (!isMac || !inTauri) return;
-    if (e.button !== 0) return;
-    if ((e.target as Element).closest('button, a') !== null) return;
-    getCurrentWindow().startDragging();
-  }
-
-  function onHeaderDoubleClick(e: MouseEvent) {
-    if (!isMac || !inTauri) return;
-    if ((e.target as Element).closest('button, a') !== null) return;
-    getCurrentWindow().toggleMaximize();
-  }
+  const {
+    inTauri,
+    isMac,
+    onMouseDown: onHeaderMouseDown,
+    onDoubleClick: onHeaderDoubleClick
+  } = useWindowDrag();
 </script>
 
 <!-- Chromeless shell for the welcome view: drag region + window controls only.

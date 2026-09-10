@@ -56,7 +56,7 @@ No `preview` script (no `vite preview` wrapper). Frontend unit tests are pure-he
 
 ## Notables
 
-- **Frameless window**: `decorations: false` in Tauri config. Custom `<TitleBar />` component handles drag.
+- **Frameless window**: `decorations: false` in Tauri config. Custom `<TitleBar />` component handles drag; drag/maximize handlers come from `useWindowDrag()` and modifier-key labels from `$lib/utils/platform.ts`.
 - **Theme toggle**: `Ctrl/Cmd+Shift+T` toggles light/dark. Persisted in `localStorage`, validated per-key on load (`settings.svelte.ts`).
 - **Store convention**: `.svelte.ts` modules using `$state()` wrapped in `{ value }` (e.g., `export const x = $state({ value: ... })`). Applies to every store, including scalar flags like `keyboardShortcutsDialog`.
 - **Sample data**: `data/test.gnucash` exists but is gitignored (`/data` in `.gitignore`).
