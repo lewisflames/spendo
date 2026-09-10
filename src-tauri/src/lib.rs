@@ -109,7 +109,6 @@ pub fn run() {
             accounts::fetch_book_currencies,
             accounts_mut::create_account,
             accounts_mut::update_account,
-            accounts_mut::move_account,
             accounts_mut::delete_account,
             transactions::fetch_transactions,
             transactions::fetch_transaction,
