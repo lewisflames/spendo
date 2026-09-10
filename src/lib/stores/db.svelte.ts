@@ -9,9 +9,6 @@ export const dbSession = $state<{ value: DbSession | null }>({ value: null });
 /** Active `.spendo` file, or `null` while book-less (fresh install). */
 export const activeBookPath = $state<{ value: string | null }>({ value: null });
 
-/** True while any session fetch is in flight (bootstrap or refresh). */
-export const dbSessionLoading = $state<{ value: boolean }>({ value: true });
-
 /**
  * True only during the first bootstrap fetch. Stays false for later
  * force-refreshes (home revalidates on every visit), so shell/redirect logic
@@ -48,7 +45,6 @@ export function ensureDbSessionLoaded(force = false): Promise<void> {
   }
   const isBootstrap = !bootstrapped;
   bootstrapped = true;
-  dbSessionLoading.value = true;
   if (isBootstrap) {
     dbBootstrapping.value = true;
   }
@@ -66,7 +62,6 @@ export function ensureDbSessionLoaded(force = false): Promise<void> {
     if (inflight === q) {
       inflight = null;
     }
-    dbSessionLoading.value = false;
     if (isBootstrap) {
       dbBootstrapping.value = false;
     }

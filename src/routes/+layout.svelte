@@ -50,10 +50,10 @@
   // of dropping to the chromeless welcome shell mid-load. Once bootstrap
   // settles, session identity alone decides (empty → welcome shell).
   //
-  // NOTE: this reads dbBootstrapping, never dbSessionLoading. The home page
-  // force-refreshes the session on every mount, which toggles loading with
-  // the session intact; bootstrapping is already false by then, so refreshes
-  // can't flap the shell into a remount → refetch loop. Tradeoff: a true
+  // NOTE: this reads only dbBootstrapping. The home page force-refreshes the
+  // session on every mount with the session intact; bootstrapping is already
+  // false by then, so refreshes can't flap the shell into a remount → refetch
+  // loop. Tradeoff: a true
   // first run (or cleared book) briefly shows the app shell with skeletons
   // before settling on welcome — preferred over every reload flashing
   // chromeless, since a persisted hint proved unreliable across webview /

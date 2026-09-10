@@ -24,9 +24,6 @@ export const bookSettings = $state<{ value: BookSettings }>({
   value: { ...DEFAULT_BOOK_SETTINGS }
 });
 
-/** True while an initial load or save round-trip is in flight. */
-export const bookSettingsLoading = $state<{ value: boolean }>({ value: false });
-
 let loaded = false;
 let inflight: Promise<BookSettings> | null = null;
 
@@ -34,7 +31,6 @@ let inflight: Promise<BookSettings> | null = null;
 export function loadBookSettings(force = false): Promise<BookSettings> {
   if (inflight) return inflight;
   if (!force && loaded) return Promise.resolve(bookSettings.value);
-  bookSettingsLoading.value = true;
   const p = getBookSettings()
     .then((settings) => {
       bookSettings.value = settings;
@@ -47,7 +43,6 @@ export function loadBookSettings(force = false): Promise<BookSettings> {
     });
   const q = p.finally(() => {
     if (inflight === q) inflight = null;
-    bookSettingsLoading.value = false;
   });
   inflight = q;
   return q;
@@ -58,15 +53,10 @@ export async function saveBookSetting<K extends BookSettingField>(
   field: K,
   value: BookSettings[K]
 ): Promise<BookSettings> {
-  bookSettingsLoading.value = true;
-  try {
-    const updated = await setBookSetting(FIELD_TO_KEY[field], String(value));
-    bookSettings.value = updated;
-    loaded = true;
-    return updated;
-  } finally {
-    bookSettingsLoading.value = false;
-  }
+  const updated = await setBookSetting(FIELD_TO_KEY[field], String(value));
+  bookSettings.value = updated;
+  loaded = true;
+  return updated;
 }
 
 /** Return to defaults when book-less or after Clear (empty book stays open). */
