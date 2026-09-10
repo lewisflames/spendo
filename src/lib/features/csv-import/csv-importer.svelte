@@ -82,23 +82,34 @@
   let commitResult = $state<CsvCommitResult | null>(null);
 
   let accountsData = $state<{ trees: Parameters<typeof flattenAccountsForPicker>[0] } | null>(null);
+  let accountsError = $state<string | null>(null);
   let pickerOptions = $derived(
     flattenAccountsForPicker(accountsData?.trees, { hidePlaceholders: true })
   );
 
-  // Load account trees once a book is present (for both pickers).
+  // Load account trees once a book is present (for both pickers). A failed
+  // load surfaces inline: without an error the pickers just stay empty and
+  // Preview looks inexplicably disabled.
+  let accountsRequest = 0;
+  async function loadAccounts() {
+    const request = ++accountsRequest;
+    accountsError = null;
+    try {
+      const r = await fetchAccounts();
+      if (request !== accountsRequest) return;
+      accountsData = r;
+    } catch (e: unknown) {
+      if (request !== accountsRequest) return;
+      accountsData = null;
+      accountsError = errMsg(e, 'Failed to load accounts');
+    }
+  }
+
   $effect(() => {
     if (!dbSession.value) return;
-    let cancelled = false;
-    fetchAccounts()
-      .then((r) => {
-        if (!cancelled) accountsData = r;
-      })
-      .catch(() => {
-        if (!cancelled) accountsData = null;
-      });
+    void loadAccounts();
     return () => {
-      cancelled = true;
+      accountsRequest++;
     };
   });
 
@@ -510,6 +521,10 @@
 
     {#if previewError}
       <ErrorCard message={previewError} onRetry={() => void handlePreview()} />
+    {/if}
+
+    {#if accountsError}
+      <ErrorCard message={accountsError} onRetry={() => void loadAccounts()} />
     {/if}
 
     <div class="flex items-center gap-2">
