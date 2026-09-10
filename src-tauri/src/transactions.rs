@@ -428,7 +428,7 @@ fn fetch_splits_for_txns(conn: &Connection, guids: &[String]) -> Result<SplitMap
 
     let param_refs = sql::string_param_refs(guids);
 
-    let report_currency = fx::get_report_currency_mnemonic(conn).unwrap_or_default();
+    let report_currency = fx::get_report_currency_mnemonic(conn)?.unwrap_or_default();
     let fx_history = fx::FxHistory::load(conn)?;
 
     let rows: Vec<(String, SplitData, f64, String)> = stmt

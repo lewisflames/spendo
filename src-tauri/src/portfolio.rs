@@ -259,7 +259,7 @@ fn build_holdings(
         accounts: Vec<HoldingAccount>,
     }
 
-    let report_currency = fx::get_report_currency_mnemonic(conn).unwrap_or_default();
+    let report_currency = fx::get_report_currency_mnemonic(conn)?.unwrap_or_default();
     let fx_map = fx::get_fx_map(conn, None)?;
     // Cost-basis currency per commodity: its latest price quote currency.
     let quote_currencies = latest_quote_currencies(conn)?;
@@ -462,7 +462,7 @@ fn load_trend_inputs(conn: &Connection, filter: Option<&str>) -> Result<TrendInp
 
     // FX rate history per currency (quoted in the report currency), for normalizing
     // prices and cost basis per date. Same source `account_detail.rs` uses.
-    let report_currency = fx::get_report_currency_mnemonic(conn).unwrap_or_default();
+    let report_currency = fx::get_report_currency_mnemonic(conn)?.unwrap_or_default();
     let fx_history = fx::FxHistory::load(conn)?;
 
     // Get commodity_guid → mnemonic for market value computation

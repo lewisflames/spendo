@@ -1,4 +1,4 @@
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 use tauri::State;
 
@@ -79,13 +79,14 @@ fn ensure_app_settings_table(conn: &Connection) -> Result<(), String> {
     .map_err(|e| e.to_string())
 }
 
-fn read_setting(conn: &Connection, key: &str) -> Option<String> {
+fn read_setting(conn: &Connection, key: &str) -> Result<Option<String>, String> {
     conn.query_row(
         "SELECT value FROM app_settings WHERE key = ?1",
         [key],
         |row| row.get(0),
     )
-    .ok()
+    .optional()
+    .map_err(|e| e.to_string())
 }
 
 fn validate_book_setting(key: &str, value: &str) -> Result<(), String> {
@@ -123,14 +124,16 @@ fn validate_book_setting(key: &str, value: &str) -> Result<(), String> {
 fn get_book_settings_inner(conn: &Connection) -> Result<BookSettings, String> {
     ensure_app_settings_table(conn)?;
     let defaults = default_book_settings();
-    let pick = |key: &str, fallback: String| match read_setting(conn, key) {
-        Some(v) if validate_book_setting(key, &v).is_ok() => v,
-        _ => fallback,
+    let pick = |key: &str, fallback: String| -> Result<String, String> {
+        match read_setting(conn, key)? {
+            Some(v) if validate_book_setting(key, &v).is_ok() => Ok(v),
+            _ => Ok(fallback),
+        }
     };
     let fiscal_year_start_month = pick(
         "fiscal_year_start_month",
         defaults.fiscal_year_start_month.to_string(),
-    )
+    )?
     .parse()
     .unwrap_or(1);
     Ok(BookSettings {
@@ -138,19 +141,19 @@ fn get_book_settings_inner(conn: &Connection) -> Result<BookSettings, String> {
         default_pnl_period: pick(
             "default_pnl_period",
             defaults.default_pnl_period.clone(),
-        ),
+        )?,
         price_auto_refresh: pick(
             "price_auto_refresh",
             defaults.price_auto_refresh.clone(),
-        ),
+        )?,
         export_csv_delimiter: pick(
             "export_csv_delimiter",
             defaults.export_csv_delimiter.clone(),
-        ),
+        )?,
         export_date_format: pick(
             "export_date_format",
             defaults.export_date_format.clone(),
-        ),
+        )?,
     })
 }
 

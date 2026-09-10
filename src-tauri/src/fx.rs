@@ -10,7 +10,10 @@ use crate::utils;
 /// 1. The ROOT account's commodity (GnuCash book default currency)
 /// 2. The currency with the most split value
 /// 3. The first CURRENCY commodity
-pub fn get_report_currency_guid(conn: &Connection) -> Option<String> {
+///
+/// `Ok(None)` means the book genuinely has no currency commodity; a database
+/// failure propagates instead of masquerading as "no currency".
+pub fn get_report_currency_guid(conn: &Connection) -> Result<Option<String>, String> {
     let root: Option<String> = conn
         .query_row(
             "SELECT c.guid
@@ -20,9 +23,10 @@ pub fn get_report_currency_guid(conn: &Connection) -> Option<String> {
             [],
             |row| row.get(0),
         )
-        .ok();
+        .optional()
+        .map_err(|e| e.to_string())?;
     if root.is_some() {
-        return root;
+        return Ok(root);
     }
 
     let weighted: Option<String> = conn
@@ -43,9 +47,10 @@ pub fn get_report_currency_guid(conn: &Connection) -> Option<String> {
             [],
             |row| row.get(0),
         )
-        .ok();
+        .optional()
+        .map_err(|e| e.to_string())?;
     if weighted.is_some() {
-        return weighted;
+        return Ok(weighted);
     }
 
     conn.query_row(
@@ -53,44 +58,45 @@ pub fn get_report_currency_guid(conn: &Connection) -> Option<String> {
         [],
         |row| row.get(0),
     )
-    .ok()
+    .optional()
+    .map_err(|e| e.to_string())
 }
 
-pub fn get_report_currency_mnemonic(conn: &Connection) -> Option<String> {
-    let guid = get_report_currency_guid(conn)?;
+pub fn get_report_currency_mnemonic(conn: &Connection) -> Result<Option<String>, String> {
+    let Some(guid) = get_report_currency_guid(conn)? else {
+        return Ok(None);
+    };
     conn.query_row(
         "SELECT mnemonic FROM commodities WHERE guid = ?1",
         [guid],
         |row| row.get(0),
     )
-    .ok()
+    .optional()
+    .map_err(|e| e.to_string())
 }
 
 /// All CURRENCY-namespace commodities as (guid, mnemonic).
-pub fn list_book_currencies(conn: &Connection) -> Vec<(String, String)> {
-    let mut stmt = match conn.prepare(
-        "SELECT guid, mnemonic FROM commodities WHERE namespace = 'CURRENCY' ORDER BY mnemonic",
-    ) {
-        Ok(s) => s,
-        Err(_) => return vec![],
-    };
+pub fn list_book_currencies(conn: &Connection) -> Result<Vec<(String, String)>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT guid, mnemonic FROM commodities WHERE namespace = 'CURRENCY' ORDER BY mnemonic",
+        )
+        .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })
-        .ok();
-    match rows {
-        Some(rows) => rows.flatten().collect(),
-        None => vec![],
-    }
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 /// CURRENCY mnemonic -> GUID for all currency commodities in the book.
-pub fn currency_guid_map(conn: &Connection) -> HashMap<String, String> {
-    list_book_currencies(conn)
+pub fn currency_guid_map(conn: &Connection) -> Result<HashMap<String, String>, String> {
+    Ok(list_book_currencies(conn)?
         .into_iter()
         .map(|(guid, mnemonic)| (mnemonic, guid))
-        .collect()
+        .collect())
 }
 
 /// Latest FX rate per currency (1 unit of currency = N units of report currency),
@@ -102,7 +108,7 @@ pub fn currency_guid_map(conn: &Connection) -> HashMap<String, String> {
 /// but a missing row silently skews totals. Price refresh surfaces FX failures
 /// as `PriceError`s; money queries intentionally do not fail the whole report.
 pub fn get_fx_map(conn: &Connection, as_of: Option<&str>) -> Result<HashMap<String, f64>, String> {
-    let Some(report_guid) = get_report_currency_guid(conn) else {
+    let Some(report_guid) = get_report_currency_guid(conn)? else {
         return Ok(HashMap::new());
     };
 
@@ -130,36 +136,6 @@ pub fn get_fx_map(conn: &Connection, as_of: Option<&str>) -> Result<HashMap<Stri
         map.insert(mnemonic, price);
     }
     Ok(map)
-}
-
-/// FX rate for a single currency as of a date (latest rate on or before the date).
-/// Returns 1.0 only when no qualifying rate row exists; DB errors propagate.
-pub fn get_fx_rate_at(
-    conn: &Connection,
-    currency_mnemonic: &str,
-    report_guid: &str,
-    date: &str,
-) -> Result<f64, String> {
-    let rate: Option<f64> = conn
-        .query_row(
-            &format!(
-                "SELECT {}
-                 FROM prices p
-                 JOIN commodities c ON c.guid = p.commodity_guid
-                 WHERE c.namespace = 'CURRENCY'
-                    AND c.mnemonic = ?1
-                    AND p.currency_guid = ?2
-                    AND p.date <= ?3
-                 ORDER BY p.date DESC, p.guid DESC
-                 LIMIT 1",
-                utils::PRICE_AMOUNT
-            ),
-            rusqlite::params![currency_mnemonic, report_guid, date],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(|e| e.to_string())?;
-    Ok(rate.unwrap_or(1.0))
 }
 
 /// Convert an amount from its own currency to the report currency.
@@ -236,7 +212,7 @@ pub struct FxHistory {
 
 impl FxHistory {
     pub fn load(conn: &Connection) -> Result<FxHistory, String> {
-        let Some(report_guid) = get_report_currency_guid(conn) else {
+        let Some(report_guid) = get_report_currency_guid(conn)? else {
             return Ok(FxHistory { events: vec![] });
         };
         let mut stmt = conn

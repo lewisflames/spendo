@@ -1,4 +1,4 @@
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use tauri::State;
 
 use crate::db::{run_blocking, with_tx_err, AppError, AppState};
@@ -67,7 +67,7 @@ fn set_base_currency_inner(conn: &Connection, currency: &str) -> Result<HomeData
             [],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
-        .ok();
+        .optional()?;
     let Some((root_guid, _)) = root else {
         return Err(AppError::NotFound("No database yet — create an empty book first".to_string()));
     };
@@ -78,7 +78,7 @@ fn set_base_currency_inner(conn: &Connection, currency: &str) -> Result<HomeData
             [&mnemonic],
             |row| row.get(0),
         )
-        .ok();
+        .optional()?;
 
     let commodity_guid = match existing_guid {
         Some(guid) => guid,
