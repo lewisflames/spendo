@@ -2,14 +2,29 @@ import type { AccountNode } from '$lib/tauri';
 
 export interface PickerAccount {
   guid: string;
-  /** Full display path, e.g. `Expenses › Groceries`. */
+  /** Full display path, e.g. `Expenses › Groceries` (search, sort, tooltips). */
   label: string;
+  /** Leaf display name, e.g. `Groceries`. */
+  display: string;
+  /** Ancestor display path; set only when `display` is shared by several options. */
+  parentPath: string | null;
   accountType: string;
   placeholder: boolean;
   commodity: string | null;
 }
 
-/** Flatten account trees into picker options with full display paths. */
+/** Null out `parentPath` entries whose `display` is unique among `rows`. */
+export function keepDuplicateParentPaths<T extends { display: string; parentPath: string | null }>(
+  rows: T[]
+): void {
+  const counts = new Map<string, number>();
+  for (const row of rows) counts.set(row.display, (counts.get(row.display) ?? 0) + 1);
+  for (const row of rows) {
+    if ((counts.get(row.display) ?? 0) < 2) row.parentPath = null;
+  }
+}
+
+/** Flatten account trees into picker options with leaf display names. */
 export function flattenAccountsForPicker(
   trees: AccountNode[] | null | undefined,
   opts?: { excludeGuids?: Set<string> | string[]; hidePlaceholders?: boolean }
@@ -26,6 +41,8 @@ export function flattenAccountsForPicker(
         out.push({
           guid: n.guid,
           label: path.join(' › '),
+          display,
+          parentPath: path.slice(0, -1).join(' › ') || null,
           accountType: n.accountType,
           placeholder: n.placeholder,
           commodity: n.commodity
@@ -35,6 +52,7 @@ export function flattenAccountsForPicker(
     }
   }
   walk(trees, []);
+  keepDuplicateParentPaths(out);
   out.sort((a, b) => a.label.localeCompare(b.label));
   return out;
 }

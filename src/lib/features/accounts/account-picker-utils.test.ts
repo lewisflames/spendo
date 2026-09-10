@@ -31,13 +31,34 @@ const trees = [
 ];
 
 describe('flattenAccountsForPicker', () => {
-  it('labels options with full display paths', () => {
+  it('exposes leaf display names with full display path labels', () => {
     const opts = flattenAccountsForPicker(trees);
+    expect(opts.map((o) => o.display)).toEqual(['Expenses', 'Groceries', 'Savings']);
     expect(opts.map((o) => o.label)).toEqual([
       'Expenses',
       'Expenses › Groceries',
       'Expenses › Savings'
     ]);
+    expect(opts.every((o) => o.parentPath === null)).toBe(true);
+  });
+
+  it('sets parentPath only for duplicate leaf display names', () => {
+    const opts = flattenAccountsForPicker([
+      node({
+        guid: 'bank-a',
+        name: 'Bank A',
+        children: [node({ guid: 'checking-a', name: 'Checking' })]
+      }),
+      node({
+        guid: 'bank-b',
+        name: 'Bank B',
+        children: [node({ guid: 'checking-b', name: 'Checking' })]
+      }),
+      node({ guid: 'savings', name: 'Savings' })
+    ]);
+    expect(opts.find((o) => o.guid === 'checking-a')?.parentPath).toBe('Bank A');
+    expect(opts.find((o) => o.guid === 'checking-b')?.parentPath).toBe('Bank B');
+    expect(opts.find((o) => o.guid === 'savings')?.parentPath).toBeNull();
   });
 
   it('optionally hides placeholders', () => {

@@ -53,10 +53,14 @@
         role="combobox"
         aria-expanded={open}
         {disabled}
+        title={selected?.label}
         class={cn('w-full justify-between font-normal', !selected && 'text-muted-foreground')}
       >
         <span class="min-w-0 flex-1 truncate text-left">
-          {selected ? selected.label : placeholder}
+          {selected ? selected.display : placeholder}
+          {#if selected?.parentPath}
+            <span class="text-muted-foreground">· {selected.parentPath}</span>
+          {/if}
         </span>
         {#if selected}
           <Badge
@@ -80,13 +84,19 @@
             <Command.Item
               value={opt.label}
               keywords={opt.commodity ? [opt.accountType, opt.commodity] : [opt.accountType]}
+              title={opt.label}
               onSelect={() => select(opt.guid)}
             >
               <Check
                 aria-hidden="true"
                 class={cn('mr-1 size-4', value === opt.guid ? 'opacity-100' : 'opacity-0')}
               />
-              <span class="min-w-0 flex-1 truncate">{opt.label}</span>
+              <span class="min-w-0 flex-1 truncate">
+                {opt.display}
+                {#if opt.parentPath}
+                  <span class="text-muted-foreground">· {opt.parentPath}</span>
+                {/if}
+              </span>
               <Badge variant="outline" class="shrink-0 text-[10px] leading-none">
                 {opt.accountType}
               </Badge>
