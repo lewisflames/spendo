@@ -64,8 +64,7 @@
         <label for="reconcile-ending-balance" class="text-sm font-medium">Ending balance</label>
         <Input
           id="reconcile-ending-balance"
-          type="number"
-          step="0.01"
+          type="text"
           inputmode="decimal"
           placeholder="0.00"
           bind:value={endingBalanceInput}
