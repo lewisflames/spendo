@@ -7,7 +7,6 @@
   import TransactionFilters from '$lib/features/transactions/transaction-filters.svelte';
   import TransactionTable from '$lib/features/transactions/transaction-table.svelte';
   import TransactionHeatmap from '$lib/features/transactions/transaction-heatmap.svelte';
-  import TransactionEditorDialog from '$lib/features/transactions/transaction-editor-dialog.svelte';
   import ImportMenu from '$lib/features/transactions/import-menu.svelte';
   import { Button } from '$lib/components/ui/button';
   import { Plus } from '@lucide/svelte';
@@ -127,7 +126,6 @@
   });
 
   let accounts = $state<AccountInfo[]>([]);
-  let editorOpen = $state(false);
 
   useAsyncData({
     enabled: () => !!dbSession.value && accountsUnlocked,
@@ -160,22 +158,12 @@
           <CalendarClock aria-hidden="true" class="size-4" />
           Recurring
         </Button>
-        <Button onclick={() => (editorOpen = true)}>
+        <Button href={resolve('/transactions/new')}>
           <Plus aria-hidden="true" class="size-4" />
           New transaction
         </Button>
       {/if}
     </PageHeader>
-
-    <TransactionEditorDialog
-      bind:open={editorOpen}
-      mode="create"
-      onSaved={() => {
-        res.reload();
-        toast.success('Transaction created');
-      }}
-      onError={(msg) => toast.error(msg)}
-    />
 
     <TransactionHeatmap {filters} />
 

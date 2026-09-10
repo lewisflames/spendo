@@ -123,7 +123,7 @@
                      SvelteKit's router can intercept it. -->
               <a
                 class="block truncate"
-                href={resolve('/transactions/[id]', { id: t.guid })}
+                href={resolve('/transactions/[guid]', { guid: t.guid })}
                 title={t.description ?? undefined}
               >
                 {#if t.num}<span class="mr-1 text-muted-foreground">#{t.num}</span>{/if}

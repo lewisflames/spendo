@@ -9,10 +9,10 @@
     type Schedule
   } from '$lib/tauri';
   import { dbBootstrapping, dbSession, ensureDbSessionLoaded } from '$lib/stores/db.svelte';
-  import ScheduleEditorDialog from '$lib/features/schedules/schedule-editor-dialog.svelte';
   import ScheduleTable from '$lib/features/schedules/schedule-table.svelte';
   import { Button } from '$lib/components/ui/button';
   import { Plus, CalendarClock } from '@lucide/svelte';
+  import { resolve } from '$app/paths';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import PageSkeleton from '$lib/components/shared/page-skeleton.svelte';
   import BookGate from '$lib/components/shared/book-gate.svelte';
@@ -33,25 +33,7 @@
     label: 'Failed to load scheduled transactions'
   });
 
-  let dialogOpen = $state(false);
-  let dialogMode = $state<'create' | 'edit'>('create');
-  let dialogGuid = $state<string | null>(null);
-  let dialogInitial = $state<Schedule | null>(null);
   let busyGuid = $state<string | null>(null);
-
-  function openCreate() {
-    dialogMode = 'create';
-    dialogGuid = null;
-    dialogInitial = null;
-    dialogOpen = true;
-  }
-
-  function openEdit(schedule: Schedule) {
-    dialogMode = 'edit';
-    dialogGuid = schedule.guid;
-    dialogInitial = schedule;
-    dialogOpen = true;
-  }
 
   async function refreshAfterMutation() {
     res.reload();
@@ -119,28 +101,12 @@
   <div class="flex flex-col gap-6">
     <PageHeader title="Scheduled" description={res.data ? plural(res.data.length, 'schedule') : ''}>
       {#if dbSession.value}
-        <Button onclick={openCreate}>
+        <Button href={resolve('/scheduled/new')}>
           <Plus aria-hidden="true" class="size-4" />
           New schedule
         </Button>
       {/if}
     </PageHeader>
-
-    <ScheduleEditorDialog
-      bind:open={dialogOpen}
-      mode={dialogMode}
-      guid={dialogGuid}
-      initial={dialogInitial}
-      onSaved={(s) => {
-        res.reload();
-        toast.success(dialogMode === 'edit' ? `Updated "${s.name}"` : `Created "${s.name}"`);
-      }}
-      onDeleted={() => {
-        res.reload();
-        toast.success('Schedule deleted');
-      }}
-      onError={(msg) => toast.error(msg)}
-    />
 
     {#if (res.loading || dbBootstrapping.value) && !res.data}
       <PageSkeleton variant="scheduled" />
@@ -158,7 +124,7 @@
             <CalendarClock aria-hidden="true" class="text-muted-foreground" />
           {/snippet}
           {#snippet action()}
-            <Button onclick={openCreate}>
+            <Button href={resolve('/scheduled/new')}>
               <Plus aria-hidden="true" class="size-4" />
               New schedule
             </Button>
@@ -171,7 +137,6 @@
             {currency}
             {today}
             busy={busyGuid !== null}
-            onEdit={openEdit}
             onPost={handlePost}
             onSkip={handleSkip}
             onToggleActive={handleToggleActive}

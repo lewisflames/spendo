@@ -6,9 +6,11 @@
 export const ROUTE_TITLES: Record<string, string> = {
   '/accounts': 'Accounts',
   '/transactions': 'Transactions',
+  '/transactions/new': 'New transaction',
   '/transactions/import': 'Import CSV',
   '/history': 'History',
   '/scheduled': 'Scheduled',
+  '/scheduled/new': 'New schedule',
   '/reconcile': 'Reconcile',
   '/settings': 'Settings',
   '/about': 'About',

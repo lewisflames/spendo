@@ -2,6 +2,7 @@
   import * as Table from '$lib/components/ui/table';
   import { Badge } from '$lib/components/ui/badge';
   import { Button } from '$lib/components/ui/button';
+  import { resolve } from '$app/paths';
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import { CalendarCheck, SkipForward, Pencil, Pause, Play } from '@lucide/svelte';
   import type { Schedule } from '$lib/tauri';
@@ -25,7 +26,6 @@
     currency,
     today,
     busy = false,
-    onEdit,
     onPost,
     onSkip,
     onToggleActive
@@ -35,7 +35,6 @@
     /** YYYY-MM-DD for due comparisons. */
     today: string;
     busy?: boolean;
-    onEdit: (schedule: Schedule) => void;
     onPost: (schedule: Schedule) => void;
     onSkip: (schedule: Schedule) => void;
     onToggleActive: (schedule: Schedule) => void;
@@ -153,8 +152,7 @@
             <Button
               variant="ghost"
               size="sm"
-              onclick={() => onEdit(schedule)}
-              disabled={busy}
+              href={resolve('/scheduled/[guid]/edit', { guid: schedule.guid })}
               title="Edit schedule"
             >
               <Pencil aria-hidden="true" class="size-3.5" />

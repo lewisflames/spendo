@@ -140,6 +140,7 @@ pub fn run() {
             schedules::delete_schedule,
             schedules::set_schedule_active,
             schedules::fetch_schedules,
+            schedules::fetch_schedule,
             schedules::fetch_upcoming_reminders,
             schedules::post_schedule_occurrence,
             schedules::skip_schedule_occurrence,

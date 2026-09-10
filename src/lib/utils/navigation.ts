@@ -2,8 +2,8 @@ import { goto } from '$app/navigation';
 import { resolve } from '$app/paths';
 
 /** Navigate to a transaction detail page. */
-export function openTransaction(guid: string): Promise<void> {
-  return goto(resolve('/transactions/[id]', { id: guid }));
+export function openTransaction(guid: string, opts?: { replaceState?: boolean }): Promise<void> {
+  return goto(resolve('/transactions/[guid]', { guid }), opts);
 }
 
 /** Navigate to an account detail page. */
