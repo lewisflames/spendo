@@ -1,49 +1,27 @@
 <script lang="ts">
-  import * as Card from '$lib/components/ui/card';
-  import * as Select from '$lib/components/ui/select';
-  import * as Table from '$lib/components/ui/table';
-  import { Select as SelectPrimitive } from 'bits-ui';
-  import { Button } from '$lib/components/ui/button';
-  import { Badge } from '$lib/components/ui/badge';
-  import { Checkbox } from '$lib/components/ui/checkbox';
-  import TableShell from '$lib/components/shared/table-shell.svelte';
-  import ErrorCard from '$lib/components/shared/error-card.svelte';
-  import { PaginationNav } from '$lib/components/shared/pagination-nav';
-  import { AccountPicker } from '$lib/components/shared/account-picker';
-  import { toast } from '$lib/components/ui/sonner';
   import { open } from '@tauri-apps/plugin-dialog';
   import { basename } from '@tauri-apps/api/path';
-  import { resolve } from '$app/paths';
   import { SvelteSet } from 'svelte/reactivity';
-  import {
-    ArrowLeft,
-    ArrowRight,
-    CheckCircle2,
-    FileUp,
-    LoaderCircle,
-    Upload
-  } from '@lucide/svelte';
+  import { toast } from '$lib/components/ui/sonner';
   import {
     csvCommit,
     csvDetect,
     csvPreview,
     fetchAccounts,
     fetchHomeData,
+    type AccountsResult,
     type CsvCommitResult,
     type CsvDetectResult,
     type CsvPreviewResult
   } from '$lib/tauri';
   import { dbSession, setDbSession } from '$lib/stores/db.svelte';
   import { errMsg } from '$lib/utils/error';
-  import { flattenAccountsForPicker } from '$lib/features/accounts/account-picker-utils';
+  import { plural } from '$lib/utils/format.svelte';
   import { guessMapping } from '$lib/features/csv-import/guess';
-  import {
-    formatCurrency,
-    formatDate,
-    plural,
-    sessionCurrency,
-    EMPTY_DASH
-  } from '$lib/utils/format.svelte';
+  import FileStep from '$lib/features/csv-import/steps/file-step.svelte';
+  import MappingStep from '$lib/features/csv-import/steps/mapping-step.svelte';
+  import PreviewStep from '$lib/features/csv-import/steps/preview-step.svelte';
+  import DoneStep from '$lib/features/csv-import/steps/done-step.svelte';
 
   type Step = 'file' | 'mapping' | 'preview' | 'done';
 
@@ -81,11 +59,8 @@
   let commitError = $state<string | null>(null);
   let commitResult = $state<CsvCommitResult | null>(null);
 
-  let accountsData = $state<{ trees: Parameters<typeof flattenAccountsForPicker>[0] } | null>(null);
+  let accountsData = $state<AccountsResult | null>(null);
   let accountsError = $state<string | null>(null);
-  let pickerOptions = $derived(
-    flattenAccountsForPicker(accountsData?.trees, { hidePlaceholders: true })
-  );
 
   // Load account trees once a book is present (for both pickers). A failed
   // load surfaces inline: without an error the pickers just stay empty and
@@ -112,21 +87,6 @@
       accountsRequest++;
     };
   });
-
-  let currency = $derived(sessionCurrency());
-
-  let columnOptions = $derived.by(() => {
-    const headers = detect?.headers ?? [];
-    const count = detect?.columnCount ?? 0;
-    return Array.from({ length: count }, (_, i) => ({
-      value: String(i),
-      label: `${i + 1}. ${headers[i] || `Column ${i + 1}`}`
-    }));
-  });
-
-  function columnLabel(i: number): string {
-    return detect?.headers[i] || `Column ${i + 1}`;
-  }
 
   function applyDetect(d: CsvDetectResult) {
     detect = d;
@@ -211,32 +171,6 @@
     }
   }
 
-  let totalPages = $derived(preview ? Math.max(1, Math.ceil(preview.rows.length / pageSize)) : 1);
-  let pageRows = $derived.by(() => {
-    if (!preview) return [];
-    const start = (page - 1) * pageSize;
-    return preview.rows.slice(start, start + pageSize);
-  });
-
-  let importableKeys = $derived.by(() =>
-    (preview?.rows ?? []).filter((r) => r.valid && !r.duplicate).map((r) => r.key)
-  );
-  let allImportableSelected = $derived.by(
-    () => importableKeys.length > 0 && importableKeys.every((k) => selected.has(k))
-  );
-
-  function toggleRow(key: number, next: boolean) {
-    if (next) selected.add(key);
-    else selected.delete(key);
-  }
-
-  function toggleAll(next: boolean) {
-    selected.clear();
-    if (next) {
-      for (const k of importableKeys) selected.add(k);
-    }
-  }
-
   async function handleCommit() {
     if (!preview || committing || selected.size === 0) return;
     committing = true;
@@ -284,398 +218,44 @@
     previewError = null;
     commitError = null;
   }
-
-  const delimiters = [
-    { value: ',', label: 'Comma (,)' },
-    { value: ';', label: 'Semicolon (;)' },
-    { value: '\t', label: 'Tab' },
-    { value: '|', label: 'Pipe (|)' }
-  ];
 </script>
 
 {#if step === 'file'}
-  <Card.Root>
-    <Card.Header>
-      <Card.Title>Choose a CSV file</Card.Title>
-      <Card.Description>
-        Bank-statement exports (.csv, .txt, .tsv). Nothing is written until the final import step.
-      </Card.Description>
-    </Card.Header>
-    <Card.Content class="flex flex-col gap-4">
-      {#if detectError}
-        <ErrorCard message={detectError} onRetry={() => void handlePickFile()} />
-      {/if}
-      <div>
-        <Button onclick={() => void handlePickFile()} disabled={picking}>
-          {#if picking}
-            <LoaderCircle aria-hidden="true" class="size-4 animate-spin" />
-            Reading…
-          {:else}
-            <FileUp aria-hidden="true" class="size-4" />
-            Choose CSV file
-          {/if}
-        </Button>
-      </div>
-      <p class="text-xs text-muted-foreground">
-        Detection runs locally: encoding, delimiter and header row are sniffed before mapping.
-      </p>
-    </Card.Content>
-  </Card.Root>
+  <FileStep {detectError} {picking} onDetect={() => void handlePickFile()} />
 {:else if step === 'mapping' && detect}
-  <div class="flex flex-col gap-4">
-    <Card.Root>
-      <Card.Header>
-        <Card.Title>{filename || 'Map columns'}</Card.Title>
-        <Card.Description>
-          {plural(detect.rowCount, 'data row')} · {plural(detect.columnCount, 'column')} · {detect.encoding}
-          · delimiter
-          {detect.delimiter === '\t' ? 'tab' : `“${detect.delimiter}”`}
-        </Card.Description>
-      </Card.Header>
-      <Card.Content class="grid gap-4 md:grid-cols-2">
-        <div class="flex flex-col gap-2">
-          <span class="text-sm font-medium">Date column</span>
-          <Select.Root
-            type="single"
-            value={String(dateCol)}
-            onValueChange={(v) => (dateCol = Number(v))}
-            items={columnOptions}
-          >
-            <Select.Trigger><SelectPrimitive.Value placeholder="Date column" /></Select.Trigger>
-            <Select.Content>
-              {#each columnOptions as opt (opt.value)}
-                <Select.Item value={opt.value} label={opt.label}>{opt.label}</Select.Item>
-              {/each}
-            </Select.Content>
-          </Select.Root>
-        </div>
-        <div class="flex flex-col gap-2">
-          <span class="text-sm font-medium">Description column</span>
-          <Select.Root
-            type="single"
-            value={String(descCol)}
-            onValueChange={(v) => (descCol = Number(v))}
-            items={columnOptions}
-          >
-            <Select.Trigger
-              ><SelectPrimitive.Value placeholder="Description column" /></Select.Trigger
-            >
-            <Select.Content>
-              {#each columnOptions as opt (opt.value)}
-                <Select.Item value={opt.value} label={opt.label}>{opt.label}</Select.Item>
-              {/each}
-            </Select.Content>
-          </Select.Root>
-        </div>
-        <div class="flex items-center gap-2 md:col-span-2">
-          <Checkbox
-            checked={usePair}
-            onCheckedChange={(v) => (usePair = v === true)}
-            id="csv-pair"
-          />
-          <label for="csv-pair" class="text-sm">My file has separate Debit / Credit columns</label>
-        </div>
-        {#if usePair}
-          <div class="flex flex-col gap-2">
-            <span class="text-sm font-medium">Debit column (money out)</span>
-            <Select.Root
-              type="single"
-              value={debitCol !== null ? String(debitCol) : ''}
-              onValueChange={(v) => (debitCol = Number(v))}
-              items={columnOptions}
-            >
-              <Select.Trigger><SelectPrimitive.Value placeholder="Debit column" /></Select.Trigger>
-              <Select.Content>
-                {#each columnOptions as opt (opt.value)}
-                  <Select.Item value={opt.value} label={opt.label}>{opt.label}</Select.Item>
-                {/each}
-              </Select.Content>
-            </Select.Root>
-          </div>
-          <div class="flex flex-col gap-2">
-            <span class="text-sm font-medium">Credit column (money in)</span>
-            <Select.Root
-              type="single"
-              value={creditCol !== null ? String(creditCol) : ''}
-              onValueChange={(v) => (creditCol = Number(v))}
-              items={columnOptions}
-            >
-              <Select.Trigger><SelectPrimitive.Value placeholder="Credit column" /></Select.Trigger>
-              <Select.Content>
-                {#each columnOptions as opt (opt.value)}
-                  <Select.Item value={opt.value} label={opt.label}>{opt.label}</Select.Item>
-                {/each}
-              </Select.Content>
-            </Select.Root>
-          </div>
-        {:else}
-          <div class="flex flex-col gap-2 md:col-span-2">
-            <span class="text-sm font-medium">Amount column</span>
-            <Select.Root
-              type="single"
-              value={amountCol !== null ? String(amountCol) : ''}
-              onValueChange={(v) => (amountCol = Number(v))}
-              items={columnOptions}
-            >
-              <Select.Trigger><SelectPrimitive.Value placeholder="Amount column" /></Select.Trigger>
-              <Select.Content>
-                {#each columnOptions as opt (opt.value)}
-                  <Select.Item value={opt.value} label={opt.label}>{opt.label}</Select.Item>
-                {/each}
-              </Select.Content>
-            </Select.Root>
-          </div>
-        {/if}
-        <div class="flex flex-col gap-2">
-          <span class="text-sm font-medium">Target account (statement)</span>
-          <AccountPicker
-            bind:value={targetAccountGuid}
-            options={pickerOptions}
-            placeholder="Money in/out of…"
-          />
-        </div>
-        <div class="flex flex-col gap-2">
-          <span class="text-sm font-medium">Offset account (category)</span>
-          <AccountPicker
-            bind:value={offsetAccountGuid}
-            options={pickerOptions}
-            placeholder="Balanced against…"
-          />
-        </div>
-        <div class="flex flex-col gap-2">
-          <span class="text-sm font-medium">Delimiter</span>
-          <Select.Root
-            type="single"
-            value={delimiter}
-            onValueChange={(v) => {
-              if (v) delimiter = v;
-            }}
-            items={delimiters}
-          >
-            <Select.Trigger><SelectPrimitive.Value /></Select.Trigger>
-            <Select.Content>
-              {#each delimiters as d (d.value)}
-                <Select.Item value={d.value} label={d.label}>{d.label}</Select.Item>
-              {/each}
-            </Select.Content>
-          </Select.Root>
-        </div>
-        <div class="flex flex-col gap-2">
-          <span class="text-sm font-medium">Ambiguous dates (01/02/2026)</span>
-          <Select.Root
-            type="single"
-            value={datePreference}
-            onValueChange={(v) => {
-              if (v === 'dmy' || v === 'mdy') datePreference = v;
-            }}
-            items={[
-              { value: 'dmy', label: 'Day first (DMY)' },
-              { value: 'mdy', label: 'Month first (MDY)' }
-            ]}
-          >
-            <Select.Trigger><SelectPrimitive.Value /></Select.Trigger>
-            <Select.Content>
-              <Select.Item value="dmy" label="Day first (DMY)">Day first (DMY)</Select.Item>
-              <Select.Item value="mdy" label="Month first (MDY)">Month first (MDY)</Select.Item>
-            </Select.Content>
-          </Select.Root>
-        </div>
-        <div class="flex items-center gap-2 md:col-span-2">
-          <Checkbox
-            checked={hasHeader}
-            onCheckedChange={(v) => (hasHeader = v === true)}
-            id="csv-header"
-          />
-          <label for="csv-header" class="text-sm">First row is a header</label>
-        </div>
-      </Card.Content>
-    </Card.Root>
-
-    <Card.Root>
-      <Card.Header>
-        <Card.Title>Sample rows</Card.Title>
-      </Card.Header>
-      <Card.Content>
-        <TableShell>
-          <Table.Header>
-            <Table.Row class="bg-muted/75">
-              {#each detect.headers as _h, i (i)}
-                <Table.Head class="text-muted-foreground">{columnLabel(i)}</Table.Head>
-              {/each}
-            </Table.Row>
-          </Table.Header>
-          <Table.Body>
-            {#each detect.sampleRows as row, i (i)}
-              <Table.Row>
-                {#each row as cell, j (j)}
-                  <Table.Cell class="max-w-56 truncate py-2" title={cell}
-                    >{cell || EMPTY_DASH}</Table.Cell
-                  >
-                {/each}
-              </Table.Row>
-            {/each}
-          </Table.Body>
-        </TableShell>
-      </Card.Content>
-    </Card.Root>
-
-    {#if previewError}
-      <ErrorCard message={previewError} onRetry={() => void handlePreview()} />
-    {/if}
-
-    {#if accountsError}
-      <ErrorCard message={accountsError} onRetry={() => void loadAccounts()} />
-    {/if}
-
-    <div class="flex items-center gap-2">
-      <Button variant="outline" onclick={resetWizard}>
-        <ArrowLeft aria-hidden="true" class="size-4" />
-        Back
-      </Button>
-      <Button
-        onclick={() => void handlePreview()}
-        disabled={previewing || !targetAccountGuid || !offsetAccountGuid}
-      >
-        {#if previewing}
-          <LoaderCircle aria-hidden="true" class="size-4 animate-spin" />
-          Previewing…
-        {:else}
-          Preview
-          <ArrowRight aria-hidden="true" class="size-4" />
-        {/if}
-      </Button>
-    </div>
-  </div>
+  <MappingStep
+    {detect}
+    {filename}
+    bind:delimiter
+    bind:hasHeader
+    bind:datePreference
+    bind:usePair
+    bind:dateCol
+    bind:descCol
+    bind:amountCol
+    bind:debitCol
+    bind:creditCol
+    bind:targetAccountGuid
+    bind:offsetAccountGuid
+    {accountsData}
+    {accountsError}
+    {previewError}
+    {previewing}
+    onPreview={() => void handlePreview()}
+    onReset={resetWizard}
+    onRetryAccounts={() => void loadAccounts()}
+  />
 {:else if step === 'preview' && preview}
-  <div class="flex flex-col gap-4">
-    <Card.Root>
-      <Card.Header>
-        <Card.Title>Dry-run preview</Card.Title>
-        <Card.Description>
-          {preview.validCount} ready · {preview.duplicateCount} duplicates (pre-unchecked) ·
-          {preview.errorCount} errors · {selected.size} selected
-        </Card.Description>
-      </Card.Header>
-      <Card.Content>
-        <TableShell>
-          <Table.Header>
-            <Table.Row class="bg-muted/75">
-              <Table.Head class="w-10">
-                <Checkbox
-                  checked={allImportableSelected}
-                  indeterminate={!allImportableSelected && selected.size > 0}
-                  disabled={importableKeys.length === 0}
-                  aria-label={allImportableSelected
-                    ? 'Unselect all importable rows'
-                    : 'Select all importable rows'}
-                  onCheckedChange={(v) => toggleAll(v === true)}
-                />
-              </Table.Head>
-              <Table.Head>Date</Table.Head>
-              <Table.Head>Description</Table.Head>
-              <Table.Head class="text-right">Amount</Table.Head>
-              <Table.Head>Status</Table.Head>
-            </Table.Row>
-          </Table.Header>
-          <Table.Body>
-            {#each pageRows as row (row.key)}
-              {@const checked = selected.has(row.key)}
-              {@const disabled = !row.valid || row.duplicate}
-              <Table.Row data-checked={checked}>
-                <Table.Cell>
-                  <Checkbox
-                    {checked}
-                    {disabled}
-                    aria-label="Select row {row.key + 1}"
-                    onCheckedChange={(v) => toggleRow(row.key, v === true)}
-                  />
-                </Table.Cell>
-                <Table.Cell class="whitespace-nowrap">
-                  {row.postDate ? formatDate(row.postDate) : EMPTY_DASH}
-                </Table.Cell>
-                <Table.Cell class="max-w-md truncate font-medium" title={row.description ?? ''}>
-                  {row.description || EMPTY_DASH}
-                </Table.Cell>
-                <Table.Cell class="text-right">
-                  {row.amount !== null ? formatCurrency(row.amount, currency) : EMPTY_DASH}
-                </Table.Cell>
-                <Table.Cell>
-                  {#if !row.valid}
-                    <Badge variant="destructive" title={row.error ?? ''}>Error</Badge>
-                  {:else if row.duplicate}
-                    <Badge variant="secondary">Duplicate</Badge>
-                  {:else}
-                    <Badge variant="outline">Ready</Badge>
-                  {/if}
-                </Table.Cell>
-              </Table.Row>
-            {/each}
-          </Table.Body>
-        </TableShell>
-        <div class="mt-4">
-          <PaginationNav
-            bind:page
-            {totalPages}
-            totalItems={preview.rows.length}
-            {pageSize}
-            onPageSizeChange={(size) => {
-              pageSize = size;
-              page = 1;
-            }}
-          />
-        </div>
-        {#if preview.errorCount > 0}
-          <p class="mt-2 text-xs text-muted-foreground">
-            Rows with errors stay disabled. Fix the mapping or the file, then re-run preview.
-          </p>
-        {/if}
-      </Card.Content>
-    </Card.Root>
-
-    {#if commitError}
-      <ErrorCard message={commitError} onRetry={() => void handleCommit()} />
-    {/if}
-
-    <div class="flex items-center gap-2">
-      <Button variant="outline" onclick={() => (step = 'mapping')}>
-        <ArrowLeft aria-hidden="true" class="size-4" />
-        Mapping
-      </Button>
-      <Button onclick={() => void handleCommit()} disabled={committing || selected.size === 0}>
-        {#if committing}
-          <LoaderCircle aria-hidden="true" class="size-4 animate-spin" />
-          Importing…
-        {:else}
-          <Upload aria-hidden="true" class="size-4" />
-          Import {plural(selected.size, 'row')}
-        {/if}
-      </Button>
-    </div>
-  </div>
+  <PreviewStep
+    {preview}
+    {selected}
+    bind:page
+    bind:pageSize
+    {commitError}
+    {committing}
+    onCommit={() => void handleCommit()}
+    onBack={() => (step = 'mapping')}
+  />
 {:else if step === 'done' && commitResult}
-  <Card.Root>
-    <Card.Header>
-      <Card.Title class="flex items-center gap-2">
-        <CheckCircle2 aria-hidden="true" class="size-5 text-green-600" />
-        Import complete
-      </Card.Title>
-      <Card.Description>{commitResult.label}</Card.Description>
-    </Card.Header>
-    <Card.Content class="flex flex-col gap-4">
-      <p class="text-sm text-muted-foreground">
-        Created {plural(commitResult.created, 'transaction')} · skipped {plural(
-          commitResult.skippedDuplicates,
-          'duplicate'
-        )} · skipped {plural(commitResult.skippedErrors, 'error')}. Revert from Settings → History
-        if needed.
-      </p>
-      <div class="flex flex-wrap gap-2">
-        <Button href={resolve('/settings')}>
-          <ArrowLeft aria-hidden="true" class="size-4" />
-          Back to Settings
-        </Button>
-        <Button variant="outline" onclick={resetWizard}>Import another file</Button>
-      </div>
-    </Card.Content>
-  </Card.Root>
+  <DoneStep {commitResult} onReset={resetWizard} />
 {/if}
