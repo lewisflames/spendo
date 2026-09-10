@@ -1,6 +1,6 @@
 <script lang="ts">
   import * as Dialog from '$lib/components/ui/dialog';
-  import DialogSaveFooter from '$lib/components/shared/dialog-save-footer.svelte';
+  import SaveFooter from '$lib/components/shared/save-footer.svelte';
   import { useDialogReset } from '$lib/hooks/use-dialog-reset.svelte';
   import * as Select from '$lib/components/ui/select';
   import { Select as SelectPrimitive } from 'bits-ui';
@@ -321,7 +321,7 @@
       {/if}
     </div>
 
-    <DialogSaveFooter
+    <SaveFooter
       {mode}
       {saving}
       {deleting}
