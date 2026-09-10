@@ -419,7 +419,7 @@ fn load_tx_page(
     let tx_sql = format!(
         "WITH RECURSIVE sub AS (
             SELECT guid FROM accounts WHERE guid = ?1
-            UNION ALL
+            UNION
             SELECT a.guid FROM accounts a JOIN sub ON a.parent_guid = sub.guid
         ),
         tx_splits AS (

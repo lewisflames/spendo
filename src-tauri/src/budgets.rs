@@ -176,7 +176,7 @@ fn descendants_cte(seed_filter_sql: &str) -> String {
         "WITH RECURSIVE
          descendants(budget_account_guid, descendant_guid) AS (
              SELECT DISTINCT b.account_guid, b.account_guid FROM budgets b {seed_filter_sql}
-             UNION ALL
+             UNION
              SELECT d.budget_account_guid, a.guid
              FROM descendants d JOIN accounts a ON a.parent_guid = d.descendant_guid
          )"
@@ -311,7 +311,7 @@ fn fetch_monthly_actuals(
         "WITH RECURSIVE
          descendants(descendant_guid) AS (
              SELECT ?1
-             UNION ALL
+             UNION
              SELECT a.guid FROM descendants d JOIN accounts a ON a.parent_guid = d.descendant_guid
          )
          SELECT substr(t.post_date, 1, 7), c.mnemonic, COALESCE(SUM({}), 0)

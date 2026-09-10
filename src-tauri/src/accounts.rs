@@ -322,7 +322,7 @@ pub fn get_subaccount_guids(conn: &Connection, guid: &str) -> Result<Vec<String>
         .prepare(
             "WITH RECURSIVE sub AS (
                 SELECT guid FROM accounts WHERE guid = ?1
-                UNION ALL
+                UNION
                 SELECT a.guid FROM accounts a JOIN sub ON a.parent_guid = sub.guid
             )
             SELECT guid FROM sub",
