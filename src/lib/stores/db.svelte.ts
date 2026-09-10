@@ -62,8 +62,8 @@ export function ensureDbSessionLoaded(force = false): Promise<void> {
       bootstrapped = false;
       throw e;
     });
-  inflight = p.finally(() => {
-    if (inflight === p) {
+  const q = p.finally(() => {
+    if (inflight === q) {
       inflight = null;
     }
     dbSessionLoading.value = false;
@@ -71,7 +71,8 @@ export function ensureDbSessionLoaded(force = false): Promise<void> {
       dbBootstrapping.value = false;
     }
   });
-  return inflight;
+  inflight = q;
+  return q;
 }
 
 export function clearSession() {
