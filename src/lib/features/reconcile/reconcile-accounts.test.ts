@@ -18,7 +18,7 @@ function node(partial: Partial<AccountNode> & { guid: string; name: string }): A
 }
 
 describe('flattenReconcilableAccounts', () => {
-  it('keeps cash-like accounts with full path labels, sorted', () => {
+  it('keeps cash-like accounts with leaf display names and full path labels, sorted', () => {
     const trees = [
       node({
         guid: 'assets',
@@ -34,8 +34,34 @@ describe('flattenReconcilableAccounts', () => {
     ];
     const rows = flattenReconcilableAccounts(trees);
     expect(rows.map((r) => r.guid)).toEqual(['checking', 'card']);
+    expect(rows.map((r) => r.display)).toEqual(['Checking', 'Card']);
     expect(rows.find((r) => r.guid === 'checking')?.label).toBe('Assets › Checking');
     expect(rows.find((r) => r.guid === 'card')?.label).toBe('Card');
+    expect(rows.every((r) => r.parentPath === null)).toBe(true);
+  });
+
+  it('sets parentPath only for duplicate display names', () => {
+    const trees = [
+      node({
+        guid: 'bank-a',
+        name: 'Bank A',
+        accountType: 'ASSET',
+        placeholder: true,
+        children: [node({ guid: 'checking-a', name: 'Checking' })]
+      }),
+      node({
+        guid: 'bank-b',
+        name: 'Bank B',
+        accountType: 'ASSET',
+        placeholder: true,
+        children: [node({ guid: 'checking-b', name: 'Checking' })]
+      }),
+      node({ guid: 'savings', name: 'Savings' })
+    ];
+    const rows = flattenReconcilableAccounts(trees);
+    expect(rows.find((r) => r.guid === 'checking-a')?.parentPath).toBe('Bank A');
+    expect(rows.find((r) => r.guid === 'checking-b')?.parentPath).toBe('Bank B');
+    expect(rows.find((r) => r.guid === 'savings')?.parentPath).toBeNull();
   });
 
   it('returns empty for missing trees', () => {
