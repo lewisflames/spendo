@@ -147,6 +147,16 @@ export function formatDate(date: string | Date, opts?: Intl.DateTimeFormatOption
   return cachedDateTimeFormat(appSettings.value.locale, o).format(d);
 }
 
+/** Short month name (e.g. "Jan") in the app locale, reusing the formatter cache. */
+export function formatMonthShort(date: Date): string {
+  return cachedDateTimeFormat(appSettings.value.locale, { month: 'short' }).format(date);
+}
+
+/** Integer axis/tick label in the app locale (thousands separators, no decimals). */
+export function formatInteger(n: number): string {
+  return cachedNumberFormat(appSettings.value.locale, { maximumFractionDigits: 0 }).format(n);
+}
+
 /** English pluralization for counts, e.g. `plural(3, 'account')` -> "3 accounts". */
 export function plural(n: number, word: string): string {
   return `${formatNumber(n)} ${n === 1 ? word : `${word}s`}`;

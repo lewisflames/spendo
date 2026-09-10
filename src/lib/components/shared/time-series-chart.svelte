@@ -4,8 +4,7 @@
   import ChartTooltipRow from '$lib/components/ui/chart/chart-tooltip-row.svelte';
   import { Skeleton } from '$lib/components/ui/skeleton';
   import { AreaChart, BarChart, AnnotationLine } from 'layerchart';
-  import { formatCurrency, formatDate } from '$lib/utils/format.svelte';
-  import { appSettings } from '$lib/stores/settings.svelte';
+  import { formatCurrency, formatDate, formatInteger } from '$lib/utils/format.svelte';
   import { curveStepAfter } from 'd3-shape';
 
   interface TimeSeriesSeries {
@@ -107,25 +106,18 @@
   );
 
   // Locale-aware axis ticks: layerchart defaults to English month names, so
-  // format explicitly with the app locale. X shows localized "Mon Year"
-  // (e.g. Jan 2024 / janv. 2024); Y shows grouped integers while the
-  // tooltip carries the full currency amount.
-  let locale = $derived(appSettings.value.locale);
-  let xTickFormatter = $derived.by(() => {
-    const fmt = new Intl.DateTimeFormat(locale, { month: 'short', year: 'numeric' });
-    return (v: unknown): string => {
-      const d = v instanceof Date ? v : new Date(v as string | number);
-      if (Number.isNaN(d.getTime())) return `${v ?? ''}`;
-      return fmt.format(d);
-    };
-  });
-  let yTickFormatter = $derived.by(() => {
-    const fmt = new Intl.NumberFormat(locale, { maximumFractionDigits: 0 });
-    return (v: unknown): string => {
-      if (typeof v !== 'number' || !Number.isFinite(v)) return `${v ?? ''}`;
-      return fmt.format(v);
-    };
-  });
+  // format explicitly with the app locale (cached formatters). X shows
+  // localized "Mon Year" (e.g. Jan 2024 / janv. 2024); Y shows grouped
+  // integers while the tooltip carries the full currency amount.
+  function xTickFormatter(v: unknown): string {
+    const d = v instanceof Date ? v : new Date(v as string | number);
+    if (Number.isNaN(d.getTime())) return `${v ?? ''}`;
+    return formatDate(d, { month: 'short', year: 'numeric' });
+  }
+  function yTickFormatter(v: unknown): string {
+    if (typeof v !== 'number' || !Number.isFinite(v)) return `${v ?? ''}`;
+    return formatInteger(v);
+  }
 
   const rangeOptions = [
     { value: '1M', label: '1M' },
