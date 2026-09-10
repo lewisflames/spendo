@@ -1,6 +1,10 @@
 use crate::utils;
 use rusqlite::types::ToSql;
 
+/// SQLite caps bound parameters per statement; chunk `IN (...)` lists larger
+/// than this so queries can never hit "too many SQL variables".
+pub const MAX_IN_PARAMS: usize = 500;
+
 /// Generate `?1, ?2, ...` placeholders for an `IN (...)` clause.
 pub fn in_clause(count: usize) -> String {
     (1..=count)

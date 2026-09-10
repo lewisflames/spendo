@@ -58,59 +58,6 @@ pub struct ExportAccountRow {
     pub placeholder: bool,
 }
 
-struct AccountMeta {
-    name: String,
-    parent_guid: Option<String>,
-    account_type: String,
-}
-
-fn load_account_metas(conn: &Connection) -> Result<HashMap<String, AccountMeta>, String> {
-    let mut stmt = conn
-        .prepare("SELECT guid, name, parent_guid, account_type FROM accounts")
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                AccountMeta {
-                    name: row.get(1)?,
-                    parent_guid: row.get(2)?,
-                    account_type: row.get(3)?,
-                },
-            ))
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<HashMap<_, _>, _>>()
-        .map_err(|e| e.to_string())?;
-    Ok(rows)
-}
-
-/// Colon-joined account path, skipping the internal ROOT ancestor. The visited
-/// set guards against `parent_guid` cycles in corrupt books.
-fn full_account_path(guid: &str, metas: &HashMap<String, AccountMeta>) -> String {
-    let mut parts: Vec<&str> = Vec::new();
-    let mut visited: HashSet<&str> = HashSet::new();
-    let mut current = Some(guid);
-    while let Some(g) = current {
-        if !visited.insert(g) {
-            break;
-        }
-        let Some(meta) = metas.get(g) else {
-            break;
-        };
-        if meta.account_type != "ROOT" {
-            parts.push(meta.name.as_str());
-        }
-        current = meta.parent_guid.as_deref();
-        // Cap the walk so a long corrupt chain can't blow up the export.
-        if visited.len() > 100 {
-            break;
-        }
-    }
-    parts.reverse();
-    parts.join(":")
-}
-
 fn price_for(amount: f64, quantity: f64) -> f64 {
     if quantity.abs() > 1e-12 && amount.is_finite() && quantity.is_finite() {
         amount / quantity
@@ -120,10 +67,10 @@ fn price_for(amount: f64, quantity: f64) -> f64 {
 }
 
 fn fetch_export_transactions_inner(conn: &Connection) -> Result<Vec<ExportSplitRow>, String> {
-    let metas = load_account_metas(conn)?;
+    let metas = tree::load_account_metas(conn)?;
     let mut path_cache: HashMap<String, String> = HashMap::new();
     for guid in metas.keys() {
-        path_cache.insert(guid.clone(), full_account_path(guid, &metas));
+        path_cache.insert(guid.clone(), tree::full_account_path(guid, &metas, ":"));
     }
 
     let sql = format!(
@@ -250,7 +197,7 @@ fn fetch_export_accounts_inner(conn: &Connection) -> Result<Vec<ExportAccountRow
         .map_err(|e| e.to_string())?;
 
     // Full paths need the complete map (including the excluded ROOT row).
-    let metas = load_account_metas(conn)?;
+    let metas = tree::load_account_metas(conn)?;
     // Null the parent link when it points at the internal ROOT or a missing
     // row so top-level accounts import as roots instead of dangling.
     let exportable_parent = |guid: &str, parent: &Option<String>| -> Option<String> {
@@ -279,7 +226,7 @@ fn fetch_export_accounts_inner(conn: &Connection) -> Result<Vec<ExportAccountRow
         guid: &str,
         by_guid: &HashMap<String, Raw>,
         index: &tree::TreeIndex,
-        metas: &HashMap<String, AccountMeta>,
+        metas: &HashMap<String, tree::AccountMeta>,
         exportable_parent: &impl Fn(&str, &Option<String>) -> Option<String>,
         out: &mut Vec<ExportAccountRow>,
         visited: &mut HashSet<String>,
@@ -290,7 +237,7 @@ fn fetch_export_accounts_inner(conn: &Connection) -> Result<Vec<ExportAccountRow
         if let Some(r) = by_guid.get(guid) {
             out.push(ExportAccountRow {
                 parent_guid: exportable_parent(guid, &r.parent_guid),
-                full_name: full_account_path(guid, metas),
+                full_name: tree::full_account_path(guid, metas, ":"),
                 guid: r.guid.clone(),
                 account_type: r.account_type.clone(),
                 name: r.name.clone(),

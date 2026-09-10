@@ -1,4 +1,65 @@
+use rusqlite::Connection;
 use std::collections::{HashMap, HashSet};
+
+/// Minimal account metadata for ancestor-path walks.
+pub struct AccountMeta {
+    pub name: String,
+    pub parent_guid: Option<String>,
+    pub account_type: String,
+}
+
+/// Load every account's path metadata in one query so ancestor walks are
+/// in-memory instead of one query per level.
+pub fn load_account_metas(conn: &Connection) -> Result<HashMap<String, AccountMeta>, String> {
+    let mut stmt = conn
+        .prepare("SELECT guid, name, parent_guid, account_type FROM accounts")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                AccountMeta {
+                    name: row.get(1)?,
+                    parent_guid: row.get(2)?,
+                    account_type: row.get(3)?,
+                },
+            ))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<HashMap<_, _>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+
+/// `separator`-joined account path, skipping the internal ROOT ancestor. The
+/// visited set guards against `parent_guid` cycles in corrupt books.
+pub fn full_account_path(
+    guid: &str,
+    metas: &HashMap<String, AccountMeta>,
+    separator: &str,
+) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    let mut visited: HashSet<&str> = HashSet::new();
+    let mut current = Some(guid);
+    while let Some(g) = current {
+        if !visited.insert(g) {
+            break;
+        }
+        let Some(meta) = metas.get(g) else {
+            break;
+        };
+        if meta.account_type != "ROOT" {
+            parts.push(meta.name.as_str());
+        }
+        current = meta.parent_guid.as_deref();
+        // Cap the walk so a long corrupt chain can't blow up the caller.
+        if visited.len() > 100 {
+            break;
+        }
+    }
+    parts.reverse();
+    parts.join(separator)
+}
 
 /// Parent→children adjacency plus root GUIDs for a set of tree nodes.
 /// All lists are sorted by node name so traversal order is stable.

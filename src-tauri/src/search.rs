@@ -3,6 +3,7 @@ use serde::Serialize;
 use tauri::State;
 
 use crate::db::{run_blocking, AppState};
+use crate::tree;
 use crate::utils;
 
 /// Minimum trimmed query length before any SQL runs. The palette also gates
@@ -66,50 +67,6 @@ fn empty_result() -> GlobalSearchResult {
     }
 }
 
-/// Walk `parent_guid` links to build `Root : … : Leaf`. Cycle-guarded so
-/// corrupt books can't loop forever; falls back to the leaf name.
-fn full_account_path(conn: &Connection, guid: &str, leaf_name: &str) -> String {
-    let mut parts = vec![leaf_name.to_string()];
-    let mut seen = std::collections::HashSet::new();
-    seen.insert(guid.to_string());
-    let mut current: Option<String> = conn
-        .query_row(
-            "SELECT parent_guid FROM accounts WHERE guid = ?1",
-            [guid],
-            |row| row.get::<_, Option<String>>(0),
-        )
-        .ok()
-        .flatten();
-    while let Some(p) = current {
-        if p.is_empty() || !seen.insert(p.clone()) {
-            break;
-        }
-        let row: Option<(String, Option<String>, String)> = conn
-            .query_row(
-                "SELECT name, parent_guid, account_type FROM accounts WHERE guid = ?1",
-                [&p],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-            )
-            .ok();
-        match row {
-            Some((name, grandparent, account_type)) => {
-                // Skip the synthetic ROOT node from display paths.
-                if account_type == "ROOT" {
-                    break;
-                }
-                parts.push(name);
-                current = grandparent;
-            }
-            None => break,
-        }
-        if parts.len() > 32 {
-            break;
-        }
-    }
-    parts.reverse();
-    parts.join(" : ")
-}
-
 fn search_accounts_inner(
     conn: &Connection,
     like: &str,
@@ -134,10 +91,12 @@ fn search_accounts_inner(
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
+    // One account index for all path walks instead of queries per ancestor.
+    let metas = tree::load_account_metas(conn)?;
     Ok(rows
         .into_iter()
         .map(|(guid, name, account_type, code)| {
-            let full_path = full_account_path(conn, &guid, &name);
+            let full_path = tree::full_account_path(&guid, &metas, " : ");
             SearchAccount {
                 guid,
                 name,
