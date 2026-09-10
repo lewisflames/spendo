@@ -54,10 +54,6 @@ where
 /// Run `f` inside a SQLite transaction on a shared `&Connection`.
 /// Uses `unchecked_transaction()` (shared-borrow) because every command holds
 /// only `&Connection` via `run_blocking`. Drop rolls back on error; commit
-/// only on `Ok`. Replaces the manual `BEGIN`/`COMMIT`/`ROLLBACK` blocks.
-/// Run `f` inside a SQLite transaction on a shared `&Connection`.
-/// Uses `unchecked_transaction()` (shared-borrow) because every command holds
-/// only `&Connection` via `run_blocking`. Drop rolls back on error; commit
 /// only on `Ok`. Replaces manual `BEGIN`/`COMMIT`/`ROLLBACK` blocks.
 pub fn with_tx_err<T, E>(conn: &Connection, f: impl FnOnce() -> Result<T, E>) -> Result<T, E>
 where

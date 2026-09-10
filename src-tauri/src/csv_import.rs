@@ -218,7 +218,7 @@ fn sniff_delimiter(text: &str) -> char {
     if lines.is_empty() {
         return ',';
     }
-    let mut best = (',', 0usize, false);
+    let mut best = (',', 0usize);
     for &delim in &CANDIDATES {
         let counts: Vec<usize> = lines.iter().map(|l| count_delim_outside_quotes(l, delim)).collect();
         let total: usize = counts.iter().sum();
@@ -228,11 +228,10 @@ fn sniff_delimiter(text: &str) -> char {
         let consistent = counts.iter().all(|&c| c == counts[0] && c > 0);
         let score = if consistent { total * 2 } else { total };
         if score > best.1 {
-            best = (delim, score, consistent);
+            best = (delim, score);
         }
     }
-    // Prefer consistency info only for tie-breaking; `best.0` stays ',' on ties.
-    let _ = best.2;
+    // Ties keep the initial ','.
     best.0
 }
 
@@ -611,8 +610,6 @@ struct ParsedRow {
 
 struct ParsedFile {
     rows: Vec<ParsedRow>,
-    #[allow(dead_code)]
-    headers: Vec<String>,
 }
 
 fn parse_file_rows(
@@ -631,11 +628,6 @@ fn parse_file_rows(
     let use_pair = validate_mapping(mapping, column_count)?;
     validate_accounts(conn, target_guid, offset_guid)?;
 
-    let headers = if has_header {
-        records.first().cloned().unwrap_or_default()
-    } else {
-        Vec::new()
-    };
     let data: &[Vec<String>] = if has_header { records.get(1..).unwrap_or(&[]) } else { records };
 
     let mut rows = Vec::with_capacity(data.len());
@@ -824,7 +816,7 @@ fn parse_file_rows(
             error: None,
         });
     }
-    Ok(ParsedFile { rows, headers })
+    Ok(ParsedFile { rows })
 }
 
 /// One validated CSV row staged for insert: date, description, original key,

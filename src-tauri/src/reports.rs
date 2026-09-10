@@ -411,13 +411,6 @@ fn build_tree<R>(
     result
 }
 
-/// Balance-sheet reporting lives in `accounts.rs` (`/accounts` is the single
-/// balance-sheet view). This module owns only P&L (`fetch_pnl_report`,
-/// `fetch_pnl_trend`). The previous `BalanceSheet*` implementation was removed
-/// as dead code; see git history if needed.
-
-/// (Balance-sheet helpers removed; see `accounts.rs`.)
-
 /// Percent change for P&L rows. `None` when both periods are zero; a new
 /// account with no prior balance reports 100% (matches the frontend
 /// `changePct` in `pnl-utils.ts` — keep the two in sync).

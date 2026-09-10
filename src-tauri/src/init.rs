@@ -38,8 +38,8 @@ pub(crate) fn seed_empty_book(conn: &Connection, mnemonic: &str) -> Result<(), A
 }
 
 // No live IPC command calls this (books are created via `create_book_at`);
-// kept for the init tests below.
-#[allow(dead_code)]
+// compiled only for the init tests below.
+#[cfg(test)]
 fn create_empty_book_inner(conn: &Connection, currency: &str) -> Result<HomeDataResult, AppError> {
     let mnemonic = normalize_mnemonic(currency)?;
 
