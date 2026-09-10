@@ -256,7 +256,7 @@ fn fetch_export_accounts_inner(conn: &Connection) -> Result<Vec<ExportAccountRow
     let exportable_parent = |guid: &str, parent: &Option<String>| -> Option<String> {
         let p = parent.clone()?;
         match metas.get(&p) {
-            Some(meta) if meta.account_type != "ROOT" && meta.name.as_str() != guid => Some(p),
+            Some(meta) if meta.account_type != "ROOT" && p != guid => Some(p),
             _ => None,
         }
     };
