@@ -172,8 +172,8 @@ fn load_account_header(conn: &Connection, guid: &str) -> Result<AccountHeader, S
 }
 
 /// Shared transaction-filter WHERE builder for this module's queries. All
-/// queries here alias `transactions` as `t`. Half-open dates:
-/// `>= from AND < date(to,'+1 day')`.
+/// queries here alias `transactions` as `t`; date/search semantics come from
+/// `sql::push_tx_date_search`.
 fn filter_clauses(
     date_from: Option<&str>,
     date_to: Option<&str>,
@@ -185,27 +185,7 @@ fn filter_clauses(
     if include_baseline {
         w.push_raw(utils::VISIBLE_TX_FILTER);
     }
-    if let Some(df) = date_from {
-        w.add("t.post_date >= {}", vec![Box::new(df.to_string())]);
-    }
-    if let Some(dt) = date_to {
-        w.add("t.post_date < date({}, '+1 day')", vec![Box::new(dt.to_string())]);
-    }
-    if let Some(s) = search {
-        let s = utils::escape_like(s);
-        w.add(
-            "(t.description LIKE '%' || {} || '%' ESCAPE '\\' \
-             OR t.num LIKE '%' || {} || '%' ESCAPE '\\' \
-             OR t.notes LIKE '%' || {} || '%' ESCAPE '\\' \
-             OR EXISTS(SELECT 1 FROM splits m WHERE m.tx_guid = t.guid AND m.memo LIKE '%' || {} || '%' ESCAPE '\\'))",
-            vec![
-                Box::new(s.clone()) as Box<dyn rusqlite::types::ToSql>,
-                Box::new(s.clone()),
-                Box::new(s.clone()),
-                Box::new(s),
-            ],
-        );
-    }
+    sql::push_tx_date_search(&mut w, date_from, date_to, search);
     w
 }
 

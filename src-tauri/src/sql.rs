@@ -1,3 +1,4 @@
+use crate::utils;
 use rusqlite::types::ToSql;
 
 /// Generate `?1, ?2, ...` placeholders for an `IN (...)` clause.
@@ -16,6 +17,43 @@ pub fn param_refs(params: &[Box<dyn ToSql>]) -> Vec<&dyn ToSql> {
 /// Convert a slice of owned strings to trait-object refs (e.g. for GUID lists).
 pub fn string_param_refs(guids: &[String]) -> Vec<&dyn ToSql> {
     guids.iter().map(|g| g as &dyn ToSql).collect()
+}
+
+/// Push the shared transaction date window and cross-field search predicate
+/// onto `w`. Callers must alias `transactions` as `t`. Dates are half-open
+/// (`>= from AND < date(to,'+1 day')`); search matches description, number,
+/// notes and split memos, with LIKE metacharacters escaped. Single source of
+/// truth for the ledger and account-detail filters.
+pub fn push_tx_date_search(
+    w: &mut WhereBuilder,
+    date_from: Option<&str>,
+    date_to: Option<&str>,
+    search: Option<&str>,
+) {
+    if let Some(df) = date_from {
+        w.add("t.post_date >= {}", vec![Box::new(df.to_string())]);
+    }
+    if let Some(dt) = date_to {
+        w.add(
+            "t.post_date < date({}, '+1 day')",
+            vec![Box::new(dt.to_string())],
+        );
+    }
+    if let Some(s) = search {
+        let s = utils::escape_like(s);
+        w.add(
+            "(t.description LIKE '%' || {} || '%' ESCAPE '\\' \
+             OR t.num LIKE '%' || {} || '%' ESCAPE '\\' \
+             OR t.notes LIKE '%' || {} || '%' ESCAPE '\\' \
+             OR EXISTS(SELECT 1 FROM splits m WHERE m.tx_guid = t.guid AND m.memo LIKE '%' || {} || '%' ESCAPE '\\'))",
+            vec![
+                Box::new(s.clone()) as Box<dyn ToSql>,
+                Box::new(s.clone()),
+                Box::new(s.clone()),
+                Box::new(s),
+            ],
+        );
+    }
 }
 
 /// Incrementally builds a WHERE clause with explicit `?N` placeholders so

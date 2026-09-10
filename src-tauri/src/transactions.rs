@@ -338,10 +338,9 @@ fn tx_detail_json(post_date: &str) -> String {
 }
 
 /// Shared transaction-list WHERE builder. `param_offset` reserves leading
-/// placeholder indices already used by the surrounding query. Half-open dates:
-/// `>= from AND < date(to,'+1 day')`. Mirrors `account_detail::filter_clauses`
-/// (which searches split memos via EXISTS); this variant uses `IN` — keep the
-/// two in sync when changing date/search semantics.
+/// placeholder indices already used by the surrounding query. Date window and
+/// search come from `sql::push_tx_date_search`; this adds the list-only
+/// account filters.
 fn build_filter_conditions(
     filters: &Option<Filters>,
     param_offset: usize,
@@ -350,30 +349,12 @@ fn build_filter_conditions(
     w.push_raw(utils::VISIBLE_TX_FILTER);
 
     if let Some(ref f) = filters {
-        if let Some(ref search) = f.search {
-            let s = utils::escape_like(search);
-            w.add(
-                "(t.description LIKE '%' || {} || '%' ESCAPE '\\' \
-                 OR t.num LIKE '%' || {} || '%' ESCAPE '\\' \
-                 OR t.notes LIKE '%' || {} || '%' ESCAPE '\\' \
-                 OR t.guid IN (SELECT s.tx_guid FROM splits s WHERE s.memo LIKE '%' || {} || '%' ESCAPE '\\'))",
-                vec![
-                    Box::new(s.clone()) as Box<dyn rusqlite::types::ToSql>,
-                    Box::new(s.clone()),
-                    Box::new(s.clone()),
-                    Box::new(s),
-                ],
-            );
-        }
-        if let Some(ref date_from) = f.date_from {
-            w.add("t.post_date >= {}", vec![Box::new(date_from.clone())]);
-        }
-        if let Some(ref date_to) = f.date_to {
-            w.add(
-                "t.post_date < date({}, '+1 day')",
-                vec![Box::new(date_to.clone())],
-            );
-        }
+        sql::push_tx_date_search(
+            &mut w,
+            f.date_from.as_deref(),
+            f.date_to.as_deref(),
+            f.search.as_deref(),
+        );
         if let Some(ref account_guid) = f.account_guid {
             w.add(
                 "t.guid IN (SELECT s.tx_guid FROM splits s WHERE s.account_guid = {})",
