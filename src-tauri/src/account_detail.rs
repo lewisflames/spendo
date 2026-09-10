@@ -304,7 +304,7 @@ fn fetch_account_detail_inner(
     let (child_accounts, subtree, parent) =
         accounts::fetch_children_and_subtree(conn, guid, query.as_of)?;
     let ctx = FxCtx {
-        report_currency: fx::get_report_currency_mnemonic(conn).unwrap_or_default(),
+        report_currency: fx::get_report_currency_mnemonic(conn)?.unwrap_or_default(),
         fx_map: fx::get_fx_map(conn, query.as_of)?,
     };
 
@@ -832,9 +832,9 @@ fn fetch_account_balance_trend_inner(
     let signed_shares = utils::signed_amount_expr(utils::QUANTITY_AMOUNT, "a.account_type");
     let shares_filter = format!("AND a.account_type IN ({})", utils::investment_types_sql());
 
-    let report_currency = fx::get_report_currency_mnemonic(conn).unwrap_or_default();
+    let report_currency = fx::get_report_currency_mnemonic(conn)?.unwrap_or_default();
     let fx_history = fx::FxHistory::load(conn)?;
-    let unified_prices = get_cached_prices_map(conn).unwrap_or_default();
+    let unified_prices = get_cached_prices_map(conn)?;
 
     let mut cash_by_day: HashMap<String, Vec<(String, f64)>> = HashMap::new();
     for (day, mnemonic, delta) in subtree_deltas_by_day(

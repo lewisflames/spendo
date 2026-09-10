@@ -120,21 +120,6 @@ fn nth_price_raw(
     Ok(rows)
 }
 
-/// Normalize a price quoted in `quote_currency` to the report currency as of `date`.
-fn normalize_price(
-    price: f64,
-    quote_currency: &str,
-    date: &str,
-    report_guid: &str,
-    report_mnemonic: &str,
-    conn: &Connection,
-) -> Result<f64, String> {
-    if quote_currency == report_mnemonic {
-        return Ok(price);
-    }
-    Ok(price * fx::get_fx_rate_at(conn, quote_currency, report_guid, date)?)
-}
-
 fn get_latest_live_prices(conn: &Connection) -> Result<Vec<PriceEntry>, String> {
     Ok(nth_price_raw(conn, 1)?
         .into_iter()
@@ -304,12 +289,12 @@ pub(crate) fn read_price_data(conn: &Connection) -> Result<PriceFetchPlan, Strin
         rows
     };
 
-    let report_currency_guid = fx::get_report_currency_guid(conn);
-    let report_currency = fx::get_report_currency_mnemonic(conn);
-    let currencies = fx::list_book_currencies(conn);
-    let currency_guid_map = fx::currency_guid_map(conn);
+    let report_currency_guid = fx::get_report_currency_guid(conn)?;
+    let report_currency = fx::get_report_currency_mnemonic(conn)?;
+    let currencies = fx::list_book_currencies(conn)?;
+    let currency_guid_map = fx::currency_guid_map(conn)?;
 
-    let existing_live_prices = get_latest_live_prices(conn).unwrap_or_default();
+    let existing_live_prices = get_latest_live_prices(conn)?;
     let overrides = symbol_override_map(conn);
 
     Ok(PriceFetchPlan {
@@ -820,7 +805,7 @@ pub fn get_cached_prev_prices_map(
 
 /// Latest-price rows normalized to the report currency:
 /// (mnemonic, price, price date, quote mnemonic). Single window-function scan
-/// shared by every cached-price map above.
+/// plus one FX-history scan shared by every cached-price map above.
 fn latest_prices_normalized(
     conn: &Connection,
     rn: u32,
@@ -829,24 +814,23 @@ fn latest_prices_normalized(
     if rows.is_empty() {
         return Ok(vec![]);
     }
-    let (report_guid, report_mnemonic) = report_currency_pair(conn);
+    let report_mnemonic = fx::get_report_currency_mnemonic(conn)?.unwrap_or_default();
+    let fx_history = fx::FxHistory::load(conn)?;
+    // One rate map per distinct price date instead of one query per commodity.
+    let mut rates_by_date: HashMap<String, HashMap<String, f64>> = HashMap::new();
     rows.into_iter()
-        .map(|(m, p, d, quote)| {
-            Ok((
-                m,
-                normalize_price(p, &quote, &d, &report_guid, &report_mnemonic, conn)?,
-                d,
-                quote,
-            ))
+        .map(|(mnemonic, price, date, quote)| {
+            let normalized = if quote == report_mnemonic {
+                price
+            } else {
+                let rates = rates_by_date
+                    .entry(date.clone())
+                    .or_insert_with(|| fx_history.map_for_date(&date));
+                price * rates.get(&quote).copied().unwrap_or(1.0)
+            };
+            Ok((mnemonic, normalized, date, quote))
         })
         .collect()
-}
-
-fn report_currency_pair(conn: &Connection) -> (String, String) {
-    (
-        fx::get_report_currency_guid(conn).unwrap_or_default(),
-        fx::get_report_currency_mnemonic(conn).unwrap_or_default(),
-    )
 }
 
 /// Quote currency mnemonic per commodity (from each commodity's latest price),

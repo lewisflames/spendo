@@ -152,8 +152,8 @@ fn fetch_accounts_inner(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
 
-    let unified_prices = get_cached_prices_map(conn).unwrap_or_default();
-    let report_currency = fx::get_report_currency_mnemonic(conn).unwrap_or_default();
+    let unified_prices = get_cached_prices_map(conn)?;
+    let report_currency = fx::get_report_currency_mnemonic(conn)?.unwrap_or_default();
     let fx_map = fx::get_fx_map(conn, as_of)?;
 
     let mut node_map: HashMap<String, AccountNode> = HashMap::new();
@@ -453,16 +453,16 @@ pub struct BookCurrency {
     pub mnemonic: String,
 }
 
-fn fetch_book_currencies_inner(conn: &Connection) -> Vec<BookCurrency> {
-    fx::list_book_currencies(conn)
+fn fetch_book_currencies_inner(conn: &Connection) -> Result<Vec<BookCurrency>, String> {
+    Ok(fx::list_book_currencies(conn)?
         .into_iter()
         .map(|(guid, mnemonic)| BookCurrency { guid, mnemonic })
-        .collect()
+        .collect())
 }
 
 #[tauri::command]
 pub async fn fetch_book_currencies(state: State<'_, AppState>) -> Result<Vec<BookCurrency>, String> {
-    run_blocking(state.db.clone(), |conn| Ok(fetch_book_currencies_inner(conn))).await
+    run_blocking(state.db.clone(), fetch_book_currencies_inner).await
 }
 
 #[cfg(test)]

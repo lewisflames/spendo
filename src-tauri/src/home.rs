@@ -26,7 +26,7 @@ pub struct HomeDataResult {
 }
 
 pub fn get_summary(conn: &Connection) -> Result<DataSummary, String> {
-    let currency = fx::get_report_currency_mnemonic(conn).unwrap_or_else(|| "Unknown".to_string());
+    let currency = fx::get_report_currency_mnemonic(conn)?.unwrap_or_else(|| "Unknown".to_string());
 
     let total_accounts: i64 = conn
         .query_row("SELECT COUNT(*) FROM accounts", [], |row| row.get(0))
@@ -96,7 +96,7 @@ pub fn get_summary(conn: &Connection) -> Result<DataSummary, String> {
     };
 
     let fx_map = fx::get_fx_map(conn, None)?;
-    let unified_prices = get_cached_prices_map(conn).unwrap_or_default();
+    let unified_prices = get_cached_prices_map(conn)?;
 
     let net_worth: f64 = cash_rows
         .iter()
