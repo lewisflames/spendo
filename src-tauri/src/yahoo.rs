@@ -5,14 +5,20 @@ static HTTP_CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::
 const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
 const HTTP_TIMEOUT_SECS: u64 = 15;
 
-fn http_client() -> &'static reqwest::Client {
-    HTTP_CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(HTTP_TIMEOUT_SECS))
-            .user_agent(USER_AGENT)
-            .build()
-            .expect("Failed to create HTTP client")
-    })
+fn http_client() -> Result<&'static reqwest::Client, String> {
+    if let Some(client) = HTTP_CLIENT.get() {
+        return Ok(client);
+    }
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(HTTP_TIMEOUT_SECS))
+        .user_agent(USER_AGENT)
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
+    // `set` only fails if another thread won the race; reuse its client then.
+    let _ = HTTP_CLIENT.set(client);
+    HTTP_CLIENT
+        .get()
+        .ok_or_else(|| "Failed to create HTTP client".to_string())
 }
 
 const NAMESPACE_YAHOO_SUFFIX: [(&str, &[&str]); 8] = [
@@ -160,7 +166,7 @@ pub async fn fetch_single_yahoo_history(
         )
     };
 
-    let client = http_client();
+    let client = http_client()?;
 
     let response = client
         .get(&url)
