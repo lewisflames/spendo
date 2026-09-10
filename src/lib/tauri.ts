@@ -438,9 +438,6 @@ export const createAccount = (input: AccountInput): Promise<string> =>
 export const updateAccount = (guid: string, input: AccountInput): Promise<void> =>
   invoke<void>('update_account', { guid, input });
 
-export const moveAccount = (guid: string, newParentGuid?: string | null): Promise<void> =>
-  invoke<void>('move_account', { guid, newParentGuid: newParentGuid ?? null });
-
 export const deleteAccount = (guid: string): Promise<void> =>
   invoke<void>('delete_account', { guid });
 

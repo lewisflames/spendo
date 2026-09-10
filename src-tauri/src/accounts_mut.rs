@@ -3,7 +3,6 @@ use serde::Deserialize;
 use std::collections::HashSet;
 use tauri::State;
 
-use crate::accounts::get_subaccount_guids;
 use crate::db::{run_blocking, with_tx_err, AppError, AppState};
 use crate::history;
 
@@ -279,66 +278,6 @@ fn update_account_inner(
     })
 }
 
-fn move_account_inner(
-    conn: &Connection,
-    guid: &str,
-    new_parent_guid: Option<String>,
-) -> Result<(), AppError> {
-    let row: Option<(
-        String,
-        String,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        i64,
-        Option<String>,
-    )> = conn
-        .query_row(
-            "SELECT name, account_type, code, description, parent_guid, placeholder, commodity_guid
-             FROM accounts WHERE guid = ?1",
-            params![guid],
-            |row| {
-                Ok((
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    row.get(4)?,
-                    row.get(5)?,
-                    row.get(6)?,
-                ))
-            },
-        )
-        .optional()
-        ?;
-    let Some((name, account_type, code, description, _, placeholder, commodity_guid)) = row else {
-        return Err(AppError::NotFound("Account not found — it may have been removed".to_string()));
-    };
-    if account_type == "ROOT" {
-        return Err(AppError::Validation("The root account cannot be moved".to_string()));
-    }
-    // Block moves under a descendant (get_subaccount_guids includes self).
-    if let Some(ref p) = opt_text(&new_parent_guid) {
-        let sub = get_subaccount_guids(conn, guid)?;
-        if sub.iter().any(|g| g == p) {
-            return Err(AppError::Validation("Cannot move an account under its own descendant".to_string()));
-        }
-    }
-    update_account_inner(
-        conn,
-        guid,
-        AccountInput {
-            name,
-            account_type,
-            parent_guid: new_parent_guid,
-            code,
-            description,
-            commodity_guid,
-            placeholder: placeholder != 0,
-        },
-    )
-}
-
 fn delete_account_inner(conn: &Connection, guid: &str) -> Result<(), AppError> {
     let row: Option<(String, String)> = conn
         .query_row(
@@ -435,18 +374,6 @@ pub async fn update_account(
 }
 
 #[tauri::command]
-pub async fn move_account(
-    state: State<'_, AppState>,
-    guid: String,
-    new_parent_guid: Option<String>,
-) -> Result<(), String> {
-    run_blocking(state.db.clone(), move |conn| {
-        move_account_inner(conn, &guid, new_parent_guid).map_err(String::from)
-    })
-    .await
-}
-
-#[tauri::command]
 pub async fn delete_account(state: State<'_, AppState>, guid: String) -> Result<(), String> {
     run_blocking(state.db.clone(), move |conn| {
         delete_account_inner(conn, &guid).map_err(String::from)
@@ -527,8 +454,8 @@ mod tests {
         let parent = create_account_inner(&conn, input("Parent", Some("assets"))).expect("create");
         let child = create_account_inner(&conn, input("Child", Some(&parent))).expect("create");
         // Self-parent and descendant-parent both blocked.
-        assert!(move_account_inner(&conn, &parent, Some(parent.clone())).is_err());
-        assert!(move_account_inner(&conn, &parent, Some(child.clone())).is_err());
+        assert!(update_account_inner(&conn, &parent, input("Parent", Some(&parent))).is_err());
+        assert!(update_account_inner(&conn, &parent, input("Parent", Some(&child))).is_err());
         // Delete blocked while children exist.
         assert!(delete_account_inner(&conn, &parent).is_err());
         // Delete blocked with splits.
