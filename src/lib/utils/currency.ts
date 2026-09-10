@@ -23,7 +23,7 @@ export const BOOK_CURRENCIES = [
   'ZAR'
 ];
 
-export const LOCALE_CURRENCY: Record<Locale, string> = {
+const LOCALE_CURRENCY: Record<Locale, string> = {
   'en-US': 'USD',
   'en-GB': 'GBP',
   'en-IE': 'EUR',

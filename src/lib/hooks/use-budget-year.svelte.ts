@@ -8,7 +8,7 @@ import {
   type YearOption
 } from '$lib/features/budgets/budget-utils';
 
-export interface BudgetYear {
+interface BudgetYear {
   yearSel: string;
   /** Numeric view of the string selection. */
   year: number;

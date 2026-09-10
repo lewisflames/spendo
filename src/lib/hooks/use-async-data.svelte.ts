@@ -1,6 +1,6 @@
 import { errMsg } from '$lib/utils/error';
 
-export interface AsyncDataConfig<T> {
+interface AsyncDataConfig<T> {
   /** Whether fetching should happen (e.g. a DB session exists). */
   enabled: () => boolean;
   /**

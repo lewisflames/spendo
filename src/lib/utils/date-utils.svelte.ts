@@ -154,7 +154,7 @@ function getThisYearRange(): { start: CalendarDate; end: CalendarDate } {
  * the calendar year; otherwise the window spans two calendar years (e.g.
  * start 4 → Apr 1 this year – Mar 31 next year when today is past April).
  */
-export function getFiscalYearContaining(
+function getFiscalYearContaining(
   fyStartMonth: number,
   now: Date = new Date()
 ): { start: CalendarDate; end: CalendarDate } {

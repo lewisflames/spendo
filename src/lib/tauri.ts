@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 
-export interface HomeDataResult {
+interface HomeDataResult {
   hasData: boolean;
   summary: DataSummary | null;
 }
@@ -16,7 +16,7 @@ export interface DataSummary {
 
 /** Sortable ledger columns shared by transactions + account detail. Backend falls back silently on unknown values, so keep this in sync. */
 export type TxSortKey = 'date' | 'description' | 'amount';
-export type SortDir = 'asc' | 'desc';
+type SortDir = 'asc' | 'desc';
 
 /** One row of the unified changes history (imports + manual edits). */
 export interface ChangeEntry {
@@ -31,7 +31,7 @@ export interface ChangeEntry {
   revertedBy: number | null;
 }
 
-export interface ChangeHistoryPage {
+interface ChangeHistoryPage {
   entries: ChangeEntry[];
   total: number;
   pageSize: number;
@@ -40,13 +40,13 @@ export interface ChangeHistoryPage {
   revertibleId: number | null;
 }
 
-export interface RevertResult {
+interface RevertResult {
   revertedId: number;
   revertId: number;
   summary: DataSummary;
 }
 
-export interface ImportResult {
+interface ImportResult {
   accountsAdded: number;
   transactionsAdded: number;
   splitsAdded: number;
@@ -78,7 +78,7 @@ export interface AccountNode {
   children: AccountNode[];
 }
 
-export interface TypeSummary {
+interface TypeSummary {
   count: number;
   totalBalance: number;
 }
@@ -98,14 +98,13 @@ export interface AccountsResult {
   missingPrices: MissingPrice[];
 }
 
-export interface SplitInfo {
+interface SplitInfo {
   guid: string;
   accountGuid: string;
   accountName: string;
   accountType: string;
   amount: number;
   memo?: string | null;
-  accountDescription?: string | null;
 }
 
 export interface TransactionRow {
@@ -130,7 +129,7 @@ export interface Filters {
   accountGuid?: string;
 }
 
-export interface TransactionsResult {
+interface TransactionsResult {
   transactions: TransactionRow[];
   total: number;
   page: number;
@@ -164,7 +163,7 @@ export interface TransactionDetail {
   totalAmount: number;
 }
 
-export interface TransactionDetailResult {
+interface TransactionDetailResult {
   transaction: TransactionDetail;
   prevGuid?: string | null;
   nextGuid?: string | null;
@@ -277,13 +276,13 @@ export const writeTextFile = (path: string, contents: string): Promise<void> =>
 // ── Books (document model: one active `.spendo` file opened in place) ──
 
 /** Active book path, or `null` while book-less (fresh install). */
-export interface ActiveBook {
+interface ActiveBook {
   path: string | null;
 }
 
 export const fetchActiveBook = (): Promise<ActiveBook> => invoke<ActiveBook>('fetch_active_book');
 
-export interface EmptyBookResult {
+interface EmptyBookResult {
   hasData: boolean;
   summary: DataSummary;
 }
@@ -297,7 +296,7 @@ export const createBookAt = (path: string, currency: string): Promise<EmptyBookR
 export const saveBookAs = (path: string): Promise<EmptyBookResult> =>
   invoke<EmptyBookResult>('save_book_as', { path });
 
-export interface DataInfo {
+interface DataInfo {
   dbPath: string;
 }
 
@@ -306,7 +305,7 @@ export const fetchDataInfo = (): Promise<DataInfo> => invoke<DataInfo>('fetch_da
 // ── Book-scoped settings (travel with the `.spendo` file) ──
 
 export type PnlPeriodId = 'this_month' | 'this_quarter' | 'this_year' | 'last_12_months';
-export type PriceAutoRefresh = 'off' | 'on_startup';
+type PriceAutoRefresh = 'off' | 'on_startup';
 export type CsvDelimiter = ',' | ';';
 export type ExportDateFormat = 'iso' | 'locale';
 
@@ -337,7 +336,7 @@ export const reimportLast = (): Promise<ImportResult> => invoke<ImportResult>('r
 
 // ── CSV import (bank-statement wizard: detect → map → preview → commit) ──
 
-export interface CsvMapping {
+interface CsvMapping {
   dateCol: number;
   descCol: number;
   amountCol?: number | null;
@@ -347,7 +346,7 @@ export interface CsvMapping {
   notesCol?: number | null;
 }
 
-export interface CsvPreviewInput {
+interface CsvPreviewInput {
   path: string;
   encoding?: string | null;
   delimiter?: string | null;
@@ -369,7 +368,7 @@ export interface CsvDetectResult {
   filename: string;
 }
 
-export interface CsvPreviewRow {
+interface CsvPreviewRow {
   key: number;
   raw: string[];
   postDate: string | null;
@@ -495,7 +494,7 @@ export const fetchTransaction = (guid: string): Promise<TransactionDetailResult 
 export type ScheduleFrequency =
   'daily' | 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'yearly';
 
-export interface ScheduleSplit {
+interface ScheduleSplit {
   accountGuid: string;
   accountName?: string | null;
   amount: number;
@@ -690,7 +689,7 @@ export interface MissingPrice {
   commodityGuid: string | null;
 }
 
-export interface SymbolOverride {
+interface SymbolOverride {
   commodityGuid: string;
   mnemonic: string;
   namespace: string;
@@ -760,7 +759,7 @@ export interface BudgetYearSummary {
   elapsedMonths: number;
 }
 
-export interface BudgetDetail {
+interface BudgetDetail {
   budget: Budget;
   summary: BudgetYearSummary;
   monthlyEntries: MonthlySlice[];
@@ -797,7 +796,7 @@ export const fetchBudgetDateRange = (): Promise<BudgetDateRange> =>
 
 // ── Portfolio ──
 
-export interface HoldingAccount {
+interface HoldingAccount {
   accountGuid: string;
   accountName: string;
   accountDescription: string | null;
@@ -829,7 +828,7 @@ export interface PortfolioValuePoint {
   costBasis: number;
 }
 
-export interface PortfolioData {
+interface PortfolioData {
   totalMarketValue: number;
   totalCostBasis: number;
   totalGainLoss: number;
@@ -852,7 +851,7 @@ export interface HoldingTransaction {
   runningShares: number;
 }
 
-export interface HoldingDetail {
+interface HoldingDetail {
   holding: PortfolioHolding;
   priceHistory: PriceHistoryEntry[];
   valueTrend: PortfolioValuePoint[];
@@ -894,7 +893,7 @@ export interface ReconcileCandidate {
   reconcileState: string;
 }
 
-export interface ReconcileInfo {
+interface ReconcileInfo {
   accountGuid: string;
   accountName: string;
   accountType: string;
@@ -916,7 +915,7 @@ interface MarkReconcileInput {
   updates: SplitStateUpdate[];
 }
 
-export interface MarkReconcileResult {
+interface MarkReconcileResult {
   updated: number;
 }
 
@@ -926,7 +925,7 @@ interface FinishReconcileInput {
   endingBalance: number;
 }
 
-export interface FinishReconcileResult {
+interface FinishReconcileResult {
   reconciledCount: number;
   startingBalance: number;
   endingBalance: number;
@@ -957,7 +956,7 @@ export const finishReconciliation = (
 
 // ── Global search (Ctrl+K palette) ──
 
-export interface SearchAccount {
+interface SearchAccount {
   guid: string;
   name: string;
   fullPath: string;
@@ -965,28 +964,28 @@ export interface SearchAccount {
   code: string | null;
 }
 
-export interface SearchTransaction {
+interface SearchTransaction {
   guid: string;
   postDate: string;
   description: string | null;
   num: string | null;
 }
 
-export interface SearchHolding {
+interface SearchHolding {
   commodityGuid: string;
   mnemonic: string;
   fullName: string | null;
   namespace: string;
 }
 
-export interface SearchBudget {
+interface SearchBudget {
   accountGuid: string;
   accountName: string;
   /** Most recent year with a budget row for the account. */
   year: number;
 }
 
-export interface GlobalSearchResult {
+interface GlobalSearchResult {
   accounts: SearchAccount[];
   transactions: SearchTransaction[];
   holdings: SearchHolding[];

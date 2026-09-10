@@ -1,7 +1,7 @@
 import { getBookSettings, setBookSetting, type BookSettings } from '$lib/tauri';
 
 export type { BookSettings };
-export type BookSettingField = keyof BookSettings;
+type BookSettingField = keyof BookSettings;
 
 /** Backend snake_case keys for `set_book_setting`. */
 const FIELD_TO_KEY: Record<BookSettingField, string> = {
@@ -12,7 +12,7 @@ const FIELD_TO_KEY: Record<BookSettingField, string> = {
   exportDateFormat: 'export_date_format'
 };
 
-export const DEFAULT_BOOK_SETTINGS: BookSettings = {
+const DEFAULT_BOOK_SETTINGS: BookSettings = {
   fiscalYearStartMonth: 1,
   defaultPnlPeriod: 'last_12_months',
   priceAutoRefresh: 'off',
