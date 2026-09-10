@@ -47,11 +47,12 @@ export function loadBookSettings(force = false): Promise<BookSettings> {
       loaded = false;
       throw e;
     });
-  inflight = p.finally(() => {
-    if (inflight === p) inflight = null;
+  const q = p.finally(() => {
+    if (inflight === q) inflight = null;
     bookSettingsLoading.value = false;
   });
-  return inflight;
+  inflight = q;
+  return q;
 }
 
 /** Persist one field and replace the store with the backend snapshot. */
