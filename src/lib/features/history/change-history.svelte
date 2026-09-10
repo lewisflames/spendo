@@ -10,7 +10,6 @@
   import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
   import { PaginationNav } from '$lib/components/shared/pagination-nav';
   import { History, Undo2, LoaderCircle } from '@lucide/svelte';
-  import ImportButton from '$lib/components/shared/import-button.svelte';
   import { dbSession, setDbSession } from '$lib/stores/db.svelte';
   import { appSettings, applyPageSize } from '$lib/stores/settings.svelte';
   import { fetchChangeHistory, revertHistoryEntry } from '$lib/tauri';
@@ -26,7 +25,7 @@
   const res = useAsyncData({
     enabled: () => !!dbSession.value,
     fetch: async () => {
-      // Subscribe to summary changes so header imports/reimports refresh
+      // Subscribe to summary changes so imports and reverts refresh
       // this list without navigation (the effect tracks these reads).
       void dbSession.value?.summary.totalTransactions;
       void dbSession.value?.summary.totalAccounts;
@@ -98,13 +97,10 @@
     <EmptyState
       card
       title="No changes yet"
-      description="Import transactions to start building history."
+      description="Imports, edits and reverts will appear here."
     >
       {#snippet icon()}
         <History aria-hidden="true" class="text-muted-foreground" />
-      {/snippet}
-      {#snippet action()}
-        <ImportButton />
       {/snippet}
     </EmptyState>
   {:else}

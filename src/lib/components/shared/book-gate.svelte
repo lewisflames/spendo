@@ -2,7 +2,7 @@
   import type { Snippet } from 'svelte';
   import { dbBootstrapping, dbSession } from '$lib/stores/db.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
-  import ImportPrompt from '$lib/components/shared/import-prompt.svelte';
+  import EmptyBookPrompt from '$lib/components/shared/empty-book-prompt.svelte';
 
   let {
     title,
@@ -20,6 +20,6 @@
 {:else}
   <div class="flex flex-col gap-6">
     <PageHeader {title} description={description ?? ''} />
-    <ImportPrompt />
+    <EmptyBookPrompt />
   </div>
 {/if}
