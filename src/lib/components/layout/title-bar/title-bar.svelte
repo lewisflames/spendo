@@ -1,7 +1,5 @@
 <script lang="ts">
   import { page } from '$app/state';
-  import { getCurrentWindow } from '@tauri-apps/api/window';
-  import { isTauri } from '@tauri-apps/api/core';
   import { ArrowLeft, ArrowRight, SunMoon } from '@lucide/svelte';
   import { Button } from '$lib/components/ui/button';
   import { SidebarTrigger } from '$lib/components/ui/sidebar/index.js';
@@ -9,35 +7,17 @@
   import { goBack, goForward, navHistory } from '$lib/stores/nav-history.svelte';
   import { appSettings, saveSettings, resolveTheme } from '$lib/stores/settings.svelte';
   import { routeTitle } from '$lib/routes';
+  import { useWindowDrag } from '$lib/hooks/use-window-drag.svelte';
   import * as Breadcrumb from '$lib/components/ui/breadcrumb';
   import PaletteTrigger from './palette-trigger.svelte';
   import WindowControls from './window-controls.svelte';
 
-  // Synchronous runtime check (prerender-safe); see window-controls.svelte.
-  const inTauri = isTauri();
-  let isMac = $state(false);
-
-  $effect(() => {
-    if (!inTauri) return;
-    isMac = /Mac|iPhone|iPad/.test(navigator.userAgent);
-  });
-
-  function isInteractive(e: MouseEvent) {
-    return (e.target as Element).closest('button, a') !== null;
-  }
-
-  function onHeaderMouseDown(e: MouseEvent) {
-    if (!isMac || !inTauri) return;
-    if (e.button !== 0) return;
-    if (isInteractive(e)) return;
-    getCurrentWindow().startDragging();
-  }
-
-  function onHeaderDoubleClick(e: MouseEvent) {
-    if (!isMac || !inTauri) return;
-    if (isInteractive(e)) return;
-    getCurrentWindow().toggleMaximize();
-  }
+  const {
+    inTauri,
+    isMac,
+    onMouseDown: onHeaderMouseDown,
+    onDoubleClick: onHeaderDoubleClick
+  } = useWindowDrag();
 
   const defaultItems: BreadcrumbItem[] = $derived([{ name: routeTitle(page.url.pathname) }]);
 

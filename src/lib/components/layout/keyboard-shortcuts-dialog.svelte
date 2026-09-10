@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { browser } from '$app/environment';
   import * as Dialog from '$lib/components/ui/dialog';
   import Kbd from '$lib/components/shared/kbd.svelte';
   import { keyboardShortcutsDialog } from '$lib/stores/ui.svelte';
+  import { modKeyLabel } from '$lib/utils/platform';
 
   /** The layout accepts Cmd on macOS; show the chord users actually press. */
-  const modKey = browser && navigator.platform.toLowerCase().includes('mac') ? '⌘' : 'Ctrl';
+  const modKey = modKeyLabel();
 
   interface ShortcutEntry {
     keys: string[];
