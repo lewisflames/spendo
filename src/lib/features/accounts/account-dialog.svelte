@@ -63,6 +63,7 @@
   let deleting = $state(false);
   let confirmDelete = $state(false);
   let formError = $state('');
+  let showErrors = $state(false);
 
   let accountsData = $state<AccountsResult | null>(null);
   let currencies = $state<BookCurrency[]>([]);
@@ -91,6 +92,7 @@
     saving = false;
     deleting = false;
     loading = false;
+    showErrors = false;
     if (mode === 'edit' && initial) {
       name = initial.name;
       accountType = initial.accountType;
@@ -151,7 +153,11 @@
   }
 
   async function handleSave() {
-    if (!canSave) return;
+    if (saving || deleting) return;
+    if (!canSave) {
+      showErrors = true;
+      return;
+    }
     saving = true;
     formError = '';
     try {
@@ -218,9 +224,9 @@
           bind:value={name}
           placeholder="e.g. Groceries"
           maxlength={200}
-          aria-invalid={!!nameError}
+          aria-invalid={showErrors && !!nameError}
         />
-        {#if nameError}
+        {#if showErrors && nameError}
           <p role="alert" class="text-xs text-destructive">{nameError}</p>
         {/if}
       </div>
@@ -229,7 +235,7 @@
         <div class="flex flex-col gap-1.5">
           <label for="acct-type" class="text-sm font-medium">Type</label>
           <Select.Root type="single" bind:value={accountType}>
-            <Select.Trigger id="acct-type" class="w-full">
+            <Select.Trigger id="acct-type" class="w-full" aria-invalid={showErrors && !!typeError}>
               <SelectPrimitive.Value placeholder="Select a type" />
             </Select.Trigger>
             <Select.Content>
@@ -238,7 +244,7 @@
               {/each}
             </Select.Content>
           </Select.Root>
-          {#if typeError}
+          {#if showErrors && typeError}
             <p role="alert" class="text-xs text-destructive">{typeError}</p>
           {/if}
         </div>
@@ -316,7 +322,7 @@
       {deleting}
       {confirmDelete}
       saveLabel={mode === 'edit' ? 'Save changes' : 'Create account'}
-      saveDisabled={!canSave}
+      saveDisabled={saving || deleting || loading}
       onDelete={handleDelete}
       onSave={handleSave}
       onCancel={() => {
