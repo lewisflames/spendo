@@ -12,27 +12,18 @@
   let {
     label = 'Import from GnuCash',
     disabled = false,
-    onError,
-    onStatusChange,
     onImported,
     ...rest
   }: {
     label?: string;
     disabled?: boolean;
-    onError?: (msg: string) => void;
-    onStatusChange?: (importing: boolean) => void;
     onImported?: () => void;
   } & Omit<ButtonProps, 'onclick' | 'disabled'> = $props();
 
   let importing = $state(false);
 
-  function setImporting(value: boolean) {
-    importing = value;
-    onStatusChange?.(value);
-  }
-
   async function handleImport() {
-    setImporting(true);
+    importing = true;
     try {
       const selected = await open({
         multiple: false,
@@ -46,14 +37,9 @@
       toastPriceResult(result.prices, { fixHint: true });
       onImported?.();
     } catch (e: unknown) {
-      const msg = errMsg(e, 'Import failed');
-      if (onError) {
-        onError(msg);
-      } else {
-        toast.error(msg);
-      }
+      toast.error(errMsg(e, 'Import failed'));
     } finally {
-      setImporting(false);
+      importing = false;
     }
   }
 </script>

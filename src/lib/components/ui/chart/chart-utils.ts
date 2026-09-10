@@ -64,25 +64,3 @@ export function setChartContext(value: ChartContextValue) {
 export function useChart() {
   return getContext<ChartContextValue>(chartContextKey);
 }
-
-/** Month-aligned ticks spaced to fit the available pixel width. */
-export function responsiveTimeTicks(scale: { domain(): unknown[]; range(): number[] }): Date[] {
-  const [start, end] = scale.domain() as [Date, Date];
-  if (+end <= +start) return [start];
-  const pixelWidth = Math.abs(scale.range()[1] - scale.range()[0]);
-  const labelWidth = 60;
-  const maxTicks = Math.max(1, Math.floor(pixelWidth / labelWidth));
-  const msPerMonth = 30 * 24 * 60 * 60 * 1000;
-  const monthCount = Math.round((+end - +start) / msPerMonth);
-  const step = Math.max(1, Math.ceil(monthCount / maxTicks));
-  const ticks: Date[] = [];
-  const d = new Date(start);
-  d.setDate(1);
-  d.setHours(0, 0, 0, 0);
-  while (d <= end) {
-    ticks.push(new Date(d));
-    d.setMonth(d.getMonth() + step);
-  }
-  if (ticks.length === 0) ticks.push(new Date(start));
-  return ticks;
-}

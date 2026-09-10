@@ -5,13 +5,7 @@
   import { DatePicker } from '$lib/components/shared/date-picker';
   import { todayStr } from '$lib/utils/date-utils.svelte';
 
-  let {
-    value = $bindable(''),
-    label = 'As-of date'
-  }: {
-    value?: string;
-    label?: string;
-  } = $props();
+  let { value = $bindable('') }: { value?: string } = $props();
 
   let isToday = $derived(!value || value === todayStr());
 
@@ -20,7 +14,7 @@
   }
 </script>
 
-<ButtonGroup.Root aria-label={label}>
+<ButtonGroup.Root aria-label="As-of date">
   <DatePicker bind:value />
   <Button
     variant="outline"
