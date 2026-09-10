@@ -51,6 +51,19 @@ where
     .map_err(|e| format!("Background task failed: {}", e))?
 }
 
+/// Run a synchronous, non-DB closure (file hashing, reading, writing) on a
+/// blocking thread so async commands never stall a tokio worker on disk I/O.
+/// Mirrors [`run_blocking`] without the connection lock.
+pub async fn run_io<T, F>(f: F) -> Result<T, String>
+where
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+    T: Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(f)
+        .await
+        .map_err(|e| format!("Background task failed: {}", e))?
+}
+
 /// Run `f` inside a SQLite transaction on a shared `&Connection`.
 /// Uses `unchecked_transaction()` (shared-borrow) because every command holds
 /// only `&Connection` via `run_blocking`. Drop rolls back on error; commit

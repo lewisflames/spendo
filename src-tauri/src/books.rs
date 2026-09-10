@@ -163,8 +163,9 @@ pub async fn fetch_active_book(state: State<'_, AppState>) -> Result<ActiveBook,
 #[tauri::command]
 pub async fn open_book(state: State<'_, AppState>, path: String) -> Result<HomeDataResult, String> {
     let new_path = PathBuf::from(&path);
-    // Validate + connect before touching shared state (file I/O pre-lock).
-    let new_conn = open_book_inner(&new_path)?;
+    // Validate + connect on a blocking thread before touching shared state.
+    let open_path = new_path.clone();
+    let new_conn = db::run_io(move || open_book_inner(&open_path)).await?;
     activate_book(&state, new_path, new_conn).await
 }
 
@@ -175,7 +176,8 @@ pub async fn create_book_at(
     currency: String,
 ) -> Result<HomeDataResult, String> {
     let new_path = PathBuf::from(&path);
-    let new_conn = create_book_at_inner(&new_path, &currency)?;
+    let create_path = new_path.clone();
+    let new_conn = db::run_io(move || create_book_at_inner(&create_path, &currency)).await?;
     activate_book(&state, new_path, new_conn).await
 }
 
@@ -201,12 +203,19 @@ pub async fn save_book_as(
         })
         .await;
     }
-    if let Some(parent) = new_path.parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent).map_err(|e| format!("Failed to create folder: {}", e))?;
+    // Prepare the destination on a blocking thread (mkdir + stale-file sweep).
+    let prepare_path = new_path.clone();
+    db::run_io(move || {
+        if let Some(parent) = prepare_path.parent() {
+            if !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| format!("Failed to create folder: {}", e))?;
+            }
         }
-    }
-    remove_target(&new_path);
+        remove_target(&prepare_path);
+        Ok(())
+    })
+    .await?;
     // SAFETY: `VACUUM INTO` must run on the live connection, so this is the
     // one intentional exception to "file I/O before the DB lock". It runs on
     // the blocking thread via `run_swap_blocking` (never blocking a tokio
