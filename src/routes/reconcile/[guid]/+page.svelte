@@ -3,7 +3,7 @@
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { SvelteSet } from 'svelte/reactivity';
-  import { ArrowLeft, CircleCheck } from '@lucide/svelte';
+  import { ArrowLeft, CalendarDays, CircleCheck } from '@lucide/svelte';
   import { toast } from '$lib/components/ui/sonner';
   import { Button } from '$lib/components/ui/button';
   import { dbSession } from '$lib/stores/db.svelte';
@@ -315,6 +315,16 @@
       <ErrorCard message={res.error} onRetry={() => res.reload()} />
     {:else if res.loading}
       <TableSkeleton cols={5} rows={8} />
+    {:else}
+      <EmptyState
+        card
+        title="Choose a statement date"
+        description="Enter a valid statement date to load reconciliation candidates."
+      >
+        {#snippet icon()}
+          <CalendarDays aria-hidden="true" class="text-muted-foreground" />
+        {/snippet}
+      </EmptyState>
     {/if}
   </div>
 </BookGate>
