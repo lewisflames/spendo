@@ -57,10 +57,6 @@
     onPageSizeChange: (size: number) => void;
   } = $props();
 
-  function isVisible(id: ActivityColumnId): boolean {
-    return cols.isVisible(id);
-  }
-
   /** Buy/Sell derived from the share-delta sign; near-zero rows have no action. */
   function actionFor(shares: number): { label: string; variant: 'success' | 'destructive' } | null {
     if (shares > 1e-9) return { label: 'Buy', variant: 'success' };
@@ -91,22 +87,22 @@
         <Table.Row class="bg-muted/75">
           <Table.Head class="text-muted-foreground">Date</Table.Head>
           <Table.Head class="text-muted-foreground">Description</Table.Head>
-          {#if isVisible('action')}
+          {#if cols.isVisible('action')}
             <Table.Head class="text-muted-foreground">Action</Table.Head>
           {/if}
-          {#if isVisible('account')}
+          {#if cols.isVisible('account')}
             <Table.Head class="text-muted-foreground">Account</Table.Head>
           {/if}
-          {#if isVisible('shares')}
+          {#if cols.isVisible('shares')}
             <Table.Head class="text-right text-muted-foreground">Shares</Table.Head>
           {/if}
-          {#if isVisible('price')}
+          {#if cols.isVisible('price')}
             <Table.Head class="text-right text-muted-foreground">Price</Table.Head>
           {/if}
-          {#if isVisible('value')}
+          {#if cols.isVisible('value')}
             <Table.Head class="text-right text-muted-foreground">Value</Table.Head>
           {/if}
-          {#if isVisible('runningBalance')}
+          {#if cols.isVisible('runningBalance')}
             <Table.Head class="text-right text-muted-foreground">Balance</Table.Head>
           {/if}
         </Table.Row>
@@ -135,7 +131,7 @@
                 </p>
               {/if}
             </Table.Cell>
-            {#if isVisible('action')}
+            {#if cols.isVisible('action')}
               <Table.Cell class="py-2.5">
                 {@const action = actionFor(t.sharesDelta)}
                 {#if action}
@@ -145,28 +141,28 @@
                 {/if}
               </Table.Cell>
             {/if}
-            {#if isVisible('account')}
+            {#if cols.isVisible('account')}
               <Table.Cell class="max-w-48 truncate py-2.5 text-xs text-muted-foreground">
                 {t.accountDescription || t.accountName}
               </Table.Cell>
             {/if}
-            {#if isVisible('shares')}
+            {#if cols.isVisible('shares')}
               <Table.Cell class="py-2.5 text-right tabular-nums {signColor(t.sharesDelta)}">
                 {t.sharesDelta >= 0 ? '+' : ''}{formatShares(Math.abs(t.sharesDelta))}
               </Table.Cell>
             {/if}
-            {#if isVisible('price')}
+            {#if cols.isVisible('price')}
               {@const unitPrice = pricePerShare(t)}
               <Table.Cell class="py-2.5 text-right text-muted-foreground tabular-nums">
                 {unitPrice === null ? EMPTY_DASH : formatCurrency(unitPrice, currency)}
               </Table.Cell>
             {/if}
-            {#if isVisible('value')}
+            {#if cols.isVisible('value')}
               <Table.Cell class="py-2.5 text-right tabular-nums {signColor(t.valueDelta)}">
                 {formatSignedCurrency(t.valueDelta, currency)}
               </Table.Cell>
             {/if}
-            {#if isVisible('runningBalance')}
+            {#if cols.isVisible('runningBalance')}
               <Table.Cell
                 class="py-2.5 text-right text-muted-foreground tabular-nums"
                 title="Share balance after this transaction"

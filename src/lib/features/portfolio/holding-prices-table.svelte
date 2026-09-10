@@ -38,10 +38,6 @@
     cols: ColumnVisibility<PriceColumnId>;
   } = $props();
 
-  function isVisible(id: PriceColumnId): boolean {
-    return cols.isVisible(id);
-  }
-
   interface PriceRow extends PriceHistoryEntry {
     /** Day-over-day change in percent (0–100 scale); null for the oldest entry. */
     changePct: number | null;
@@ -99,10 +95,10 @@
       <Table.Header>
         <Table.Row class="bg-muted/75">
           <Table.Head class="text-muted-foreground">Date</Table.Head>
-          {#if isVisible('price')}
+          {#if cols.isVisible('price')}
             <Table.Head class="text-right text-muted-foreground">Price</Table.Head>
           {/if}
-          {#if isVisible('change')}
+          {#if cols.isVisible('change')}
             <Table.Head class="text-right text-muted-foreground">Change</Table.Head>
           {/if}
         </Table.Row>
@@ -113,12 +109,12 @@
             <Table.Cell class="py-2.5 whitespace-nowrap text-muted-foreground tabular-nums">
               {formatDate(row.date)}
             </Table.Cell>
-            {#if isVisible('price')}
+            {#if cols.isVisible('price')}
               <Table.Cell class="py-2.5 text-right font-medium tabular-nums">
                 {formatCurrency(row.price, priceCurrency)}
               </Table.Cell>
             {/if}
-            {#if isVisible('change')}
+            {#if cols.isVisible('change')}
               <Table.Cell
                 class="py-2.5 text-right tabular-nums {row.changePct === null
                   ? 'text-muted-foreground'

@@ -83,10 +83,6 @@
 
   let skeletonCols = $derived(visibleColumns.length + 1);
 
-  function isVisible(id: ColumnId): boolean {
-    return cols.isVisible(id);
-  }
-
   // Don't leave an invisible sort in effect (default back to market value).
   function handleHideColumn(id: ColumnId) {
     if (sortBy === id) sort.toggle('marketValue');
@@ -168,69 +164,17 @@
             dir={sortDir}
             onclick={() => sort.toggle('name')}
           />
-          {#if isVisible('shares')}
-            <SortHead
-              label="Shares"
-              active={sortBy === 'shares'}
-              dir={sortDir}
-              onclick={() => sort.toggle('shares')}
-              class="text-right"
-            />
-          {/if}
-          {#if isVisible('avgCost')}
-            <SortHead
-              label="Avg Cost"
-              active={sortBy === 'avgCost'}
-              dir={sortDir}
-              onclick={() => sort.toggle('avgCost')}
-              class="text-right"
-            />
-          {/if}
-          {#if isVisible('price')}
-            <SortHead
-              label="Price"
-              active={sortBy === 'price'}
-              dir={sortDir}
-              onclick={() => sort.toggle('price')}
-              class="text-right"
-            />
-          {/if}
-          {#if isVisible('marketValue')}
-            <SortHead
-              label="Market Value"
-              active={sortBy === 'marketValue'}
-              dir={sortDir}
-              onclick={() => sort.toggle('marketValue')}
-              class="text-right"
-            />
-          {/if}
-          {#if isVisible('costBasis')}
-            <SortHead
-              label="Cost Basis"
-              active={sortBy === 'costBasis'}
-              dir={sortDir}
-              onclick={() => sort.toggle('costBasis')}
-              class="text-right"
-            />
-          {/if}
-          {#if isVisible('gainLoss')}
-            <SortHead
-              label="Gain / Loss"
-              active={sortBy === 'gainLoss'}
-              dir={sortDir}
-              onclick={() => sort.toggle('gainLoss')}
-              class="text-right"
-            />
-          {/if}
-          {#if isVisible('alloc')}
-            <SortHead
-              label="Alloc"
-              active={sortBy === 'alloc'}
-              dir={sortDir}
-              onclick={() => sort.toggle('alloc')}
-              class="text-right"
-            />
-          {/if}
+          {#each COLUMNS as col (col.id)}
+            {#if cols.isVisible(col.id)}
+              <SortHead
+                label={col.label}
+                active={sortBy === col.id}
+                dir={sortDir}
+                onclick={() => sort.toggle(col.id)}
+                class="text-right"
+              />
+            {/if}
+          {/each}
         </Table.Row>
       </Table.Header>
       <Table.Body>
@@ -270,17 +214,17 @@
                   <span class="truncate text-xs text-muted-foreground">{h.mnemonic}</span>
                 </a>
               </Table.Cell>
-              {#if isVisible('shares')}
+              {#if cols.isVisible('shares')}
                 <Table.Cell class="py-2.5 text-right tabular-nums"
                   >{formatShares(h.shares)}</Table.Cell
                 >
               {/if}
-              {#if isVisible('avgCost')}
+              {#if cols.isVisible('avgCost')}
                 <Table.Cell class="py-2.5 text-right tabular-nums">
                   {h.shares > 0 ? fmt(h.avgCostPerShare) : EMPTY_DASH}
                 </Table.Cell>
               {/if}
-              {#if isVisible('price')}
+              {#if cols.isVisible('price')}
                 <Table.Cell class="py-2.5 text-right tabular-nums">
                   {#if h.price !== null}
                     {@const stale =
@@ -296,23 +240,23 @@
                   {/if}
                 </Table.Cell>
               {/if}
-              {#if isVisible('marketValue')}
+              {#if cols.isVisible('marketValue')}
                 <Table.Cell class="py-2.5 text-right font-medium tabular-nums">
                   {fmt(h.marketValue)}
                 </Table.Cell>
               {/if}
-              {#if isVisible('costBasis')}
+              {#if cols.isVisible('costBasis')}
                 <Table.Cell class="py-2.5 text-right tabular-nums">
                   {fmt(h.costBasis)}
                 </Table.Cell>
               {/if}
-              {#if isVisible('gainLoss')}
+              {#if cols.isVisible('gainLoss')}
                 <Table.Cell class="py-2.5 text-right tabular-nums {signColor(h.gainLoss)}">
                   {formatSignedCurrency(h.gainLoss, currency)}
                   <span class="text-xs"> ({fmtPct(h.gainLossPct)})</span>
                 </Table.Cell>
               {/if}
-              {#if isVisible('alloc')}
+              {#if cols.isVisible('alloc')}
                 <Table.Cell class="py-2.5 text-right tabular-nums">
                   {formatAllocPct(h.allocationPct)}
                 </Table.Cell>
