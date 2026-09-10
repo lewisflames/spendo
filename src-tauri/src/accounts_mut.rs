@@ -5,6 +5,7 @@ use tauri::State;
 
 use crate::db::{run_blocking, with_tx_err, AppError, AppState};
 use crate::history;
+use crate::utils::opt_text;
 
 /// Creatable account types (mirrors `TYPE_TO_CATEGORY` keys minus the
 /// internal ROOT, kept in sync with `$lib/features/accounts/account-types`).
@@ -38,10 +39,6 @@ pub struct AccountInput {
     pub description: Option<String>,
     pub commodity_guid: Option<String>,
     pub placeholder: bool,
-}
-
-fn opt_text(s: &Option<String>) -> Option<String> {
-    s.as_ref().map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
 }
 
 fn root_guid(conn: &Connection) -> Result<String, AppError> {

@@ -693,22 +693,8 @@ fn fetch_budget_detail_inner(
     })
 }
 
-/// Book-wide visible transaction window (`YYYY-MM-DD`). Single `MIN,MAX`
-/// query so earliest/latest can never diverge.
-fn visible_tx_window(conn: &Connection) -> Result<(Option<String>, Option<String>), String> {
-    conn.query_row(
-        &format!(
-            "SELECT substr(MIN(t.post_date), 1, 10), substr(MAX(t.post_date), 1, 10) FROM transactions t WHERE {}",
-            utils::VISIBLE_TX_FILTER
-        ),
-        [],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    )
-    .map_err(|e| e.to_string())
-}
-
 fn fetch_budget_date_range_inner(conn: &Connection) -> Result<BudgetDateRange, String> {
-    let (earliest, latest) = visible_tx_window(conn)?;
+    let (earliest, latest) = utils::visible_tx_window(conn)?;
 
     let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
     // Clamp the upper bound to today so an empty book still offers the

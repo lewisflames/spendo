@@ -46,6 +46,32 @@ pub fn is_credit_normal(account_type: &str) -> bool {
     CREDIT_NORMAL.contains(&account_type)
 }
 
+/// Trimmed `None`-when-empty helper for optional text fields (create/update
+/// payloads and schedule templates).
+pub fn opt_text(s: &Option<String>) -> Option<String> {
+    s.as_ref()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
+/// Book-wide visible transaction window (`YYYY-MM-DD`). Single `MIN,MAX`
+/// query so earliest/latest can never diverge between callers.
+pub fn visible_tx_window(
+    conn: &rusqlite::Connection,
+) -> Result<(Option<String>, Option<String>), String> {
+    conn.query_row(
+        &format!(
+            "SELECT substr(MIN(t.post_date), 1, 10), substr(MAX(t.post_date), 1, 10)
+             FROM transactions t
+             WHERE {}",
+            VISIBLE_TX_FILTER
+        ),
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .map_err(|e| e.to_string())
+}
+
 pub const RAW_AMOUNT: &str = "CAST(s.value_num AS REAL) / CAST(s.value_denom AS REAL)";
 pub const PRICE_AMOUNT: &str = "CAST(p.value_num AS REAL) / CAST(p.value_denom AS REAL)";
 pub const QUANTITY_AMOUNT: &str = "CAST(s.quantity_num AS REAL) / CAST(s.quantity_denom AS REAL)";

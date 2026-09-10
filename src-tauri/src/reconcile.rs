@@ -106,13 +106,12 @@ fn validate_statement_date(raw: &str) -> Result<String, AppError> {
     if trimmed.is_empty() {
         return Err(AppError::Validation("Statement date is required".to_string()));
     }
-    let parsed = chrono::NaiveDate::parse_from_str(trimmed, "%Y-%m-%d")
-        .map_err(|_| AppError::Validation(format!("Invalid date (expected YYYY-MM-DD): {trimmed}")))?;
+    let normalized = crate::utils::validate_iso_date(trimmed).map_err(AppError::Validation)?;
     let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
-    if parsed.format("%Y-%m-%d").to_string() > today {
+    if normalized > today {
         return Err(AppError::Validation("Statement date cannot be in the future".to_string()));
     }
-    Ok(parsed.format("%Y-%m-%d").to_string())
+    Ok(normalized)
 }
 
 fn load_reconcilable_account(conn: &Connection, guid: &str) -> Result<ReconcilableAccount, AppError> {

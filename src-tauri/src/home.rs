@@ -46,18 +46,7 @@ pub fn get_summary(conn: &Connection) -> Result<DataSummary, String> {
         )
         .map_err(|e| e.to_string())?;
 
-    let (earliest_date, latest_date): (Option<String>, Option<String>) = conn
-        .query_row(
-            &format!(
-                "SELECT substr(MIN(t.post_date), 1, 10), substr(MAX(t.post_date), 1, 10)
-                 FROM transactions t
-                 WHERE {}",
-                utils::VISIBLE_TX_FILTER
-            ),
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .map_err(|e| e.to_string())?;
+    let (earliest_date, latest_date) = utils::visible_tx_window(conn)?;
 
     // Net worth in report currency: cash per account currency converted at latest FX,
     // investments marked to market with report-currency-normalized prices.

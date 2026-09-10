@@ -8,6 +8,7 @@ use crate::fx;
 use crate::history;
 use crate::sql;
 use crate::utils;
+use crate::utils::opt_text;
 
 /// Fixed denominators for manual-entry rational storage. `commodities` carries
 /// no SCU/fraction column, so per-commodity precision is out of scope for the
@@ -185,13 +186,12 @@ fn validate_post_date(post_date: &str) -> Result<String, AppError> {
     if trimmed.is_empty() {
         return Err(AppError::Validation("Date is required".to_string()));
     }
-    let parsed = chrono::NaiveDate::parse_from_str(trimmed, "%Y-%m-%d")
-        .map_err(|_| AppError::Validation(format!("Invalid date (expected YYYY-MM-DD): {trimmed}")))?;
+    let normalized = utils::validate_iso_date(trimmed).map_err(AppError::Validation)?;
     let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
-    if parsed.format("%Y-%m-%d").to_string() > today {
+    if normalized > today {
         return Err(AppError::Validation("Future dates are not allowed".to_string()));
     }
-    Ok(parsed.format("%Y-%m-%d").to_string())
+    Ok(normalized)
 }
 
 fn to_value_rational(amount: f64) -> Result<(i64, i64), AppError> {
@@ -218,11 +218,6 @@ fn to_quantity_rational(qty: f64) -> Result<(i64, i64), AppError> {
     }
     let num = (qty * QUANTITY_DENOM as f64).round() as i64;
     Ok((num, QUANTITY_DENOM))
-}
-
-/// Trimmed `None`-when-empty helper, shared with `schedules.rs` template storage.
-pub(crate) fn opt_text(s: &Option<String>) -> Option<String> {
-    s.as_ref().map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
 }
 
 /// Shared validation for create/update: ≥2 splits, accounts exist and are not
