@@ -1,5 +1,6 @@
 <script lang="ts">
   import { dbBootstrapping, dbSession } from '$lib/stores/db.svelte';
+  import { untrack } from 'svelte';
   import { fetchPnlReport, fetchPnlTrend } from '$lib/tauri';
   import {
     signColor,
@@ -35,11 +36,19 @@
   let defaultPeriodApplied = $state(false);
   $effect(() => {
     if (!dbSession.value || defaultPeriodApplied) return;
+    // Snapshot the URL-restored range: if the user picks a new period while
+    // settings load, the snapshot differs and the default is skipped (the URL
+    // guard alone loses the race because goto() updates the URL asynchronously).
+    const rangeAtStart = untrack(() => `${range.dateFrom}|${range.dateTo}`);
     loadBookSettings()
       .then((settings) => {
         if (defaultPeriodApplied) return;
         const sp = page.url.searchParams;
-        if (sp.get('from') || sp.get('to')) {
+        if (
+          sp.get('from') ||
+          sp.get('to') ||
+          `${range.dateFrom}|${range.dateTo}` !== rangeAtStart
+        ) {
           defaultPeriodApplied = true;
           return;
         }
