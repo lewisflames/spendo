@@ -178,6 +178,21 @@ pub fn paginate(total: i64, page: i64, page_size: i64) -> (i64, i64, i64, i64) {
     (page_size, total_pages, safe_page, offset)
 }
 
+/// Validate a strict, zero-padded `YYYY-MM-DD` calendar date and return it
+/// normalized. SQLite's `date()` silently yields NULL for malformed input, so
+/// any caller that interpolates a date into SQL must validate first instead of
+/// letting a bad string quietly zero out comparisons.
+pub fn validate_iso_date(value: &str) -> Result<String, String> {
+    let trimmed = value.trim();
+    let parsed = chrono::NaiveDate::parse_from_str(trimmed, "%Y-%m-%d")
+        .map_err(|_| format!("Invalid date (expected YYYY-MM-DD): {trimmed}"))?;
+    let normalized = parsed.format("%Y-%m-%d").to_string();
+    if normalized != trimmed {
+        return Err(format!("Invalid date (expected YYYY-MM-DD): {trimmed}"));
+    }
+    Ok(normalized)
+}
+
 /// Validate that a path points at an existing `.gnucash` file.
 pub fn validate_gnucash_path(path: &str) -> Result<(), String> {
     let p = std::path::Path::new(path);
@@ -235,6 +250,17 @@ mod tests {
         assert_eq!(month_end("2024-01").unwrap(), "2024-01-31");
         assert!(month_end("2024-13").is_err());
         assert!(month_end("not-a-month").is_err());
+    }
+
+    #[test]
+    fn validate_iso_date_accepts_only_strict_dates() {
+        assert_eq!(validate_iso_date("2024-02-29").unwrap(), "2024-02-29");
+        // Non-padded or out-of-range components must not reach SQL date math.
+        assert!(validate_iso_date("2024-2-9").is_err());
+        assert!(validate_iso_date("2023-02-29").is_err());
+        assert!(validate_iso_date("2024-13-01").is_err());
+        assert!(validate_iso_date("").is_err());
+        assert!(validate_iso_date("not-a-date").is_err());
     }
 
     #[test]

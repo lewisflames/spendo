@@ -103,7 +103,7 @@ fn fetch_accounts_inner(
     // is capped at the shared visibility window so a future as-of never leaks
     // future transactions (mirrors `reports.rs`).
     let date_expr: String = match as_of {
-        Some(d) => d.to_string(),
+        Some(d) => utils::validate_iso_date(d)?,
         None => Utc::now().format("%Y-%m-%d").to_string(),
     };
 

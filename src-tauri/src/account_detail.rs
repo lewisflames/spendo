@@ -290,6 +290,9 @@ fn fetch_account_detail_inner(
     guid: &str,
     query: TxQuery<'_>,
 ) -> Result<AccountDetailResult, String> {
+    if let Some(as_of) = query.as_of {
+        utils::validate_iso_date(as_of)?;
+    }
     let header = load_account_header(conn, guid)?;
     let sub_guids = accounts::get_subaccount_guids(conn, guid)?;
 
