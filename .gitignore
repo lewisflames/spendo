@@ -9,8 +9,9 @@ node_modules
 /build
 /data
 *.lock
-# Application crate: keep the lockfile in version control for reproducible builds
+# Application crate + JS workspace: keep lockfiles in version control for reproducible builds
 !src-tauri/Cargo.lock
+!bun.lock
 
 # OS
 .DS_Store
