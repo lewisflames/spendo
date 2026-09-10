@@ -769,6 +769,8 @@ fn import_gnucash_inner(
 /// a warning toast while keeping the imported data.
 async fn fetch_prices_best_effort(
     db: std::sync::Arc<std::sync::Mutex<Connection>>,
+    book_generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    expected_generation: u64,
 ) -> PricesResult {
     fn failed(message: String) -> PricesResult {
         PricesResult {
@@ -795,6 +797,11 @@ async fn fetch_prices_best_effort(
         Err(e) => return failed(e),
     };
     if let Err(e) = db::run_blocking(db, move |conn| {
+        if book_generation.load(std::sync::atomic::Ordering::SeqCst) != expected_generation {
+            return Err(
+                "Book changed while prices were refreshing — results discarded".to_string(),
+            );
+        }
         prices::write_prices_and_log(conn, &write_data).map_err(String::from)
     })
     .await
@@ -818,11 +825,19 @@ pub async fn import_gnucash(
     utils::validate_gnucash_path(&path)?;
     // Hash before acquiring the DB lock so the lock isn't held during file I/O.
     let sha256 = file_sha256(&path)?;
+    // Capture the active book before merging: if the user switches books while
+    // the import (or its price fetch) is in flight, the price write is dropped.
+    let generation = state.book_generation.load(std::sync::atomic::Ordering::SeqCst);
     let mut result = db::run_blocking(state.db.clone(), move |conn| {
         import_gnucash_inner(conn, &path, &filename, &sha256).map_err(String::from)
     })
     .await?;
-    result.prices = fetch_prices_best_effort(state.db.clone()).await;
+    result.prices = fetch_prices_best_effort(
+        state.db.clone(),
+        state.book_generation.clone(),
+        generation,
+    )
+    .await;
     Ok(result)
 }
 
@@ -835,12 +850,18 @@ pub async fn reimport_last(state: State<'_, AppState>) -> Result<ImportResult, S
         db::run_blocking(state.db.clone(), history::last_import_source).await?;
     utils::validate_gnucash_path(&file_path)?;
     let sha256 = file_sha256(&file_path)?;
+    let generation = state.book_generation.load(std::sync::atomic::Ordering::SeqCst);
 
     let mut result = db::run_blocking(state.db.clone(), move |conn| {
         import_gnucash_inner(conn, &file_path, &filename, &sha256).map_err(String::from)
     })
     .await?;
-    result.prices = fetch_prices_best_effort(state.db.clone()).await;
+    result.prices = fetch_prices_best_effort(
+        state.db.clone(),
+        state.book_generation.clone(),
+        generation,
+    )
+    .await;
     Ok(result)
 }
 
