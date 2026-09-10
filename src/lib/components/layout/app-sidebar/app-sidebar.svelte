@@ -159,7 +159,10 @@
         </Sidebar.MenuButton>
       </Sidebar.MenuItem>
       <Sidebar.MenuItem>
-        <Sidebar.MenuButton isActive={page.url.pathname === '/settings'} tooltipContent="Settings">
+        <Sidebar.MenuButton
+          isActive={page.url.pathname.startsWith('/settings')}
+          tooltipContent="Settings"
+        >
           {#snippet child({ props })}
             <a href={resolve('/settings')} {...props}>
               <Settings aria-hidden="true" />
