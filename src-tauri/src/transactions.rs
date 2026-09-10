@@ -249,7 +249,6 @@ pub(crate) fn validate_tx_body(conn: &Connection, input: &TxInput) -> Result<(),
         return Err(AppError::Validation("Too many splits (max 50)".to_string()));
     }
     let mut sum = 0.0;
-    let mut seen_accounts = HashSet::new();
     for (i, s) in input.splits.iter().enumerate() {
         let n = i + 1;
         if s.account_guid.trim().is_empty() {
@@ -295,7 +294,6 @@ pub(crate) fn validate_tx_body(conn: &Connection, input: &TxInput) -> Result<(),
             }
         }
         sum += s.amount;
-        seen_accounts.insert(s.account_guid.clone());
     }
     if sum.abs() > BALANCE_EPS {
         return Err(AppError::Validation(format!(
@@ -317,7 +315,7 @@ pub(crate) fn validate_tx_body(conn: &Connection, input: &TxInput) -> Result<(),
             return Err(AppError::Validation("Notes are too long (max 2000)".to_string()));
         }
     }
-    let _ = seen_accounts;
+
     Ok(())
 }
 
