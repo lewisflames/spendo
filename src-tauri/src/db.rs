@@ -362,8 +362,8 @@ pub fn clear_last_book(app_data_dir: &Path) {
 /// supported upgrade path while there are no migrations — Settings →
 /// Clear all data, then re-import.
 pub fn clear_db(conn: &Connection) -> Result<()> {
-    conn.execute_batch(
-         "PRAGMA foreign_keys = OFF;
+    let drops = conn.execute_batch(
+        "PRAGMA foreign_keys = OFF;
           DROP TABLE IF EXISTS budget_amounts;
           DROP TABLE IF EXISTS budgets;
           DROP TABLE IF EXISTS prices;
@@ -377,9 +377,14 @@ pub fn clear_db(conn: &Connection) -> Result<()> {
            DROP TABLE IF EXISTS refresh_log;
            DROP TABLE IF EXISTS symbol_overrides;
            DROP TABLE IF EXISTS recurring_schedules;
-           DROP TABLE IF EXISTS app_settings;
-          PRAGMA foreign_keys = ON;",
-    )?;
+           DROP TABLE IF EXISTS app_settings;",
+    );
+    // Restore foreign keys on every path: a failed drop must not leave the
+    // live connection with FK enforcement off (the revert safety net and
+    // orphan handling depend on real FK errors).
+    let restore = conn.execute_batch("PRAGMA foreign_keys = ON;");
+    drops?;
+    restore?;
     init_db(conn)
 }
 
@@ -528,6 +533,11 @@ mod tests {
         assert_eq!(count, 0);
         assert!(!table_names(&conn).contains(&"budget_amounts".to_string()));
         assert!(!table_names(&conn).contains(&"import_log".to_string()));
+        // Foreign-key enforcement must survive the reset on every path.
+        let fk_on: i64 = conn
+            .query_row("PRAGMA foreign_keys", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(fk_on, 1);
         // Schema is usable again right after the reset.
         conn.execute(
             "INSERT INTO commodities (guid, mnemonic, namespace) VALUES ('c-usd', 'USD', 'CURRENCY')",
