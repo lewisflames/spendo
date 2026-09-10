@@ -48,20 +48,22 @@ export function useAsyncData<T>({ enabled, fetch, onSuccess, onError, label }: A
     loading = true;
     error = null;
 
-    fetch().then(
-      (result) => {
-        if (cancelled) return;
-        data = result;
-        loading = false;
-        onSuccess?.(result);
-      },
-      (e: unknown) => {
+    void (async () => {
+      let result: T;
+      try {
+        result = await fetch();
+      } catch (e) {
         if (cancelled) return;
         error = errMsg(e, label);
         loading = false;
         onError?.(error);
+        return;
       }
-    );
+      if (cancelled) return;
+      data = result;
+      loading = false;
+      onSuccess?.(result);
+    })();
 
     return () => {
       cancelled = true;
