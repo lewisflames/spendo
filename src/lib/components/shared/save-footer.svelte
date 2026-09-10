@@ -1,7 +1,15 @@
 <script lang="ts">
+  import * as Dialog from '$lib/components/ui/dialog';
   import { Button } from '$lib/components/ui/button';
 
+  /**
+   * Standard create/edit footer: two-step Delete (edit mode only), Cancel and
+   * Save. `layout="dialog"` renders inside `Dialog.Footer`; `layout="form"`
+   * renders the sticky page-form bar. Delete confirmation text lives in the
+   * body.
+   */
   let {
+    layout = 'dialog',
     mode = 'create',
     saving,
     deleting,
@@ -12,6 +20,7 @@
     onSave,
     onCancel
   }: {
+    layout?: 'dialog' | 'form';
     mode?: 'create' | 'edit';
     saving: boolean;
     deleting: boolean;
@@ -24,9 +33,7 @@
   } = $props();
 </script>
 
-<div
-  class="sticky bottom-0 z-10 flex flex-col gap-2 border-t bg-background/95 py-4 backdrop-blur sm:flex-row sm:justify-end"
->
+{#snippet buttons()}
   {#if mode === 'edit'}
     <Button
       type="button"
@@ -42,4 +49,16 @@
   <Button type="button" onclick={onSave} disabled={saveDisabled}>
     {saving ? 'Saving…' : saveLabel}
   </Button>
-</div>
+{/snippet}
+
+{#if layout === 'dialog'}
+  <Dialog.Footer class="flex-col gap-2 sm:flex-row">
+    {@render buttons()}
+  </Dialog.Footer>
+{:else}
+  <div
+    class="sticky bottom-0 z-10 flex flex-col gap-2 border-t bg-background/95 py-4 backdrop-blur sm:flex-row sm:justify-end"
+  >
+    {@render buttons()}
+  </div>
+{/if}

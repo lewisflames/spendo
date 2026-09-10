@@ -4,7 +4,7 @@
   import { Textarea } from '$lib/components/ui/textarea';
   import * as Card from '$lib/components/ui/card';
   import { DatePicker } from '$lib/components/shared/date-picker';
-  import FormSaveFooter from '$lib/components/shared/form-save-footer.svelte';
+  import SaveFooter from '$lib/components/shared/save-footer.svelte';
   import {
     SplitEditor,
     draftFromSplit,
@@ -245,7 +245,8 @@
     </p>
   {/if}
 
-  <FormSaveFooter
+  <SaveFooter
+    layout="form"
     {mode}
     {saving}
     {deleting}
