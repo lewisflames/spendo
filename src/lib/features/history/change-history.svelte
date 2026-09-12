@@ -24,6 +24,7 @@
 
   const res = useAsyncData({
     enabled: () => !!dbSession.value,
+  import { impactLabel, sourceLabel } from './history-labels';
     fetch: async () => {
       // Subscribe to summary changes so imports and reverts refresh
       // this list without navigation (the effect tracks these reads).
@@ -44,25 +45,6 @@
   let confirmOpen = $state(false);
   let pending = $state<ChangeEntry | null>(null);
   let reverting = $state(false);
-
-  function sourceLabel(entry: ChangeEntry): string {
-    if (entry.kind === 'revert') return 'Undo';
-    if (entry.kind === 'import') return 'Import';
-    return 'Manual';
-  }
-
-  function impactLabel(entry: ChangeEntry): string | null {
-    if (entry.kind !== 'import') return null;
-    if (!entry.transactionsAffected && !entry.accountsAffected) return null;
-    const parts: string[] = [];
-    if (entry.transactionsAffected) {
-      parts.push(plural(entry.transactionsAffected, 'transaction'));
-    }
-    if (entry.accountsAffected) {
-      parts.push(plural(entry.accountsAffected, 'account'));
-    }
-    return parts.join(' · ');
-  }
 
   function openConfirm(entry: ChangeEntry) {
     pending = entry;
