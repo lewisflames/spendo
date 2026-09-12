@@ -557,7 +557,11 @@ fn csv_row_hash(post_date: &str, value_num: i64, description: &str) -> String {
     );
     let mut hasher = Sha256::new();
     hasher.update(normalized.as_bytes());
-    format!("{:x}", hasher.finalize())
+    hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect()
 }
 
 fn amount_to_value_num(amount: f64) -> i64 {
