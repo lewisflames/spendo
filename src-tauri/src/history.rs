@@ -1,9 +1,11 @@
+use rusqlite::types::ToSql;
 use rusqlite::{params, Connection, OptionalExtension};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::db::{run_blocking, validate_data_table, with_tx_err, AppError, AppState};
 use crate::home::{get_summary, DataSummary};
+use crate::sql;
 use crate::utils;
 
 // ── Wire structs ─────────────────────────────────────────────────────────────
@@ -41,6 +43,21 @@ pub struct RevertResult {
     pub reverted_id: i64,
     pub revert_id: i64,
     pub summary: DataSummary,
+}
+
+/// Arguments for `fetch_change_history`. `kind`/`source` are exact matches;
+/// `search` is a literal substring over the label.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangeHistoryQuery {
+    pub page: i64,
+    pub page_size: i64,
+    #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub search: Option<String>,
 }
 
 // ── Snapshots ────────────────────────────────────────────────────────────────
@@ -314,20 +331,70 @@ pub(crate) fn insert_change_entry(
 
 // ── Fetch ────────────────────────────────────────────────────────────────────
 
+/// Optional `change_log` predicates shared by the count and page queries.
+#[derive(Debug, Default)]
+pub(crate) struct HistoryFilter<'a> {
+    kind: Option<&'a str>,
+    source: Option<&'a str>,
+    search: Option<&'a str>,
+}
+
+impl<'a> HistoryFilter<'a> {
+    /// Trim and drop empty values so `?kind=` / whitespace search behave as
+    /// "no filter" instead of matching nothing.
+    fn from_query(query: &'a ChangeHistoryQuery) -> Self {
+        Self {
+            kind: non_empty(query.kind.as_deref()),
+            source: non_empty(query.source.as_deref()),
+            search: non_empty(query.search.as_deref()),
+        }
+    }
+}
+
+fn non_empty(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|s| !s.is_empty())
+}
+
+/// Build the shared WHERE clause + bound params for the filter predicates.
+/// `kind`/`source` are exact matches; `search` is a literal LIKE over the label
+/// (metacharacters escaped). Placeholder indices start at 1 so callers can
+/// append their own placeholders after `params.len()`.
+fn history_where(filter: &HistoryFilter) -> (String, Vec<Box<dyn ToSql>>) {
+    let mut w = sql::WhereBuilder::new(0);
+    if let Some(kind) = filter.kind {
+        w.add("kind = {}", vec![Box::new(kind.to_string())]);
+    }
+    if let Some(source) = filter.source {
+        w.add("source = {}", vec![Box::new(source.to_string())]);
+    }
+    if let Some(search) = filter.search {
+        w.add(
+            "label LIKE '%' || {} || '%' ESCAPE '\\'",
+            vec![Box::new(utils::escape_like(search))],
+        );
+    }
+    (w.where_clause(), w.params)
+}
+
 fn get_change_entries(
     conn: &Connection,
     limit: i64,
     offset: i64,
+    filter: &HistoryFilter,
 ) -> Result<Vec<ChangeEntry>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, occurred_at, kind, label, source,
-                    transactions_affected, accounts_affected, reverts_id, reverted_by
-             FROM change_log ORDER BY id DESC LIMIT ?1 OFFSET ?2",
-        )
-        .map_err(|e| e.to_string())?;
+    let (where_clause, mut params) = history_where(filter);
+    let limit_idx = params.len() + 1;
+    let offset_idx = limit_idx + 1;
+    let sql_text = format!(
+        "SELECT id, occurred_at, kind, label, source,
+                transactions_affected, accounts_affected, reverts_id, reverted_by
+         FROM change_log{where_clause} ORDER BY id DESC LIMIT ?{limit_idx} OFFSET ?{offset_idx}"
+    );
+    params.push(Box::new(limit));
+    params.push(Box::new(offset));
+    let mut stmt = conn.prepare(&sql_text).map_err(|e| e.to_string())?;
     let mapped = stmt
-        .query_map(params![limit, offset], |row| {
+        .query_map(sql::param_refs(&params).as_slice(), |row| {
             Ok(ChangeEntry {
                 id: row.get(0)?,
                 occurred_at: row.get(1)?,
@@ -355,12 +422,16 @@ fn table_exists(conn: &Connection, name: &str) -> bool {
     .is_ok()
 }
 
-fn count_change_entries(conn: &Connection) -> Result<i64, String> {
+fn count_change_entries(conn: &Connection, filter: &HistoryFilter) -> Result<i64, String> {
     if !table_exists(conn, "change_log") {
         return Ok(0);
     }
-    conn.query_row("SELECT COUNT(*) FROM change_log", [], |row| row.get(0))
-        .map_err(|e| e.to_string())
+    let (where_clause, params) = history_where(filter);
+    let sql_text = format!("SELECT COUNT(*) FROM change_log{where_clause}");
+    conn.query_row(&sql_text, sql::param_refs(&params).as_slice(), |row| {
+        row.get(0)
+    })
+    .map_err(|e| e.to_string())
 }
 
 /// Newest original entry still eligible for linear undo.
@@ -383,11 +454,12 @@ pub(crate) fn fetch_change_history_inner(
     conn: &Connection,
     page: i64,
     page_size: i64,
+    filter: &HistoryFilter,
 ) -> Result<ChangeHistoryPage, String> {
-    let total = count_change_entries(conn)?;
+    let total = count_change_entries(conn, filter)?;
     let (page_size, total_pages, safe_page, _) = utils::paginate(total, page, page_size);
     let entries = if table_exists(conn, "change_log") {
-        get_change_entries(conn, page_size, (safe_page - 1) * page_size)?
+        get_change_entries(conn, page_size, (safe_page - 1) * page_size, filter)?
     } else {
         vec![]
     };
@@ -396,6 +468,8 @@ pub(crate) fn fetch_change_history_inner(
         total,
         page_size,
         total_pages,
+        // Undo eligibility is global, not filtered: the Revert action stays
+        // correct even while the newest entry is hidden by a filter.
         revertible_id: revertible_entry_id(conn)?,
     })
 }
@@ -534,11 +608,11 @@ pub(crate) fn last_import_source(conn: &Connection) -> Result<(String, String), 
 #[tauri::command]
 pub async fn fetch_change_history(
     state: State<'_, AppState>,
-    page: i64,
-    page_size: i64,
+    query: ChangeHistoryQuery,
 ) -> Result<ChangeHistoryPage, String> {
     run_blocking(state.db.clone(), move |conn| {
-        fetch_change_history_inner(conn, page, page_size)
+        let filter = HistoryFilter::from_query(&query);
+        fetch_change_history_inner(conn, query.page, query.page_size, &filter)
     })
     .await
 }
@@ -636,7 +710,7 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM transactions", [], |r| r.get(0))
             .unwrap();
         assert_eq!(count, 0);
-        let page = fetch_change_history_inner(&conn, 1, 50).unwrap();
+        let page = fetch_change_history_inner(&conn, 1, 50, &HistoryFilter::default()).unwrap();
         assert_eq!(page.total, 2);
         assert_eq!(page.revertible_id, None);
     }
@@ -727,7 +801,7 @@ mod tests {
         let first = log_snapshots(&conn, &[("transactions", "t1")]);
         let (_, revert_id) = revert_history_entry_inner(&conn, first).unwrap();
         assert!(revert_history_entry_inner(&conn, revert_id).is_err());
-        assert!(fetch_change_history_inner(&conn, 1, 50)
+        assert!(fetch_change_history_inner(&conn, 1, 50, &HistoryFilter::default())
             .unwrap()
             .revertible_id
             .is_none());
@@ -775,14 +849,13 @@ mod tests {
             )
             .unwrap();
         }
-        let page = fetch_change_history_inner(&conn, 1, 2).unwrap();
+        let page = fetch_change_history_inner(&conn, 1, 2, &HistoryFilter::default()).unwrap();
         assert_eq!(page.total, 3);
         assert_eq!(page.total_pages, 2);
         assert_eq!(page.entries.len(), 2);
         assert!(page.entries[0].id > page.entries[1].id);
         assert_eq!(page.revertible_id, Some(page.entries[0].id));
     }
-}
 
     #[test]
     fn revert_account_update_preserves_budgets() {
@@ -815,3 +888,77 @@ mod tests {
             .unwrap();
         assert_eq!(budgets, 1);
     }
+
+    #[test]
+    fn history_filters_by_kind_source_and_search() {
+        let conn = setup();
+        insert_change_entry(&conn, "import", "Imported a.gnucash", "import", 3, 2, None, &[]).unwrap();
+        insert_change_entry(&conn, "tx_create", "Groceries", "manual", 1, 1, None, &[]).unwrap();
+        insert_change_entry(&conn, "tx_create", "Rent", "schedule", 1, 1, None, &[]).unwrap();
+        insert_change_entry(&conn, "reconcile", "Reconciled Checking", "manual", 5, 1, None, &[])
+            .unwrap();
+
+        let imports = HistoryFilter {
+            kind: Some("import"),
+            ..Default::default()
+        };
+        let page = fetch_change_history_inner(&conn, 1, 50, &imports).unwrap();
+        assert_eq!(page.total, 1);
+        assert_eq!(page.entries[0].label, "Imported a.gnucash");
+
+        let scheduled = HistoryFilter {
+            source: Some("schedule"),
+            ..Default::default()
+        };
+        let page = fetch_change_history_inner(&conn, 1, 50, &scheduled).unwrap();
+        assert_eq!(page.total, 1);
+        assert_eq!(page.entries[0].label, "Rent");
+
+        let search = HistoryFilter {
+            search: Some("recon"),
+            ..Default::default()
+        };
+        let page = fetch_change_history_inner(&conn, 1, 50, &search).unwrap();
+        assert_eq!(page.total, 1);
+        assert_eq!(page.entries[0].kind, "reconcile");
+
+        // Filters combine with AND and keep pagination totals consistent.
+        let none = HistoryFilter {
+            kind: Some("import"),
+            source: Some("schedule"),
+            ..Default::default()
+        };
+        let page = fetch_change_history_inner(&conn, 1, 50, &none).unwrap();
+        assert_eq!((page.total, page.total_pages, page.entries.len()), (0, 1, 0));
+        // Undo eligibility stays global (unfiltered).
+        assert_eq!(page.revertible_id, Some(4));
+    }
+
+    #[test]
+    fn history_search_escapes_like_metacharacters() {
+        let conn = setup();
+        insert_change_entry(&conn, "test", "100% rent", "manual", 0, 0, None, &[]).unwrap();
+        insert_change_entry(&conn, "test", "100x rent", "manual", 0, 0, None, &[]).unwrap();
+
+        let percent = HistoryFilter {
+            search: Some("100%"),
+            ..Default::default()
+        };
+        assert_eq!(
+            fetch_change_history_inner(&conn, 1, 50, &percent).unwrap().total,
+            1
+        );
+        // Unescaped `_` would match any single character; escaped it matches
+        // nothing here.
+        let underscore = HistoryFilter {
+            search: Some("100_"),
+            ..Default::default()
+        };
+        assert_eq!(
+            fetch_change_history_inner(&conn, 1, 50, &underscore)
+                .unwrap()
+                .total,
+            0
+        );
+    }
+}

@@ -40,6 +40,14 @@ interface ChangeHistoryPage {
   revertibleId: number | null;
 }
 
+interface ChangeHistoryQuery {
+  page: number;
+  pageSize: number;
+  kind?: string | null;
+  source?: string | null;
+  search?: string | null;
+}
+
 interface RevertResult {
   revertedId: number;
   revertId: number;
@@ -323,8 +331,8 @@ export const getBookSettings = (): Promise<BookSettings> =>
 export const setBookSetting = (key: string, value: string): Promise<BookSettings> =>
   invoke<BookSettings>('set_book_setting', { key, value });
 
-export const fetchChangeHistory = (page: number, pageSize: number): Promise<ChangeHistoryPage> =>
-  invoke<ChangeHistoryPage>('fetch_change_history', { page, pageSize });
+export const fetchChangeHistory = (query: ChangeHistoryQuery): Promise<ChangeHistoryPage> =>
+  invoke<ChangeHistoryPage>('fetch_change_history', { query });
 
 export const revertHistoryEntry = (id: number): Promise<RevertResult> =>
   invoke<RevertResult>('revert_history_entry', { id });
