@@ -267,7 +267,7 @@
           bind:page
           totalPages={res.data.totalPages}
           totalItems={res.data.total}
-          pageSize={appSettings.value.pageSize}
+          pageSize={res.data.pageSize}
           onPageSizeChange={(size) => applyPageSize(size, (v) => (page = v))}
         />
       </DimWrapper>
