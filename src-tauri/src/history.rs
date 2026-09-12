@@ -157,8 +157,11 @@ fn int_field(v: &serde_json::Value, key: &str) -> Result<i64, String> {
         .ok_or_else(|| format!("Snapshot is missing '{key}'"))
 }
 
-/// Re-insert (or overwrite) a row from its before-image. Callers order phases:
-/// parents before children so FK references resolve.
+/// Re-insert (or overwrite) a row from its before-image. Uses an upsert rather
+/// than `INSERT OR REPLACE`: REPLACE deletes the conflicting row first, and
+/// with foreign keys enabled that fires `ON DELETE CASCADE` (e.g. wiping
+/// `budgets` when restoring an account edit). Callers order phases: parents
+/// before children so FK references resolve.
 fn restore_snapshot_row(conn: &Connection, table: &str, before: &str) -> Result<(), String> {
     validate_data_table(table)?;
     let v: serde_json::Value =
@@ -166,8 +169,12 @@ fn restore_snapshot_row(conn: &Connection, table: &str, before: &str) -> Result<
     match table {
         "commodities" => {
             conn.execute(
-                "INSERT OR REPLACE INTO commodities (guid, mnemonic, namespace, fullname)
-                 VALUES (?1, ?2, ?3, ?4)",
+                "INSERT INTO commodities (guid, mnemonic, namespace, fullname)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(guid) DO UPDATE SET
+                     mnemonic = excluded.mnemonic,
+                     namespace = excluded.namespace,
+                     fullname = excluded.fullname",
                 params![
                     str_field(&v, "guid")?,
                     str_field(&v, "mnemonic")?,
@@ -179,9 +186,17 @@ fn restore_snapshot_row(conn: &Connection, table: &str, before: &str) -> Result<
         }
         "accounts" => {
             conn.execute(
-                "INSERT OR REPLACE INTO accounts
+                "INSERT INTO accounts
                  (guid, name, account_type, parent_guid, code, description, placeholder, commodity_guid)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                 ON CONFLICT(guid) DO UPDATE SET
+                     name = excluded.name,
+                     account_type = excluded.account_type,
+                     parent_guid = excluded.parent_guid,
+                     code = excluded.code,
+                     description = excluded.description,
+                     placeholder = excluded.placeholder,
+                     commodity_guid = excluded.commodity_guid",
                 params![
                     str_field(&v, "guid")?,
                     str_field(&v, "name")?,
@@ -197,8 +212,13 @@ fn restore_snapshot_row(conn: &Connection, table: &str, before: &str) -> Result<
         }
         "transactions" => {
             conn.execute(
-                "INSERT OR REPLACE INTO transactions (guid, post_date, description, num, notes)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                "INSERT INTO transactions (guid, post_date, description, num, notes)
+                 VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(guid) DO UPDATE SET
+                     post_date = excluded.post_date,
+                     description = excluded.description,
+                     num = excluded.num,
+                     notes = excluded.notes",
                 params![
                     str_field(&v, "guid")?,
                     str_field(&v, "post_date")?,
@@ -211,10 +231,20 @@ fn restore_snapshot_row(conn: &Connection, table: &str, before: &str) -> Result<
         }
         _ => {
             conn.execute(
-                "INSERT OR REPLACE INTO splits
+                "INSERT INTO splits
                  (guid, tx_guid, account_guid, value_num, value_denom, quantity_num, quantity_denom,
                   reconcile_state, reconciled, memo)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                 ON CONFLICT(guid) DO UPDATE SET
+                     tx_guid = excluded.tx_guid,
+                     account_guid = excluded.account_guid,
+                     value_num = excluded.value_num,
+                     value_denom = excluded.value_denom,
+                     quantity_num = excluded.quantity_num,
+                     quantity_denom = excluded.quantity_denom,
+                     reconcile_state = excluded.reconcile_state,
+                     reconciled = excluded.reconciled,
+                     memo = excluded.memo",
                 params![
                     str_field(&v, "guid")?,
                     str_field(&v, "tx_guid")?,
@@ -753,3 +783,35 @@ mod tests {
         assert_eq!(page.revertible_id, Some(page.entries[0].id));
     }
 }
+
+    #[test]
+    fn revert_account_update_preserves_budgets() {
+        let conn = setup();
+        conn.execute(
+            "INSERT INTO budgets (guid, account_guid, year, amount, created_at)
+             VALUES ('b1', 'checking', 2024, 250.0, '2024-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        // Log an account_update, mutate, then revert: the upsert restore must
+        // not fire the budgets FK cascade (INSERT OR REPLACE would).
+        let id = log_snapshots(&conn, &[("accounts", "checking")]);
+        conn.execute(
+            "UPDATE accounts SET name = 'Renamed' WHERE guid = 'checking'",
+            [],
+        )
+        .unwrap();
+
+        revert_history_entry_inner(&conn, id).unwrap();
+
+        let name: String = conn
+            .query_row("SELECT name FROM accounts WHERE guid = 'checking'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(name, "Checking");
+        let budgets: i64 = conn
+            .query_row("SELECT COUNT(*) FROM budgets", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(budgets, 1);
+    }
