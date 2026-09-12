@@ -18,13 +18,13 @@
   import { formatDate, plural, EMPTY_DASH } from '$lib/utils/format.svelte';
   import { errMsg } from '$lib/utils/error';
   import { toast } from '$lib/components/ui/sonner';
+  import { impactLabel, sourceLabel } from './history-labels';
 
   let page = $state(1);
   let pageSize = $derived(appSettings.value.pageSize);
 
   const res = useAsyncData({
     enabled: () => !!dbSession.value,
-  import { impactLabel, sourceLabel } from './history-labels';
     fetch: async () => {
       // Subscribe to summary changes so imports and reverts refresh
       // this list without navigation (the effect tracks these reads).
