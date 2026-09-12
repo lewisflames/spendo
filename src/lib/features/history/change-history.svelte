@@ -51,6 +51,11 @@
     confirmOpen = true;
   }
 
+  function closeConfirm() {
+    confirmOpen = false;
+    pending = null;
+  }
+
   async function handleRevert() {
     if (!pending || reverting) return;
     reverting = true;
@@ -58,8 +63,7 @@
       const result = await revertHistoryEntry(pending.id);
       setDbSession(result.summary);
       toast.success('Change reverted');
-      confirmOpen = false;
-      pending = null;
+      closeConfirm();
       res.reload();
     } catch (e: unknown) {
       toast.error(errMsg(e, 'Revert failed'));
@@ -177,9 +181,7 @@
       </Dialog.Description>
     </Dialog.Header>
     <Dialog.Footer>
-      <Button variant="outline" onclick={() => (confirmOpen = false)} disabled={reverting}>
-        Cancel
-      </Button>
+      <Button variant="outline" onclick={closeConfirm} disabled={reverting}>Cancel</Button>
       <Button variant="destructive" onclick={handleRevert} disabled={reverting || !pending}>
         {#if reverting}
           <LoaderCircle aria-hidden="true" class="size-3 animate-spin" />
