@@ -964,7 +964,9 @@ mod tests {
         assert_eq!(result.splits_orphaned, 1);
 
         // Exactly one history row; orphans are gone from the data.
-        let page = history::fetch_change_history_inner(&dest, 1, 50).unwrap();
+        let page =
+            history::fetch_change_history_inner(&dest, 1, 50, &history::HistoryFilter::default())
+                .unwrap();
         assert_eq!(page.total, 1);
         assert_eq!(page.entries[0].kind, "import");
         assert_eq!(page.entries[0].label, "Imported book.gnucash");
@@ -1001,7 +1003,7 @@ mod tests {
         assert_eq!(again.transactions_added, 0);
         assert_eq!(again.transactions_orphaned, 0);
         assert_eq!(
-            history::fetch_change_history_inner(&dest, 1, 50)
+            history::fetch_change_history_inner(&dest, 1, 50, &history::HistoryFilter::default())
                 .unwrap()
                 .total,
             1
