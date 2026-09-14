@@ -898,18 +898,21 @@ pub async fn set_symbol_override(
     .await
 }
 
+fn delete_symbol_override_inner(conn: &Connection, commodity_guid: &str) -> Result<(), AppError> {
+    conn.execute(
+        "DELETE FROM symbol_overrides WHERE commodity_guid = ?1",
+        [commodity_guid],
+    )?;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn delete_symbol_override(
     state: State<'_, AppState>,
     commodity_guid: String,
 ) -> Result<(), String> {
     db::run_blocking(state.db.clone(), move |conn| {
-        conn.execute(
-            "DELETE FROM symbol_overrides WHERE commodity_guid = ?1",
-            [&commodity_guid],
-        )
-        .map_err(|e| e.to_string())?;
-        Ok(())
+        delete_symbol_override_inner(conn, &commodity_guid).map_err(String::from)
     })
     .await
 }
@@ -1005,26 +1008,32 @@ mod tests {
     }
 
     #[test]
-    fn override_upsert_round_trip() {
+    fn override_set_overwrites_and_delete_removes() {
         let conn = setup_commodities();
-        conn.execute(
-            "INSERT INTO symbol_overrides (commodity_guid, symbol) VALUES ('c-aapl', 'AAPL')",
-            [],
-        )
-        .unwrap();
+        set_symbol_override_inner(&conn, "c-aapl".to_string(), "AAPL".to_string()).unwrap();
         assert_eq!(
             symbol_override_map(&conn).get("c-aapl").cloned(),
             Some("AAPL".to_string())
         );
-        conn.execute(
-            "INSERT INTO symbol_overrides (commodity_guid, symbol) VALUES ('c-aapl', 'AAPL.DE')
-             ON CONFLICT(commodity_guid) DO UPDATE SET symbol = excluded.symbol",
-            [],
-        )
-        .unwrap();
+
+        set_symbol_override_inner(&conn, "c-aapl".to_string(), "AAPL.DE".to_string()).unwrap();
         assert_eq!(
             symbol_override_map(&conn).get("c-aapl").cloned(),
             Some("AAPL.DE".to_string())
+        );
+
+        delete_symbol_override_inner(&conn, "c-aapl").unwrap();
+        assert!(symbol_override_map(&conn).is_empty());
+    }
+
+    #[test]
+    fn override_rejects_currencies_and_unknown_commodities() {
+        let conn = setup_commodities();
+        assert!(
+            set_symbol_override_inner(&conn, "c-eur".to_string(), "EUR=X".to_string()).is_err()
+        );
+        assert!(
+            set_symbol_override_inner(&conn, "missing".to_string(), "AAPL".to_string()).is_err()
         );
     }
 }
