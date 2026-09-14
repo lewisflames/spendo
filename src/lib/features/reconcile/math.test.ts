@@ -43,6 +43,8 @@ describe('reconcile statement math', () => {
     expect(parseStatementAmount(' 70.50 ')).toBeCloseTo(70.5, 10);
     expect(parseStatementAmount('-12,5')).toBeCloseTo(-12.5, 10);
     expect(parseStatementAmount('1,000.50')).toBeNull();
+    expect(parseStatementAmount('1,000')).toBeNull();
+    expect(parseStatementAmount('12,345')).toBeNull();
     expect(parseStatementAmount('abc')).toBeNull();
     expect(parseStatementAmount('12.34.56')).toBeNull();
   });
