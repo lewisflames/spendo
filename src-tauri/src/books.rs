@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use tauri::State;
@@ -21,11 +20,9 @@ fn gnucash_guidance() -> String {
         .to_string()
 }
 
-/// Check that `path` is an openable Spendo book: stamped `application_id`, or
-/// — for pre-stamp `spendo.db` files — a Spendo-specific history table
-/// (`change_log`, or legacy `import_log`) on top of the shared core tables.
-/// GnuCash sources and random SQLite/text files are rejected with actionable
-/// errors.
+/// Check that `path` is an openable Spendo book: a Spendo `application_id`
+/// stamp. GnuCash sources and random SQLite/text files are rejected with
+/// actionable errors.
 fn validate_spendo_db_inner(path: &Path) -> Result<(), String> {
     if !path.is_file() {
         return Err(format!("File not found: {}", path.display()));
@@ -41,39 +38,27 @@ fn validate_spendo_db_inner(path: &Path) -> Result<(), String> {
     let app_id: Result<i32, _> = probe.query_row("PRAGMA application_id", [], |row| row.get(0));
     match app_id {
         Ok(id) if id == db::SPENDO_APP_ID => return Ok(()),
-        // Fall through to the table check for unstamped (legacy) books.
-        Ok(_) => {}
         // Not a SQLite database at all.
         Err(_) => return Err(format!("Not a Spendo database: {}", path.display())),
+        Ok(_) => {}
     }
 
-    let tables: HashSet<String> = {
-        let mut stmt = probe
-            .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
-            .map_err(|_| format!("Not a Spendo database: {}", path.display()))?;
-        let rows = stmt
-            .query_map([], |row| row.get(0))
-            .map_err(|_| format!("Not a Spendo database: {}", path.display()))?;
-        rows
-            .collect::<Result<HashSet<String>, _>>()
-            .map_err(|_| format!("Not a Spendo database: {}", path.display()))?
-    };
-    if tables.contains("slots") {
-        return Err(gnucash_guidance());
-    }
-    let has_core = ["accounts", "commodities", "transactions", "splits"]
-        .iter()
-        .all(|t| tables.contains(*t));
-    if has_core && (tables.contains("change_log") || tables.contains("import_log")) {
-        return Ok(());
-    }
-    if has_core {
+    // GnuCash sources share our core table names; detect their `slots` table
+    // so the error can steer toward Import instead of a generic rejection.
+    let has_slots: bool = probe
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'slots'",
+            [],
+            |_| Ok(()),
+        )
+        .is_ok();
+    if has_slots {
         return Err(gnucash_guidance());
     }
     Err(format!("Not a Spendo database: {}", path.display()))
 }
 
-/// Open + upgrade (idempotent `init_db` for pre-stamp files) + stamp.
+/// Open + ensure schema (idempotent `init_db`) + stamp.
 /// File I/O happens here, before the shared lock is touched.
 fn open_book_inner(path: &Path) -> Result<rusqlite::Connection, String> {
     validate_spendo_db_inner(path)?;
@@ -262,17 +247,19 @@ mod tests {
     }
 
     #[test]
-    fn validate_accepts_stamped_and_legacy_books() {
+    fn validate_accepts_stamped_books() {
         let dir = tmp_dir("accept");
         let stamped = dir.join("a.spendo");
         stamped_book(&stamped);
         assert!(validate_spendo_db_inner(&stamped).is_ok());
 
-        // Pre-stamp spendo.db: core tables + import_log, no application_id.
+        // Unstamped Spendo-shaped files (pre-stamp builds) are rejected.
         let legacy = dir.join("legacy.db");
-        let conn = db::connect_db(&legacy.to_path_buf()).unwrap();
-        db::init_db(&conn).unwrap();
-        assert!(validate_spendo_db_inner(&legacy).is_ok());
+        {
+            let conn = db::connect_db(&legacy.to_path_buf()).unwrap();
+            db::init_db(&conn).unwrap();
+        }
+        assert!(validate_spendo_db_inner(&legacy).is_err());
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -280,7 +267,7 @@ mod tests {
     #[test]
     fn validate_rejects_gnucash_sources() {
         let dir = tmp_dir("gnucash");
-        // GnuCash-shaped: core tables + slots, no import_log.
+        // GnuCash-shaped: core tables + slots, no application_id.
         let src = dir.join("book.db");
         let conn = db::connect_db(&src.to_path_buf()).unwrap();
         conn.execute_batch(

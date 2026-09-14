@@ -1,6 +1,5 @@
 import { getBookSettings, setBookSetting, type BookSettings } from '$lib/tauri';
 
-export type { BookSettings };
 type BookSettingField = keyof BookSettings;
 
 /** Backend snake_case keys for `set_book_setting`. */

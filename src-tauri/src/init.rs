@@ -15,8 +15,8 @@ pub(crate) fn normalize_mnemonic(raw: &str) -> Result<String, AppError> {
 }
 
 /// Insert the base-currency commodity + ROOT account into a fresh database.
-/// Takes an already-normalized mnemonic; owns its transaction. Shared by
-/// `create_empty_book_inner` (tests) and `books::create_book_at` (new file).
+/// Takes an already-normalized mnemonic; owns its transaction. Used by
+/// `books::create_book_at`.
 pub(crate) fn seed_empty_book(conn: &Connection, mnemonic: &str) -> Result<(), AppError> {
     let commodity_guid = uuid::Uuid::new_v4().to_string();
     let root_guid = uuid::Uuid::new_v4().to_string();
@@ -34,27 +34,6 @@ pub(crate) fn seed_empty_book(conn: &Connection, mnemonic: &str) -> Result<(), A
         )
         ?;
         Ok(())
-    })
-}
-
-// No live IPC command calls this (books are created via `create_book_at`);
-// compiled only for the init tests below.
-#[cfg(test)]
-fn create_empty_book_inner(conn: &Connection, currency: &str) -> Result<HomeDataResult, AppError> {
-    let mnemonic = normalize_mnemonic(currency)?;
-
-    let existing: i64 = conn
-        .query_row("SELECT COUNT(*) FROM accounts", [], |row| row.get(0))
-        ?;
-    if existing > 0 {
-        return Err(AppError::Validation("Database already initialized — clear all data first".to_string()));
-    }
-
-    seed_empty_book(conn, &mnemonic)?;
-
-    Ok(HomeDataResult {
-        has_data: true,
-        summary: Some(get_summary(conn)?),
     })
 }
 
@@ -128,11 +107,10 @@ mod tests {
     }
 
     #[test]
-    fn creates_root_and_currency() {
+    fn seed_creates_root_and_currency() {
         let conn = setup();
-        let result = create_empty_book_inner(&conn, "eur").unwrap();
-        assert!(result.has_data);
-        let summary = result.summary.unwrap();
+        seed_empty_book(&conn, "EUR").unwrap();
+        let summary = get_summary(&conn).unwrap();
         assert_eq!(summary.currency, "EUR");
         assert_eq!(summary.total_accounts, 1);
         assert_eq!(summary.total_transactions, 0);
@@ -148,43 +126,22 @@ mod tests {
     }
 
     #[test]
-    fn rejects_second_init_without_clear() {
-        let conn = setup();
-        create_empty_book_inner(&conn, "USD").unwrap();
-        let err = match create_empty_book_inner(&conn, "EUR") {
-            Ok(_) => panic!("expected already-initialized error"),
-            Err(e) => e,
-        };
-        assert!(err.to_string().contains("already initialized"));
-    }
-
-    #[test]
     fn rejects_invalid_mnemonics() {
-        let conn = setup();
         for bad in ["", "EU", "EURO", "E1R", " us "] {
-            assert!(
-                create_empty_book_inner(&conn, bad).is_err(),
-                "expected error for '{bad}'"
-            );
+            assert!(normalize_mnemonic(bad).is_err(), "expected error for '{bad}'");
         }
-        // Failed attempts must not have seeded anything.
-        let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM accounts", [], |row| row.get(0))
-            .unwrap();
-        assert_eq!(count, 0);
     }
 
     #[test]
     fn normalizes_case_and_whitespace() {
-        let conn = setup();
-        let result = create_empty_book_inner(&conn, "  gbp ").unwrap();
-        assert_eq!(result.summary.unwrap().currency, "GBP");
+        assert_eq!(normalize_mnemonic("  gbp ").unwrap(), "GBP");
+        assert_eq!(normalize_mnemonic("eur").unwrap(), "EUR");
     }
 
     #[test]
     fn set_base_currency_updates_root() {
         let conn = setup();
-        create_empty_book_inner(&conn, "USD").unwrap();
+        seed_empty_book(&conn, "USD").unwrap();
         let result = set_base_currency_inner(&conn, "eur").unwrap();
         assert_eq!(result.summary.unwrap().currency, "EUR");
     }
@@ -192,7 +149,7 @@ mod tests {
     #[test]
     fn set_base_currency_reuses_existing_commodity() {
         let conn = setup();
-        create_empty_book_inner(&conn, "USD").unwrap();
+        seed_empty_book(&conn, "USD").unwrap();
         conn.execute(
             "INSERT INTO commodities (guid, mnemonic, namespace, fullname) VALUES ('c-eur', 'EUR', 'CURRENCY', 'EUR')",
             [],
@@ -221,7 +178,7 @@ mod tests {
     fn set_base_currency_rejects_without_book_or_bad_code() {
         let conn = setup();
         assert!(set_base_currency_inner(&conn, "EUR").is_err());
-        create_empty_book_inner(&conn, "USD").unwrap();
+        seed_empty_book(&conn, "USD").unwrap();
         assert!(set_base_currency_inner(&conn, "EURO").is_err());
     }
 }

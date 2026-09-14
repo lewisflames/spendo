@@ -5,7 +5,6 @@ export {
   draftFromSplit,
   isBalanced,
   makeSplitDraft,
-  parseAmount,
   splitBalance,
   splitErrors,
   splitToInput,

@@ -9,10 +9,8 @@
   import ReportingCard from '$lib/features/settings/reporting-card.svelte';
   import { appSettings, resetSettings } from '$lib/stores/settings.svelte';
   import { loadBookSettings } from '$lib/stores/book-settings.svelte';
-  import { fetchDataInfo } from '$lib/tauri';
   import { errMsg } from '$lib/utils/error';
   import { toast } from '$lib/components/ui/sonner';
-  import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
 
   const DEFAULT_CUSTOM_PRIMARY = '#3b82f6';
 
@@ -35,12 +33,6 @@
     }
   }
 
-  const dataRes = useAsyncData({
-    enabled: () => true,
-    fetch: fetchDataInfo,
-    label: 'Failed to load data location'
-  });
-
   function handleResetPreferences() {
     resetSettings();
     customDraft = DEFAULT_CUSTOM_PRIMARY;
@@ -60,16 +52,11 @@
 
   <DisplayCard />
 
-  <BookCard
-    dbPath={dataRes.data?.dbPath ?? null}
-    dataError={dataRes.error}
-    onRetryData={() => dataRes.reload()}
-    onBookChanged={refreshBookSettings}
-  />
+  <BookCard onBookChanged={refreshBookSettings} />
 
   <ReportingCard error={bookSettingsError} onRetry={() => void refreshBookSettings()} />
 
-  <DataImport onImported={() => dataRes.reload()} />
+  <DataImport />
 
   <DataExport />
 
