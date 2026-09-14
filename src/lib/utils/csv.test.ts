@@ -1,13 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { buildCsvText, CSV_BOM } from './csv';
-
-const BOM = '\uFEFF';
+import { buildCsvText } from './csv';
 
 describe('buildCsvText', () => {
-  it('exposes the BOM separately from the body text', () => {
-    expect(CSV_BOM).toBe(BOM);
-  });
-
   it('builds header-plus-rows text', () => {
     expect(buildCsvText(['Name', 'Amount'], [['Cash', '100']])).toBe('Name,Amount\nCash,100');
   });

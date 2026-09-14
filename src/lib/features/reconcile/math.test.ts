@@ -28,8 +28,18 @@ describe('reconcile statement math', () => {
   });
 
   it('gates reconcilable account types', () => {
-    expect(isReconcilable('BANK', false)).toBe(true);
-    expect(isReconcilable('CREDIT', false)).toBe(true);
+    for (const type of [
+      'ASSET',
+      'BANK',
+      'CASH',
+      'CURRENCY',
+      'RECEIVABLE',
+      'LIABILITY',
+      'CREDIT',
+      'PAYABLE'
+    ]) {
+      expect(isReconcilable(type, false)).toBe(true);
+    }
     expect(isReconcilable('BANK', true)).toBe(false);
     expect(isReconcilable('STOCK', false)).toBe(false);
     expect(isReconcilable('EXPENSE', false)).toBe(false);

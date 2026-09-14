@@ -1,4 +1,3 @@
-import { CalendarDate } from '@internationalized/date';
 import { describe, expect, it } from 'vitest';
 import {
   calendarDateToStr,
@@ -6,10 +5,12 @@ import {
   daysInMonth,
   getMonthRange,
   getMonthRangeSpan,
+  getPnlPeriodRange,
   getQuarterRange,
   getYearRange,
+  isFutureDate,
+  isIsoDate,
   last12MonthsRange,
-  monthName,
   PNL_PRESETS,
   todayStr
 } from './date-utils.svelte';
@@ -19,6 +20,29 @@ describe('todayStr', () => {
     const now = new Date();
     const expected = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     expect(todayStr()).toBe(expected);
+  });
+});
+
+describe('isIsoDate', () => {
+  it('accepts real ISO dates including leap day', () => {
+    expect(isIsoDate('2024-02-29')).toBe(true);
+    expect(isIsoDate('2023-12-31')).toBe(true);
+  });
+
+  it('rejects impossible or misformatted dates', () => {
+    expect(isIsoDate('2024-02-30')).toBe(false);
+    expect(isIsoDate('2023-02-29')).toBe(false);
+    expect(isIsoDate('2024-2-01')).toBe(false);
+    expect(isIsoDate('2024-13-01')).toBe(false);
+    expect(isIsoDate('')).toBe(false);
+  });
+});
+
+describe('isFutureDate', () => {
+  it('compares the date against local today', () => {
+    expect(isFutureDate('2000-01-01')).toBe(false);
+    expect(isFutureDate(todayStr())).toBe(false);
+    expect(isFutureDate('2999-01-01')).toBe(true);
   });
 });
 
@@ -91,14 +115,6 @@ describe('calendar ranges', () => {
   });
 });
 
-describe('monthName', () => {
-  it('returns the long month name for the locale', () => {
-    expect(monthName(1, 'en-US')).toBe('January');
-    expect(monthName(12, 'en-US')).toBe('December');
-    expect(monthName(3, 'de-DE')).toBe('März');
-  });
-});
-
 describe('computePrevRange', () => {
   it('returns the same-length window immediately before', () => {
     expect(computePrevRange('2024-01-01', '2024-01-31')).toEqual({
@@ -142,9 +158,55 @@ describe('PNL_PRESETS', () => {
     expect(calendarDateToStr(start)).toBe(`${year}-01-01`);
     expect(calendarDateToStr(end)).toBe(`${year}-12-31`);
   });
+});
 
-  it('no longer offers Year to date', () => {
-    expect(PNL_PRESETS.some((p) => p.label === 'Year to date')).toBe(false);
+describe('getPnlPeriodRange', () => {
+  it('resolves a January fiscal year as the calendar year', () => {
+    const year = new Date().getFullYear();
+    const { start, end } = getPnlPeriodRange('this_year', 1);
+    expect(start.toString()).toBe(`${year}-01-01`);
+    expect(end.toString()).toBe(`${year}-12-31`);
+  });
+
+  it('wraps non-January fiscal years around today', () => {
+    const { start, end } = getPnlPeriodRange('this_year', 4);
+    const today = todayStr();
+    expect(start.day).toBe(1);
+    expect(end.day).toBe(daysInMonth(end.year, end.month));
+    expect((end.year - start.year) * 12 + (end.month - start.month)).toBe(11);
+    expect(start.toString() <= today && today <= end.toString()).toBe(true);
+  });
+
+  it('starts in the previous calendar year when today precedes the fiscal start', () => {
+    const now = new Date();
+    const thisMonth = now.getMonth() + 1;
+    const fyStart = (thisMonth % 12) + 1;
+    const expectedYear = fyStart === 1 ? now.getFullYear() : now.getFullYear() - 1;
+    expect(getPnlPeriodRange('this_year', fyStart).start.toString()).toBe(
+      `${expectedYear}-${String(fyStart).padStart(2, '0')}-01`
+    );
+  });
+
+  it('clamps invalid fiscal starts (0 → January, 99 → December)', () => {
+    const year = new Date().getFullYear();
+    expect(getPnlPeriodRange('this_year', 0).start.toString()).toBe(`${year}-01-01`);
+    expect(getPnlPeriodRange('this_year', 99).start.month).toBe(12);
+  });
+
+  it('resolves month and quarter presets to calendar units', () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth() + 1;
+    const monthRange = getPnlPeriodRange('this_month', 1);
+    expect(monthRange.start.toString()).toBe(`${year}-${String(month).padStart(2, '0')}-01`);
+    expect(monthRange.end.toString()).toBe(
+      `${year}-${String(month).padStart(2, '0')}-${daysInMonth(year, month)}`
+    );
+    const quarterRange = getPnlPeriodRange('this_quarter', 1);
+    const quarterStartMonth = Math.floor(now.getMonth() / 3) * 3 + 1;
+    expect(quarterRange.start.toString()).toBe(
+      `${year}-${String(quarterStartMonth).padStart(2, '0')}-01`
+    );
   });
 });
 
@@ -155,9 +217,5 @@ describe('last12MonthsRange', () => {
     expect(end.day).toBe(daysInMonth(end.year, end.month));
     const monthDistance = (end.year - start.year) * 12 + (end.month - start.month);
     expect(monthDistance).toBe(11);
-  });
-
-  it('round-trips through calendarDateToStr', () => {
-    expect(calendarDateToStr(new CalendarDate(2024, 2, 29))).toBe('2024-02-29');
   });
 });

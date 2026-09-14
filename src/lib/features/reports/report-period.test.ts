@@ -20,10 +20,15 @@ function str(range: { start: CalendarDate; end: CalendarDate }): [string, string
 }
 
 describe('getReportYearBounds', () => {
-  it('derives bounds from the book window', () => {
-    const { minYear, maxYear } = getReportYearBounds('2021-05-01', '2023-08-01');
-    expect(minYear).toBe(2021);
-    expect(maxYear).toBeGreaterThanOrEqual(new Date().getFullYear());
+  it('derives bounds from the book window and never before the current year', () => {
+    expect(getReportYearBounds('2021-05-01', '2099-08-01')).toEqual({
+      minYear: 2021,
+      maxYear: 2099
+    });
+    const currentYear = new Date().getFullYear();
+    expect(getReportYearBounds('2021-05-01', '2023-08-01').maxYear).toBe(
+      Math.max(2023, currentYear)
+    );
   });
 
   it('falls back when the book has no dates', () => {
@@ -34,9 +39,12 @@ describe('getReportYearBounds', () => {
     });
   });
 
-  it('swaps inverted bounds instead of returning an empty range', () => {
-    const bounds = getReportYearBounds('2025-01-01', '2020-01-01');
-    expect(bounds.minYear).toBeLessThanOrEqual(bounds.maxYear);
+  it('clamps an inverted window to a valid range', () => {
+    const currentYear = new Date().getFullYear();
+    expect(getReportYearBounds('9999-01-01', '1900-01-01')).toEqual({
+      minYear: currentYear,
+      maxYear: currentYear
+    });
   });
 });
 
@@ -177,7 +185,7 @@ describe('isAtBookStart / isAtPresent', () => {
     const m = now.getMonth() + 1;
     const monthEnd = new Date(y, m, 0).getDate();
     expect(isAtPresent(cd(y, m, 1), cd(y, m, monthEnd))).toBe(true);
-    expect(isAtPresent(cd(2024, 3, 1), cd(2024, 3, 31))).toBe(false);
+    expect(isAtPresent(cd(2020, 3, 1), cd(2020, 3, 31))).toBe(false);
     expect(isAtPresent(cd(y, m, 1), cd(y + 1, m, monthEnd))).toBe(true);
   });
 
