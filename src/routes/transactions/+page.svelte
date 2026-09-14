@@ -52,7 +52,7 @@
 
   const cols = useColumnVisibility<TransactionColumnId>(
     TRANSACTION_DEFAULT_COLUMNS,
-    'cols:transactions:v1'
+    'cols:transactions'
   );
   let visibleColumns = $derived(cols.visibleColumns);
 

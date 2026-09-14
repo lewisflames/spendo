@@ -56,7 +56,7 @@
     onRetry: () => void;
   } = $props();
 
-  const cols = useColumnVisibility<ColumnId>(DEFAULT_COLUMNS, 'cols:ledger:v1');
+  const cols = useColumnVisibility<ColumnId>(DEFAULT_COLUMNS, 'cols:ledger');
   let visibleColumns = $derived(cols.visibleColumns);
   let skeletonCols = $derived(visibleColumns.length + 2);
 

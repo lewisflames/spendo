@@ -1,7 +1,7 @@
 /**
  * Column visibility state shared by tables with a columns menu
  * (account ledger, holdings). Preserves `COLUMNS` order on show.
- * Pass a stable `storageKey` (e.g. `cols:ledger:v1`) to persist across
+ * Pass a stable `storageKey` (e.g. `cols:ledger`) to persist across
  * mounts; otherwise state is memory-only.
  */
 export interface ColumnVisibility<Id extends string> {
@@ -20,8 +20,6 @@ function loadStored<Id extends string>(key: string, defaults: Id[]): Id[] | null
     // Keep only known ids, preserve defaults order.
     const set = new Set(parsed.filter((v): v is Id => typeof v === 'string'));
     const ordered = defaults.filter((d) => set.has(d));
-    // Include any stored ids not in defaults (forward-compat), then validate non-empty.
-    for (const v of set) if (!ordered.includes(v)) ordered.push(v);
     return ordered.length > 0 ? ordered : null;
   } catch {
     return null;

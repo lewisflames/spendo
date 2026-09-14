@@ -98,8 +98,8 @@
   /** Activity/Prices tab selection (local; activity pagination owns the URL). */
   let tab = $state('activity');
 
-  const activityCols = useColumnVisibility(ACTIVITY_DEFAULT_COLUMNS, 'cols:holding-activity:v1');
-  const priceCols = useColumnVisibility(PRICE_DEFAULT_COLUMNS, 'cols:holding-prices:v1');
+  const activityCols = useColumnVisibility(ACTIVITY_DEFAULT_COLUMNS, 'cols:holding-activity');
+  const priceCols = useColumnVisibility(PRICE_DEFAULT_COLUMNS, 'cols:holding-prices');
 
   async function handleSymbolSave() {
     overridesRes.reload();
