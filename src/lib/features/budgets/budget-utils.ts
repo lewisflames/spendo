@@ -1,4 +1,4 @@
-import type { AccountNode, BudgetDateRange } from '$lib/tauri';
+import type { AccountNode, BudgetActualRow, BudgetDateRange } from '$lib/tauri';
 import { yearOf } from '$lib/utils/format.svelte';
 
 export interface YearOption {
@@ -84,4 +84,43 @@ export function accountNameMap(trees: AccountNode[] | undefined): Record<string,
   }
   walk(trees);
   return map;
+}
+
+export interface BudgetTotals {
+  budgetAmount: number;
+  rolloverBalance: number;
+  actualAmount: number;
+  expectedYtd: number;
+  delta: number;
+  remaining: number;
+  /** Weighted across rows: spent ÷ expected. Mirrors the backend's guard. */
+  pacingPercentage: number;
+  /** Uniform per year; 0 for an empty selection. */
+  elapsedMonths: number;
+}
+
+/** Aggregate a table selection into footer totals. */
+export function budgetTotals(rows: BudgetActualRow[]): BudgetTotals {
+  const totals: BudgetTotals = {
+    budgetAmount: 0,
+    rolloverBalance: 0,
+    actualAmount: 0,
+    expectedYtd: 0,
+    delta: 0,
+    remaining: 0,
+    pacingPercentage: 0,
+    elapsedMonths: rows[0]?.elapsedMonths ?? 0
+  };
+  for (const row of rows) {
+    totals.budgetAmount += row.budgetAmount;
+    totals.rolloverBalance += row.rolloverBalance;
+    totals.actualAmount += row.actualAmount;
+    totals.expectedYtd += row.expectedYtd;
+    totals.delta += row.delta;
+    totals.remaining += row.remaining;
+  }
+  if (totals.expectedYtd > 0) {
+    totals.pacingPercentage = (Math.max(0, totals.actualAmount) / totals.expectedYtd) * 100;
+  }
+  return totals;
 }
