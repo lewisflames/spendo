@@ -160,6 +160,7 @@ describe('budgetTotals', () => {
     ]);
     expect(totals).toEqual({
       budgetAmount: 1800,
+      monthlyAmount: 150,
       rolloverBalance: 200,
       actualAmount: 1100,
       expectedYtd: 850,
@@ -168,6 +169,11 @@ describe('budgetTotals', () => {
       pacingPercentage: (1100 / 850) * 100,
       elapsedMonths: 6
     });
+  });
+
+  it('derives monthlyAmount from the annual amount', () => {
+    const totals = budgetTotals([budgetRow({ budgetAmount: 1000 })]);
+    expect(totals.monthlyAmount).toBeCloseTo(1000 / 12);
   });
 
   it('weights pacing by aggregate expected, not per-row percentages', () => {
@@ -194,6 +200,7 @@ describe('budgetTotals', () => {
   it('returns zeroed totals for an empty selection', () => {
     expect(budgetTotals([])).toEqual({
       budgetAmount: 0,
+      monthlyAmount: 0,
       rolloverBalance: 0,
       actualAmount: 0,
       expectedYtd: 0,

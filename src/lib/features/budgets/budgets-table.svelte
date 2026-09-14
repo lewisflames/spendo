@@ -1,9 +1,17 @@
 <script lang="ts" module>
   export type BudgetColumnId =
-    'budget' | 'carryIn' | 'spent' | 'expectedYtd' | 'aheadBehind' | 'pacing' | 'remaining';
+    | 'budget'
+    | 'monthly'
+    | 'carryIn'
+    | 'spent'
+    | 'expectedYtd'
+    | 'aheadBehind'
+    | 'pacing'
+    | 'remaining';
 
   export const BUDGET_COLUMNS: { id: BudgetColumnId; label: string }[] = [
-    { id: 'budget', label: 'Budget' },
+    { id: 'budget', label: 'Annual' },
+    { id: 'monthly', label: 'Monthly' },
     { id: 'carryIn', label: 'Carry-in' },
     { id: 'spent', label: 'Spent' },
     { id: 'expectedYtd', label: 'Expected YTD' },
@@ -14,6 +22,7 @@
 
   export const BUDGET_DEFAULT_COLUMNS: BudgetColumnId[] = [
     'budget',
+    'monthly',
     'spent',
     'aheadBehind',
     'pacing',
@@ -100,7 +109,10 @@
       <Table.Row class="bg-muted/75">
         <Table.Head class="text-muted-foreground">Account</Table.Head>
         {#if cols.isVisible('budget')}
-          <Table.Head class="text-right text-muted-foreground">Budget</Table.Head>
+          <Table.Head class="text-right text-muted-foreground">Annual</Table.Head>
+        {/if}
+        {#if cols.isVisible('monthly')}
+          <Table.Head class="text-right text-muted-foreground">Monthly</Table.Head>
         {/if}
         {#if cols.isVisible('carryIn')}
           <Table.Head class="text-right text-muted-foreground">Carry-in</Table.Head>
@@ -140,6 +152,11 @@
           {#if cols.isVisible('budget')}
             <Table.Cell class="py-2.5 text-right tabular-nums">
               {fmt(item.budgetAmount)}
+            </Table.Cell>
+          {/if}
+          {#if cols.isVisible('monthly')}
+            <Table.Cell class="py-2.5 text-right tabular-nums">
+              {fmt(item.budgetAmount / 12)}
             </Table.Cell>
           {/if}
           {#if cols.isVisible('carryIn')}
@@ -204,6 +221,11 @@
         {#if cols.isVisible('budget')}
           <Table.Cell class="py-2.5 text-right tabular-nums">
             {fmt(totals.budgetAmount)}
+          </Table.Cell>
+        {/if}
+        {#if cols.isVisible('monthly')}
+          <Table.Cell class="py-2.5 text-right tabular-nums">
+            {fmt(totals.monthlyAmount)}
           </Table.Cell>
         {/if}
         {#if cols.isVisible('carryIn')}
