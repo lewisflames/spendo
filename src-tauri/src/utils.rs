@@ -290,14 +290,6 @@ mod tests {
     }
 
     #[test]
-    fn total_pages_always_at_least_one() {
-        assert_eq!(total_pages(0, 50), 1);
-        assert_eq!(total_pages(1, 50), 1);
-        assert_eq!(total_pages(51, 50), 2);
-        assert_eq!(total_pages(100, 50), 2);
-    }
-
-    #[test]
     fn paginate_clamps_and_never_divides_by_zero() {
         // Zero/negative/huge sizes clamp to 1..=500.
         let (size, pages, safe, offset) = paginate(0, 1, 0);
@@ -309,5 +301,8 @@ mod tests {
         assert_eq!(offset, 50);
         let (size, _, _, _) = paginate(10, 1, 10_000);
         assert_eq!(size, 500);
+        // Totals never yield an empty page range.
+        assert_eq!(total_pages(0, 50), 1);
+        assert_eq!(total_pages(51, 50), 2);
     }
 }

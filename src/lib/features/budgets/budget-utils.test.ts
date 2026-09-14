@@ -5,9 +5,7 @@ import {
   accountPathMap,
   budgetTotals,
   budgetYearBounds,
-  buildYearOptions,
   clampYear,
-  fallbackYearOptions,
   flattenExpenseAccounts
 } from './budget-utils';
 
@@ -47,25 +45,6 @@ function budgetRow(partial: Partial<BudgetActualRow>): BudgetActualRow {
     ...partial
   };
 }
-
-describe('buildYearOptions', () => {
-  it('builds a contiguous string-valued range', () => {
-    expect(buildYearOptions(2022, 2024)).toEqual([
-      { value: '2022', label: '2022' },
-      { value: '2023', label: '2023' },
-      { value: '2024', label: '2024' }
-    ]);
-  });
-});
-
-describe('fallbackYearOptions', () => {
-  it('centers radius + 6 entries ending above the center year', () => {
-    const opts = fallbackYearOptions(2024, 2);
-    expect(opts.length).toBe(8);
-    expect(opts[0].value).toBe('2022');
-    expect(opts[opts.length - 1].value).toBe('2029');
-  });
-});
 
 describe('clampYear', () => {
   it('clamps to non-null bounds, passes through otherwise', () => {

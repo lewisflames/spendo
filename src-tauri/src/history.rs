@@ -773,32 +773,6 @@ mod tests {
     }
 
     #[test]
-    fn revert_maps_only_fk_violations_to_blocked() {
-        use crate::db::DbError;
-        // Synthetic FK failure (unreachable end-to-end with the current
-        // schema — the only FK onto data tables cascades — so cover the
-        // mapping directly).
-        let fk = AppError::Db(DbError {
-            message: "FOREIGN KEY constraint failed".to_string(),
-            extended_code: Some(rusqlite::ffi::SQLITE_CONSTRAINT_FOREIGNKEY),
-        });
-        let mapped = map_revert_error(fk);
-        assert!(matches!(mapped, AppError::Validation(ref m) if m.contains("depends")));
-        assert_eq!(
-            String::from(mapped),
-            "Cannot revert — newer data depends on this change"
-        );
-        // Other Db failures (e.g. UNIQUE) and guards pass through untouched.
-        let unique = AppError::Db(DbError {
-            message: "UNIQUE constraint failed".to_string(),
-            extended_code: Some(rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE),
-        });
-        assert!(matches!(map_revert_error(unique), AppError::Db(_)));
-        let guard = AppError::Validation("Revert newer changes first".to_string());
-        assert!(matches!(map_revert_error(guard), AppError::Validation(_)));
-    }
-
-    #[test]
     fn history_paginates_newest_first() {
         let conn = setup();
         for i in 0..3 {

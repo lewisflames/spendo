@@ -1036,4 +1036,80 @@ mod tests {
         assert_eq!(page.total, 0);
         assert!(page.transactions.is_empty());
     }
+
+    fn setup_valued_portfolio() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        init_db(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO commodities (guid, mnemonic, namespace, fullname) VALUES
+             ('c-eur', 'EUR', 'CURRENCY', NULL),
+             ('c-aapl', 'AAPL', 'NASDAQ', 'Apple Inc'),
+             ('c-xyz', 'XYZ', 'NASDAQ', 'XYZ Corp')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO accounts (guid, name, account_type, parent_guid, placeholder, commodity_guid) VALUES
+             ('root', 'Root', 'ROOT', NULL, 0, 'c-eur'),
+             ('broker', 'Broker', 'STOCK', 'root', 0, 'c-aapl'),
+             ('vault', 'Vault', 'STOCK', 'root', 0, 'c-xyz')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO transactions (guid, post_date) VALUES
+             ('t-aapl', '2024-02-01'), ('t-xyz', '2024-02-15')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO splits (guid, tx_guid, account_guid, value_num, value_denom, quantity_num, quantity_denom) VALUES
+             ('s-aapl', 't-aapl', 'broker', 100000, 100, 10, 1),
+             ('s-xyz', 't-xyz', 'vault', 70000, 100, 5, 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO prices (guid, commodity_guid, currency_guid, value_num, value_denom, date)
+             VALUES ('p-aapl-prev', 'c-aapl', 'c-eur', 14000, 100, '2024-02-01'),
+                    ('p-aapl-latest', 'c-aapl', 'c-eur', 15000, 100, '2024-03-01')",
+            [],
+        )
+        .unwrap();
+        conn
+    }
+
+    #[test]
+    fn portfolio_values_priced_holdings_and_zero_values_unpriced_ones() {
+        let conn = setup_valued_portfolio();
+        let data = fetch_portfolio_data_inner(&conn).unwrap();
+
+        // Value desc: priced AAPL first, unpriced XYZ trails.
+        assert_eq!(data.holdings.len(), 2);
+        let aapl = &data.holdings[0];
+        assert_eq!(aapl.commodity_guid, "c-aapl");
+        assert_eq!(aapl.shares, 10.0);
+        assert_eq!(aapl.cost_basis, 1000.0);
+        assert_eq!(aapl.market_value, 1500.0);
+        assert_eq!(aapl.gain_loss, 500.0);
+        assert_eq!(aapl.gain_loss_pct, 50.0);
+        assert_eq!(aapl.price, Some(150.0));
+        assert_eq!(aapl.prev_price, Some(140.0));
+        assert_eq!(aapl.price_date.as_deref(), Some("2024-03-01"));
+        assert_eq!(aapl.allocation_pct, 100.0);
+
+        let xyz = &data.holdings[1];
+        assert_eq!(xyz.commodity_guid, "c-xyz");
+        assert_eq!(xyz.shares, 5.0);
+        assert_eq!(xyz.cost_basis, 700.0);
+        assert_eq!(xyz.market_value, 0.0);
+        assert_eq!(xyz.gain_loss, -700.0);
+        assert_eq!(xyz.price, None);
+        assert_eq!(xyz.allocation_pct, 0.0);
+
+        assert_eq!(data.total_market_value, 1500.0);
+        assert_eq!(data.total_cost_basis, 1700.0);
+        assert_eq!(data.total_gain_loss, -200.0);
+        assert!((data.total_gain_loss_pct - (-200.0 / 1700.0) * 100.0).abs() < 1e-9);
+    }
 }

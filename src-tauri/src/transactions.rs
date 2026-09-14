@@ -1267,4 +1267,110 @@ mod tests {
         };
         assert_eq!(affected, vec![2, 2, 2]);
     }
+
+    #[test]
+    fn list_filters_sorts_and_paginates_visible_transactions() {
+        let conn = setup_two_accounts();
+        conn.execute(
+            "UPDATE transactions SET description = 'Coffee' WHERE guid = 't1'",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE transactions SET description = 'Rent' WHERE guid = 't2'",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO transactions (guid, post_date, description) VALUES ('t3', '2099-01-01', 'Future')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO splits (guid, tx_guid, account_guid, value_num, value_denom, quantity_num, quantity_denom)
+             VALUES ('s-t3', 't3', 'checking', 100, 100, 100, 100)",
+            [],
+        )
+        .unwrap();
+
+        // Future-dated rows stay hidden from the list.
+        let all = fetch_transactions_inner(&conn, 1, 50, None, None, None).unwrap();
+        assert_eq!(all.total, 2);
+        assert_eq!(
+            all.transactions
+                .iter()
+                .map(|t| t.guid.as_str())
+                .collect::<Vec<_>>(),
+            vec!["t2", "t1"]
+        );
+
+        // Search and date range combine with AND.
+        let filtered = fetch_transactions_inner(
+            &conn,
+            1,
+            50,
+            Some(Filters {
+                search: Some("coffee".into()),
+                date_from: Some("2024-02-01".into()),
+                date_to: None,
+            }),
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(filtered.total, 0);
+
+        let search = fetch_transactions_inner(
+            &conn,
+            1,
+            50,
+            Some(Filters {
+                search: Some("coffee".into()),
+                date_from: None,
+                date_to: None,
+            }),
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(search.total, 1);
+        assert_eq!(search.transactions[0].guid, "t1");
+
+        // Page 2 of size 1 holds the older transaction.
+        let page2 = fetch_transactions_inner(&conn, 2, 1, None, None, None).unwrap();
+        assert_eq!(page2.page, 2);
+        assert_eq!(page2.total_pages, 2);
+        assert_eq!(page2.transactions.len(), 1);
+        assert_eq!(page2.transactions[0].guid, "t1");
+
+        // Amount sorting uses the FX-converted transaction total.
+        let asc =
+            fetch_transactions_inner(&conn, 1, 50, None, Some("amount"), Some("asc")).unwrap();
+        assert_eq!(asc.transactions[0].guid, "t2");
+        let desc =
+            fetch_transactions_inner(&conn, 1, 50, None, Some("amount"), Some("desc")).unwrap();
+        assert_eq!(desc.transactions[0].guid, "t1");
+    }
+
+    #[test]
+    fn reconciled_or_cleared_splits_block_edit_and_delete() {
+        let conn = setup_two_accounts();
+        let guid = create_transaction_inner(&conn, balanced_input()).unwrap();
+        let set_state = |state: &str| {
+            conn.execute("UPDATE splits SET reconcile_state = ?1", params![state])
+                .unwrap();
+        };
+
+        for state in ["c", "y"] {
+            set_state(state);
+            let err = update_transaction_inner(&conn, &guid, balanced_input()).unwrap_err();
+            assert!(err.to_string().contains("reconcile"), "unexpected: {err}");
+            let err = delete_transaction_inner(&conn, &guid).unwrap_err();
+            assert!(err.to_string().contains("reconcile"), "unexpected: {err}");
+        }
+
+        set_state("n");
+        update_transaction_inner(&conn, &guid, balanced_input()).expect("unlocked edit runs");
+        delete_transaction_inner(&conn, &guid).expect("unlocked delete runs");
+    }
 }

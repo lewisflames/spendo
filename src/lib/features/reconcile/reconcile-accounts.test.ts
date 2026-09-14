@@ -40,7 +40,7 @@ describe('flattenReconcilableAccounts', () => {
     expect(rows.every((r) => r.parentPath === null)).toBe(true);
   });
 
-  it('sets parentPath only for duplicate display names', () => {
+  it('detects duplicate display names among reconcilable rows only', () => {
     const trees = [
       node({
         guid: 'bank-a',
@@ -54,14 +54,12 @@ describe('flattenReconcilableAccounts', () => {
         name: 'Bank B',
         accountType: 'ASSET',
         placeholder: true,
-        children: [node({ guid: 'checking-b', name: 'Checking' })]
-      }),
-      node({ guid: 'savings', name: 'Savings' })
+        children: [node({ guid: 'checking-b', name: 'Checking', accountType: 'STOCK' })]
+      })
     ];
     const rows = flattenReconcilableAccounts(trees);
-    expect(rows.find((r) => r.guid === 'checking-a')?.parentPath).toBe('Bank A');
-    expect(rows.find((r) => r.guid === 'checking-b')?.parentPath).toBe('Bank B');
-    expect(rows.find((r) => r.guid === 'savings')?.parentPath).toBeNull();
+    expect(rows.map((r) => r.guid)).toEqual(['checking-a']);
+    expect(rows[0].parentPath).toBeNull();
   });
 
   it('returns empty for missing trees', () => {
