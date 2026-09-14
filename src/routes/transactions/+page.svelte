@@ -1,11 +1,14 @@
 <script lang="ts">
   import ErrorCard from '$lib/components/shared/error-card.svelte';
   import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
-  import { fetchTransactions, fetchAccountNames } from '$lib/tauri';
+  import { fetchTransactions } from '$lib/tauri';
   import { dbBootstrapping, dbSession } from '$lib/stores/db.svelte';
   import { appSettings, applyPageSize } from '$lib/stores/settings.svelte';
   import TransactionFilters from '$lib/features/transactions/transaction-filters.svelte';
-  import TransactionTable from '$lib/features/transactions/transaction-table.svelte';
+  import TransactionTable, {
+    TRANSACTION_COLUMNS,
+    TRANSACTION_DEFAULT_COLUMNS
+  } from '$lib/features/transactions/transaction-table.svelte';
   import TransactionHeatmap from '$lib/features/transactions/transaction-heatmap.svelte';
   import { Button } from '$lib/components/ui/button';
   import { Plus } from '@lucide/svelte';
@@ -15,7 +18,7 @@
   import PageSkeleton from '$lib/components/shared/page-skeleton.svelte';
   import BookGate from '$lib/components/shared/book-gate.svelte';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
-  import { toast } from '$lib/components/ui/sonner';
+  import { ColumnsMenu } from '$lib/components/shared/columns-menu';
   import { useDebouncedSearch } from '$lib/hooks/use-debounced-search.svelte';
   import {
     useUrlParams,
@@ -24,11 +27,12 @@
     dateParam
   } from '$lib/hooks/use-url-params.svelte';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
+  import { useColumnVisibility } from '$lib/hooks/use-column-visibility.svelte';
   import { useResetPageOnChange } from '$lib/hooks/use-page-reset.svelte';
   import { useTableSort } from '$lib/hooks/use-table-sort.svelte';
   import { plural, sessionCurrency } from '$lib/utils/format.svelte';
   import { ArrowLeftRight, CalendarClock } from '@lucide/svelte';
-  import type { AccountInfo } from '$lib/tauri';
+  import type { TransactionColumnId } from '$lib/features/transactions/transaction-table.svelte';
 
   let pageSize = $derived(appSettings.value.pageSize);
 
@@ -43,9 +47,25 @@
   let searchInput = $state('');
   let dateFrom = $state('');
   let dateTo = $state('');
-  let accountName = $state('');
 
   let search = useDebouncedSearch(() => searchInput);
+
+  const cols = useColumnVisibility<TransactionColumnId>(
+    TRANSACTION_DEFAULT_COLUMNS,
+    'cols:transactions:v1'
+  );
+  let visibleColumns = $derived(cols.visibleColumns);
+
+  // Don't leave an invisible sort in effect: prefer the still-visible date,
+  // else the always-visible description.
+  const SORT_FALLBACKS = ['date', 'description', 'amount'] as const;
+  function handleHideColumn(id: TransactionColumnId) {
+    if (id !== sortBy) return;
+    const next = SORT_FALLBACKS.find(
+      (key) => key !== id && (key === 'description' || cols.isVisible(key))
+    );
+    sort.toggle(next ?? 'description');
+  }
 
   useUrlParams([
     pageParam(
@@ -70,20 +90,13 @@
       'to',
       () => dateTo || null,
       (v) => (dateTo = v ?? '')
-    ),
-    {
-      key: 'account',
-      get: () => accountName || null,
-      apply: (v) => (accountName = v ?? ''),
-      replace: true
-    }
+    )
   ]);
 
   let filters = $derived({
     ...(search.value ? { search: search.value } : {}),
     ...(dateFrom ? { dateFrom } : {}),
-    ...(dateTo ? { dateTo } : {}),
-    ...(accountName ? { accountName } : {})
+    ...(dateTo ? { dateTo } : {})
   });
 
   let currency = $derived(sessionCurrency());
@@ -112,26 +125,6 @@
     },
     label: 'Failed to load transactions'
   });
-
-  // Let the ledger table win the initial backend race: the account filter
-  // options load once the first table request settles. One-shot so later
-  // table refetches never wipe the options (a disabled hook clears data).
-  let accountsUnlocked = $derived(res.data !== null || res.error !== null);
-
-  let accounts = $state<AccountInfo[]>([]);
-
-  useAsyncData({
-    enabled: () => !!dbSession.value && accountsUnlocked,
-    fetch: fetchAccountNames,
-    label: 'Failed to load accounts',
-    onError: (message) => {
-      accounts = [];
-      toast.error(message);
-    },
-    onSuccess: (r) => {
-      accounts = r;
-    }
-  });
 </script>
 
 <svelte:head>
@@ -159,13 +152,11 @@
 
     <TransactionHeatmap {filters} />
 
-    <TransactionFilters
-      bind:search={searchInput}
-      bind:dateFrom
-      bind:dateTo
-      bind:accountName
-      {accounts}
-    />
+    <TransactionFilters bind:search={searchInput} bind:dateFrom bind:dateTo>
+      {#snippet extra()}
+        <ColumnsMenu columns={TRANSACTION_COLUMNS} {cols} onHide={handleHideColumn} />
+      {/snippet}
+    </TransactionFilters>
 
     {#if (res.loading || dbBootstrapping.value) && !res.data}
       <!-- Pagination placeholder holds its height so nothing jumps on first load. -->
@@ -178,7 +169,7 @@
         <EmptyState
           card
           title="No transactions"
-          description="No transactions found{search.value || dateFrom || dateTo || accountName
+          description="No transactions found{search.value || dateFrom || dateTo
             ? ' matching the current filters'
             : ''}."
         >
@@ -196,6 +187,7 @@
             {sortBy}
             {sortDir}
             onSort={sort.toggle}
+            {visibleColumns}
           />
           <PaginationNav
             bind:page
