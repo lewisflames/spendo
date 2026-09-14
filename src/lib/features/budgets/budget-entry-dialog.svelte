@@ -31,9 +31,10 @@
 
   let loading = $state(false);
   let formError = $state('');
+  let showErrors = $state(false);
 
   let amountError = $derived(amount > 0 ? '' : 'Target must be greater than zero');
-  let saveDisabled = $derived(loading || amount <= 0);
+  let canSave = $derived(!loading && amount > 0);
 
   // Re-initialize the form whenever the dialog opens (user interaction), so
   // it always reflects the target year.
@@ -42,11 +43,16 @@
   function syncFromEntry() {
     amount = initialAmount;
     formError = '';
+    showErrors = false;
     loading = false;
   }
 
   async function handleSave() {
-    if (amount <= 0) return;
+    if (loading) return;
+    if (!canSave) {
+      showErrors = true;
+      return;
+    }
     loading = true;
     formError = '';
     try {
@@ -91,8 +97,8 @@
             bind:value={amount}
             placeholder="0.00"
             class="pr-16"
-            aria-invalid={!!amountError}
-            aria-describedby={amountError ? 'amount-error' : undefined}
+            aria-invalid={showErrors && !!amountError}
+            aria-describedby={showErrors && amountError ? 'amount-error' : undefined}
             autofocus
           />
           <span
@@ -100,7 +106,7 @@
             >{currency}</span
           >
         </div>
-        {#if amountError}
+        {#if showErrors && amountError}
           <p id="amount-error" role="alert" class="text-xs text-destructive">{amountError}</p>
         {/if}
         {#if formError}
@@ -115,7 +121,7 @@
       deleting={false}
       confirmDelete={false}
       saveLabel={exists ? 'Save' : 'Create budget'}
-      {saveDisabled}
+      saveDisabled={loading}
       onDelete={() => {}}
       onSave={handleSave}
       onCancel={() => {

@@ -44,6 +44,7 @@
   let loading = $state(false);
   let formError = $state('');
   let fetchError = $state('');
+  let showErrors = $state(false);
 
   // Years already budgeted for the target account. Null = unknown
   // (no account selected yet, or not fetched).
@@ -75,6 +76,7 @@
     amount = 0;
     formError = '';
     fetchError = '';
+    showErrors = false;
     existingYears = null;
     yearsLoading = false;
     loading = false;
@@ -124,14 +126,17 @@
   );
 
   let noFreeYears = $derived(target !== null && existingYears !== null && freeYears.length === 0);
+  let canSave = $derived(
+    !loading &&
+      !yearsLoading &&
+      target !== null &&
+      existingYears !== null &&
+      !noFreeYears &&
+      amount > 0 &&
+      !yearError
+  );
   let saveDisabled = $derived(
-    loading ||
-      yearsLoading ||
-      (target !== null && existingYears === null) ||
-      noFreeYears ||
-      !target ||
-      amount <= 0 ||
-      !!yearError
+    loading || yearsLoading || (target !== null && existingYears === null) || noFreeYears
   );
 
   function retryFetchYears() {
@@ -164,7 +169,11 @@
 
   async function handleSave() {
     const y = Number(by.yearSel);
-    if (!target || amount <= 0 || yearError) return;
+    if (loading) return;
+    if (!canSave || !target) {
+      showErrors = true;
+      return;
+    }
     loading = true;
     formError = '';
     try {
@@ -206,8 +215,8 @@
             <Select.Trigger
               id="account"
               class="w-full"
-              aria-invalid={!!accountError}
-              aria-describedby={accountError ? 'account-error' : undefined}
+              aria-invalid={showErrors && !!accountError}
+              aria-describedby={showErrors && accountError ? 'account-error' : undefined}
             >
               <SelectPrimitive.Value placeholder="Select an expense account" />
             </Select.Trigger>
@@ -219,7 +228,7 @@
               {/each}
             </Select.Content>
           </Select.Root>
-          {#if accountError}
+          {#if showErrors && accountError}
             <p id="account-error" role="alert" class="text-xs text-destructive">{accountError}</p>
           {/if}
         </div>
@@ -236,15 +245,15 @@
             bind:value={amount}
             placeholder="0.00"
             class="pr-16"
-            aria-invalid={!!amountError}
-            aria-describedby={amountError ? 'amount-error' : undefined}
+            aria-invalid={showErrors && !!amountError}
+            aria-describedby={showErrors && amountError ? 'amount-error' : undefined}
           />
           <span
             class="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-xs text-muted-foreground uppercase"
             >{currency}</span
           >
         </div>
-        {#if amountError}
+        {#if showErrors && amountError}
           <p id="amount-error" role="alert" class="text-xs text-destructive">{amountError}</p>
         {/if}
       </div>
@@ -255,8 +264,8 @@
           <Select.Trigger
             id="year"
             class="min-w-20 justify-center"
-            aria-invalid={!!yearError}
-            aria-describedby={yearError ? 'year-error' : undefined}
+            aria-invalid={showErrors && !!yearError}
+            aria-describedby={showErrors && yearError ? 'year-error' : undefined}
             aria-labelledby="budget-year-label"
           >
             <SelectPrimitive.Value />
@@ -272,7 +281,7 @@
         </Select.Root>
       </div>
 
-      {#if yearError}
+      {#if showErrors && yearError}
         <p id="year-error" role="alert" class="text-xs text-destructive">{yearError}</p>
       {/if}
       {#if fetchError}
