@@ -1,12 +1,13 @@
 <script lang="ts" module>
   export type BudgetColumnId =
-    'budget' | 'carryIn' | 'spent' | 'expectedYtd' | 'pacing' | 'remaining';
+    'budget' | 'carryIn' | 'spent' | 'expectedYtd' | 'aheadBehind' | 'pacing' | 'remaining';
 
   export const BUDGET_COLUMNS: { id: BudgetColumnId; label: string }[] = [
     { id: 'budget', label: 'Budget' },
     { id: 'carryIn', label: 'Carry-in' },
     { id: 'spent', label: 'Spent' },
     { id: 'expectedYtd', label: 'Expected YTD' },
+    { id: 'aheadBehind', label: 'Ahead / Behind' },
     { id: 'pacing', label: 'Pacing' },
     { id: 'remaining', label: 'Remaining' }
   ];
@@ -14,6 +15,7 @@
   export const BUDGET_DEFAULT_COLUMNS: BudgetColumnId[] = [
     'budget',
     'spent',
+    'aheadBehind',
     'pacing',
     'remaining'
   ];
@@ -107,6 +109,9 @@
         {#if cols.isVisible('expectedYtd')}
           <Table.Head class="text-right text-muted-foreground">Expected YTD</Table.Head>
         {/if}
+        {#if cols.isVisible('aheadBehind')}
+          <Table.Head class="text-right text-muted-foreground">Ahead / Behind</Table.Head>
+        {/if}
         {#if cols.isVisible('pacing')}
           <Table.Head class="text-muted-foreground">Pacing</Table.Head>
         {/if}
@@ -151,6 +156,20 @@
             <Table.Cell class="py-2.5 text-right tabular-nums">
               {#if item.elapsedMonths > 0}
                 {fmt(item.expectedYtd)}
+              {:else}
+                <span class="text-xs text-muted-foreground">{EMPTY_DASH}</span>
+              {/if}
+            </Table.Cell>
+          {/if}
+          {#if cols.isVisible('aheadBehind')}
+            <Table.Cell
+              class={cn(
+                'py-2.5 text-right tabular-nums',
+                item.elapsedMonths > 0 && signColor(item.delta)
+              )}
+            >
+              {#if item.elapsedMonths > 0}
+                {fmtSigned(item.delta)}
               {:else}
                 <span class="text-xs text-muted-foreground">{EMPTY_DASH}</span>
               {/if}
