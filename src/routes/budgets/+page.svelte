@@ -29,7 +29,7 @@
     BUDGET_DEFAULT_COLUMNS
   } from '$lib/features/budgets/budgets-table.svelte';
 
-  const budgetCols = useColumnVisibility(BUDGET_DEFAULT_COLUMNS, 'cols:budgets:v2');
+  const budgetCols = useColumnVisibility(BUDGET_DEFAULT_COLUMNS, 'cols:budgets');
 
   let showAddDialog = $state(false);
 

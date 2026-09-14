@@ -67,7 +67,7 @@
   let sortBy = $derived(sort.sortBy);
   let sortDir = $derived(sort.sortDir);
 
-  const cols = useColumnVisibility<ColumnId>(DEFAULT_COLUMNS, 'cols:holdings:v1');
+  const cols = useColumnVisibility<ColumnId>(DEFAULT_COLUMNS, 'cols:holdings');
   let visibleColumns = $derived(cols.visibleColumns);
 
   let searchInput = $state('');

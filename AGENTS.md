@@ -86,6 +86,7 @@ No `preview` script (no `vite preview` wrapper). Frontend unit tests are pure-he
 - **Dialogs**: form reset goes through `useDialogReset(() => open, sync)` (bits-ui never fires `onOpenChange` for programmatic `bind:open`); create/edit footers use `<SaveFooter layout=…>` — never copy the reset effect or footer buttons.
 - **Barrels**: named exports only in `index.ts` re-export files (no default+named duplication).
 - **tauri.ts**: leaf payload types are module-private; only export types that other modules import.
+- **Persisted frontend state**: localStorage keys are stable and unversioned (e.g. `spendo-settings`, `cols:budgets`). Never add version suffixes (`:v2`) or migration/legacy-compat branches; drop unknown or invalid stored values instead. A stored selection always wins — new default columns appear only for users with no stored state or after "Reset to default" in the Columns menu.
 
 ## Naming glossary (do not invent synonyms)
 
