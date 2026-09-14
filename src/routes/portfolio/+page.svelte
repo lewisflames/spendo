@@ -8,6 +8,7 @@
     formatSessionCurrency,
     formatSignedCurrency,
     fmtPct,
+    formatAllocPct,
     formatDate
   } from '$lib/utils/format.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
@@ -80,6 +81,12 @@
       color: holdingColor(i),
       sharePct: total > 0 ? (Math.max(h.marketValue, 0) / total) * 100 : null
     }));
+  });
+
+  let netWorthSharePct = $derived.by(() => {
+    const netWorth = dbSession.value?.summary.netWorth ?? 0;
+    if (netWorth <= 0 || !res.data) return null;
+    return (res.data.totalMarketValue / netWorth) * 100;
   });
 
   let headerDescription = $derived.by(() => {
@@ -174,8 +181,8 @@
                 data={pieData}
                 title="Allocation"
                 description="By market value"
-                centerLabel="Total"
-                centerValue={fmt(d.totalMarketValue)}
+                centerLabel={netWorthSharePct != null ? 'of Net Worth' : null}
+                centerValue={netWorthSharePct != null ? formatAllocPct(netWorthSharePct) : null}
                 onSelect={(key) => openHolding(key)}
               />
             </div>
