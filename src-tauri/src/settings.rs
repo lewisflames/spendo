@@ -4,12 +4,6 @@ use tauri::State;
 
 use crate::db::{clear_db, run_blocking, AppState};
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DataInfo {
-    pub db_path: String,
-}
-
 #[tauri::command]
 pub async fn clear_app_db(state: State<'_, AppState>) -> Result<(), String> {
     run_blocking(state.db.clone(), |conn| {
@@ -29,26 +23,12 @@ pub async fn write_text_file(path: String, contents: String) -> Result<(), Strin
     })
     .await
 }
-/// Reads only the precomputed active-book path — no DB access. While no book
-/// is open yet (fresh install) it falls back to the legacy default path so
-/// the UI still has something to display; prefer `books::fetch_active_book`
-/// when nullability matters.
-#[tauri::command]
-pub async fn fetch_data_info(state: State<'_, AppState>) -> Result<DataInfo, String> {
-    let guard = state.db_path.lock().map_err(|e| e.to_string())?;
-    let path = guard
-        .clone()
-        .unwrap_or_else(|| crate::db::get_db_path(&state.app_data_dir));
-    Ok(DataInfo {
-        db_path: path.to_string_lossy().to_string(),
-    })
-}
 
 // ── Book-scoped settings (travel with the `.spendo` file) ──
 
 /// Full book-settings snapshot served to the frontend (camelCase). Stored as
 /// individual `TEXT` rows in `app_settings`; missing rows fall back to
-/// defaults so pre-table books keep working without a reset.
+/// defaults.
 #[derive(Serialize, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct BookSettings {
@@ -67,18 +47,6 @@ fn default_book_settings() -> BookSettings {
         export_csv_delimiter: ",".to_string(),
         export_date_format: "iso".to_string(),
     }
-}
-
-/// Idempotent backfill for pre-table books: `init_db` covers fresh files, but
-/// existing books opened after the upgrade need the table without a reset.
-fn ensure_app_settings_table(conn: &Connection) -> Result<(), String> {
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS app_settings (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL
-        );",
-    )
-    .map_err(|e| e.to_string())
 }
 
 fn read_setting(conn: &Connection, key: &str) -> Result<Option<String>, String> {
@@ -124,7 +92,6 @@ fn validate_book_setting(key: &str, value: &str) -> Result<(), String> {
 }
 
 fn get_book_settings_inner(conn: &Connection) -> Result<BookSettings, String> {
-    ensure_app_settings_table(conn)?;
     let defaults = default_book_settings();
     let pick = |key: &str, fallback: String| -> Result<String, String> {
         match read_setting(conn, key)? {
@@ -165,7 +132,6 @@ fn set_book_setting_inner(
     value: &str,
 ) -> Result<BookSettings, String> {
     validate_book_setting(key, value)?;
-    ensure_app_settings_table(conn)?;
     conn.execute(
         "INSERT INTO app_settings (key, value) VALUES (?1, ?2)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -177,7 +143,7 @@ fn set_book_setting_inner(
 
 #[tauri::command]
 pub async fn get_book_settings(state: State<'_, AppState>) -> Result<BookSettings, String> {
-    run_blocking(state.db.clone(), |conn| get_book_settings_inner(conn)).await
+    run_blocking(state.db.clone(), get_book_settings_inner).await
 }
 
 #[tauri::command]
@@ -207,23 +173,6 @@ mod tests {
     fn defaults_on_fresh_book() {
         let conn = mem_db();
         assert_eq!(get_book_settings_inner(&conn).unwrap(), default_book_settings());
-    }
-
-    #[test]
-    fn backfills_missing_table_on_old_books() {
-        let conn = Connection::open_in_memory().unwrap();
-        // Pre-table book: schema without app_settings.
-        conn.execute_batch("CREATE TABLE commodities (guid TEXT PRIMARY KEY, mnemonic TEXT);")
-            .unwrap();
-        assert_eq!(get_book_settings_inner(&conn).unwrap(), default_book_settings());
-        let tables: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'app_settings'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(tables, 1);
     }
 
     #[test]

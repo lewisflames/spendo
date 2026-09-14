@@ -5,7 +5,6 @@
   import { Select as SelectPrimitive } from 'bits-ui';
   import * as Dialog from '$lib/components/ui/dialog';
   import IconCardHeader from '$lib/components/shared/icon-card-header.svelte';
-  import ErrorCard from '$lib/components/shared/error-card.svelte';
   import SettingSelectRow from './setting-select-row.svelte';
   import { BOOK_CURRENCIES, defaultCurrencyForLocale } from '$lib/utils/currency';
   import { ensureSpendoExtension } from '$lib/utils/book';
@@ -25,17 +24,7 @@
   import { appSettings } from '$lib/stores/settings.svelte';
   import { createBookAt, openBook, saveBookAs, setBaseCurrency } from '$lib/tauri';
 
-  let {
-    dbPath,
-    dataError,
-    onRetryData,
-    onBookChanged
-  }: {
-    dbPath: string | null;
-    dataError: string | null;
-    onRetryData: () => void;
-    onBookChanged: () => Promise<void>;
-  } = $props();
+  let { onBookChanged }: { onBookChanged: () => Promise<void> } = $props();
 
   let switching = $state(false);
   let copied = $state(false);
@@ -43,7 +32,7 @@
   let currencyDialogOpen = $state(false);
   let pendingCurrency = $state<string | null>(null);
 
-  const activePath = $derived(activeBookPath.value ?? dbPath);
+  const activePath = $derived(activeBookPath.value);
 
   function bookHasData(): boolean {
     const summary = dbSession.value?.summary;
@@ -224,50 +213,46 @@
       {/if}
     </SettingSelectRow>
     <div class="flex flex-col items-start gap-3">
-      {#if dataError}
-        <ErrorCard message={dataError} onRetry={onRetryData} />
-      {:else}
-        <div class="flex w-full items-center gap-2">
-          <code
-            class="max-w-full flex-1 truncate rounded bg-muted px-2 py-1 font-mono text-xs text-muted-foreground"
-            title={activePath ?? undefined}
-          >
-            {activePath ?? 'No book open'}
-          </code>
-          <Button
-            variant="outline"
-            size="icon"
-            disabled={!activePath}
-            onclick={handleCopyPath}
-            aria-label="Copy book path"
-            title="Copy book path"
-          >
-            {#if copied}
-              <Check aria-hidden="true" class="size-4" />
-            {:else}
-              <Copy aria-hidden="true" class="size-4" />
-            {/if}
-          </Button>
-        </div>
-        <div class="flex flex-wrap gap-2">
-          <Button variant="outline" disabled={switching} onclick={handleOpenBook}>
-            <FolderOpen aria-hidden="true" class="size-4" />
-            {switching ? 'Working...' : 'Open...'}
-          </Button>
-          <Button variant="outline" disabled={switching || !dbSession.value} onclick={handleSaveAs}>
-            <Save aria-hidden="true" class="size-4" />
-            Save as...
-          </Button>
-          <Button variant="outline" disabled={switching} onclick={handleNewBook}>
-            <Plus aria-hidden="true" class="size-4" />
-            New...
-          </Button>
-          <Button variant="outline" disabled={!activePath} onclick={handleRevealDb}>
-            <ExternalLink aria-hidden="true" class="size-4" />
-            Reveal in file manager
-          </Button>
-        </div>
-      {/if}
+      <div class="flex w-full items-center gap-2">
+        <code
+          class="max-w-full flex-1 truncate rounded bg-muted px-2 py-1 font-mono text-xs text-muted-foreground"
+          title={activePath ?? undefined}
+        >
+          {activePath ?? 'No book open'}
+        </code>
+        <Button
+          variant="outline"
+          size="icon"
+          disabled={!activePath}
+          onclick={handleCopyPath}
+          aria-label="Copy book path"
+          title="Copy book path"
+        >
+          {#if copied}
+            <Check aria-hidden="true" class="size-4" />
+          {:else}
+            <Copy aria-hidden="true" class="size-4" />
+          {/if}
+        </Button>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <Button variant="outline" disabled={switching} onclick={handleOpenBook}>
+          <FolderOpen aria-hidden="true" class="size-4" />
+          {switching ? 'Working...' : 'Open...'}
+        </Button>
+        <Button variant="outline" disabled={switching || !dbSession.value} onclick={handleSaveAs}>
+          <Save aria-hidden="true" class="size-4" />
+          Save as...
+        </Button>
+        <Button variant="outline" disabled={switching} onclick={handleNewBook}>
+          <Plus aria-hidden="true" class="size-4" />
+          New...
+        </Button>
+        <Button variant="outline" disabled={!activePath} onclick={handleRevealDb}>
+          <ExternalLink aria-hidden="true" class="size-4" />
+          Reveal in file manager
+        </Button>
+      </div>
     </div>
   </Card.Content>
 </Card.Root>

@@ -41,16 +41,10 @@ pub fn run() {
                 .expect("Failed to get app data dir");
             std::fs::create_dir_all(&app_data_dir).ok();
 
-            // Document model: reopen the last active book, else adopt the
-            // legacy single `spendo.db`, else start book-less on an in-memory
-            // placeholder (welcome screen) — startup never crashes on a
-            // missing or corrupt file.
-            let remembered = db::read_last_book(&app_data_dir)
-                .filter(|p| p.is_file())
-                .or_else(|| {
-                    let legacy = db::get_db_path(&app_data_dir);
-                    legacy.is_file().then_some(legacy)
-                });
+            // Document model: reopen the last active book, else start book-less
+            // on an in-memory placeholder (welcome screen) — startup never
+            // crashes on a missing or corrupt file.
+            let remembered = db::read_last_book(&app_data_dir).filter(|p| p.is_file());
             let (conn, active_path) = match remembered {
                 Some(path) => match db::connect_db(&path)
                     .ok()
@@ -94,7 +88,6 @@ pub fn run() {
             books::save_book_as,
             init::set_base_currency,
             settings::clear_app_db,
-            settings::fetch_data_info,
             settings::write_text_file,
             settings::get_book_settings,
             settings::set_book_setting,
@@ -113,7 +106,6 @@ pub fn run() {
             transactions::fetch_transactions,
             transactions::fetch_transaction,
             transactions::fetch_transaction_heatmap,
-            transactions::fetch_account_names,
             transactions::create_transaction,
             transactions::update_transaction,
             transactions::delete_transaction,

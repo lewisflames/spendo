@@ -13,7 +13,7 @@ pub struct AppState {
     /// Absolute path of the active book file. `None` while on the in-memory
     /// placeholder (no book opened or created yet) — see `books::fetch_active_book`.
     pub db_path: Mutex<Option<PathBuf>>,
-    /// Tauri app-data dir: legacy `spendo.db` location + `last_book.json` sidecar.
+    /// Tauri app-data dir: home of the `last_book.json` sidecar.
     pub app_data_dir: PathBuf,
 }
 
@@ -296,13 +296,9 @@ CREATE TABLE IF NOT EXISTS app_settings (
 );
 ";
 
-pub fn get_db_path(app_data_dir: &Path) -> PathBuf {
-    app_data_dir.join("spendo.db")
-}
-
 /// No migrations by design (pre-release): the schema is the single source of
-/// truth in `SCHEMA`. Schema changes require a database reset via
-/// `clear_db` (Settings → Clear all data) or by deleting `spendo.db`.
+/// truth in `SCHEMA`. Schema changes require a database reset via `clear_db`
+/// (Settings → Clear all data) or by deleting the book file.
 pub fn init_db(conn: &Connection) -> Result<()> {
     conn.execute_batch(SCHEMA)
 }
@@ -340,8 +336,7 @@ pub fn last_book_file(app_data_dir: &Path) -> PathBuf {
 }
 
 /// Read the sidecar; missing/corrupt content means "no remembered book", never
-/// an error — startup falls back to the legacy `spendo.db` or the welcome
-/// screen instead of crashing.
+/// an error — startup falls back to the welcome screen instead of crashing.
 pub fn read_last_book(app_data_dir: &Path) -> Option<PathBuf> {
     let raw = std::fs::read_to_string(last_book_file(app_data_dir)).ok()?;
     let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
@@ -365,15 +360,12 @@ pub fn clear_last_book(app_data_dir: &Path) {
     std::fs::remove_file(last_book_file(app_data_dir)).ok();
 }
 
-/// Full database reset: drops every app table (including the legacy
-/// `budget_amounts` table from pre-release builds and the pre-history
-/// `import_log` table) and recreates the current `SCHEMA`. This is the
-/// supported upgrade path while there are no migrations — Settings →
-/// Clear all data, then re-import.
+/// Full database reset: drops every app table and recreates the current
+/// `SCHEMA`. This is the supported upgrade path while there are no
+/// migrations — Settings → Clear all data, then re-import.
 pub fn clear_db(conn: &Connection) -> Result<()> {
     let drops = conn.execute_batch(
         "PRAGMA foreign_keys = OFF;
-          DROP TABLE IF EXISTS budget_amounts;
           DROP TABLE IF EXISTS budgets;
           DROP TABLE IF EXISTS prices;
           DROP TABLE IF EXISTS splits;
@@ -382,7 +374,6 @@ pub fn clear_db(conn: &Connection) -> Result<()> {
           DROP TABLE IF EXISTS commodities;
           DROP TABLE IF EXISTS change_snapshots;
           DROP TABLE IF EXISTS change_log;
-          DROP TABLE IF EXISTS import_log;
            DROP TABLE IF EXISTS refresh_log;
            DROP TABLE IF EXISTS symbol_overrides;
            DROP TABLE IF EXISTS recurring_schedules;
@@ -504,9 +495,6 @@ mod tests {
         ] {
             assert!(tables.contains(&expected.to_string()), "missing {expected}");
         }
-        // No legacy tables linger on fresh installs.
-        assert!(!tables.contains(&"budget_amounts".to_string()));
-        assert!(!tables.contains(&"import_log".to_string()));
 
         let indexes: i64 = conn
             .query_row(
@@ -519,15 +507,9 @@ mod tests {
     }
 
     #[test]
-    fn clear_resets_data_and_legacy_tables() {
+    fn clear_resets_data_and_schema() {
         let conn = Connection::open_in_memory().unwrap();
         init_db(&conn).unwrap();
-        // Legacy tables from pre-release builds must not survive a reset.
-        conn.execute_batch(
-            "CREATE TABLE budget_amounts (budget_guid TEXT NOT NULL, year INTEGER NOT NULL);
-             CREATE TABLE import_log (id INTEGER PRIMARY KEY AUTOINCREMENT, filename TEXT NOT NULL);",
-        )
-        .unwrap();
         conn.execute(
             "INSERT INTO commodities (guid, mnemonic, namespace) VALUES ('c-eur', 'EUR', 'CURRENCY')",
             [],
@@ -540,8 +522,6 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM commodities", [], |r| r.get(0))
             .unwrap();
         assert_eq!(count, 0);
-        assert!(!table_names(&conn).contains(&"budget_amounts".to_string()));
-        assert!(!table_names(&conn).contains(&"import_log".to_string()));
         // Foreign-key enforcement must survive the reset on every path.
         let fk_on: i64 = conn
             .query_row("PRAGMA foreign_keys", [], |r| r.get(0))

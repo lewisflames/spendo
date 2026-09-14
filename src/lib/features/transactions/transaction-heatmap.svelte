@@ -58,9 +58,7 @@
     const snapshot: Filters = {
       ...(filters.search ? { search: filters.search } : {}),
       ...(filters.dateFrom ? { dateFrom: filters.dateFrom } : {}),
-      ...(filters.dateTo ? { dateTo: filters.dateTo } : {}),
-      ...(filters.accountName ? { accountName: filters.accountName } : {}),
-      ...(filters.accountGuid ? { accountGuid: filters.accountGuid } : {})
+      ...(filters.dateTo ? { dateTo: filters.dateTo } : {})
     };
     const key = JSON.stringify(snapshot);
     if (!filtersCommitted) {

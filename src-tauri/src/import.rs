@@ -848,8 +848,6 @@ pub async fn import_gnucash(
 #[tauri::command]
 pub async fn reimport_last(state: State<'_, AppState>) -> Result<ImportResult, String> {
     // Look up the last import outside the blocking closure, then hash + merge.
-    // Reads the uniform change history first, falling back to the legacy
-    // import log so books imported before the rewrite can still reimport.
     let (file_path, filename) =
         db::run_blocking(state.db.clone(), history::last_import_source).await?;
     let hash_path = file_path.clone();

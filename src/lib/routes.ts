@@ -30,6 +30,5 @@ export function routeTitle(pathname: string): string {
   if (pathname.startsWith('/portfolio/')) return ROUTE_TITLES['/portfolio'];
   if (pathname.startsWith('/transactions/')) return ROUTE_TITLES['/transactions'];
   if (pathname.startsWith('/scheduled/')) return ROUTE_TITLES['/scheduled'];
-  if (pathname === '/404' || pathname.startsWith('/dev/')) return '';
   return 'Home';
 }

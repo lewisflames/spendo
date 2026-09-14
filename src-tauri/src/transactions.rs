@@ -140,22 +140,12 @@ pub struct TransactionDetailResult {
     pub next_guid: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AccountInfo {
-    pub name: String,
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Filters {
     pub search: Option<String>,
     pub date_from: Option<String>,
     pub date_to: Option<String>,
-    pub account_name: Option<String>,
-    /// Unique account filter (preferred over `account_name`, which can collide
-    /// for same-named accounts under different parents).
-    pub account_guid: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -334,8 +324,7 @@ fn tx_detail_json(post_date: &str) -> String {
 
 /// Shared transaction-list WHERE builder. `param_offset` reserves leading
 /// placeholder indices already used by the surrounding query. Date window and
-/// search come from `sql::push_tx_date_search`; this adds the list-only
-/// account filters.
+/// search come from `sql::push_tx_date_search`.
 fn build_filter_conditions(
     filters: &Option<Filters>,
     param_offset: usize,
@@ -350,17 +339,6 @@ fn build_filter_conditions(
             f.date_to.as_deref(),
             f.search.as_deref(),
         );
-        if let Some(ref account_guid) = f.account_guid {
-            w.add(
-                "t.guid IN (SELECT s.tx_guid FROM splits s WHERE s.account_guid = {})",
-                vec![Box::new(account_guid.clone())],
-            );
-        } else if let Some(ref account_name) = f.account_name {
-            w.add(
-                "t.guid IN (SELECT s.tx_guid FROM splits s JOIN accounts a ON a.guid = s.account_guid WHERE a.name = {})",
-                vec![Box::new(account_name.clone())],
-            );
-        }
     }
 
     w
@@ -457,25 +435,6 @@ fn fetch_splits_for_txns(conn: &Connection, guids: &[String]) -> Result<SplitMap
         }
     }
     Ok((map, totals))
-}
-
-fn fetch_account_names_inner(conn: &Connection) -> Result<Vec<AccountInfo>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT DISTINCT a.name
-             FROM accounts a
-             JOIN splits s ON s.account_guid = a.guid
-             ORDER BY a.name",
-        )
-        .map_err(|e| e.to_string())?;
-
-    let names = stmt
-        .query_map([], |row| Ok(AccountInfo { name: row.get(0)? }))
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
-
-    Ok(names)
 }
 
 #[derive(Debug)]
@@ -659,11 +618,6 @@ fn fetch_transaction_heatmap_inner(
         .map_err(|e| e.to_string())?;
 
     Ok(points)
-}
-
-#[tauri::command]
-pub async fn fetch_account_names(state: State<'_, AppState>) -> Result<Vec<AccountInfo>, String> {
-    run_blocking(state.db.clone(), fetch_account_names_inner).await
 }
 
 #[tauri::command]
@@ -1008,10 +962,8 @@ fn delete_transaction_inner(conn: &Connection, guid: &str) -> Result<(), AppErro
             params![guid],
             |row| row.get::<_, Option<String>>(0),
         )
-        .optional()
-        ?
-        .flatten()
-        .into();
+        .optional()?
+        .flatten();
     let exists = conn
         .query_row(
             "SELECT 1 FROM transactions WHERE guid = ?1",

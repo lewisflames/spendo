@@ -125,16 +125,10 @@ export interface TransactionRow {
   totalAmount: number;
 }
 
-export interface AccountInfo {
-  name: string;
-}
-
 export interface Filters {
   search?: string;
   dateFrom?: string;
   dateTo?: string;
-  accountName?: string;
-  accountGuid?: string;
 }
 
 interface TransactionsResult {
@@ -303,12 +297,6 @@ export const createBookAt = (path: string, currency: string): Promise<EmptyBookR
 
 export const saveBookAs = (path: string): Promise<EmptyBookResult> =>
   invoke<EmptyBookResult>('save_book_as', { path });
-
-interface DataInfo {
-  dbPath: string;
-}
-
-export const fetchDataInfo = (): Promise<DataInfo> => invoke<DataInfo>('fetch_data_info');
 
 // ── Book-scoped settings (travel with the `.spendo` file) ──
 
@@ -486,9 +474,6 @@ export const fetchTransactions = (
     sortBy: sortBy ?? null,
     sortDir: sortDir ?? null
   });
-
-export const fetchAccountNames = (): Promise<AccountInfo[]> =>
-  invoke<AccountInfo[]>('fetch_account_names');
 
 export const fetchTransactionHeatmap = (filters?: Filters): Promise<HeatmapPoint[]> =>
   invoke<HeatmapPoint[]>('fetch_transaction_heatmap', { filters: filters ?? null });
@@ -716,7 +701,7 @@ export const deleteSymbolOverride = (commodityGuid: string): Promise<void> =>
 
 // ── Budgets ──
 
-export interface Budget {
+interface Budget {
   guid: string;
   accountGuid: string;
   accountName: string;

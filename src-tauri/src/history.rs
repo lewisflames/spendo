@@ -413,19 +413,7 @@ fn get_change_entries(
         .map_err(|e| e.to_string())
 }
 
-fn table_exists(conn: &Connection, name: &str) -> bool {
-    conn.query_row(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
-        [name],
-        |_| Ok(()),
-    )
-    .is_ok()
-}
-
 fn count_change_entries(conn: &Connection, filter: &HistoryFilter) -> Result<i64, String> {
-    if !table_exists(conn, "change_log") {
-        return Ok(0);
-    }
     let (where_clause, params) = history_where(filter);
     let sql_text = format!("SELECT COUNT(*) FROM change_log{where_clause}");
     conn.query_row(&sql_text, sql::param_refs(&params).as_slice(), |row| {
@@ -436,9 +424,6 @@ fn count_change_entries(conn: &Connection, filter: &HistoryFilter) -> Result<i64
 
 /// Newest original entry still eligible for linear undo.
 fn revertible_entry_id(conn: &Connection) -> Result<Option<i64>, String> {
-    if !table_exists(conn, "change_log") {
-        return Ok(None);
-    }
     conn.query_row(
         "SELECT id FROM change_log
          WHERE kind != 'revert' AND reverted_by IS NULL
@@ -458,11 +443,7 @@ pub(crate) fn fetch_change_history_inner(
 ) -> Result<ChangeHistoryPage, String> {
     let total = count_change_entries(conn, filter)?;
     let (page_size, total_pages, safe_page, _) = utils::paginate(total, page, page_size);
-    let entries = if table_exists(conn, "change_log") {
-        get_change_entries(conn, page_size, (safe_page - 1) * page_size, filter)?
-    } else {
-        vec![]
-    };
+    let entries = get_change_entries(conn, page_size, (safe_page - 1) * page_size, filter)?;
     Ok(ChangeHistoryPage {
         entries,
         total,
@@ -569,38 +550,22 @@ fn map_revert_error(e: AppError) -> AppError {
 
 // ── Last-import pointer (feeds `reimport_last`) ──────────────────────────────
 
-/// Newest import's `(file_path, filename)`. Reads the uniform `change_log`
-/// first; falls back to the legacy `import_log` table so books imported
-/// before the history rewrite can still reimport.
+/// Newest import's `(file_path, filename)` from the uniform `change_log`.
 pub(crate) fn last_import_source(conn: &Connection) -> Result<(String, String), String> {
-    if table_exists(conn, "change_log") {
-        let row: Option<(Option<String>, Option<String>)> = conn
-            .query_row(
-                "SELECT json_extract(detail_json, '$.filePath'),
-                        json_extract(detail_json, '$.filename')
-                 FROM change_log WHERE kind = 'import' ORDER BY id DESC LIMIT 1",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()
-            .map_err(|e| e.to_string())?;
-        if let Some((Some(path), Some(filename))) = row {
-            if !path.is_empty() {
-                return Ok((path, filename));
-            }
-        }
+    let row: Option<(Option<String>, Option<String>)> = conn
+        .query_row(
+            "SELECT json_extract(detail_json, '$.filePath'),
+                    json_extract(detail_json, '$.filename')
+             FROM change_log WHERE kind = 'import' ORDER BY id DESC LIMIT 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    match row {
+        Some((Some(path), Some(filename))) if !path.is_empty() => Ok((path, filename)),
+        _ => Err("No previous import to reimport".to_string()),
     }
-    if table_exists(conn, "import_log") {
-        return conn
-            .query_row(
-                "SELECT file_path, filename FROM import_log
-                 WHERE file_path IS NOT NULL ORDER BY id DESC LIMIT 1",
-                [],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-            )
-            .map_err(|_| "No previous import to reimport".to_string());
-    }
-    Err("No previous import to reimport".to_string())
 }
 
 // ── Tauri commands ───────────────────────────────────────────────────────────
