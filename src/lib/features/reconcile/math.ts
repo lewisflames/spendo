@@ -32,7 +32,11 @@ export function isBalanced(difference: number, eps = RECONCILE_EPS): boolean {
 export function parseStatementAmount(raw: string): number | null {
   const text = raw.trim().replace(/\s+/g, '');
   if (text === '') return null;
-  if (!/^[+-]?\d+(?:[.,]\d+)?$/.test(text)) return null;
+  const m = /^[+-]?(\d+)(?:([.,])(\d+))?$/.exec(text);
+  if (!m) return null;
+  // A lone separator with exactly three digits after it is ambiguous
+  // (thousands grouping vs. decimal), so reject instead of guessing.
+  if (m[2] && m[3].length === 3) return null;
   const n = Number(text.replace(',', '.'));
   return Number.isFinite(n) ? n : null;
 }
