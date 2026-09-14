@@ -41,6 +41,7 @@
   import type { BudgetActualRow } from '$lib/tauri';
   import type { ColumnVisibility } from '$lib/hooks/use-column-visibility.svelte';
   import PacingBar from './pacing-bar.svelte';
+  import { budgetTotals } from './budget-utils';
 
   let {
     rows,
@@ -93,6 +94,7 @@
     {/snippet}
   </EmptyState>
 {:else}
+  {@const totals = budgetTotals(rows)}
   <TableShell>
     <Table.Header>
       <Table.Row class="bg-muted/75">
@@ -197,6 +199,69 @@
           {/if}
         </NavRow>
       {/each}
+      <NavRow onNavigate={null} class="border-t-2 bg-muted/50 font-semibold">
+        <Table.Cell class="py-2.5 text-xs font-semibold tracking-wider uppercase">Total</Table.Cell>
+        {#if cols.isVisible('budget')}
+          <Table.Cell class="py-2.5 text-right tabular-nums">
+            {fmt(totals.budgetAmount)}
+          </Table.Cell>
+        {/if}
+        {#if cols.isVisible('carryIn')}
+          <Table.Cell
+            class={cn('py-2.5 text-right tabular-nums', signColor(totals.rolloverBalance))}
+          >
+            {fmtSigned(totals.rolloverBalance)}
+          </Table.Cell>
+        {/if}
+        {#if cols.isVisible('spent')}
+          <Table.Cell class="py-2.5 text-right tabular-nums">
+            {fmt(totals.actualAmount)}
+          </Table.Cell>
+        {/if}
+        {#if cols.isVisible('expectedYtd')}
+          <Table.Cell class="py-2.5 text-right tabular-nums">
+            {#if totals.elapsedMonths > 0}
+              {fmt(totals.expectedYtd)}
+            {:else}
+              <span class="text-xs text-muted-foreground">{EMPTY_DASH}</span>
+            {/if}
+          </Table.Cell>
+        {/if}
+        {#if cols.isVisible('aheadBehind')}
+          <Table.Cell
+            class={cn(
+              'py-2.5 text-right tabular-nums',
+              totals.elapsedMonths > 0 && signColor(totals.delta)
+            )}
+          >
+            {#if totals.elapsedMonths > 0}
+              {fmtSigned(totals.delta)}
+            {:else}
+              <span class="text-xs text-muted-foreground">{EMPTY_DASH}</span>
+            {/if}
+          </Table.Cell>
+        {/if}
+        {#if cols.isVisible('pacing')}
+          <Table.Cell class="py-2.5">
+            {#if totals.elapsedMonths > 0}
+              <PacingBar
+                pacingPercentage={totals.pacingPercentage}
+                actualAmount={totals.actualAmount}
+                expectedYtd={totals.expectedYtd}
+                delta={totals.delta}
+                {fmt}
+              />
+            {:else}
+              <span class="text-xs text-muted-foreground">{EMPTY_DASH}</span>
+            {/if}
+          </Table.Cell>
+        {/if}
+        {#if cols.isVisible('remaining')}
+          <Table.Cell class={cn('py-2.5 text-right tabular-nums', signColor(totals.remaining))}>
+            {fmtSigned(totals.remaining)}
+          </Table.Cell>
+        {/if}
+      </NavRow>
     </Table.Body>
   </TableShell>
 {/if}
