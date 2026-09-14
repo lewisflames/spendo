@@ -88,6 +88,7 @@ export function accountNameMap(trees: AccountNode[] | undefined): Record<string,
 
 export interface BudgetTotals {
   budgetAmount: number;
+  monthlyAmount: number;
   rolloverBalance: number;
   actualAmount: number;
   expectedYtd: number;
@@ -103,6 +104,7 @@ export interface BudgetTotals {
 export function budgetTotals(rows: BudgetActualRow[]): BudgetTotals {
   const totals: BudgetTotals = {
     budgetAmount: 0,
+    monthlyAmount: 0,
     rolloverBalance: 0,
     actualAmount: 0,
     expectedYtd: 0,
@@ -113,6 +115,7 @@ export function budgetTotals(rows: BudgetActualRow[]): BudgetTotals {
   };
   for (const row of rows) {
     totals.budgetAmount += row.budgetAmount;
+    totals.monthlyAmount += row.budgetAmount / 12;
     totals.rolloverBalance += row.rolloverBalance;
     totals.actualAmount += row.actualAmount;
     totals.expectedYtd += row.expectedYtd;
