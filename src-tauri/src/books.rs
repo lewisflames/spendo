@@ -104,6 +104,21 @@ fn remove_target(path: &Path) {
     std::fs::remove_file(name).ok();
 }
 
+/// Copy the live book into a fresh stamped file at `new_path`. The caller
+/// must have prepared the destination (parent dir + stale-target sweep).
+fn save_book_as_inner(
+    conn: &rusqlite::Connection,
+    new_path: &Path,
+) -> Result<rusqlite::Connection, String> {
+    let escaped = escape_path_for_sql(new_path);
+    conn.execute_batch(&format!("VACUUM INTO '{escaped}';"))
+        .map_err(|e| format!("Failed to save book: {}", e))?;
+    let fresh = db::connect_db(&new_path.to_path_buf())
+        .map_err(|e| format!("Failed to open saved book: {}", e))?;
+    db::stamp_app_id(&fresh);
+    Ok(fresh)
+}
+
 /// Swap the shared connection to `new_conn` and remember `new_path`.
 /// The connection swap runs on a blocking thread; the path mutex is only held
 /// for a `PathBuf` clone afterward (never the DB mutex in async context).
@@ -206,15 +221,10 @@ pub async fn save_book_as(
     // the blocking thread via `run_swap_blocking` (never blocking a tokio
     // worker); the UI may briefly stall on very large books while SQLite
     // copies the file, then the fresh file is opened and swapped atomically.
-    let escaped = escape_path_for_sql(&new_path);
     let fresh_path = new_path.clone();
     let generation = state.book_generation.clone();
     let summary = db::run_swap_blocking(state.db.clone(), move |conn| {
-        conn.execute_batch(&format!("VACUUM INTO '{escaped}';"))
-            .map_err(|e| format!("Failed to save book: {}", e))?;
-        let fresh =
-            db::connect_db(&fresh_path).map_err(|e| format!("Failed to open saved book: {}", e))?;
-        db::stamp_app_id(&fresh);
+        let fresh = save_book_as_inner(conn, &fresh_path)?;
         *conn = fresh;
         generation.fetch_add(1, Ordering::SeqCst);
         get_summary(conn)
@@ -344,17 +354,8 @@ mod tests {
     }
 
     #[test]
-    fn escape_path_for_sql_doubles_single_quotes() {
-        let path = PathBuf::from("/tmp/o'brien.spendo");
-        assert_eq!(
-            escape_path_for_sql(&path),
-            "/tmp/o''brien.spendo".to_string()
-        );
-    }
-
-    #[test]
-    fn vacuum_copies_book_content() {
-        let dir = tmp_dir("vacuum");
+    fn save_as_copies_content_into_a_fresh_stamped_file() {
+        let dir = tmp_dir("save-as");
         let src = dir.join("src.spendo");
         let conn = create_book_at_inner(&src, "USD").unwrap();
         conn.execute(
@@ -362,13 +363,17 @@ mod tests {
             [],
         )
         .unwrap();
-        let dst = dir.join("dst.spendo");
-        let escaped = escape_path_for_sql(&dst);
-        conn.execute_batch(&format!("VACUUM INTO '{escaped}';"))
-            .unwrap();
-        drop(conn);
 
-        let fresh = db::connect_db(&dst).unwrap();
+        let dst = dir.join("nested").join("dst.spendo");
+        std::fs::create_dir_all(dst.parent().unwrap()).unwrap();
+        std::fs::write(&dst, "stale, not a database").unwrap();
+        let wal = format!("{}-wal", dst.display());
+        std::fs::write(&wal, "stale").unwrap();
+        remove_target(&dst);
+        assert!(!dst.exists());
+        assert!(!Path::new(&wal).exists());
+
+        let fresh = save_book_as_inner(&conn, &dst).unwrap();
         let count: i64 = fresh
             .query_row(
                 "SELECT COUNT(*) FROM commodities WHERE mnemonic = 'X'",
@@ -377,6 +382,13 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 1);
+        let id: i32 = fresh
+            .query_row("PRAGMA application_id", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(id, db::SPENDO_APP_ID);
+        drop(fresh);
+        drop(conn);
+
         assert!(validate_spendo_db_inner(&dst).is_ok());
         std::fs::remove_dir_all(&dir).ok();
     }
