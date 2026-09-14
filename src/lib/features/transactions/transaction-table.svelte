@@ -1,3 +1,17 @@
+<script lang="ts" module>
+  export type TransactionColumnId =
+    'date' | 'num' | 'accounts' | 'amount' | 'transfer' | 'status' | 'runningBalance';
+
+  export const TRANSACTION_COLUMNS: { id: TransactionColumnId; label: string }[] = [
+    { id: 'date', label: 'Date' },
+    { id: 'num', label: 'Number' },
+    { id: 'accounts', label: 'Accounts' },
+    { id: 'amount', label: 'Total' }
+  ];
+
+  export const TRANSACTION_DEFAULT_COLUMNS: TransactionColumnId[] = ['date', 'amount'];
+</script>
+
 <script lang="ts">
   import { resolve } from '$app/paths';
   import * as Table from '$lib/components/ui/table';
@@ -16,8 +30,6 @@
   import { statusFor } from '$lib/utils/reconcile';
   import type { DetailTransaction, TransactionRow, TxSortKey } from '$lib/tauri';
 
-  type AccountColumn = 'transfer' | 'status' | 'amount' | 'runningBalance';
-
   let {
     transactions = [],
     currency = 'EUR',
@@ -25,7 +37,7 @@
     sortDir = 'desc',
     onSort,
     variant = 'all',
-    visibleColumns = ['transfer', 'amount'] as AccountColumn[]
+    visibleColumns
   }: {
     transactions?: TransactionRow[] | DetailTransaction[];
     currency?: string;
@@ -35,31 +47,63 @@
     onSort?: (key: TxSortKey) => void;
     /** `account` adds Transfer/Status/Amount/Balance columns for the ledger view. */
     variant?: 'all' | 'account';
-    visibleColumns?: AccountColumn[];
+    /** Every column is visible when omitted. */
+    visibleColumns?: TransactionColumnId[];
   } = $props();
 
   function isDetail(txn: TransactionRow | DetailTransaction): txn is DetailTransaction {
     return variant === 'account' && 'counterAccounts' in txn;
   }
 
-  function isVisible(id: AccountColumn): boolean {
-    return visibleColumns.includes(id);
+  function isVisible(id: TransactionColumnId): boolean {
+    return visibleColumns ? visibleColumns.includes(id) : true;
   }
 
   function totalOf(txn: TransactionRow | DetailTransaction): number {
     return isDetail(txn) ? txn.amount : (txn as TransactionRow).totalAmount;
   }
+
+  // Date is fixed in the account ledger; only the all-transactions table can hide it.
+  let showDate = $derived(variant !== 'all' || isVisible('date'));
+  // Inline `#num` under the description is redundant once that column is shown.
+  let showInlineNum = $derived(variant !== 'all' || !isVisible('num'));
+
+  function splitAccounts(txn: TransactionRow | DetailTransaction): string[] {
+    const out: string[] = [];
+    for (const split of txn.splits) {
+      if (!split.accountName || out.includes(split.accountName)) continue;
+      out.push(split.accountName);
+    }
+    return out;
+  }
 </script>
+
+{#snippet multiValue(values: string[])}
+  {#if values.length === 0}
+    {EMPTY_DASH}
+  {:else}
+    <div class="flex items-center gap-1">
+      <span class="truncate">{values[0]}</span>
+      {#if values.length > 1}
+        <Badge variant="outline" class="shrink-0 text-[10px] leading-none"
+          >+{values.length - 1} more</Badge
+        >
+      {/if}
+    </div>
+  {/if}
+{/snippet}
 
 <TableShell>
   <Table.Header>
     <Table.Row class="bg-muted/75">
-      <SortHead
-        label="Date"
-        active={sortBy === 'date'}
-        dir={sortDir}
-        onclick={() => onSort?.('date')}
-      />
+      {#if showDate}
+        <SortHead
+          label="Date"
+          active={sortBy === 'date'}
+          dir={sortDir}
+          onclick={() => onSort?.('date')}
+        />
+      {/if}
       <SortHead
         label="Description"
         active={sortBy === 'description'}
@@ -67,13 +111,21 @@
         onclick={() => onSort?.('description')}
       />
       {#if variant === 'all'}
-        <SortHead
-          label="Total"
-          active={sortBy === 'amount'}
-          dir={sortDir}
-          onclick={() => onSort?.('amount')}
-          class="text-right"
-        />
+        {#if isVisible('num')}
+          <Table.Head class="text-muted-foreground">Number</Table.Head>
+        {/if}
+        {#if isVisible('accounts')}
+          <Table.Head class="text-muted-foreground">Accounts</Table.Head>
+        {/if}
+        {#if isVisible('amount')}
+          <SortHead
+            label="Total"
+            active={sortBy === 'amount'}
+            dir={sortDir}
+            onclick={() => onSort?.('amount')}
+            class="text-right"
+          />
+        {/if}
       {:else}
         {#if isVisible('transfer')}
           <Table.Head class="text-muted-foreground">Transfer</Table.Head>
@@ -99,9 +151,11 @@
   <Table.Body>
     {#each transactions as txn (txn.guid)}
       <NavRow onNavigate={() => openTransaction(txn.guid)}>
-        <Table.Cell class="py-2.5 whitespace-nowrap text-muted-foreground">
-          {fmtDate(txn.postDate)}
-        </Table.Cell>
+        {#if showDate}
+          <Table.Cell class="py-2.5 whitespace-nowrap text-muted-foreground">
+            {fmtDate(txn.postDate)}
+          </Table.Cell>
+        {/if}
         <Table.Cell class="max-w-md py-2.5 font-medium">
           <!-- Accessible link target for keyboard/middle-click; the row click
                is a convenience shortcut. Its event must keep bubbling so
@@ -111,7 +165,8 @@
             href={resolve('/transactions/[guid]', { guid: txn.guid })}
             title={txn.description ?? undefined}
           >
-            {#if txn.num}<span class="mr-1 text-muted-foreground">#{txn.num}</span>{/if}
+            {#if txn.num && showInlineNum}<span class="mr-1 text-muted-foreground">#{txn.num}</span
+              >{/if}
             {txn.description || EMPTY_DASH}
           </a>
           {#if txn.notes}
@@ -121,31 +176,33 @@
           {/if}
         </Table.Cell>
         {#if variant === 'all'}
-          <Table.Cell
-            class="py-2.5 text-right font-medium whitespace-nowrap tabular-nums {signColor(
-              totalOf(txn)
-            )}"
-          >
-            {formatSignedCurrency(totalOf(txn), currency)}
-          </Table.Cell>
+          {#if isVisible('num')}
+            <Table.Cell class="py-2.5 whitespace-nowrap text-muted-foreground tabular-nums">
+              {txn.num || EMPTY_DASH}
+            </Table.Cell>
+          {/if}
+          {#if isVisible('accounts')}
+            {@const accounts = splitAccounts(txn)}
+            <Table.Cell class="max-w-xs py-2.5 text-muted-foreground" title={accounts.join(', ')}>
+              {@render multiValue(accounts)}
+            </Table.Cell>
+          {/if}
+          {#if isVisible('amount')}
+            <Table.Cell
+              class="py-2.5 text-right font-medium whitespace-nowrap tabular-nums {signColor(
+                totalOf(txn)
+              )}"
+            >
+              {formatSignedCurrency(totalOf(txn), currency)}
+            </Table.Cell>
+          {/if}
         {:else if isDetail(txn)}
           {#if isVisible('transfer')}
             <Table.Cell
               class="max-w-xs py-2.5 text-muted-foreground"
               title={txn.counterAccounts.join(', ')}
             >
-              {#if txn.counterAccounts.length === 0}
-                {EMPTY_DASH}
-              {:else}
-                <div class="flex items-center gap-1">
-                  <span class="truncate">{txn.counterAccounts[0]}</span>
-                  {#if txn.counterAccounts.length > 1}
-                    <Badge variant="outline" class="shrink-0 text-[10px] leading-none"
-                      >+{txn.counterAccounts.length - 1} more</Badge
-                    >
-                  {/if}
-                </div>
-              {/if}
+              {@render multiValue(txn.counterAccounts)}
             </Table.Cell>
           {/if}
           {#if isVisible('status')}

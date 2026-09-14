@@ -1,44 +1,32 @@
 <script lang="ts">
-  import * as Select from '$lib/components/ui/select';
-  import { Select as SelectPrimitive } from 'bits-ui';
   import { SearchInput } from '$lib/components/shared/search-input';
   import { DatePicker } from '$lib/components/shared/date-picker';
   import { Button } from '$lib/components/ui/button';
   import { X } from '@lucide/svelte';
   import type { Snippet } from 'svelte';
-  import type { AccountInfo } from '$lib/tauri';
 
   let {
     search = $bindable(''),
     dateFrom = $bindable(''),
     dateTo = $bindable(''),
-    accountName = $bindable(''),
-    accounts = [],
     extra = undefined,
     idPrefix = 'txn'
   }: {
     search?: string;
     dateFrom?: string;
     dateTo?: string;
-    /** Bound only when an account picker is wanted (pass the choices). */
-    accountName?: string;
-    accounts?: AccountInfo[];
     /** Optional trailing controls (e.g. a columns toggle), right-aligned. */
     extra?: Snippet;
     /** Prefix for input IDs so multiple filter bars can mount on one page. */
     idPrefix?: string;
   } = $props();
 
-  let hasFilters = $derived(
-    !!(search || dateFrom || dateTo || (accounts.length > 0 && accountName))
-  );
-  let showAccountSelect = $derived(accounts.length > 0);
+  let hasFilters = $derived(!!(search || dateFrom || dateTo));
 
   function clearFilters() {
     search = '';
     dateFrom = '';
     dateTo = '';
-    accountName = '';
   }
 </script>
 
@@ -61,22 +49,6 @@
     <DatePicker id="{idPrefix}-to" bind:value={dateTo} placeholder="End date" />
   </div>
 
-  {#if showAccountSelect}
-    <div class="flex flex-col gap-1">
-      <label for="{idPrefix}-account" class="text-xs text-muted-foreground">Account</label>
-      <Select.Root type="single" bind:value={accountName}>
-        <Select.Trigger id="{idPrefix}-account" class="min-w-36">
-          <SelectPrimitive.Value placeholder="All accounts" />
-        </Select.Trigger>
-        <Select.Content>
-          <Select.Item value="">All accounts</Select.Item>
-          {#each accounts as acc (acc.name)}
-            <Select.Item value={acc.name}>{acc.name}</Select.Item>
-          {/each}
-        </Select.Content>
-      </Select.Root>
-    </div>
-  {/if}
   {#if hasFilters}
     <Button variant="ghost" onclick={clearFilters}>
       <X aria-hidden="true" class="mr-1 size-3" />
