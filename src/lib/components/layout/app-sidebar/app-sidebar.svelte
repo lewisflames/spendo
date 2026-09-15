@@ -27,7 +27,7 @@
   import { navBadges, navRoots } from '$lib/stores/nav.svelte';
   import { appSettings, saveSettings } from '$lib/stores/settings.svelte';
   import { keyboardShortcutsDialog } from '$lib/stores/ui.svelte';
-  import { bookDisplayName } from '$lib/utils/book';
+  import { bookDisplayName, bookFolder } from '$lib/utils/book';
   import { plural } from '$lib/utils/format.svelte';
 
   const bookName = $derived(bookDisplayName(activeBookPath.value));
@@ -153,7 +153,7 @@
                     class="block truncate text-xs text-muted-foreground"
                     title={activeBookPath.value}
                   >
-                    {activeBookPath.value}
+                    {bookFolder(activeBookPath.value) ?? activeBookPath.value}
                   </span>
                 {/if}
               </div>
