@@ -7,6 +7,7 @@
     CircleHelp,
     Database,
     FolderOpen,
+    FolderSearch,
     Info,
     LogOut,
     Plus,
@@ -20,6 +21,7 @@
     closeActiveBook,
     createBookViaDialog,
     openBookViaDialog,
+    revealActiveBook,
     saveBookAsViaDialog
   } from '$lib/features/book/book-actions';
   import { NAV_GROUPS, navHref, navItemActive } from '$lib/features/nav/nav-items';
@@ -170,6 +172,10 @@
             <DropdownMenu.Item onclick={() => void saveBookAsViaDialog()}>
               <Save aria-hidden="true" />
               Save as…
+            </DropdownMenu.Item>
+            <DropdownMenu.Item onclick={() => void revealActiveBook()}>
+              <FolderSearch aria-hidden="true" />
+              Show in folder
             </DropdownMenu.Item>
             <DropdownMenu.Separator />
             <DropdownMenu.Item>
