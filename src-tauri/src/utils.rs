@@ -18,6 +18,43 @@ pub const INVESTMENT_TYPES: [&str; 3] = ["STOCK", "MUTUAL", "FUND"];
 pub const CASH_LIKE_TYPES: [&str; 5] = ["ASSET", "BANK", "CASH", "CURRENCY", "RECEIVABLE"];
 pub const LIABILITY_TYPES: [&str; 3] = ["LIABILITY", "CREDIT", "PAYABLE"];
 
+/// Account type → reporting category. Mirrors the frontend
+/// `$lib/features/accounts/account-types.ts` table; `ROOT` is excluded.
+pub const TYPE_TO_CATEGORY: [(&str, &str); 15] = [
+    ("ASSET", "ASSET"),
+    ("BANK", "ASSET"),
+    ("CASH", "ASSET"),
+    ("STOCK", "ASSET"),
+    ("MUTUAL", "ASSET"),
+    ("FUND", "ASSET"),
+    ("CURRENCY", "ASSET"),
+    ("RECEIVABLE", "ASSET"),
+    ("LIABILITY", "LIABILITY"),
+    ("CREDIT", "LIABILITY"),
+    ("PAYABLE", "LIABILITY"),
+    ("INCOME", "INCOME"),
+    ("EXPENSE", "EXPENSE"),
+    ("EQUITY", "EQUITY"),
+    ("TRADING", "EQUITY"),
+];
+
+/// The five root categories, balance-sheet order then P&L.
+pub const CATEGORY_ORDER: [&str; 5] = ["ASSET", "LIABILITY", "EQUITY", "INCOME", "EXPENSE"];
+
+/// Category of an account type, falling back to the raw type when unknown.
+pub fn category_for_type(account_type: &str) -> &str {
+    TYPE_TO_CATEGORY
+        .iter()
+        .find(|(ty, _)| *ty == account_type)
+        .map_or(account_type, |(_, category)| category)
+}
+
+/// Every categorised account type as an SQL `IN (...)` fragment.
+pub fn category_types_all_sql() -> String {
+    let types: Vec<&str> = TYPE_TO_CATEGORY.iter().map(|(ty, _)| *ty).collect();
+    types_sql(&types)
+}
+
 /// `'STOCK','MUTUAL','FUND'` fragment for SQL `IN (...)` lists, derived from
 /// [`INVESTMENT_TYPES`] so query filters can never drift from Rust-side checks.
 pub fn investment_types_sql() -> String {

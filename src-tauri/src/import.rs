@@ -8,6 +8,7 @@ use tauri::State;
 use crate::db::{self, connect_source_db, init_db, AppError, AppState};
 use crate::history;
 use crate::home::{get_summary, DataSummary};
+use crate::init;
 use crate::prices::{self, PriceError, PricesResult};
 use crate::utils;
 
@@ -478,24 +479,94 @@ fn drop_source_guid_tables(conn: &Connection) {
         "DROP TABLE IF EXISTS tmp_src_commodities;
          DROP TABLE IF EXISTS tmp_src_accounts;
          DROP TABLE IF EXISTS tmp_src_transactions;
-         DROP TABLE IF EXISTS tmp_src_splits;",
+         DROP TABLE IF EXISTS tmp_src_splits;
+         DROP TABLE IF EXISTS tmp_protected_accounts;",
     );
 }
 
-fn count_orphaned(conn: &Connection, table: &str, src_table: &str) -> Result<i64, AppError> {
+fn count_orphaned(
+    conn: &Connection,
+    table: &str,
+    src_table: &str,
+    excluded_table: Option<&str>,
+) -> Result<i64, AppError> {
     db::validate_data_table(table)?;
-    let sql =
+    let mut sql =
         format!("SELECT COUNT(*) FROM {table} WHERE guid NOT IN (SELECT guid FROM {src_table})");
+    if let Some(excluded) = excluded_table {
+        sql.push_str(&format!(" AND guid NOT IN (SELECT guid FROM {excluded})"));
+    }
     conn.query_row(&sql, [], |row| row.get(0))
         .map_err(AppError::from)
 }
 
-fn delete_orphans(conn: &Connection, table: &str, src_table: &str) -> Result<i64, AppError> {
+fn delete_orphans(
+    conn: &Connection,
+    table: &str,
+    src_table: &str,
+    excluded_table: Option<&str>,
+) -> Result<i64, AppError> {
     db::validate_data_table(table)?;
-    let sql = format!("DELETE FROM {table} WHERE guid NOT IN (SELECT guid FROM {src_table})");
+    let mut sql = format!("DELETE FROM {table} WHERE guid NOT IN (SELECT guid FROM {src_table})");
+    if let Some(excluded) = excluded_table {
+        sql.push_str(&format!(" AND guid NOT IN (SELECT guid FROM {excluded})"));
+    }
     conn.execute(&sql, [])
         .map(|n| n as i64)
         .map_err(AppError::from)
+}
+
+/// Canonical default roots the source book doesn't cover, as local GUIDs.
+/// These survive the orphan sweep (and its revert snapshots) so re-imports
+/// stay no-ops and their GUIDs stay stable; source-provided roots of the same
+/// category replace them through the normal merge/sweep path. Only roots whose
+/// parent ROOT survives the import are protected — the seeded ROOT of a fresh
+/// book is swept in favor of the source's ROOT, taking its roots with it.
+fn protected_default_roots(conn: &Connection, src: &SourceData) -> Result<Vec<String>, AppError> {
+    let src_roots: HashSet<&str> = src
+        .accounts
+        .iter()
+        .filter(|a| a.account_type == "ROOT")
+        .map(|a| a.guid.as_str())
+        .collect();
+    let covered: HashSet<&str> = src
+        .accounts
+        .iter()
+        .filter(|a| {
+            a.account_type != "ROOT"
+                && a.parent_guid
+                    .as_deref()
+                    .is_none_or(|parent| src_roots.contains(parent))
+        })
+        .map(|a| utils::category_for_type(&a.account_type))
+        .collect();
+
+    let src_guids: HashSet<&str> = src.accounts.iter().map(|a| a.guid.as_str()).collect();
+    let mut protected = Vec::new();
+    for (name, category) in init::DEFAULT_ROOTS {
+        if covered.contains(category) {
+            continue;
+        }
+        let mut stmt = conn.prepare(
+            "SELECT guid, parent_guid FROM accounts
+             WHERE name = ?1 AND account_type = ?2
+               AND parent_guid IN (SELECT guid FROM accounts WHERE account_type = 'ROOT')",
+        )?;
+        let rows = stmt
+            .query_map(rusqlite::params![name, category], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        for (guid, parent) in rows {
+            let parent_survives = parent
+                .as_deref()
+                .is_some_and(|p| src_guids.contains(p));
+            if parent_survives && !src_guids.contains(guid.as_str()) {
+                protected.push(guid);
+            }
+        }
+    }
+    Ok(protected)
 }
 
 // ── Merge ───────────────────────────────────────────────────────────────────
@@ -608,16 +679,19 @@ fn capture_changed<T: Importable>(
 }
 
 /// Snapshot destination rows absent from the source (the merge deletes them).
+/// `skip` defends app-managed rows the sweep is told to keep (protected
+/// default roots) from being captured as orphans.
 fn capture_orphaned<T: Importable>(
     conn: &Connection,
     table: &'static str,
     src: &[T],
     existing: &HashMap<String, T>,
+    skip: &HashSet<String>,
     snapshots: &mut Vec<history::Snapshot<'static>>,
 ) -> Result<(), AppError> {
     let src_guids: HashSet<&str> = src.iter().map(|r| r.guid()).collect();
     for guid in existing.keys() {
-        if !src_guids.contains(guid.as_str()) {
+        if !src_guids.contains(guid.as_str()) && !skip.contains(guid) {
             snapshots.push(capture_snapshot(conn, table, guid)?);
         }
     }
@@ -630,25 +704,28 @@ fn capture_import_snapshots(
     conn: &Connection,
     src: &SourceData,
     existing: &ExistingData,
+    protected: &HashSet<String>,
 ) -> Result<Vec<history::Snapshot<'static>>, AppError> {
     let mut snapshots = Vec::new();
     capture_changed(conn, "commodities", &src.commodities, &existing.commodities, &mut snapshots)?;
     capture_changed(conn, "accounts", &src.accounts, &existing.accounts, &mut snapshots)?;
     capture_changed(conn, "transactions", &src.transactions, &existing.transactions, &mut snapshots)?;
     capture_changed(conn, "splits", &src.splits, &existing.splits, &mut snapshots)?;
-    capture_orphaned(conn, "commodities", &src.commodities, &existing.commodities, &mut snapshots)?;
-    capture_orphaned(conn, "accounts", &src.accounts, &existing.accounts, &mut snapshots)?;
-    capture_orphaned(conn, "transactions", &src.transactions, &existing.transactions, &mut snapshots)?;
-    capture_orphaned(conn, "splits", &src.splits, &existing.splits, &mut snapshots)?;
+    capture_orphaned(conn, "commodities", &src.commodities, &existing.commodities, &HashSet::new(), &mut snapshots)?;
+    capture_orphaned(conn, "accounts", &src.accounts, &existing.accounts, protected, &mut snapshots)?;
+    capture_orphaned(conn, "transactions", &src.transactions, &existing.transactions, &HashSet::new(), &mut snapshots)?;
+    capture_orphaned(conn, "splits", &src.splits, &existing.splits, &HashSet::new(), &mut snapshots)?;
     Ok(snapshots)
 }
 
-/// Upsert source rows over the destination, then delete orphans.
+/// Upsert source rows over the destination, then delete orphans (protected
+/// default roots excepted).
 fn apply_merge(
     conn: &Connection,
     src: &SourceData,
     existing: &ExistingData,
     counts: &mut MergeCounts,
+    accounts_excluded: Option<&str>,
 ) -> Result<(), AppError> {
     (counts.commodities_added, counts.commodities_updated) =
         process_entities(conn, &src.commodities, &existing.commodities)?;
@@ -659,10 +736,10 @@ fn apply_merge(
     (counts.splits_added, counts.splits_updated) =
         process_entities(conn, &src.splits, &existing.splits)?;
 
-    delete_orphans(conn, "splits", "tmp_src_splits")?;
-    delete_orphans(conn, "transactions", "tmp_src_transactions")?;
-    delete_orphans(conn, "accounts", "tmp_src_accounts")?;
-    delete_orphans(conn, "commodities", "tmp_src_commodities")?;
+    delete_orphans(conn, "splits", "tmp_src_splits", None)?;
+    delete_orphans(conn, "transactions", "tmp_src_transactions", None)?;
+    delete_orphans(conn, "accounts", "tmp_src_accounts", accounts_excluded)?;
+    delete_orphans(conn, "commodities", "tmp_src_commodities", None)?;
     Ok(())
 }
 
@@ -691,6 +768,18 @@ fn import_gnucash_inner(
     populate_source_guids(dest_conn, "tmp_src_transactions", &tx_guids)?;
     populate_source_guids(dest_conn, "tmp_src_splits", &split_guids)?;
 
+    // Roots for categories the source book lacks stay put across re-imports:
+    // materialize their GUIDs before the transaction so the orphan sweep (and
+    // its revert snapshots) can skip them. Empty set = no exclusion needed.
+    let protected: HashSet<String> = protected_default_roots(dest_conn, &src)?.into_iter().collect();
+    let protected_guids: Vec<String> = protected.iter().cloned().collect();
+    populate_source_guids(dest_conn, "tmp_protected_accounts", &protected_guids)?;
+    let accounts_excluded = if protected.is_empty() {
+        None
+    } else {
+        Some("tmp_protected_accounts")
+    };
+
     let mut counts = MergeCounts::default();
 
     // Counts live inside the txn so the numbers in the history row match
@@ -699,16 +788,26 @@ fn import_gnucash_inner(
     // until the next import recreates them.
     let tx_result: Result<(), AppError> = db::with_tx_err(dest_conn, || {
         counts.commodities_orphaned =
-            count_orphaned(dest_conn, "commodities", "tmp_src_commodities")?;
+            count_orphaned(dest_conn, "commodities", "tmp_src_commodities", None)?;
         counts.accounts_orphaned =
-            count_orphaned(dest_conn, "accounts", "tmp_src_accounts")?;
+            count_orphaned(dest_conn, "accounts", "tmp_src_accounts", accounts_excluded)?;
         counts.transactions_orphaned =
-            count_orphaned(dest_conn, "transactions", "tmp_src_transactions")?;
-        counts.splits_orphaned = count_orphaned(dest_conn, "splits", "tmp_src_splits")?;
+            count_orphaned(dest_conn, "transactions", "tmp_src_transactions", None)?;
+        counts.splits_orphaned = count_orphaned(dest_conn, "splits", "tmp_src_splits", None)?;
 
         let existing = ExistingData::load(dest_conn)?;
-        let snapshots = capture_import_snapshots(dest_conn, &src, &existing)?;
-        apply_merge(dest_conn, &src, &existing, &mut counts)?;
+        let mut snapshots = capture_import_snapshots(dest_conn, &src, &existing, &protected)?;
+        apply_merge(dest_conn, &src, &existing, &mut counts, accounts_excluded)?;
+
+        // Categories the source never covered: create the canonical root now
+        // and record it as added, so reverting this import removes it again.
+        for guid in init::ensure_default_roots(dest_conn)? {
+            snapshots.push(history::Snapshot {
+                table_name: "accounts",
+                row_guid: guid,
+                before_json: None,
+            });
+        }
 
         if counts.has_changes() {
             history::insert_change_entry(
@@ -1020,6 +1119,98 @@ mod tests {
         );
         assert_eq!(count("accounts"), 1);
         assert_eq!(count("commodities"), 1);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A source book that only covers part of the canonical categories: the
+    /// seeded ROOT/roots are replaced on the first import, the uncovered
+    /// categories are recreated under the surviving ROOT, and a re-import is
+    /// a no-op that keeps the recreated roots' GUIDs stable.
+    #[test]
+    fn import_keeps_uncovered_default_roots_across_reimports() {
+        let dir =
+            std::env::temp_dir().join(format!("spendo-import-roots-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let src_path = dir.join("book.gnucash");
+        {
+            let src = Connection::open(&src_path).unwrap();
+            src.execute_batch(
+                "CREATE TABLE commodities (guid TEXT PRIMARY KEY, mnemonic TEXT, namespace TEXT, fullname TEXT);
+                 CREATE TABLE accounts (guid TEXT PRIMARY KEY, name TEXT, account_type TEXT, parent_guid TEXT, code TEXT, description TEXT, placeholder INTEGER, commodity_guid TEXT);
+                 CREATE TABLE transactions (guid TEXT PRIMARY KEY, post_date TEXT, description TEXT, num TEXT);
+                 CREATE TABLE splits (guid TEXT PRIMARY KEY, tx_guid TEXT, account_guid TEXT, value_num INTEGER, value_denom INTEGER, quantity_num INTEGER, quantity_denom INTEGER, reconcile_state TEXT, memo TEXT);
+                 CREATE TABLE slots (obj_guid TEXT, name TEXT, string_val TEXT);
+                 INSERT INTO commodities (guid, mnemonic, namespace) VALUES ('c-src', 'EUR', 'CURRENCY');
+                 INSERT INTO accounts (guid, name, account_type, parent_guid, placeholder, commodity_guid)
+                   VALUES ('src-root', 'Root Account', 'ROOT', NULL, 0, 'c-src'),
+                          ('src-income', 'Income', 'INCOME', 'src-root', 1, 'c-src'),
+                          ('src-expenses', 'Expenses', 'EXPENSE', 'src-root', 1, 'c-src');",
+            )
+            .unwrap();
+        }
+        let src_str = src_path.to_string_lossy().to_string();
+
+        let dest = Connection::open_in_memory().unwrap();
+        init_db(&dest).unwrap();
+        init::seed_empty_book(&dest, "EUR").unwrap();
+
+        let result = import_gnucash_inner(&dest, &src_str, "book.gnucash", "cafe").unwrap();
+        // Seeded ROOT + five roots are all absent from the source: the ROOT is
+        // replaced wholesale, the uncovered categories are recreated after.
+        assert_eq!(result.accounts_orphaned, 6);
+        assert_eq!(result.accounts_added, 3);
+
+        let roots = |conn: &Connection| -> Vec<(String, String)> {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT name, guid FROM accounts
+                     WHERE parent_guid IN (SELECT guid FROM accounts WHERE account_type = 'ROOT')",
+                )
+                .unwrap();
+            stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        let after_first = roots(&dest);
+        assert_eq!(after_first.len(), 5);
+        for (name, _) in init::DEFAULT_ROOTS {
+            assert!(
+                after_first.iter().any(|(n, _)| n == name),
+                "missing {name} after import"
+            );
+        }
+
+        // Re-import: the recreated roots are protected, so nothing changes and
+        // their GUIDs stay stable.
+        let again = import_gnucash_inner(&dest, &src_str, "book.gnucash", "cafe").unwrap();
+        assert_eq!(again.accounts_orphaned, 0);
+        assert_eq!(roots(&dest), after_first);
+        assert_eq!(
+            history::fetch_change_history_inner(&dest)
+                .unwrap()
+                .entries
+                .len(),
+            1
+        );
+
+        // Revert restores the seeded book: five canonical roots under one ROOT.
+        let log = history::fetch_change_history_inner(&dest).unwrap();
+        history::undo_history_entry_inner(&dest, log.entries[0].id).unwrap();
+        let root_count: i64 = dest
+            .query_row(
+                "SELECT COUNT(*) FROM accounts WHERE account_type = 'ROOT'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(root_count, 1);
+        assert_eq!(roots(&dest).len(), 5);
+        let total: i64 = dest
+            .query_row("SELECT COUNT(*) FROM accounts", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(total, 6);
 
         std::fs::remove_dir_all(&dir).ok();
     }

@@ -58,7 +58,8 @@ fn validate_spendo_db_inner(path: &Path) -> Result<(), String> {
     Err(format!("Not a Spendo database: {}", path.display()))
 }
 
-/// Open + ensure schema (idempotent `init_db`) + stamp.
+/// Open + ensure schema (idempotent `init_db`) + stamp + seed any missing
+/// canonical root accounts (heals pre-existing books on open).
 /// File I/O happens here, before the shared lock is touched.
 fn open_book_inner(path: &Path) -> Result<rusqlite::Connection, String> {
     validate_spendo_db_inner(path)?;
@@ -66,6 +67,7 @@ fn open_book_inner(path: &Path) -> Result<rusqlite::Connection, String> {
         db::connect_db(&path.to_path_buf()).map_err(|e| format!("Failed to open book: {}", e))?;
     db::init_db(&conn).map_err(|e| format!("Failed to init book: {}", e))?;
     db::stamp_app_id(&conn);
+    crate::init::ensure_default_roots(&conn).map_err(String::from)?;
     Ok(conn)
 }
 
@@ -356,7 +358,8 @@ mod tests {
         let accounts: i64 = conn
             .query_row("SELECT COUNT(*) FROM accounts", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(accounts, 1);
+        // ROOT + the five canonical category roots seeded by `seed_empty_book`.
+        assert_eq!(accounts, 6);
         let id: i32 = conn
             .query_row("PRAGMA application_id", [], |r| r.get(0))
             .unwrap();
@@ -367,7 +370,7 @@ mod tests {
         let conn = open_book_inner(&path).unwrap();
         let summary = get_summary(&conn).unwrap();
         assert_eq!(summary.currency, "EUR");
-        assert_eq!(summary.total_accounts, 1);
+        assert_eq!(summary.total_accounts, 6);
 
         // Creating again at the same path replaces cleanly (same-file safe).
         let conn = create_book_at_inner(&path, "USD").unwrap();

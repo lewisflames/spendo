@@ -53,6 +53,9 @@ pub fn run() {
                     Some(c) => {
                         db::stamp_app_id(&c);
                         db::write_last_book(&app_data_dir, &path).ok();
+                        if let Err(e) = crate::init::ensure_default_roots(&c) {
+                            eprintln!("spendo: could not seed default accounts: {e}");
+                        }
                         (c, Some(path))
                     }
                     None => {
