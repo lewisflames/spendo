@@ -28,8 +28,6 @@
   import { bookDisplayName } from '$lib/utils/book';
   import { plural } from '$lib/utils/format.svelte';
 
-  const sidebar = Sidebar.useSidebar();
-
   const bookName = $derived(bookDisplayName(activeBookPath.value));
   const bookSubtitle = $derived(
     dbSession.value
@@ -144,11 +142,7 @@
               </Sidebar.MenuButton>
             {/snippet}
           </DropdownMenu.Trigger>
-          <DropdownMenu.Content
-            class="w-64"
-            align="start"
-            side={sidebar.collapsed ? 'right' : 'top'}
-          >
+          <DropdownMenu.Content class="w-64" align="end" side="right">
             <DropdownMenu.Label>
               <div class="min-w-0">
                 <span class="block truncate font-medium">{bookName}</span>
