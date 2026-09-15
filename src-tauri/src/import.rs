@@ -962,15 +962,13 @@ mod tests {
         assert_eq!(result.splits_orphaned, 1);
 
         // Exactly one history row; orphans are gone from the data.
-        let page =
-            history::fetch_change_history_inner(&dest, 1, 50, &history::HistoryFilter::default())
-                .unwrap();
-        assert_eq!(page.total, 1);
-        assert_eq!(page.entries[0].kind, "import");
-        assert_eq!(page.entries[0].label, "Imported book.gnucash");
-        assert_eq!(page.entries[0].transactions_affected, 2);
-        assert_eq!(page.entries[0].accounts_affected, 3);
-        assert_eq!(page.revertible_id, Some(page.entries[0].id));
+        let log = history::fetch_change_history_inner(&dest).unwrap();
+        assert_eq!(log.entries.len(), 1);
+        assert_eq!(log.entries[0].kind, "import");
+        assert_eq!(log.entries[0].label, "Imported book.gnucash");
+        assert_eq!(log.entries[0].transactions_affected, 2);
+        assert_eq!(log.entries[0].accounts_affected, 3);
+        assert_eq!(log.undoable_id, Some(log.entries[0].id));
         let count = |table: &str| -> i64 {
             dest.query_row(
                 &format!("SELECT COUNT(*) FROM {table}"),
@@ -1001,14 +999,15 @@ mod tests {
         assert_eq!(again.transactions_added, 0);
         assert_eq!(again.transactions_orphaned, 0);
         assert_eq!(
-            history::fetch_change_history_inner(&dest, 1, 50, &history::HistoryFilter::default())
+            history::fetch_change_history_inner(&dest)
                 .unwrap()
-                .total,
+                .entries
+                .len(),
             1
         );
 
         // Revert removes added rows and restores the orphaned local rows.
-        history::revert_history_entry_inner(&dest, page.entries[0].id).unwrap();
+        history::undo_history_entry_inner(&dest, log.entries[0].id).unwrap();
         assert_eq!(count("transactions"), 1);
         assert_eq!(
             dest.query_row(

@@ -31,27 +31,12 @@ export interface ChangeEntry {
   revertedBy: number | null;
 }
 
-interface ChangeHistoryPage {
+interface ChangeHistory {
   entries: ChangeEntry[];
-  total: number;
-  pageSize: number;
-  totalPages: number;
-  /** Newest entry eligible for linear undo, if any. */
-  revertibleId: number | null;
-}
-
-interface ChangeHistoryQuery {
-  page: number;
-  pageSize: number;
-  kind?: string | null;
-  source?: string | null;
-  search?: string | null;
-}
-
-interface RevertResult {
-  revertedId: number;
-  revertId: number;
-  summary: DataSummary;
+  /** Newest change eligible for undo, if any. */
+  undoableId: number | null;
+  /** Most recently undone change eligible for redo (LIFO), if any. */
+  redoableId: number | null;
 }
 
 interface ImportResult {
@@ -322,11 +307,14 @@ export const getBookSettings = (): Promise<BookSettings> =>
 export const setBookSetting = (key: string, value: string): Promise<BookSettings> =>
   invoke<BookSettings>('set_book_setting', { key, value });
 
-export const fetchChangeHistory = (query: ChangeHistoryQuery): Promise<ChangeHistoryPage> =>
-  invoke<ChangeHistoryPage>('fetch_change_history', { query });
+export const fetchChangeHistory = (): Promise<ChangeHistory> =>
+  invoke<ChangeHistory>('fetch_change_history');
 
-export const revertHistoryEntry = (id: number): Promise<RevertResult> =>
-  invoke<RevertResult>('revert_history_entry', { id });
+export const undoHistoryEntry = (id: number): Promise<DataSummary> =>
+  invoke<DataSummary>('undo_history_entry', { id });
+
+export const redoHistoryEntry = (id: number): Promise<DataSummary> =>
+  invoke<DataSummary>('redo_history_entry', { id });
 
 export const importGnucash = (path: string, filename: string): Promise<ImportResult> =>
   invoke<ImportResult>('import_gnucash', { path, filename });

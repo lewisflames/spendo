@@ -1382,9 +1382,8 @@ mod tests {
         assert_eq!(second.valid_count, 0);
         assert_eq!(second.duplicate_count, 2);
 
-        // Linear revert removes the imported transactions.
-        crate::history::revert_history_entry_inner(&conn, result.entry_id)
-            .expect("revert runs");
+        // Linear undo removes the imported transactions.
+        crate::history::undo_history_entry_inner(&conn, result.entry_id).expect("undo runs");
         let tx_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM transactions", [], |r| r.get(0))
             .unwrap();

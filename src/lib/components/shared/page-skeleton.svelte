@@ -15,7 +15,6 @@
   }: {
     variant:
       | 'welcome'
-      | 'history'
       | 'accounts'
       | 'transactions'
       | 'transaction-detail'
@@ -45,9 +44,6 @@
       <Skeleton class="h-3 w-36" />
     </div>
   </div>
-{:else if variant === 'history'}
-  <PageHeaderSkeleton />
-  <TableSkeleton cols={4} />
 {:else if variant === 'accounts'}
   <KpiCardRow count={4} />
   <TableSkeleton cols={3} />

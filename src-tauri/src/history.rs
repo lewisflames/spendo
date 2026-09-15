@@ -1,11 +1,9 @@
-use rusqlite::types::ToSql;
 use rusqlite::{params, Connection, OptionalExtension};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tauri::State;
 
 use crate::db::{run_blocking, validate_data_table, with_tx_err, AppError, AppState};
 use crate::home::{get_summary, DataSummary};
-use crate::sql;
 use crate::utils;
 
 // ── Wire structs ─────────────────────────────────────────────────────────────
@@ -26,38 +24,14 @@ pub struct ChangeEntry {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ChangeHistoryPage {
+pub struct ChangeHistory {
     pub entries: Vec<ChangeEntry>,
-    pub total: i64,
-    pub page_size: i64,
-    pub total_pages: i64,
-    /// Latest original entry eligible for linear undo: newest non-revert row
-    /// with no `reverted_by`. `None` when history is empty or everything is
-    /// already reverted. The frontend enables the Revert action only here.
-    pub revertible_id: Option<i64>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RevertResult {
-    pub reverted_id: i64,
-    pub revert_id: i64,
-    pub summary: DataSummary,
-}
-
-/// Arguments for `fetch_change_history`. `kind`/`source` are exact matches;
-/// `search` is a literal substring over the label.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ChangeHistoryQuery {
-    pub page: i64,
-    pub page_size: i64,
-    #[serde(default)]
-    pub kind: Option<String>,
-    #[serde(default)]
-    pub source: Option<String>,
-    #[serde(default)]
-    pub search: Option<String>,
+    /// Newest change eligible for undo: no later change is pending and it has
+    /// no undo row. `None` when history is empty or nothing can be undone.
+    pub undoable_id: Option<i64>,
+    /// Most recently undone change still eligible for redo (LIFO). `None` once
+    /// a newer change invalidates the redo stack or everything is redone.
+    pub redoable_id: Option<i64>,
 }
 
 // ── Snapshots ────────────────────────────────────────────────────────────────
@@ -313,88 +287,43 @@ pub(crate) fn insert_change_entry(
     )
     .map_err(|e| e.to_string())?;
     let entry_id = conn.last_insert_rowid();
-    {
-        let mut stmt = conn
-            .prepare(
-                "INSERT INTO change_snapshots (entry_id, table_name, row_guid, before_json)
-                 VALUES (?1, ?2, ?3, ?4)",
-            )
-            .map_err(|e| e.to_string())?;
-        for s in snapshots {
-            validate_data_table(s.table_name)?;
-            stmt.execute(params![entry_id, s.table_name, s.row_guid, s.before_json])
-                .map_err(|e| e.to_string())?;
-        }
-    }
+    insert_snapshot_rows(conn, entry_id, snapshots)?;
     Ok(entry_id)
+}
+
+/// Insert one snapshot row per entry. Must run inside the caller's transaction
+/// alongside the log row the snapshots belong to.
+fn insert_snapshot_rows(
+    conn: &Connection,
+    entry_id: i64,
+    snapshots: &[Snapshot<'_>],
+) -> Result<(), String> {
+    let mut stmt = conn
+        .prepare(
+            "INSERT INTO change_snapshots (entry_id, table_name, row_guid, before_json)
+             VALUES (?1, ?2, ?3, ?4)",
+        )
+        .map_err(|e| e.to_string())?;
+    for s in snapshots {
+        validate_data_table(s.table_name)?;
+        stmt.execute(params![entry_id, s.table_name, s.row_guid, s.before_json])
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 // ── Fetch ────────────────────────────────────────────────────────────────────
 
-/// Optional `change_log` predicates shared by the count and page queries.
-#[derive(Debug, Default)]
-pub(crate) struct HistoryFilter<'a> {
-    kind: Option<&'a str>,
-    source: Option<&'a str>,
-    search: Option<&'a str>,
-}
-
-impl<'a> HistoryFilter<'a> {
-    /// Trim and drop empty values so `?kind=` / whitespace search behave as
-    /// "no filter" instead of matching nothing.
-    fn from_query(query: &'a ChangeHistoryQuery) -> Self {
-        Self {
-            kind: non_empty(query.kind.as_deref()),
-            source: non_empty(query.source.as_deref()),
-            search: non_empty(query.search.as_deref()),
-        }
-    }
-}
-
-fn non_empty(value: Option<&str>) -> Option<&str> {
-    value.map(str::trim).filter(|s| !s.is_empty())
-}
-
-/// Build the shared WHERE clause + bound params for the filter predicates.
-/// `kind`/`source` are exact matches; `search` is a literal LIKE over the label
-/// (metacharacters escaped). Placeholder indices start at 1 so callers can
-/// append their own placeholders after `params.len()`.
-fn history_where(filter: &HistoryFilter) -> (String, Vec<Box<dyn ToSql>>) {
-    let mut w = sql::WhereBuilder::new(0);
-    if let Some(kind) = filter.kind {
-        w.add("kind = {}", vec![Box::new(kind.to_string())]);
-    }
-    if let Some(source) = filter.source {
-        w.add("source = {}", vec![Box::new(source.to_string())]);
-    }
-    if let Some(search) = filter.search {
-        w.add(
-            "label LIKE '%' || {} || '%' ESCAPE '\\'",
-            vec![Box::new(utils::escape_like(search))],
-        );
-    }
-    (w.where_clause(), w.params)
-}
-
-fn get_change_entries(
-    conn: &Connection,
-    limit: i64,
-    offset: i64,
-    filter: &HistoryFilter,
-) -> Result<Vec<ChangeEntry>, String> {
-    let (where_clause, mut params) = history_where(filter);
-    let limit_idx = params.len() + 1;
-    let offset_idx = limit_idx + 1;
-    let sql_text = format!(
-        "SELECT id, occurred_at, kind, label, source,
-                transactions_affected, accounts_affected, reverts_id, reverted_by
-         FROM change_log{where_clause} ORDER BY id DESC LIMIT ?{limit_idx} OFFSET ?{offset_idx}"
-    );
-    params.push(Box::new(limit));
-    params.push(Box::new(offset));
-    let mut stmt = conn.prepare(&sql_text).map_err(|e| e.to_string())?;
+fn list_change_entries(conn: &Connection) -> Result<Vec<ChangeEntry>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, occurred_at, kind, label, source,
+                    transactions_affected, accounts_affected, reverts_id, reverted_by
+             FROM change_log ORDER BY id DESC",
+        )
+        .map_err(|e| e.to_string())?;
     let mapped = stmt
-        .query_map(sql::param_refs(&params).as_slice(), |row| {
+        .query_map([], |row| {
             Ok(ChangeEntry {
                 id: row.get(0)?,
                 occurred_at: row.get(1)?,
@@ -413,20 +342,11 @@ fn get_change_entries(
         .map_err(|e| e.to_string())
 }
 
-fn count_change_entries(conn: &Connection, filter: &HistoryFilter) -> Result<i64, String> {
-    let (where_clause, params) = history_where(filter);
-    let sql_text = format!("SELECT COUNT(*) FROM change_log{where_clause}");
-    conn.query_row(&sql_text, sql::param_refs(&params).as_slice(), |row| {
-        row.get(0)
-    })
-    .map_err(|e| e.to_string())
-}
-
-/// Newest original entry still eligible for linear undo.
-fn revertible_entry_id(conn: &Connection) -> Result<Option<i64>, String> {
+/// Newest change eligible for undo (still active and the head of the log).
+fn undoable_entry_id(conn: &Connection) -> Result<Option<i64>, String> {
     conn.query_row(
         "SELECT id FROM change_log
-         WHERE kind != 'revert' AND reverted_by IS NULL
+         WHERE kind NOT IN ('revert', 'redo') AND reverted_by IS NULL
          ORDER BY id DESC LIMIT 1",
         [],
         |row| row.get(0),
@@ -435,32 +355,109 @@ fn revertible_entry_id(conn: &Connection) -> Result<Option<i64>, String> {
     .map_err(|e| e.to_string())
 }
 
-pub(crate) fn fetch_change_history_inner(
-    conn: &Connection,
-    page: i64,
-    page_size: i64,
-    filter: &HistoryFilter,
-) -> Result<ChangeHistoryPage, String> {
-    let total = count_change_entries(conn, filter)?;
-    let (page_size, total_pages, safe_page, _) = utils::paginate(total, page, page_size);
-    let entries = get_change_entries(conn, page_size, (safe_page - 1) * page_size, filter)?;
-    Ok(ChangeHistoryPage {
-        entries,
-        total,
-        page_size,
-        total_pages,
-        // Undo eligibility is global, not filtered: the Revert action stays
-        // correct even while the newest entry is hidden by a filter.
-        revertible_id: revertible_entry_id(conn)?,
+/// Most recently undone change still eligible for redo. Picks the undone change
+/// whose undo row has the highest id, provided no change was recorded after that
+/// undo row (a new change invalidates the redo stack, like an editor).
+fn redoable_entry_id(conn: &Connection) -> Result<Option<i64>, String> {
+    conn.query_row(
+        "SELECT c.id FROM change_log c
+         WHERE c.kind NOT IN ('revert', 'redo')
+           AND c.reverted_by = (
+               SELECT MAX(u.reverted_by) FROM change_log u
+               WHERE u.reverted_by IS NOT NULL AND u.kind NOT IN ('revert', 'redo'))
+           AND NOT EXISTS (
+               SELECT 1 FROM change_log n
+               WHERE n.id > c.reverted_by AND n.kind NOT IN ('revert', 'redo'))
+           -- Undo rows recorded before post-state capture existed cannot be
+           -- redone faithfully; ignore them (changes with no affected rows
+           -- legitimately carry no snapshots).
+           AND (NOT EXISTS (SELECT 1 FROM change_snapshots cs WHERE cs.entry_id = c.id)
+                OR EXISTS (SELECT 1 FROM change_snapshots rs WHERE rs.entry_id = c.reverted_by))
+         LIMIT 1",
+        [],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
+/// Full change log, newest first.
+pub(crate) fn fetch_change_history_inner(conn: &Connection) -> Result<ChangeHistory, String> {
+    Ok(ChangeHistory {
+        entries: list_change_entries(conn)?,
+        undoable_id: undoable_entry_id(conn)?,
+        redoable_id: redoable_entry_id(conn)?,
     })
 }
 
-// ── Revert (linear undo) ─────────────────────────────────────────────────────
+// ── Undo / redo (linear history toggle) ──────────────────────────────────────
 
-pub(crate) fn revert_history_entry_inner(
+/// Apply an entry's snapshots: delete rows it added (children first), then
+/// restore rows it changed or removed (parents first so references resolve).
+fn restore_entry_snapshots(conn: &Connection, entry_id: i64) -> Result<(), String> {
+    for table in ["splits", "transactions", "accounts", "commodities"] {
+        validate_data_table(table)?;
+        let sql = format!(
+            "DELETE FROM {table} WHERE guid IN (
+                SELECT row_guid FROM change_snapshots
+                WHERE entry_id = ?1 AND table_name = ?2 AND before_json IS NULL)"
+        );
+        conn.execute(&sql, params![entry_id, table])
+            .map_err(|e| e.to_string())?;
+    }
+    for table in ["commodities", "accounts", "transactions", "splits"] {
+        let mut stmt = conn
+            .prepare(
+                "SELECT before_json FROM change_snapshots
+                 WHERE entry_id = ?1 AND table_name = ?2 AND before_json IS NOT NULL",
+            )
+            .map_err(|e| e.to_string())?;
+        let befores: Vec<String> = stmt
+            .query_map(params![entry_id, table], |row| row.get(0))
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        for before in befores {
+            restore_snapshot_row(conn, table, &before)?;
+        }
+    }
+    Ok(())
+}
+
+/// Record the current state of every row `source_entry_id` touched on
+/// `dest_entry_id`. Undo calls this before restoring, so its own snapshots hold
+/// the post-change state that a later redo puts back.
+fn carry_entry_state(
     conn: &Connection,
-    id: i64,
-) -> Result<(i64, i64), AppError> {
+    source_entry_id: i64,
+    dest_entry_id: i64,
+) -> Result<(), String> {
+    let rows: Vec<(String, String)> = {
+        let mut stmt = conn
+            .prepare("SELECT table_name, row_guid FROM change_snapshots WHERE entry_id = ?1")
+            .map_err(|e| e.to_string())?;
+        let mapped = stmt
+            .query_map([source_entry_id], |row| Ok((row.get(0)?, row.get(1)?)))
+            .map_err(|e| e.to_string())?;
+        mapped
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?
+    };
+    for (table, guid) in rows {
+        let current = snapshot_row(conn, &table, &guid)?;
+        conn.execute(
+            "INSERT INTO change_snapshots (entry_id, table_name, row_guid, before_json)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![dest_entry_id, table, guid, current],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Undo the newest change: restore its before-images and record an undo row
+/// (kind `revert`) carrying the post-change state for a later redo.
+pub(crate) fn undo_history_entry_inner(conn: &Connection, id: i64) -> Result<(), AppError> {
     let (kind, label, reverted_by): (String, String, Option<i64>) = conn
         .query_row(
             "SELECT kind, label, reverted_by FROM change_log WHERE id = ?1",
@@ -469,80 +466,83 @@ pub(crate) fn revert_history_entry_inner(
         )
         .optional()?
         .ok_or_else(|| AppError::NotFound("Change not found — it may have been cleared".to_string()))?;
-    if kind == "revert" {
-        return Err(AppError::Validation("Undo entries cannot be reverted".to_string()));
+    if kind == "revert" || kind == "redo" {
+        return Err(AppError::Validation(
+            "Only recorded changes can be undone".to_string(),
+        ));
     }
     if reverted_by.is_some() {
-        return Err(AppError::Validation("This change was already reverted".to_string()));
+        return Err(AppError::Validation("This change was already undone".to_string()));
     }
     let newer: i64 = conn.query_row(
         "SELECT COUNT(*) FROM change_log
-         WHERE kind != 'revert' AND reverted_by IS NULL AND id > ?1",
+         WHERE kind NOT IN ('revert', 'redo') AND reverted_by IS NULL AND id > ?1",
         [id],
         |row| row.get(0),
     )?;
     if newer > 0 {
-        return Err(AppError::Validation("Revert newer changes first".to_string()));
+        return Err(AppError::Validation("Undo newer changes first".to_string()));
     }
 
-    let tx_result = with_tx_err(conn, || {
-        // Phase 1: drop rows the operation added (children before parents).
-        for table in ["splits", "transactions", "accounts", "commodities"] {
-            validate_data_table(table)?;
-            let sql = format!(
-                "DELETE FROM {table} WHERE guid IN (
-                    SELECT row_guid FROM change_snapshots
-                    WHERE entry_id = ?1 AND table_name = ?2 AND before_json IS NULL)"
-            );
-            conn.execute(&sql, params![id, table])?;
-        }
-
-        // Phase 2: restore rows the operation changed or removed
-        // (parents before children so references resolve).
-        for table in ["commodities", "accounts", "transactions", "splits"] {
-            let mut stmt = conn.prepare(
-                "SELECT before_json FROM change_snapshots
-                 WHERE entry_id = ?1 AND table_name = ?2 AND before_json IS NOT NULL",
-            )?;
-            let befores: Vec<String> = stmt
-                .query_map(params![id, table], |row| row.get(0))?
-                .collect::<Result<Vec<_>, _>>()?;
-            for before in befores {
-                restore_snapshot_row(conn, table, &before)?;
-            }
-        }
-
-        let revert_id = {
+    with_tx_err(conn, || {
+        let undo_id = {
             let occurred_at = utils::iso_now();
-            let revert_label = format!("Reverted: {label}");
+            let undo_label = format!("Undid: {label}");
             conn.execute(
                 "INSERT INTO change_log
                  (occurred_at, kind, label, source, reverts_id)
                  VALUES (?1, 'revert', ?2, 'system', ?3)",
-                params![occurred_at, revert_label, id],
+                params![occurred_at, undo_label, id],
             )?;
             conn.last_insert_rowid()
         };
+        carry_entry_state(conn, id, undo_id)?;
+        restore_entry_snapshots(conn, id)?;
         conn.execute(
             "UPDATE change_log SET reverted_by = ?1 WHERE id = ?2",
-            params![revert_id, id],
+            params![undo_id, id],
         )?;
-
-        Ok(revert_id)
-    });
-    match tx_result {
-        Ok(revert_id) => Ok((id, revert_id)),
-        Err(e) => Err(map_revert_error(e)),
-    }
+        Ok(())
+    })
+    .map_err(map_history_error)
 }
 
-/// Untracked rows (written outside the history log) referencing rows this
-/// revert removes surface as FK violations — translate to the same "blocked"
-/// language as the ordering guard. Matched on the extended result code so
-/// other constraint failures stay loud instead of masquerading as ordering.
-fn map_revert_error(e: AppError) -> AppError {
+/// Redo the most recently undone change: restore the post-change state captured
+/// on its undo row and clear the undone mark.
+pub(crate) fn redo_history_entry_inner(conn: &Connection, id: i64) -> Result<(), AppError> {
+    if redoable_entry_id(conn)? != Some(id) {
+        return Err(AppError::Validation(
+            "This change can no longer be redone".to_string(),
+        ));
+    }
+    let (undo_id, label): (i64, String) = conn.query_row(
+        "SELECT reverted_by, label FROM change_log WHERE id = ?1",
+        [id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+
+    with_tx_err(conn, || {
+        restore_entry_snapshots(conn, undo_id)?;
+        let occurred_at = utils::iso_now();
+        let redo_label = format!("Redid: {label}");
+        conn.execute(
+            "INSERT INTO change_log
+             (occurred_at, kind, label, source, reverts_id)
+             VALUES (?1, 'redo', ?2, 'system', ?3)",
+            params![occurred_at, redo_label, undo_id],
+        )?;
+        conn.execute("UPDATE change_log SET reverted_by = NULL WHERE id = ?1", [id])?;
+        Ok(())
+    })
+    .map_err(map_history_error)
+}
+
+/// Untracked rows (written outside the history log) referencing rows an undo or
+/// redo removes surface as FK violations — translate to plain language instead
+/// of leaking a constraint error.
+fn map_history_error(e: AppError) -> AppError {
     if matches!(&e, AppError::Db(db) if db.is_foreign_key()) {
-        AppError::Validation("Cannot revert — newer data depends on this change".to_string())
+        AppError::Validation("Newer data depends on this change".to_string())
     } else {
         e
     }
@@ -571,33 +571,32 @@ pub(crate) fn last_import_source(conn: &Connection) -> Result<(String, String), 
 // ── Tauri commands ───────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub async fn fetch_change_history(
+pub async fn fetch_change_history(state: State<'_, AppState>) -> Result<ChangeHistory, String> {
+    run_blocking(state.db.clone(), move |conn| fetch_change_history_inner(conn)).await
+}
+
+#[tauri::command]
+pub async fn undo_history_entry(
     state: State<'_, AppState>,
-    query: ChangeHistoryQuery,
-) -> Result<ChangeHistoryPage, String> {
+    id: i64,
+) -> Result<DataSummary, String> {
     run_blocking(state.db.clone(), move |conn| {
-        let filter = HistoryFilter::from_query(&query);
-        fetch_change_history_inner(conn, query.page, query.page_size, &filter)
+        undo_history_entry_inner(conn, id)?;
+        get_summary(conn)
     })
     .await
 }
 
 #[tauri::command]
-pub async fn revert_history_entry(
+pub async fn redo_history_entry(
     state: State<'_, AppState>,
     id: i64,
-) -> Result<RevertResult, String> {
-    let (reverted_id, revert_id, summary) = run_blocking(state.db.clone(), move |conn| {
-        let (reverted_id, revert_id) = revert_history_entry_inner(conn, id)?;
-        let summary = get_summary(conn)?;
-        Ok::<_, String>((reverted_id, revert_id, summary))
+) -> Result<DataSummary, String> {
+    run_blocking(state.db.clone(), move |conn| {
+        redo_history_entry_inner(conn, id)?;
+        get_summary(conn)
     })
-    .await?;
-    Ok(RevertResult {
-        reverted_id,
-        revert_id,
-        summary,
-    })
+    .await
 }
 
 #[cfg(test)]
@@ -650,6 +649,11 @@ mod tests {
         insert_change_entry(conn, "test", "test entry", "manual", 0, 0, None, &snaps).unwrap()
     }
 
+    fn count(conn: &Connection, table: &str) -> i64 {
+        conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+            .unwrap()
+    }
+
     #[test]
     fn snapshot_row_round_trips_missing_and_present() {
         let conn = setup();
@@ -663,25 +667,31 @@ mod tests {
     }
 
     #[test]
-    fn revert_create_deletes_added_rows() {
+    fn undo_create_deletes_added_rows_and_redo_reinserts() {
         let conn = setup();
-        // Capture "before" (absent), then add rows, then revert removes them.
+        // Capture "before" (absent), then add rows; undo removes them.
         let id = log_snapshots(&conn, &[("transactions", "t1"), ("splits", "s-t1")]);
         seed_tx(&conn, "t1", "2024-01-10", "Groceries", 5_000);
 
-        revert_history_entry_inner(&conn, id).unwrap();
+        undo_history_entry_inner(&conn, id).unwrap();
 
-        let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM transactions", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(count, 0);
-        let page = fetch_change_history_inner(&conn, 1, 50, &HistoryFilter::default()).unwrap();
-        assert_eq!(page.total, 2);
-        assert_eq!(page.revertible_id, None);
+        assert_eq!(count(&conn, "transactions"), 0);
+        let history = fetch_change_history_inner(&conn).unwrap();
+        assert_eq!(history.entries.len(), 2);
+        assert_eq!(history.undoable_id, None);
+        assert_eq!(history.redoable_id, Some(id));
+
+        // Redo puts the created rows back and makes the change undoable again.
+        redo_history_entry_inner(&conn, id).unwrap();
+        assert_eq!(count(&conn, "transactions"), 1);
+        assert_eq!(count(&conn, "splits"), 1);
+        let history = fetch_change_history_inner(&conn).unwrap();
+        assert_eq!(history.undoable_id, Some(id));
+        assert_eq!(history.redoable_id, None);
     }
 
     #[test]
-    fn revert_update_restores_before_image() {
+    fn undo_restores_before_image_and_redo_restores_after() {
         let conn = setup();
         seed_tx(&conn, "t1", "2024-01-10", "Groceries", 5_000);
         let id = log_snapshots(&conn, &[("transactions", "t1")]);
@@ -690,46 +700,43 @@ mod tests {
             [],
         )
         .unwrap();
-
-        revert_history_entry_inner(&conn, id).unwrap();
-
-        let desc: String = conn
-            .query_row(
+        let description = |conn: &Connection| -> String {
+            conn.query_row(
                 "SELECT description FROM transactions WHERE guid = 't1'",
                 [],
                 |r| r.get(0),
             )
-            .unwrap();
-        assert_eq!(desc, "Groceries");
+            .unwrap()
+        };
+
+        undo_history_entry_inner(&conn, id).unwrap();
+        assert_eq!(description(&conn), "Groceries");
+
+        redo_history_entry_inner(&conn, id).unwrap();
+        assert_eq!(description(&conn), "Edited");
     }
 
     #[test]
-    fn revert_delete_reinserts_removed_rows() {
+    fn undo_delete_reinserts_removed_rows_and_redo_removes_them_again() {
         let conn = setup();
         seed_tx(&conn, "t1", "2024-01-10", "Groceries", 5_000);
-        let id = log_snapshots(
-            &conn,
-            &[("transactions", "t1"), ("splits", "s-t1")],
-        );
+        let id = log_snapshots(&conn, &[("transactions", "t1"), ("splits", "s-t1")]);
         conn.execute("DELETE FROM splits WHERE guid = 's-t1'", [])
             .unwrap();
         conn.execute("DELETE FROM transactions WHERE guid = 't1'", [])
             .unwrap();
 
-        revert_history_entry_inner(&conn, id).unwrap();
+        undo_history_entry_inner(&conn, id).unwrap();
+        assert_eq!(count(&conn, "transactions"), 1);
+        assert_eq!(count(&conn, "splits"), 1);
 
-        let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM transactions", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(count, 1);
-        let splits: i64 = conn
-            .query_row("SELECT COUNT(*) FROM splits", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(splits, 1);
+        redo_history_entry_inner(&conn, id).unwrap();
+        assert_eq!(count(&conn, "transactions"), 0);
+        assert_eq!(count(&conn, "splits"), 0);
     }
 
     #[test]
-    fn linear_undo_guards_out_of_order_and_double_revert() {
+    fn linear_undo_guards_out_of_order_and_double_undo() {
         let conn = setup();
         // Model two creates: snapshot the absence first, then insert.
         let first = log_snapshots(&conn, &[("transactions", "t1"), ("splits", "s-t1")]);
@@ -738,42 +745,90 @@ mod tests {
         seed_tx(&conn, "t2", "2024-02-05", "Second", 1_500);
 
         // Older entry is blocked while a newer one is pending.
-        let err = revert_history_entry_inner(&conn, first).unwrap_err();
+        let err = undo_history_entry_inner(&conn, first).unwrap_err();
         assert!(err.to_string().contains("newer"), "unexpected: {err:?}");
 
-        revert_history_entry_inner(&conn, second).unwrap();
-        // Double revert is blocked.
-        let err = revert_history_entry_inner(&conn, second).unwrap_err();
+        undo_history_entry_inner(&conn, second).unwrap();
+        // Double undo is blocked.
+        let err = undo_history_entry_inner(&conn, second).unwrap_err();
         assert!(err.to_string().contains("already"), "unexpected: {err:?}");
         // Only the second create was undone so far.
-        let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM transactions", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(count, 1);
+        assert_eq!(count(&conn, "transactions"), 1);
 
-        // Now the older entry is the head and reverts cleanly.
-        revert_history_entry_inner(&conn, first).unwrap();
-        let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM transactions", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(count, 0);
+        // Now the older entry is the head and undoes cleanly.
+        undo_history_entry_inner(&conn, first).unwrap();
+        assert_eq!(count(&conn, "transactions"), 0);
     }
 
     #[test]
-    fn revert_entries_are_not_revertible() {
+    fn redo_stack_is_lifo_and_invalidated_by_new_changes() {
+        let conn = setup();
+        let first = log_snapshots(&conn, &[("transactions", "t1"), ("splits", "s-t1")]);
+        seed_tx(&conn, "t1", "2024-01-10", "First", 5_000);
+        let second = log_snapshots(&conn, &[("transactions", "t2"), ("splits", "s-t2")]);
+        seed_tx(&conn, "t2", "2024-02-05", "Second", 1_500);
+
+        undo_history_entry_inner(&conn, second).unwrap();
+        undo_history_entry_inner(&conn, first).unwrap();
+        assert_eq!(count(&conn, "transactions"), 0);
+        // LIFO: the most recently undone change is redone first.
+        assert_eq!(
+            fetch_change_history_inner(&conn).unwrap().redoable_id,
+            Some(first)
+        );
+
+        redo_history_entry_inner(&conn, first).unwrap();
+        assert_eq!(count(&conn, "transactions"), 1);
+        assert_eq!(
+            fetch_change_history_inner(&conn).unwrap().redoable_id,
+            Some(second)
+        );
+        redo_history_entry_inner(&conn, second).unwrap();
+        assert_eq!(count(&conn, "transactions"), 2);
+        assert_eq!(fetch_change_history_inner(&conn).unwrap().redoable_id, None);
+
+        // A new change after an undo invalidates the redo stack.
+        undo_history_entry_inner(&conn, second).unwrap();
+        let third = log_snapshots(&conn, &[("transactions", "t3"), ("splits", "s-t3")]);
+        seed_tx(&conn, "t3", "2024-03-01", "Third", 2_500);
+        let history = fetch_change_history_inner(&conn).unwrap();
+        assert_eq!(history.redoable_id, None);
+        assert_eq!(history.undoable_id, Some(third));
+    }
+
+    #[test]
+    fn history_toggle_entries_are_not_toggleable() {
         let conn = setup();
         seed_tx(&conn, "t1", "2024-01-10", "First", 5_000);
         let first = log_snapshots(&conn, &[("transactions", "t1")]);
-        let (_, revert_id) = revert_history_entry_inner(&conn, first).unwrap();
-        assert!(revert_history_entry_inner(&conn, revert_id).is_err());
-        assert!(fetch_change_history_inner(&conn, 1, 50, &HistoryFilter::default())
-            .unwrap()
-            .revertible_id
-            .is_none());
+        undo_history_entry_inner(&conn, first).unwrap();
+
+        // The undo row itself cannot be undone or redone; only the change can.
+        let history = fetch_change_history_inner(&conn).unwrap();
+        let undo_row = &history.entries[0];
+        assert_eq!(undo_row.kind, "revert");
+        assert!(undo_history_entry_inner(&conn, undo_row.id).is_err());
+        assert!(redo_history_entry_inner(&conn, undo_row.id).is_err());
+        assert_eq!(history.undoable_id, None);
+        assert_eq!(history.redoable_id, Some(first));
     }
 
     #[test]
-    fn history_paginates_newest_first() {
+    fn redo_disabled_for_undo_rows_without_captured_state() {
+        let conn = setup();
+        seed_tx(&conn, "t1", "2024-01-10", "Groceries", 5_000);
+        let id = log_snapshots(&conn, &[("transactions", "t1")]);
+        undo_history_entry_inner(&conn, id).unwrap();
+        // Simulate an undo row recorded before post-state capture existed.
+        conn.execute("DELETE FROM change_snapshots WHERE entry_id != ?1", [id])
+            .unwrap();
+
+        assert_eq!(fetch_change_history_inner(&conn).unwrap().redoable_id, None);
+        assert!(redo_history_entry_inner(&conn, id).is_err());
+    }
+
+    #[test]
+    fn history_lists_newest_first() {
         let conn = setup();
         for i in 0..3 {
             insert_change_entry(
@@ -788,16 +843,15 @@ mod tests {
             )
             .unwrap();
         }
-        let page = fetch_change_history_inner(&conn, 1, 2, &HistoryFilter::default()).unwrap();
-        assert_eq!(page.total, 3);
-        assert_eq!(page.total_pages, 2);
-        assert_eq!(page.entries.len(), 2);
-        assert!(page.entries[0].id > page.entries[1].id);
-        assert_eq!(page.revertible_id, Some(page.entries[0].id));
+        let history = fetch_change_history_inner(&conn).unwrap();
+        assert_eq!(history.entries.len(), 3);
+        assert!(history.entries[0].id > history.entries[1].id);
+        assert!(history.entries[1].id > history.entries[2].id);
+        assert_eq!(history.undoable_id, Some(history.entries[0].id));
     }
 
     #[test]
-    fn revert_account_update_preserves_budgets() {
+    fn undo_account_update_preserves_budgets() {
         let conn = setup();
         conn.execute(
             "INSERT INTO budgets (guid, account_guid, year, amount, created_at)
@@ -805,7 +859,7 @@ mod tests {
             [],
         )
         .unwrap();
-        // Log an account_update, mutate, then revert: the upsert restore must
+        // Log an account_update, mutate, then undo: the upsert restore must
         // not fire the budgets FK cascade (INSERT OR REPLACE would).
         let id = log_snapshots(&conn, &[("accounts", "checking")]);
         conn.execute(
@@ -814,7 +868,7 @@ mod tests {
         )
         .unwrap();
 
-        revert_history_entry_inner(&conn, id).unwrap();
+        undo_history_entry_inner(&conn, id).unwrap();
 
         let name: String = conn
             .query_row("SELECT name FROM accounts WHERE guid = 'checking'", [], |r| {
@@ -822,82 +876,6 @@ mod tests {
             })
             .unwrap();
         assert_eq!(name, "Checking");
-        let budgets: i64 = conn
-            .query_row("SELECT COUNT(*) FROM budgets", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(budgets, 1);
-    }
-
-    #[test]
-    fn history_filters_by_kind_source_and_search() {
-        let conn = setup();
-        insert_change_entry(&conn, "import", "Imported a.gnucash", "import", 3, 2, None, &[]).unwrap();
-        insert_change_entry(&conn, "tx_create", "Groceries", "manual", 1, 1, None, &[]).unwrap();
-        insert_change_entry(&conn, "tx_create", "Rent", "schedule", 1, 1, None, &[]).unwrap();
-        insert_change_entry(&conn, "reconcile", "Reconciled Checking", "manual", 5, 1, None, &[])
-            .unwrap();
-
-        let imports = HistoryFilter {
-            kind: Some("import"),
-            ..Default::default()
-        };
-        let page = fetch_change_history_inner(&conn, 1, 50, &imports).unwrap();
-        assert_eq!(page.total, 1);
-        assert_eq!(page.entries[0].label, "Imported a.gnucash");
-
-        let scheduled = HistoryFilter {
-            source: Some("schedule"),
-            ..Default::default()
-        };
-        let page = fetch_change_history_inner(&conn, 1, 50, &scheduled).unwrap();
-        assert_eq!(page.total, 1);
-        assert_eq!(page.entries[0].label, "Rent");
-
-        let search = HistoryFilter {
-            search: Some("recon"),
-            ..Default::default()
-        };
-        let page = fetch_change_history_inner(&conn, 1, 50, &search).unwrap();
-        assert_eq!(page.total, 1);
-        assert_eq!(page.entries[0].kind, "reconcile");
-
-        // Filters combine with AND and keep pagination totals consistent.
-        let none = HistoryFilter {
-            kind: Some("import"),
-            source: Some("schedule"),
-            ..Default::default()
-        };
-        let page = fetch_change_history_inner(&conn, 1, 50, &none).unwrap();
-        assert_eq!((page.total, page.total_pages, page.entries.len()), (0, 1, 0));
-        // Undo eligibility stays global (unfiltered).
-        assert_eq!(page.revertible_id, Some(4));
-    }
-
-    #[test]
-    fn history_search_escapes_like_metacharacters() {
-        let conn = setup();
-        insert_change_entry(&conn, "test", "100% rent", "manual", 0, 0, None, &[]).unwrap();
-        insert_change_entry(&conn, "test", "100x rent", "manual", 0, 0, None, &[]).unwrap();
-
-        let percent = HistoryFilter {
-            search: Some("100%"),
-            ..Default::default()
-        };
-        assert_eq!(
-            fetch_change_history_inner(&conn, 1, 50, &percent).unwrap().total,
-            1
-        );
-        // Unescaped `_` would match any single character; escaped it matches
-        // nothing here.
-        let underscore = HistoryFilter {
-            search: Some("100_"),
-            ..Default::default()
-        };
-        assert_eq!(
-            fetch_change_history_inner(&conn, 1, 50, &underscore)
-                .unwrap()
-                .total,
-            0
-        );
+        assert_eq!(count(&conn, "budgets"), 1);
     }
 }
