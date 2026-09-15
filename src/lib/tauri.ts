@@ -254,6 +254,22 @@ export interface AccountDetailResult {
 export const fetchHomeData = (): Promise<HomeDataResult> =>
   invoke<HomeDataResult>('fetch_home_data');
 
+/** One ACCOUNTS sidebar destination: the top-level account for a category. */
+export interface NavRoot {
+  category: string;
+  guid: string | null;
+  name: string | null;
+}
+
+export const fetchNavRoots = (): Promise<NavRoot[]> => invoke<NavRoot[]>('fetch_nav_roots');
+
+export interface NavBadges {
+  dueSchedules: number;
+  unclearedTransactions: number;
+}
+
+export const fetchNavBadges = (): Promise<NavBadges> => invoke<NavBadges>('fetch_nav_badges');
+
 export const clearAppDb = (): Promise<void> => invoke<void>('clear_app_db');
 
 /** Writes text (e.g. a CSV export) to a user-chosen path. */

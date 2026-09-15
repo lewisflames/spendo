@@ -1,7 +1,6 @@
 import { goto } from '$app/navigation';
 import { resolve } from '$app/paths';
 import { open, save } from '@tauri-apps/plugin-dialog';
-import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { basename } from '@tauri-apps/api/path';
 import { toast } from '$lib/components/ui/sonner';
 import { activeBookPath, dbSession, setActiveBookPath, setDbSession } from '$lib/stores/db.svelte';
@@ -147,16 +146,8 @@ export async function closeActiveBook(): Promise<boolean> {
   }
 }
 
-/** The path-taking variants are the single implementation for callers that
- * already have a book path (active-book menus, dialogs). */
-export async function revealBookAt(path: string): Promise<void> {
-  try {
-    await revealItemInDir(path);
-  } catch (e: unknown) {
-    toast.error(errMsg(e, 'Failed to open file manager'));
-  }
-}
-
+/** The path-taking variant is the single implementation for callers that
+ * already have a book path (settings book card). */
 export async function copyBookPathAt(path: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(path);
@@ -166,12 +157,6 @@ export async function copyBookPathAt(path: string): Promise<boolean> {
     toast.error(errMsg(e, 'Failed to copy path'));
     return false;
   }
-}
-
-export async function revealActiveBook(): Promise<void> {
-  const path = activeBookPath.value;
-  if (!path) return;
-  await revealBookAt(path);
 }
 
 export async function copyActiveBookPath(): Promise<boolean> {

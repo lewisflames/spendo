@@ -3,24 +3,23 @@ import { resolve } from '$app/paths';
 import type { Component } from 'svelte';
 import {
   ArrowLeft,
-  ArrowLeftRight,
   ArrowRight,
-  Briefcase,
+  CalendarPlus,
   CircleHelp,
   FolderOpen,
   FolderPlus,
-  FolderTree,
   History,
   Info,
   LogOut,
   PanelLeft,
-  PiggyBank,
-  Receipt,
+  Plus,
   Save,
-  Scale,
   Settings,
-  SunMoon
+  SunMoon,
+  Upload
 } from '@lucide/svelte';
+import { NAV_GROUPS, navHref } from '$lib/features/nav/nav-items';
+import { navRoots } from '$lib/stores/nav.svelte';
 import { appSettings, resolveTheme, saveSettings } from '$lib/stores/settings.svelte';
 import { keyboardShortcutsDialog, toggleHistorySidebar } from '$lib/stores/ui.svelte';
 import { activeBookPath, dbSession } from '$lib/stores/db.svelte';
@@ -45,77 +44,33 @@ export interface PaletteCommand {
   run: () => void | Promise<void>;
 }
 
-function goTo(
-  path:
-    | '/about'
-    | '/accounts'
-    | '/budgets'
-    | '/portfolio'
-    | '/reconcile'
-    | '/reports/pnl'
-    | '/settings'
-    | '/transactions'
-): () => Promise<void> {
-  return () => goto(resolve(path));
-}
+/** Page navigation mirrors the sidebar config, so the two can never drift.
+ * Dynamic targets (account roots) resolve at run time from the nav store. */
+const goToCommands: PaletteCommand[] = NAV_GROUPS.flatMap((group) =>
+  group.items.map((item): PaletteCommand => ({
+    id: `go-${item.id}`,
+    title: `Go to ${item.label}`,
+    group: 'Go to',
+    icon: item.icon,
+    keywords: item.keywords,
+    when: () => navHref(item, navRoots.value) !== null,
+    run: () => {
+      const href = navHref(item, navRoots.value);
+      if (href) void goto(resolve(href));
+    }
+  }))
+);
 
 /** Static v1 command list: page navigation + app actions. No backend calls. */
 export const PALETTE_COMMANDS: PaletteCommand[] = [
-  {
-    id: 'go-accounts',
-    title: 'Go to Accounts',
-    group: 'Go to',
-    icon: FolderTree,
-    keywords: ['accounts', 'balance sheet', 'balances'],
-    run: goTo('/accounts')
-  },
-  {
-    id: 'go-transactions',
-    title: 'Go to Transactions',
-    group: 'Go to',
-    icon: ArrowLeftRight,
-    keywords: ['transactions', 'ledger', 'journal'],
-    run: goTo('/transactions')
-  },
-  {
-    id: 'go-pnl',
-    title: 'Go to Profit & Loss',
-    group: 'Go to',
-    icon: Receipt,
-    keywords: ['profit', 'loss', 'pnl', 'income', 'expenses', 'report'],
-    run: goTo('/reports/pnl')
-  },
-  {
-    id: 'go-reconcile',
-    title: 'Go to Reconcile',
-    group: 'Go to',
-    icon: Scale,
-    keywords: ['reconcile', 'reconciliation', 'bank statement', 'cleared'],
-    run: goTo('/reconcile')
-  },
-  {
-    id: 'go-budgets',
-    title: 'Go to Budgets',
-    group: 'Go to',
-    icon: PiggyBank,
-    keywords: ['budgets', 'budgeting', 'plan'],
-    run: goTo('/budgets')
-  },
-  {
-    id: 'go-portfolio',
-    title: 'Go to Portfolio',
-    group: 'Go to',
-    icon: Briefcase,
-    keywords: ['portfolio', 'investments', 'holdings', 'stocks'],
-    run: goTo('/portfolio')
-  },
+  ...goToCommands,
   {
     id: 'go-settings',
     title: 'Go to Settings',
     group: 'Go to',
     icon: Settings,
     keywords: ['settings', 'preferences', 'export', 'import'],
-    run: goTo('/settings')
+    run: () => goto(resolve('/settings'))
   },
   {
     id: 'go-about',
@@ -123,7 +78,25 @@ export const PALETTE_COMMANDS: PaletteCommand[] = [
     group: 'Go to',
     icon: Info,
     keywords: ['about', 'version', 'help'],
-    run: goTo('/about')
+    run: () => goto(resolve('/about'))
+  },
+  {
+    id: 'new-transaction',
+    title: 'New transaction',
+    group: 'Actions',
+    icon: Plus,
+    keywords: ['new', 'add', 'transaction', 'expense', 'income', 'spend'],
+    when: () => dbSession.value !== null,
+    run: () => goto(resolve('/transactions/new'))
+  },
+  {
+    id: 'new-schedule',
+    title: 'New scheduled transaction',
+    group: 'Actions',
+    icon: CalendarPlus,
+    keywords: ['new', 'add', 'schedule', 'recurring', 'bill', 'subscription'],
+    when: () => dbSession.value !== null,
+    run: () => goto(resolve('/scheduled/new'))
   },
   {
     id: 'toggle-theme',
@@ -186,6 +159,15 @@ export const PALETTE_COMMANDS: PaletteCommand[] = [
     run: () => {
       void saveBookAsViaDialog();
     }
+  },
+  {
+    id: 'import-data',
+    title: 'Import data…',
+    group: 'Actions',
+    icon: Upload,
+    keywords: ['import', 'gnucash', 'csv', 'bank statement', 'merge'],
+    when: () => dbSession.value !== null,
+    run: () => goto(resolve('/settings/import'))
   },
   {
     id: 'close-book',
