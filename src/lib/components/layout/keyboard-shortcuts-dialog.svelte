@@ -1,6 +1,7 @@
 <script lang="ts">
   import * as Dialog from '$lib/components/ui/dialog';
   import Kbd from '$lib/components/shared/kbd.svelte';
+  import { NAV_GROUPS } from '$lib/features/nav/nav-items';
   import { keyboardShortcutsDialog } from '$lib/stores/ui.svelte';
   import { modKeyLabel } from '$lib/utils/platform';
 
@@ -23,6 +24,13 @@
     { keys: [modKey, 'Z'], description: 'Undo last change' },
     { keys: [modKey, 'Shift', 'Z'], description: 'Redo last change' }
   ];
+
+  const navShortcuts: ShortcutEntry[] = NAV_GROUPS.flatMap((group) => group.items).flatMap(
+    (item) =>
+      item.chord
+        ? [{ keys: ['G', item.chord.toUpperCase()], description: `Go to ${item.label}` }]
+        : []
+  );
 </script>
 
 <Dialog.Root bind:open={keyboardShortcutsDialog.value}>
@@ -32,22 +40,28 @@
       <Dialog.Description>Available keyboard shortcuts for Spendo.</Dialog.Description>
     </Dialog.Header>
     <div class="flex flex-col gap-3">
-      <div class="flex flex-col gap-1.5">
-        <h4 class="text-xs font-semibold tracking-wider text-muted-foreground uppercase">Global</h4>
-        {#each globalShortcuts as shortcut (shortcut.keys.join('-'))}
-          <div class="flex items-center justify-between gap-4 py-0.5">
-            <span class="text-sm text-foreground">{shortcut.description}</span>
-            <div class="flex items-center gap-0.5">
-              {#each shortcut.keys as key, i (key)}
-                <Kbd>{key}</Kbd>
-                {#if i < shortcut.keys.length - 1}
-                  <span class="text-xs text-muted-foreground">+</span>
-                {/if}
-              {/each}
+      {#snippet shortcutList(title: string, shortcuts: ShortcutEntry[])}
+        <div class="flex flex-col gap-1.5">
+          <h4 class="text-xs font-semibold tracking-wider text-muted-foreground uppercase">
+            {title}
+          </h4>
+          {#each shortcuts as shortcut (shortcut.keys.join('-'))}
+            <div class="flex items-center justify-between gap-4 py-0.5">
+              <span class="text-sm text-foreground">{shortcut.description}</span>
+              <div class="flex items-center gap-0.5">
+                {#each shortcut.keys as key, i (key)}
+                  <Kbd>{key}</Kbd>
+                  {#if i < shortcut.keys.length - 1}
+                    <span class="text-xs text-muted-foreground">+</span>
+                  {/if}
+                {/each}
+              </div>
             </div>
-          </div>
-        {/each}
-      </div>
+          {/each}
+        </div>
+      {/snippet}
+      {@render shortcutList('Navigation', navShortcuts)}
+      {@render shortcutList('Global', globalShortcuts)}
     </div>
   </Dialog.Content>
 </Dialog.Root>

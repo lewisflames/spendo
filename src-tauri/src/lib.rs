@@ -11,6 +11,7 @@ mod history;
 mod home;
 mod import;
 mod init;
+mod nav;
 mod portfolio;
 mod prices;
 mod reconcile;
@@ -52,10 +53,10 @@ pub fn run() {
                 {
                     Some(c) => {
                         db::stamp_app_id(&c);
-                        db::write_last_book(&app_data_dir, &path).ok();
                         if let Err(e) = crate::init::ensure_default_roots(&c) {
                             eprintln!("spendo: could not seed default accounts: {e}");
                         }
+                        db::write_last_book(&app_data_dir, &path).ok();
                         (c, Some(path))
                     }
                     None => {
@@ -102,7 +103,9 @@ pub fn run() {
             history::undo_history_entry,
             history::redo_history_entry,
             accounts::fetch_accounts,
+            accounts::fetch_nav_roots,
             accounts::fetch_book_currencies,
+            nav::fetch_nav_badges,
             accounts_mut::create_account,
             accounts_mut::update_account,
             accounts_mut::delete_account,

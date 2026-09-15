@@ -487,6 +487,82 @@ pub async fn fetch_accounts(
     .await
 }
 
+/// One ACCOUNTS-group destination: the top-level account representing a
+/// category. `guid`/`name` are `None` only while a book has no account of
+/// that category (healed by `init::ensure_default_roots` on book open).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NavRoot {
+    pub category: String,
+    pub guid: Option<String>,
+    pub name: Option<String>,
+}
+
+/// Resolve the ACCOUNTS sidebar entries: one top-level account (child of any
+/// ROOT) per category, preferring the canonical name when several share a
+/// category. Always returns the five categories in balance-sheet order.
+fn nav_roots_inner(conn: &Connection) -> Result<Vec<NavRoot>, String> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT guid, name, account_type FROM accounts
+             WHERE parent_guid IN (SELECT guid FROM accounts WHERE account_type = 'ROOT')
+               AND account_type IN ({})
+             ORDER BY name",
+            utils::category_types_all_sql()
+        ))
+        .map_err(|e| e.to_string())?;
+
+    // category -> (guid, name), preferring the canonical default-root name.
+    let mut best: HashMap<String, (String, String)> = HashMap::new();
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+    for row in rows {
+        let (guid, name, account_type) = row.map_err(|e| e.to_string())?;
+        let category = utils::category_for_type(&account_type).to_string();
+        let canonical_name = crate::init::DEFAULT_ROOTS
+            .iter()
+            .find(|(_, cat)| *cat == category)
+            .map(|(canonical, _)| *canonical);
+        // Prefer the canonical root name; more than one top-level account of
+        // the same category is possible in imported books.
+        let replace = match best.get(&category) {
+            None => true,
+            Some((_, current)) => {
+                let current_is_canonical = canonical_name == Some(current.as_str());
+                let candidate_is_canonical = canonical_name == Some(name.as_str());
+                !current_is_canonical && candidate_is_canonical
+            }
+        };
+        if replace {
+            best.insert(category, (guid, name));
+        }
+    }
+
+    Ok(utils::CATEGORY_ORDER
+        .iter()
+        .map(|category| {
+            let found = best.get(*category);
+            NavRoot {
+                category: category.to_string(),
+                guid: found.map(|(guid, _)| guid.clone()),
+                name: found.map(|(_, name)| name.clone()),
+            }
+        })
+        .collect())
+}
+
+#[tauri::command]
+pub async fn fetch_nav_roots(state: State<'_, AppState>) -> Result<Vec<NavRoot>, String> {
+    run_blocking(state.db.clone(), nav_roots_inner).await
+}
+
 /// Book currencies for the account commodity picker. Thin wrapper over the
 /// existing `fx::list_book_currencies` helper (previously backend-only).
 #[derive(Debug, Serialize)]
@@ -578,5 +654,36 @@ mod tests {
         let conn = setup_investments();
         let result = fetch_accounts_inner(&conn, Some("2024-01-15")).unwrap();
         assert_eq!(result.by_type.get("ASSET").unwrap().total_balance, 500.0);
+    }
+
+    #[test]
+    fn nav_roots_resolve_one_account_per_category() {
+        let conn = setup_investments();
+        let roots = nav_roots_inner(&conn).unwrap();
+        assert_eq!(roots.len(), 5);
+
+        let asset = roots.iter().find(|r| r.category == "ASSET").unwrap();
+        assert_eq!(asset.name.as_deref(), Some("Assets"));
+        assert_eq!(asset.guid.as_deref(), Some("assets"));
+
+        // Categories the book doesn't cover stay represented but unresolved.
+        let equity = roots.iter().find(|r| r.category == "EQUITY").unwrap();
+        assert!(equity.guid.is_none());
+    }
+
+    #[test]
+    fn nav_roots_prefer_canonical_name() {
+        let conn = setup_investments();
+        // A non-canonical top-level ASSET account that sorts before "Assets".
+        conn.execute(
+            "INSERT INTO accounts (guid, name, account_type, parent_guid, placeholder, commodity_guid)
+             VALUES ('investments', 'A Investments', 'ASSET', 'root', 1, 'c-eur')",
+            [],
+        )
+        .unwrap();
+
+        let roots = nav_roots_inner(&conn).unwrap();
+        let asset = roots.iter().find(|r| r.category == "ASSET").unwrap();
+        assert_eq!(asset.guid.as_deref(), Some("assets"));
     }
 }

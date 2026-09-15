@@ -3,37 +3,27 @@
   import { resolve } from '$app/paths';
 
   import {
-    ArrowLeftRight,
-    Briefcase,
-    CalendarClock,
     ChevronsUpDown,
     CircleHelp,
-    Copy,
     Database,
-    ExternalLink,
     FolderOpen,
-    FolderTree,
     Info,
     LogOut,
-    PiggyBank,
     Plus,
-    Receipt,
     Save,
-    Scale,
-    Settings,
-    Upload
+    Settings
   } from '@lucide/svelte';
   import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
   import * as Sidebar from '$lib/components/ui/sidebar/index.js';
   import {
     closeActiveBook,
-    copyActiveBookPath,
     createBookViaDialog,
     openBookViaDialog,
-    revealActiveBook,
     saveBookAsViaDialog
   } from '$lib/features/book/book-actions';
+  import { NAV_GROUPS, navHref, navItemActive } from '$lib/features/nav/nav-items';
   import { activeBookPath, dbSession } from '$lib/stores/db.svelte';
+  import { navBadges, navRoots } from '$lib/stores/nav.svelte';
   import { keyboardShortcutsDialog } from '$lib/stores/ui.svelte';
   import { bookDisplayName } from '$lib/utils/book';
   import { plural } from '$lib/utils/format.svelte';
@@ -46,112 +36,86 @@
       ? `${dbSession.value.summary.currency} · ${plural(dbSession.value.summary.totalTransactions, 'transaction')}`
       : null
   );
+
+  // Resolve dynamic account-root hrefs, active state and badge counts once per
+  // render pass; items without a target (roots still loading) are hidden.
+  const groups = $derived(
+    NAV_GROUPS.map((group) => ({
+      label: group.label,
+      items: group.items
+        .map((item) => ({
+          item,
+          href: navHref(item, navRoots.value),
+          active: navItemActive(item, page.url.pathname, navRoots.value),
+          badge:
+            item.badge === 'reconcile'
+              ? navBadges.value.unclearedTransactions
+              : item.badge === 'scheduled'
+                ? navBadges.value.dueSchedules
+                : 0
+        }))
+        .filter((entry) => entry.href !== null)
+    })).filter((group) => group.items.length > 0)
+  );
 </script>
 
 <Sidebar.Root class="top-(--header-height) h-[calc(100svh-var(--header-height))]!">
   <Sidebar.Content>
     <Sidebar.Group>
-      <Sidebar.GroupContent>
-        <Sidebar.Menu>
-          <Sidebar.MenuItem>
-            <Sidebar.MenuButton
-              isActive={page.url.pathname === '/transactions' ||
-                page.url.pathname.startsWith('/transactions/')}
-              tooltipContent="Transactions"
-            >
-              {#snippet child({ props })}
-                <a href={resolve('/transactions')} {...props}>
-                  <ArrowLeftRight aria-hidden="true" />
-                  <span class="group-data-[collapsible=icon]:hidden">Transactions</span>
-                </a>
-              {/snippet}
-            </Sidebar.MenuButton>
-          </Sidebar.MenuItem>
-          <Sidebar.MenuItem>
-            <Sidebar.MenuButton
-              isActive={page.url.pathname.startsWith('/accounts')}
-              tooltipContent="Accounts"
-            >
-              {#snippet child({ props })}
-                <a href={resolve('/accounts')} {...props}>
-                  <FolderTree aria-hidden="true" />
-                  <span class="group-data-[collapsible=icon]:hidden">Accounts</span>
-                </a>
-              {/snippet}
-            </Sidebar.MenuButton>
-          </Sidebar.MenuItem>
-          <Sidebar.MenuItem>
-            <Sidebar.MenuButton
-              isActive={page.url.pathname === '/scheduled' ||
-                page.url.pathname.startsWith('/scheduled/')}
-              tooltipContent="Scheduled"
-            >
-              {#snippet child({ props })}
-                <a href={resolve('/scheduled')} {...props}>
-                  <CalendarClock aria-hidden="true" />
-                  <span class="group-data-[collapsible=icon]:hidden">Scheduled</span>
-                </a>
-              {/snippet}
-            </Sidebar.MenuButton>
-          </Sidebar.MenuItem>
-          <Sidebar.MenuItem>
-            <Sidebar.MenuButton
-              isActive={page.url.pathname === '/reconcile' ||
-                page.url.pathname.startsWith('/reconcile/')}
-              tooltipContent="Reconcile"
-            >
-              {#snippet child({ props })}
-                <a href={resolve('/reconcile')} {...props}>
-                  <Scale aria-hidden="true" />
-                  <span class="group-data-[collapsible=icon]:hidden">Reconcile</span>
-                </a>
-              {/snippet}
-            </Sidebar.MenuButton>
-          </Sidebar.MenuItem>
-          <Sidebar.MenuItem>
-            <Sidebar.MenuButton
-              isActive={page.url.pathname === '/reports/pnl'}
-              tooltipContent="Profit & Loss"
-            >
-              {#snippet child({ props })}
-                <a href={resolve('/reports/pnl')} {...props}>
-                  <Receipt aria-hidden="true" />
-                  <span class="group-data-[collapsible=icon]:hidden">Profit &amp; Loss</span>
-                </a>
-              {/snippet}
-            </Sidebar.MenuButton>
-          </Sidebar.MenuItem>
-          <Sidebar.MenuItem>
-            <Sidebar.MenuButton
-              isActive={page.url.pathname === '/budgets' ||
-                page.url.pathname.startsWith('/budgets/')}
-              tooltipContent="Budgets"
-            >
-              {#snippet child({ props })}
-                <a href={resolve('/budgets')} {...props}>
-                  <PiggyBank aria-hidden="true" />
-                  <span class="group-data-[collapsible=icon]:hidden">Budgets</span>
-                </a>
-              {/snippet}
-            </Sidebar.MenuButton>
-          </Sidebar.MenuItem>
-          <Sidebar.MenuItem>
-            <Sidebar.MenuButton
-              isActive={page.url.pathname === '/portfolio' ||
-                page.url.pathname.startsWith('/portfolio/')}
-              tooltipContent="Portfolio"
-            >
-              {#snippet child({ props })}
-                <a href={resolve('/portfolio')} {...props}>
-                  <Briefcase aria-hidden="true" />
-                  <span class="group-data-[collapsible=icon]:hidden">Portfolio</span>
-                </a>
-              {/snippet}
-            </Sidebar.MenuButton>
-          </Sidebar.MenuItem>
-        </Sidebar.Menu>
-      </Sidebar.GroupContent>
+      <Sidebar.Menu>
+        <Sidebar.MenuItem>
+          <Sidebar.MenuButton
+            class="bg-sidebar-primary text-sidebar-primary-foreground hover:bg-sidebar-primary/90 hover:text-sidebar-primary-foreground active:bg-sidebar-primary/90 active:text-sidebar-primary-foreground"
+            tooltipContent="New transaction"
+          >
+            {#snippet child({ props })}
+              <a href={resolve('/transactions/new')} {...props}>
+                <Plus aria-hidden="true" />
+                <span class="group-data-[collapsible=icon]:hidden">New transaction</span>
+              </a>
+            {/snippet}
+          </Sidebar.MenuButton>
+        </Sidebar.MenuItem>
+      </Sidebar.Menu>
     </Sidebar.Group>
+
+    {#each groups as group (group.label)}
+      <Sidebar.Group>
+        <Sidebar.GroupLabel>{group.label}</Sidebar.GroupLabel>
+        <Sidebar.GroupContent>
+          <Sidebar.Menu>
+            {#each group.items as { item, href, active, badge } (item.id)}
+              <Sidebar.MenuItem>
+                <Sidebar.MenuButton
+                  isActive={active}
+                  tooltipContent={item.chord
+                    ? `${item.label} · G ${item.chord.toUpperCase()}`
+                    : item.label}
+                >
+                  {#snippet child({ props })}
+                    <a
+                      href={href === null ? undefined : resolve(href)}
+                      {...props}
+                      aria-current={active ? 'page' : undefined}
+                    >
+                      <item.icon aria-hidden="true" />
+                      <span class="group-data-[collapsible=icon]:hidden">{item.label}</span>
+                    </a>
+                  {/snippet}
+                </Sidebar.MenuButton>
+                {#if badge > 0}
+                  <Sidebar.MenuBadge
+                    aria-label={`${badge} ${item.badge === 'reconcile' ? 'uncleared transactions' : 'scheduled transactions due'}`}
+                  >
+                    {badge}
+                  </Sidebar.MenuBadge>
+                {/if}
+              </Sidebar.MenuItem>
+            {/each}
+          </Sidebar.Menu>
+        </Sidebar.GroupContent>
+      </Sidebar.Group>
+    {/each}
   </Sidebar.Content>
   <Sidebar.Footer>
     <Sidebar.Menu>
@@ -210,23 +174,6 @@
             <DropdownMenu.Item onclick={() => void saveBookAsViaDialog()}>
               <Save aria-hidden="true" />
               Save as…
-            </DropdownMenu.Item>
-            <DropdownMenu.Separator />
-            <DropdownMenu.Item onclick={() => void revealActiveBook()}>
-              <ExternalLink aria-hidden="true" />
-              Reveal in file manager
-            </DropdownMenu.Item>
-            <DropdownMenu.Item onclick={() => void copyActiveBookPath()}>
-              <Copy aria-hidden="true" />
-              Copy path
-            </DropdownMenu.Item>
-            <DropdownMenu.Item>
-              {#snippet child({ props })}
-                <a href={resolve('/settings/import')} {...props}>
-                  <Upload aria-hidden="true" />
-                  Import data…
-                </a>
-              {/snippet}
             </DropdownMenu.Item>
             <DropdownMenu.Separator />
             <DropdownMenu.Item>

@@ -26,6 +26,8 @@
     ensureDbSessionLoaded,
     loadActiveBook
   } from '$lib/stores/db.svelte';
+  import { NAV_CHORD_TARGETS } from '$lib/features/nav/nav-items';
+  import { refreshNav } from '$lib/stores/nav.svelte';
   import { TitleBar } from '$lib/components/layout/title-bar';
   import { cn } from '$lib/utils';
   import { Sonner } from '$lib/components/ui/sonner';
@@ -57,15 +59,20 @@
 
   // Keep the changes history current while a book is open: the side panel and
   // the global undo/redo shortcuts both read this store, and imports or manual
-  // edits move the data summary.
+  // edits move the data summary. Sidebar roots + badges share the same trigger
+  // set (pathname refreshes cover reconcile/schedule mutations).
   $effect(() => {
     void dbSession.value;
     void dbSession.value?.summary.totalTransactions;
     void dbSession.value?.summary.totalAccounts;
+    void page.url.pathname;
     // The refresh reads and writes its own store synchronously (spread in
     // `patch`), which would otherwise be tracked here and re-trigger this
     // effect on every write — an infinite update loop.
-    untrack(() => void refreshChangeHistory());
+    untrack(() => {
+      void refreshChangeHistory();
+      void refreshNav();
+    });
   });
 
   // Chrome is always mounted now; only the sidebar depends on having a book.
@@ -103,6 +110,10 @@
     applyDensity(appSettings.value.density);
   });
 
+  // `g`-prefix navigation chord: `g` arms the chord for a moment, the next
+  // unmodified key resolves it (e.g. `g t` → Transactions).
+  let pendingChord: ReturnType<typeof setTimeout> | null = null;
+
   function handleKeydown(e: KeyboardEvent) {
     // The palette must open from anywhere — including inside inputs — so
     // this chord is checked before the input guard below.
@@ -112,6 +123,22 @@
       return;
     }
     if (e.target instanceof HTMLElement && e.target.closest('input, textarea, [contenteditable]')) {
+      return;
+    }
+    if (pendingChord !== null) {
+      clearTimeout(pendingChord);
+      pendingChord = null;
+      if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+        const target = NAV_CHORD_TARGETS[e.key.toLowerCase() as keyof typeof NAV_CHORD_TARGETS];
+        if (target) {
+          e.preventDefault();
+          void goto(resolve(target));
+          return;
+        }
+      }
+    } else if (e.key.toLowerCase() === 'g' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      pendingChord = setTimeout(() => (pendingChord = null), 800);
       return;
     }
     if (e.key === '?') {
