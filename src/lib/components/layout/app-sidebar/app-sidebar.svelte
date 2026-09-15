@@ -13,7 +13,6 @@
     ExternalLink,
     FolderOpen,
     FolderTree,
-    History,
     Info,
     LogOut,
     PiggyBank,
@@ -146,19 +145,6 @@
                 <a href={resolve('/portfolio')} {...props}>
                   <Briefcase aria-hidden="true" />
                   <span class="group-data-[collapsible=icon]:hidden">Portfolio</span>
-                </a>
-              {/snippet}
-            </Sidebar.MenuButton>
-          </Sidebar.MenuItem>
-          <Sidebar.MenuItem>
-            <Sidebar.MenuButton
-              isActive={page.url.pathname === '/history'}
-              tooltipContent="History"
-            >
-              {#snippet child({ props })}
-                <a href={resolve('/history')} {...props}>
-                  <History aria-hidden="true" />
-                  <span class="group-data-[collapsible=icon]:hidden">History</span>
                 </a>
               {/snippet}
             </Sidebar.MenuButton>

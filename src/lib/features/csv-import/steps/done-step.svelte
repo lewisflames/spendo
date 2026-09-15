@@ -28,8 +28,8 @@
       Created {plural(commitResult.created, 'transaction')} · skipped {plural(
         commitResult.skippedDuplicates,
         'duplicate'
-      )} · skipped {plural(commitResult.skippedErrors, 'error')}. Revert from Settings → History if
-      needed.
+      )} · skipped {plural(commitResult.skippedErrors, 'error')}. Revert from the changes history
+      panel if needed.
     </p>
     <div class="flex flex-wrap gap-2">
       <Button href={resolve('/settings')}>

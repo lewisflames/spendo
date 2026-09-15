@@ -9,6 +9,7 @@ export type LabelFields = Pick<
 /** Badge text for a change's origin: kind refined by source. */
 export function sourceLabel(entry: LabelFields): string {
   if (entry.kind === 'revert') return 'Undo';
+  if (entry.kind === 'redo') return 'Redo';
   if (entry.kind === 'import') return entry.source === 'csv' ? 'CSV' : 'Import';
   if (entry.source === 'schedule') return 'Scheduled';
   if (entry.kind === 'reconcile') return 'Reconcile';

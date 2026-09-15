@@ -22,7 +22,7 @@ import {
   SunMoon
 } from '@lucide/svelte';
 import { appSettings, resolveTheme, saveSettings } from '$lib/stores/settings.svelte';
-import { keyboardShortcutsDialog } from '$lib/stores/ui.svelte';
+import { keyboardShortcutsDialog, toggleHistorySidebar } from '$lib/stores/ui.svelte';
 import { activeBookPath, dbSession } from '$lib/stores/db.svelte';
 import {
   closeActiveBook,
@@ -50,7 +50,6 @@ function goTo(
     | '/about'
     | '/accounts'
     | '/budgets'
-    | '/history'
     | '/portfolio'
     | '/reconcile'
     | '/reports/pnl'
@@ -62,14 +61,6 @@ function goTo(
 
 /** Static v1 command list: page navigation + app actions. No backend calls. */
 export const PALETTE_COMMANDS: PaletteCommand[] = [
-  {
-    id: 'go-history',
-    title: 'Go to History',
-    group: 'Go to',
-    icon: History,
-    keywords: ['history', 'changelog', 'changes', 'undo', 'revert'],
-    run: goTo('/history')
-  },
   {
     id: 'go-accounts',
     title: 'Go to Accounts',
@@ -152,6 +143,17 @@ export const PALETTE_COMMANDS: PaletteCommand[] = [
     keywords: ['sidebar', 'navigation', 'collapse'],
     run: () => {
       saveSettings({ sidebarCollapsed: !appSettings.value.sidebarCollapsed });
+    }
+  },
+  {
+    id: 'toggle-history',
+    title: 'Toggle changes history',
+    group: 'Actions',
+    icon: History,
+    keywords: ['history', 'changelog', 'changes', 'undo', 'revert', 'panel'],
+    when: () => dbSession.value !== null,
+    run: () => {
+      toggleHistorySidebar();
     }
   },
   {

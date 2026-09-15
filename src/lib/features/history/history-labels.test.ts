@@ -19,6 +19,7 @@ describe('sourceLabel', () => {
     expect(sourceLabel(entry({ source: 'schedule' }))).toBe('Scheduled');
     expect(sourceLabel(entry({ kind: 'reconcile' }))).toBe('Reconcile');
     expect(sourceLabel(entry({ kind: 'revert', source: 'system' }))).toBe('Undo');
+    expect(sourceLabel(entry({ kind: 'redo', source: 'system' }))).toBe('Redo');
     expect(sourceLabel(entry({ kind: 'account_update' }))).toBe('Manual');
   });
 });

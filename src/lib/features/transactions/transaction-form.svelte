@@ -240,8 +240,8 @@
       role="alert"
       class="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
     >
-      Delete this transaction? Its splits will be removed. This can be undone from history
-      (newest-first).
+      Delete this transaction? Its splits will be removed. This can be undone from the changes
+      history panel (newest-first).
     </p>
   {/if}
 

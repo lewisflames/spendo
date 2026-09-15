@@ -1,18 +1,22 @@
 <script lang="ts">
   import { page } from '$app/state';
-  import { ArrowLeft, ArrowRight, SunMoon } from '@lucide/svelte';
+  import { ArrowLeft, ArrowRight, History, SunMoon } from '@lucide/svelte';
   import { Button } from '$lib/components/ui/button';
   import { SidebarTrigger } from '$lib/components/ui/sidebar/index.js';
   import { breadcrumb, type BreadcrumbItem } from '$lib/stores/breadcrumb.svelte';
   import { goBack, goForward, navHistory } from '$lib/stores/nav-history.svelte';
   import { toggleTheme } from '$lib/stores/settings.svelte';
+  import { historySidebar, toggleHistorySidebar } from '$lib/stores/ui.svelte';
   import { routeTitle } from '$lib/routes';
   import { useWindowDrag } from '$lib/hooks/use-window-drag.svelte';
   import * as Breadcrumb from '$lib/components/ui/breadcrumb';
   import PaletteTrigger from './palette-trigger.svelte';
   import WindowControls from './window-controls.svelte';
 
-  let { showSidebarTrigger = true }: { showSidebarTrigger?: boolean } = $props();
+  let {
+    showSidebarTrigger = true,
+    showHistoryToggle = true
+  }: { showSidebarTrigger?: boolean; showHistoryToggle?: boolean } = $props();
 
   const {
     inTauri,
@@ -99,6 +103,23 @@
         {/each}
       </Breadcrumb.List>
     </Breadcrumb.Root>
+  </div>
+
+  <div class="flex h-full shrink-0 items-center px-1">
+    {#if showHistoryToggle}
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        class="text-muted-foreground"
+        aria-label="Toggle changes history"
+        aria-controls="changes-history-panel"
+        aria-expanded={historySidebar.value}
+        title="Toggle changes history (Ctrl+H)"
+        onclick={toggleHistorySidebar}
+      >
+        <History class="size-4" />
+      </Button>
+    {/if}
   </div>
 
   <WindowControls />

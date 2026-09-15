@@ -1,304 +1,90 @@
 <script lang="ts">
-  import * as Table from '$lib/components/ui/table';
   import { Badge } from '$lib/components/ui/badge';
-  import { Button } from '$lib/components/ui/button';
-  import * as Dialog from '$lib/components/ui/dialog';
-  import * as Select from '$lib/components/ui/select';
-  import { Select as SelectPrimitive } from 'bits-ui';
+  import { Skeleton } from '$lib/components/ui/skeleton';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
-  import TableShell from '$lib/components/shared/table-shell.svelte';
-  import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
   import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
-  import { PaginationNav } from '$lib/components/shared/pagination-nav';
-  import { SearchInput } from '$lib/components/shared/search-input';
-  import { History, Undo2, LoaderCircle } from '@lucide/svelte';
-  import { dbSession, setDbSession } from '$lib/stores/db.svelte';
-  import { appSettings, applyPageSize } from '$lib/stores/settings.svelte';
-  import { fetchChangeHistory, revertHistoryEntry } from '$lib/tauri';
+  import { History } from '@lucide/svelte';
   import type { ChangeEntry } from '$lib/tauri';
-  import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
-  import { useDebouncedSearch } from '$lib/hooks/use-debounced-search.svelte';
-  import { useResetPageOnChange } from '$lib/hooks/use-page-reset.svelte';
-  import { useUrlParams, pageParam, debouncedSearchParam } from '$lib/hooks/use-url-params.svelte';
-  import { formatDate, EMPTY_DASH } from '$lib/utils/format.svelte';
-  import { errMsg } from '$lib/utils/error';
-  import { toast } from '$lib/components/ui/sonner';
-  import { impactLabel, sourceLabel } from './history-labels';
+  import { formatDate, formatRelativeTime, parseLocalDate } from '$lib/utils/format.svelte';
+  import { changeHistory, refreshChangeHistory } from './history.svelte';
+  import { groupHistoryEntries } from './date-groups';
+  import { sourceLabel } from './history-labels';
 
-  type Category = 'all' | 'manual' | 'import' | 'scheduled' | 'undo';
-
-  const CATEGORIES: { value: Category; label: string }[] = [
-    { value: 'all', label: 'All sources' },
-    { value: 'manual', label: 'Manual' },
-    { value: 'import', label: 'Imports' },
-    { value: 'scheduled', label: 'Scheduled' },
-    { value: 'undo', label: 'Undos' }
-  ];
-
-  function isCategory(v: string | null): v is Category {
-    return v !== null && CATEGORIES.some((c) => c.value === v);
+  /** Absolute timestamp for the relative-time tooltip, locale-formatted. */
+  function exactTime(entry: ChangeEntry): string {
+    return formatDate(entry.occurredAt, {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit'
+    });
   }
 
-  let page = $state(1);
-  let pageSize = $derived(appSettings.value.pageSize);
-  let searchInput = $state('');
-  let category = $state<Category>('all');
-  const search = useDebouncedSearch(() => searchInput);
-
-  const hasFilters = $derived(category !== 'all' || !!search.value);
-
-  // UI category → backend predicates (exact kind/source matches).
-  const filter = $derived(
-    category === 'manual'
-      ? { source: 'manual' }
-      : category === 'import'
-        ? { kind: 'import' }
-        : category === 'scheduled'
-          ? { source: 'schedule' }
-          : category === 'undo'
-            ? { kind: 'revert' }
-            : {}
-  );
-
-  useUrlParams([
-    pageParam(
-      'page',
-      () => page,
-      (p) => (page = p)
-    ),
-    debouncedSearchParam(
-      'q',
-      () => search.value || null,
-      (v) => {
-        searchInput = v;
-        search.set(v);
-      }
-    ),
-    {
-      key: 'filter',
-      get: () => (category === 'all' ? null : category),
-      apply: (v) => (category = isCategory(v) ? v : 'all'),
-      replace: true
-    }
-  ]);
-
-  // Reset to page 1 whenever the query shape changes. Runs before the fetch
-  // effect in the same flush, so the fetch sees the reset page immediately.
-  useResetPageOnChange(
-    () => JSON.stringify({ category, search: search.value }),
-    () => {
-      page = 1;
-    }
-  );
-
-  const res = useAsyncData({
-    enabled: () => !!dbSession.value,
-    fetch: async () => {
-      // Subscribe to summary changes so imports and reverts refresh
-      // this list without navigation (the effect tracks these reads).
-      void dbSession.value?.summary.totalTransactions;
-      void dbSession.value?.summary.totalAccounts;
-      const load = (p: number) =>
-        fetchChangeHistory({
-          page: p,
-          pageSize,
-          search: search.value || null,
-          ...filter
-        });
-      let r = await load(page);
-      // The backend clamps out-of-range pages; snap back to the last valid
-      // page (possible after shrinking pageSize or narrowing the filter).
-      if (page > r.totalPages) {
-        page = r.totalPages;
-        r = await load(page);
-      }
-      return r;
-    },
-    label: 'Failed to load changes history'
-  });
-
-  let confirmOpen = $state(false);
-  let pending = $state<ChangeEntry | null>(null);
-  let reverting = $state(false);
-
-  function openConfirm(entry: ChangeEntry) {
-    pending = entry;
-    confirmOpen = true;
+  function relativeTime(entry: ChangeEntry): string {
+    return formatRelativeTime(parseLocalDate(entry.occurredAt).getTime() / 1000);
   }
 
-  function closeConfirm() {
-    confirmOpen = false;
-    pending = null;
-  }
-
-  async function handleRevert() {
-    if (!pending || reverting) return;
-    reverting = true;
-    try {
-      const result = await revertHistoryEntry(pending.id);
-      setDbSession(result.summary);
-      toast.success('Change reverted');
-      closeConfirm();
-      res.reload();
-    } catch (e: unknown) {
-      toast.error(errMsg(e, 'Revert failed'));
-    } finally {
-      reverting = false;
-    }
-  }
+  const groups = $derived(groupHistoryEntries(changeHistory.value.entries));
 </script>
 
-{#if res.loading && !res.data}
-  <TableSkeleton cols={4} />
-{:else if res.data}
-  <div class="flex flex-col gap-4">
-    <div class="flex flex-wrap items-end gap-2">
-      <SearchInput
-        id="history-search"
-        label="Search change labels"
-        placeholder="Search change labels…"
-        bind:value={searchInput}
-        class="grow basis-48"
-      />
-      <div class="flex flex-col gap-1">
-        <label for="history-filter" class="text-xs text-muted-foreground">Source</label>
-        <Select.Root
-          type="single"
-          value={category}
-          onValueChange={(v) => (category = isCategory(v) ? v : 'all')}
-        >
-          <Select.Trigger id="history-filter" class="min-w-36">
-            <SelectPrimitive.Value />
-          </Select.Trigger>
-          <Select.Content>
-            {#each CATEGORIES as option (option.value)}
-              <Select.Item value={option.value} label={option.label}>{option.label}</Select.Item>
-            {/each}
-          </Select.Content>
-        </Select.Root>
-      </div>
-    </div>
-
-    {#if res.error}
-      <ErrorCard message={res.error} onRetry={() => res.reload()} />
+{#if changeHistory.value.loading && changeHistory.value.entries.length === 0}
+  <div class="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-3">
+    {#each Array(5) as _, i (i)}
+      <Skeleton class="h-16 w-full rounded-lg" />
+    {/each}
+  </div>
+{:else}
+  <div class="min-h-0 flex-1 overflow-y-auto p-3">
+    {#if changeHistory.value.error}
+      <ErrorCard message={changeHistory.value.error} onRetry={() => void refreshChangeHistory()} />
     {/if}
 
-    {#if res.data.entries.length === 0}
-      <EmptyState
-        card
-        title={hasFilters ? 'No matching changes' : 'No changes yet'}
-        description={hasFilters
-          ? 'Try a different search or source.'
-          : 'Imports, edits and reverts will appear here.'}
-      >
-        {#snippet icon()}
-          <History aria-hidden="true" class="text-muted-foreground" />
-        {/snippet}
-      </EmptyState>
+    {#if changeHistory.value.entries.length === 0}
+      {#if !changeHistory.value.error}
+        <EmptyState title="No changes yet" description="Imports, edits and undos will appear here.">
+          {#snippet icon()}
+            <History aria-hidden="true" class="text-muted-foreground" />
+          {/snippet}
+        </EmptyState>
+      {/if}
     {:else}
-      <!-- Keep the previous table visible (dimmed) during refetches so the
-           page doesn't jump and pagination stays in place. -->
-      <DimWrapper active={res.loading} class="flex flex-col gap-4">
-        <TableShell>
-          <Table.Header>
-            <Table.Row class="bg-muted/75">
-              <Table.Head class="text-muted-foreground">Date</Table.Head>
-              <Table.Head class="text-muted-foreground">Change</Table.Head>
-              <Table.Head class="text-muted-foreground">Source</Table.Head>
-              <Table.Head class="w-24 text-right text-muted-foreground">Action</Table.Head>
-            </Table.Row>
-          </Table.Header>
-          <Table.Body>
-            {#each res.data.entries as entry (entry.id)}
-              {@const revertible = entry.id === res.data.revertibleId}
-              {@const impact = impactLabel(entry)}
-              <Table.Row>
-                <Table.Cell class="py-2.5 whitespace-nowrap">
-                  <span class="tabular-nums">
-                    {formatDate(entry.occurredAt, {
-                      month: 'short',
-                      day: 'numeric',
-                      year: 'numeric',
-                      hour: 'numeric',
-                      minute: '2-digit'
-                    })}
-                  </span>
-                </Table.Cell>
-                <Table.Cell class="py-2.5">
-                  <span class={entry.revertedBy ? 'text-muted-foreground line-through' : ''}>
-                    {entry.label}
-                  </span>
-                  {#if entry.revertedBy}
-                    <span class="ml-1.5 text-xs text-muted-foreground">(reverted)</span>
-                  {/if}
-                  {#if impact}
-                    <span class="block text-xs text-muted-foreground/70 tabular-nums">
-                      {impact}
-                    </span>
-                  {/if}
-                </Table.Cell>
-                <Table.Cell class="py-2.5 whitespace-nowrap">
+      <!-- Keep the previous list visible (dimmed) during refetches so the
+           panel doesn't jump. -->
+      <DimWrapper active={changeHistory.value.loading} class="flex flex-col gap-4">
+        {#each groups as group (group.key)}
+          <section class="flex flex-col gap-2">
+            <h3 class="px-1 text-xs font-medium text-muted-foreground">{group.label}</h3>
+            {#each group.entries as entry (entry.id)}
+              <div class="rounded-lg border bg-card p-2.5">
+                <p
+                  class="min-w-0 text-sm leading-snug {entry.revertedBy
+                    ? 'text-muted-foreground line-through'
+                    : ''}"
+                >
+                  {entry.label}
+                </p>
+                <div class="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <time
+                    class="text-xs text-muted-foreground tabular-nums"
+                    datetime={entry.occurredAt}
+                    title={exactTime(entry)}
+                  >
+                    {relativeTime(entry)}
+                  </time>
                   <Badge variant={entry.kind === 'import' ? 'secondary' : 'outline'}>
                     {sourceLabel(entry)}
                   </Badge>
-                </Table.Cell>
-                <Table.Cell class="py-2.5 text-right">
-                  {#if revertible}
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onclick={() => openConfirm(entry)}
-                      disabled={reverting}
-                      title="Revert this change"
-                    >
-                      <Undo2 aria-hidden="true" class="size-3.5" />
-                      Revert
-                    </Button>
-                  {:else}
-                    <span class="text-xs text-muted-foreground">{EMPTY_DASH}</span>
+                  {#if entry.revertedBy}
+                    <span class="text-xs text-muted-foreground">undone</span>
                   {/if}
-                </Table.Cell>
-              </Table.Row>
+                </div>
+              </div>
             {/each}
-          </Table.Body>
-        </TableShell>
-        <PaginationNav
-          bind:page
-          totalPages={res.data.totalPages}
-          totalItems={res.data.total}
-          pageSize={res.data.pageSize}
-          onPageSizeChange={(size) => applyPageSize(size, (v) => (page = v))}
-        />
+          </section>
+        {/each}
       </DimWrapper>
     {/if}
   </div>
-{:else if res.error}
-  <ErrorCard message={res.error} onRetry={() => res.reload()} />
 {/if}
-
-<Dialog.Root bind:open={confirmOpen}>
-  <Dialog.Content>
-    <Dialog.Header>
-      <Dialog.Title>Revert this change?</Dialog.Title>
-      <Dialog.Description>
-        {#if pending}
-          "{pending.label}" will be undone. This restores the data to how it was before this change.
-          Only the latest change can be reverted.
-        {/if}
-      </Dialog.Description>
-    </Dialog.Header>
-    <Dialog.Footer>
-      <Button variant="outline" onclick={closeConfirm} disabled={reverting}>Cancel</Button>
-      <Button variant="destructive" onclick={handleRevert} disabled={reverting || !pending}>
-        {#if reverting}
-          <LoaderCircle aria-hidden="true" class="size-3 animate-spin" />
-          Reverting…
-        {:else}
-          <Undo2 aria-hidden="true" class="size-3" />
-          Revert change
-        {/if}
-      </Button>
-    </Dialog.Footer>
-  </Dialog.Content>
-</Dialog.Root>
