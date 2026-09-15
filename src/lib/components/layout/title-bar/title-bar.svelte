@@ -1,11 +1,10 @@
 <script lang="ts">
   import { page } from '$app/state';
-  import { ArrowLeft, ArrowRight, History, SunMoon } from '@lucide/svelte';
+  import { ArrowLeft, ArrowRight, History } from '@lucide/svelte';
   import { Button } from '$lib/components/ui/button';
   import { SidebarTrigger } from '$lib/components/ui/sidebar/index.js';
   import { breadcrumb, type BreadcrumbItem } from '$lib/stores/breadcrumb.svelte';
   import { goBack, goForward, navHistory } from '$lib/stores/nav-history.svelte';
-  import { toggleTheme } from '$lib/stores/settings.svelte';
   import { historySidebar, toggleHistorySidebar } from '$lib/stores/ui.svelte';
   import { routeTitle } from '$lib/routes';
   import { useWindowDrag } from '$lib/hooks/use-window-drag.svelte';
@@ -75,16 +74,6 @@
         <ArrowRight class="size-4" />
       </Button>
       <PaletteTrigger />
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        class="text-muted-foreground"
-        aria-label="Toggle theme"
-        title="Toggle theme (Ctrl+Shift+T)"
-        onclick={toggleTheme}
-      >
-        <SunMoon class="size-4" />
-      </Button>
     </div>
 
     <Breadcrumb.Root>
