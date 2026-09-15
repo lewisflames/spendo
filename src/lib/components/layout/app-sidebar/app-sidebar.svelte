@@ -4,19 +4,49 @@
 
   import {
     ArrowLeftRight,
-    Settings,
-    Info,
-    History,
-    Receipt,
-    PiggyBank,
     Briefcase,
     CalendarClock,
+    ChevronsUpDown,
     CircleHelp,
+    Copy,
+    Database,
+    ExternalLink,
+    FolderOpen,
     FolderTree,
-    Scale
+    History,
+    Info,
+    LogOut,
+    PiggyBank,
+    Plus,
+    Receipt,
+    Save,
+    Scale,
+    Settings,
+    Upload
   } from '@lucide/svelte';
+  import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
   import * as Sidebar from '$lib/components/ui/sidebar/index.js';
+  import {
+    closeActiveBook,
+    copyActiveBookPath,
+    createBookViaDialog,
+    openBookViaDialog,
+    revealActiveBook,
+    saveBookAsViaDialog
+  } from '$lib/features/book/book-actions';
+  import { activeBookPath, dbSession } from '$lib/stores/db.svelte';
   import { keyboardShortcutsDialog } from '$lib/stores/ui.svelte';
+  import { bookDisplayName } from '$lib/utils/book';
+  import { plural } from '$lib/utils/format.svelte';
+
+  const sidebar = Sidebar.useSidebar();
+
+  const bookName = $derived(bookDisplayName(activeBookPath.value));
+  const bookSubtitle = $derived(
+    dbSession.value
+      ? `${dbSession.value.summary.currency} · ${plural(dbSession.value.summary.totalTransactions, 'transaction')}`
+      : null
+  );
 </script>
 
 <Sidebar.Root class="top-(--header-height) h-[calc(100svh-var(--header-height))]!">
@@ -140,36 +170,106 @@
   <Sidebar.Footer>
     <Sidebar.Menu>
       <Sidebar.MenuItem>
-        <Sidebar.MenuButton isActive={page.url.pathname === '/about'} tooltipContent="About">
-          {#snippet child({ props })}
-            <a href={resolve('/about')} {...props}>
-              <Info aria-hidden="true" />
-              <span class="group-data-[collapsible=icon]:hidden">About</span>
-            </a>
-          {/snippet}
-        </Sidebar.MenuButton>
-      </Sidebar.MenuItem>
-      <Sidebar.MenuItem>
-        <Sidebar.MenuButton
-          tooltipContent="Keyboard shortcuts"
-          onclick={() => (keyboardShortcutsDialog.value = true)}
-        >
-          <CircleHelp aria-hidden="true" />
-          <span class="group-data-[collapsible=icon]:hidden">Shortcuts</span>
-        </Sidebar.MenuButton>
-      </Sidebar.MenuItem>
-      <Sidebar.MenuItem>
-        <Sidebar.MenuButton
-          isActive={page.url.pathname.startsWith('/settings')}
-          tooltipContent="Settings"
-        >
-          {#snippet child({ props })}
-            <a href={resolve('/settings')} {...props}>
-              <Settings aria-hidden="true" />
-              <span class="group-data-[collapsible=icon]:hidden">Settings</span>
-            </a>
-          {/snippet}
-        </Sidebar.MenuButton>
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger>
+            {#snippet child({ props })}
+              <Sidebar.MenuButton
+                {...props}
+                size="lg"
+                class="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+              >
+                <Database aria-hidden="true" />
+                <div
+                  class="grid min-w-0 flex-1 text-left leading-tight group-data-[collapsible=icon]:hidden"
+                >
+                  <span class="truncate font-medium">{bookName}</span>
+                  {#if bookSubtitle}
+                    <span class="truncate text-xs text-muted-foreground">{bookSubtitle}</span>
+                  {/if}
+                </div>
+                <ChevronsUpDown
+                  class="ml-auto group-data-[collapsible=icon]:hidden"
+                  aria-hidden="true"
+                />
+              </Sidebar.MenuButton>
+            {/snippet}
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Content
+            class="w-64"
+            align="start"
+            side={sidebar.collapsed ? 'right' : 'top'}
+          >
+            <DropdownMenu.Label>
+              <div class="min-w-0">
+                <span class="block truncate font-medium">{bookName}</span>
+                {#if activeBookPath.value}
+                  <span
+                    class="block truncate text-xs text-muted-foreground"
+                    title={activeBookPath.value}
+                  >
+                    {activeBookPath.value}
+                  </span>
+                {/if}
+              </div>
+            </DropdownMenu.Label>
+            <DropdownMenu.Separator />
+            <DropdownMenu.Item onclick={() => void openBookViaDialog()}>
+              <FolderOpen aria-hidden="true" />
+              Open book…
+            </DropdownMenu.Item>
+            <DropdownMenu.Item onclick={() => void createBookViaDialog()}>
+              <Plus aria-hidden="true" />
+              New book…
+            </DropdownMenu.Item>
+            <DropdownMenu.Item onclick={() => void saveBookAsViaDialog()}>
+              <Save aria-hidden="true" />
+              Save as…
+            </DropdownMenu.Item>
+            <DropdownMenu.Separator />
+            <DropdownMenu.Item onclick={() => void revealActiveBook()}>
+              <ExternalLink aria-hidden="true" />
+              Reveal in file manager
+            </DropdownMenu.Item>
+            <DropdownMenu.Item onclick={() => void copyActiveBookPath()}>
+              <Copy aria-hidden="true" />
+              Copy path
+            </DropdownMenu.Item>
+            <DropdownMenu.Item>
+              {#snippet child({ props })}
+                <a href={resolve('/settings/import')} {...props}>
+                  <Upload aria-hidden="true" />
+                  Import data…
+                </a>
+              {/snippet}
+            </DropdownMenu.Item>
+            <DropdownMenu.Separator />
+            <DropdownMenu.Item>
+              {#snippet child({ props })}
+                <a href={resolve('/settings')} {...props}>
+                  <Settings aria-hidden="true" />
+                  Settings
+                </a>
+              {/snippet}
+            </DropdownMenu.Item>
+            <DropdownMenu.Item onclick={() => (keyboardShortcutsDialog.value = true)}>
+              <CircleHelp aria-hidden="true" />
+              Keyboard shortcuts
+            </DropdownMenu.Item>
+            <DropdownMenu.Item>
+              {#snippet child({ props })}
+                <a href={resolve('/about')} {...props}>
+                  <Info aria-hidden="true" />
+                  About
+                </a>
+              {/snippet}
+            </DropdownMenu.Item>
+            <DropdownMenu.Separator />
+            <DropdownMenu.Item variant="destructive" onclick={() => void closeActiveBook()}>
+              <LogOut aria-hidden="true" />
+              Close book
+            </DropdownMenu.Item>
+          </DropdownMenu.Content>
+        </DropdownMenu.Root>
       </Sidebar.MenuItem>
     </Sidebar.Menu>
   </Sidebar.Footer>
