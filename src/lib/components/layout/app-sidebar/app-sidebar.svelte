@@ -11,7 +11,8 @@
     LogOut,
     Plus,
     Save,
-    Settings
+    Settings,
+    SunMoon
   } from '@lucide/svelte';
   import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
   import * as Sidebar from '$lib/components/ui/sidebar/index.js';
@@ -24,6 +25,7 @@
   import { NAV_GROUPS, navHref, navItemActive } from '$lib/features/nav/nav-items';
   import { activeBookPath, dbSession } from '$lib/stores/db.svelte';
   import { navBadges, navRoots } from '$lib/stores/nav.svelte';
+  import { appSettings, saveSettings } from '$lib/stores/settings.svelte';
   import { keyboardShortcutsDialog } from '$lib/stores/ui.svelte';
   import { bookDisplayName } from '$lib/utils/book';
   import { plural } from '$lib/utils/format.svelte';
@@ -178,6 +180,24 @@
                 </a>
               {/snippet}
             </DropdownMenu.Item>
+            <DropdownMenu.Sub>
+              <DropdownMenu.SubTrigger>
+                <SunMoon aria-hidden="true" />
+                Theme
+              </DropdownMenu.SubTrigger>
+              <DropdownMenu.SubContent>
+                <DropdownMenu.RadioGroup
+                  value={appSettings.value.theme}
+                  onValueChange={(v) => {
+                    if (v === 'light' || v === 'dark' || v === 'system') saveSettings({ theme: v });
+                  }}
+                >
+                  <DropdownMenu.RadioItem value="light">Light</DropdownMenu.RadioItem>
+                  <DropdownMenu.RadioItem value="dark">Dark</DropdownMenu.RadioItem>
+                  <DropdownMenu.RadioItem value="system">System</DropdownMenu.RadioItem>
+                </DropdownMenu.RadioGroup>
+              </DropdownMenu.SubContent>
+            </DropdownMenu.Sub>
             <DropdownMenu.Item onclick={() => (keyboardShortcutsDialog.value = true)}>
               <CircleHelp aria-hidden="true" />
               Keyboard shortcuts
