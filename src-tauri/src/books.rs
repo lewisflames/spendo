@@ -147,6 +147,30 @@ async fn activate_book(
     })
 }
 
+/// Close the active book and return to the book-less placeholder. Writes are
+/// persisted live, so there is nothing to save; the checkpoint flushes WAL
+/// sidecars next to the closed file. The sidecar clear must not fail the
+/// close, so it is logged, not bubbled.
+#[tauri::command]
+pub async fn close_book(state: State<'_, AppState>) -> Result<HomeDataResult, String> {
+    let generation = state.book_generation.clone();
+    db::run_swap_blocking(state.db.clone(), move |conn| {
+        db::checkpoint(conn);
+        let placeholder =
+            db::open_placeholder().map_err(|e| format!("Failed to close book: {e}"))?;
+        *conn = placeholder;
+        generation.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    })
+    .await?;
+    *state.db_path.lock().map_err(|e| e.to_string())? = None;
+    db::clear_last_book(&state.app_data_dir);
+    Ok(HomeDataResult {
+        has_data: false,
+        summary: None,
+    })
+}
+
 /// Active book path, or `null` while on the in-memory placeholder (fresh
 /// install before any New/Open). Locks only the path mutex — a PathBuf clone
 /// with no DB access — so no blocking-thread hop is needed.
