@@ -55,7 +55,9 @@
     PALETTE_GROUPS.filter((group) => group !== 'Go to' || dbSession.value !== null).map(
       (group) => ({
         name: group,
-        items: PALETTE_COMMANDS.filter((cmd) => cmd.group === group && matchesQuery(cmd, search))
+        items: PALETTE_COMMANDS.filter(
+          (cmd) => cmd.group === group && matchesQuery(cmd, search) && cmd.when?.() !== false
+        )
       })
     )
   );

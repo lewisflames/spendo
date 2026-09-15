@@ -7,18 +7,29 @@ import {
   ArrowRight,
   Briefcase,
   CircleHelp,
+  FolderOpen,
+  FolderPlus,
   FolderTree,
   History,
   Info,
+  LogOut,
   PanelLeft,
   PiggyBank,
   Receipt,
+  Save,
   Scale,
   Settings,
   SunMoon
 } from '@lucide/svelte';
 import { appSettings, resolveTheme, saveSettings } from '$lib/stores/settings.svelte';
 import { keyboardShortcutsDialog } from '$lib/stores/ui.svelte';
+import { activeBookPath, dbSession } from '$lib/stores/db.svelte';
+import {
+  closeActiveBook,
+  createBookViaDialog,
+  openBookViaDialog,
+  saveBookAsViaDialog
+} from '$lib/features/book/book-actions';
 import { goBack, goForward } from '$lib/stores/nav-history.svelte';
 
 type PaletteGroup = 'Go to' | 'Actions';
@@ -29,6 +40,8 @@ export interface PaletteCommand {
   group: PaletteGroup;
   icon: Component;
   keywords: string[];
+  /** Hide the command when it would be a dead end (e.g. Close with no book). */
+  when?: () => boolean;
   run: () => void | Promise<void>;
 }
 
@@ -139,6 +152,48 @@ export const PALETTE_COMMANDS: PaletteCommand[] = [
     keywords: ['sidebar', 'navigation', 'collapse'],
     run: () => {
       saveSettings({ sidebarCollapsed: !appSettings.value.sidebarCollapsed });
+    }
+  },
+  {
+    id: 'open-book',
+    title: 'Open book…',
+    group: 'Actions',
+    icon: FolderOpen,
+    keywords: ['open', 'book', 'database', 'spendo', 'switch'],
+    run: () => {
+      void openBookViaDialog();
+    }
+  },
+  {
+    id: 'new-book',
+    title: 'New book…',
+    group: 'Actions',
+    icon: FolderPlus,
+    keywords: ['new', 'create', 'book', 'database', 'spendo'],
+    run: () => {
+      void createBookViaDialog();
+    }
+  },
+  {
+    id: 'save-book-as',
+    title: 'Save book as…',
+    group: 'Actions',
+    icon: Save,
+    keywords: ['save', 'book', 'copy', 'export', 'spendo'],
+    when: () => dbSession.value !== null,
+    run: () => {
+      void saveBookAsViaDialog();
+    }
+  },
+  {
+    id: 'close-book',
+    title: 'Close book',
+    group: 'Actions',
+    icon: LogOut,
+    keywords: ['close', 'book', 'database', 'switch'],
+    when: () => activeBookPath.value !== null,
+    run: () => {
+      void closeActiveBook();
     }
   },
   {
