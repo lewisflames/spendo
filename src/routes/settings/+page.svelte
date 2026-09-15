@@ -52,7 +52,7 @@
 
   <DisplayCard />
 
-  <BookCard onBookChanged={refreshBookSettings} />
+  <BookCard />
 
   <ReportingCard error={bookSettingsError} onRetry={() => void refreshBookSettings()} />
 
