@@ -53,31 +53,6 @@ pub struct AccountsResult {
     pub missing_prices: Vec<fx::MissingPrice>,
 }
 
-const TYPE_TO_CATEGORY: [(&str, &str); 15] = [
-    ("ASSET", "ASSET"),
-    ("BANK", "ASSET"),
-    ("CASH", "ASSET"),
-    ("STOCK", "ASSET"),
-    ("MUTUAL", "ASSET"),
-    ("FUND", "ASSET"),
-    ("CURRENCY", "ASSET"),
-    ("RECEIVABLE", "ASSET"),
-    ("LIABILITY", "LIABILITY"),
-    ("CREDIT", "LIABILITY"),
-    ("PAYABLE", "LIABILITY"),
-    ("INCOME", "INCOME"),
-    ("EXPENSE", "EXPENSE"),
-    ("EQUITY", "EQUITY"),
-    ("TRADING", "EQUITY"),
-];
-
-fn category_for_type(account_type: &str) -> &str {
-    TYPE_TO_CATEGORY
-        .iter()
-        .find(|(ty, _)| *ty == account_type)
-        .map_or(account_type, |(_, cat)| cat)
-}
-
 struct AccountRow {
     guid: String,
     name: String,
@@ -240,7 +215,7 @@ fn value_account_rows(
         };
         node_map.insert(row.guid.clone(), node);
 
-        let category = category_for_type(&row.account_type).to_string();
+        let category = utils::category_for_type(&row.account_type).to_string();
         let entry = by_type.entry(category).or_insert(TypeSummary {
             count: 0,
             total_balance: 0.0,
