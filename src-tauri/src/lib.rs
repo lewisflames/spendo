@@ -58,16 +58,14 @@ pub fn run() {
                     None => {
                         eprintln!("spendo: remembered book unreadable, starting book-less");
                         db::clear_last_book(&app_data_dir);
-                        let c = rusqlite::Connection::open_in_memory()
-                            .expect("Failed to open placeholder database");
-                        db::init_db(&c).expect("Failed to initialize placeholder database");
+                        let c = db::open_placeholder()
+                            .expect("Failed to initialize placeholder database");
                         (c, None)
                     }
                 },
                 None => {
-                    let c = rusqlite::Connection::open_in_memory()
-                        .expect("Failed to open placeholder database");
-                    db::init_db(&c).expect("Failed to initialize placeholder database");
+                    let c =
+                        db::open_placeholder().expect("Failed to initialize placeholder database");
                     (c, None)
                 }
             };
@@ -86,6 +84,7 @@ pub fn run() {
             books::open_book,
             books::create_book_at,
             books::save_book_as,
+            books::close_book,
             init::set_base_currency,
             settings::clear_app_db,
             settings::write_text_file,

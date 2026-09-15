@@ -309,6 +309,14 @@ pub fn connect_db(db_path: &PathBuf) -> Result<Connection> {
     Ok(conn)
 }
 
+/// Fresh in-memory placeholder book (schema, no rows) for the book-less state:
+/// startup before any New/Open, and `books::close_book`.
+pub fn open_placeholder() -> Result<Connection> {
+    let conn = Connection::open_in_memory()?;
+    init_db(&conn)?;
+    Ok(conn)
+}
+
 /// Open a GnuCash source file strictly read-only: never enables WAL or writes
 /// anything next to the user's original book.
 pub fn connect_source_db(db_path: &PathBuf) -> Result<Connection> {
@@ -543,6 +551,18 @@ mod tests {
             .query_row("PRAGMA application_id", [], |r| r.get(0))
             .unwrap();
         assert_eq!(id, SPENDO_APP_ID);
+    }
+
+    #[test]
+    fn placeholder_has_schema_and_no_rows() {
+        let conn = open_placeholder().unwrap();
+        let tables = table_names(&conn);
+        assert!(tables.contains(&"accounts".to_string()));
+        assert!(tables.contains(&"transactions".to_string()));
+        let accounts: i64 = conn
+            .query_row("SELECT COUNT(*) FROM accounts", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(accounts, 0);
     }
 
     #[test]

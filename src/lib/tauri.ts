@@ -298,6 +298,9 @@ export const createBookAt = (path: string, currency: string): Promise<EmptyBookR
 export const saveBookAs = (path: string): Promise<EmptyBookResult> =>
   invoke<EmptyBookResult>('save_book_as', { path });
 
+/** Close the active book and return to the book-less placeholder. */
+export const closeBook = (): Promise<EmptyBookResult> => invoke<EmptyBookResult>('close_book');
+
 // ── Book-scoped settings (travel with the `.spendo` file) ──
 
 export type PnlPeriodId = 'this_month' | 'this_quarter' | 'this_year' | 'last_12_months';
