@@ -1,6 +1,7 @@
 import { goto } from '$app/navigation';
 import { resolve } from '$app/paths';
 import { open, save } from '@tauri-apps/plugin-dialog';
+import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { basename } from '@tauri-apps/api/path';
 import { toast } from '$lib/components/ui/sonner';
 import { activeBookPath, dbSession, setActiveBookPath, setDbSession } from '$lib/stores/db.svelte';
@@ -163,4 +164,17 @@ export async function copyActiveBookPath(): Promise<boolean> {
   const path = activeBookPath.value;
   if (!path) return false;
   return copyBookPathAt(path);
+}
+
+/** Reveal the active book file in the OS file manager. */
+export async function revealActiveBook(): Promise<boolean> {
+  const path = activeBookPath.value;
+  if (!path) return false;
+  try {
+    await revealItemInDir(path);
+    return true;
+  } catch (e: unknown) {
+    toast.error(errMsg(e, 'Failed to show book in folder'));
+    return false;
+  }
 }
