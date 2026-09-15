@@ -19,7 +19,8 @@
     ensureDbSessionLoaded,
     loadActiveBook
   } from '$lib/stores/db.svelte';
-  import { TitleBar, MinimalTitleBar } from '$lib/components/layout/title-bar';
+  import { TitleBar } from '$lib/components/layout/title-bar';
+  import { cn } from '$lib/utils';
   import { Sonner } from '$lib/components/ui/sonner';
   import KeyboardShortcutsDialog from '$lib/components/layout/keyboard-shortcuts-dialog.svelte';
   import CommandPalette from '$lib/components/layout/command-palette.svelte';
@@ -45,27 +46,20 @@
     loadActiveBook().catch(() => {});
   });
 
-  // App chrome stays mounted while the first bootstrap is in flight so a
-  // full reload paints TitleBar + Sidebar around the page skeletons instead
-  // of dropping to the chromeless welcome shell mid-load. Once bootstrap
-  // settles, session identity alone decides (empty → welcome shell).
-  //
-  // NOTE: this reads only dbBootstrapping. The home page force-refreshes the
-  // session on every mount with the session intact; bootstrapping is already
-  // false by then, so refreshes can't flap the shell into a remount → refetch
-  // loop. Tradeoff: a true
-  // first run (or cleared book) briefly shows the app shell with skeletons
-  // before settling on welcome — preferred over every reload flashing
-  // chromeless, since a persisted hint proved unreliable across webview /
-  // browser storage contexts.
-  let showAppChrome = $derived(!!dbSession.value || dbBootstrapping.value);
+  // Chrome is always mounted now; only the sidebar depends on having a book.
+  // While book-less (welcome) the inset panel keeps its frame through the
+  // explicit classes below, because Sidebar.Inset's peer-driven styles
+  // (rounded corners, gutter) need a rendered Sidebar.Root to match.
+  let showSidebar = $derived(!!dbSession.value);
 
-  // Strict onboarding: any route other than `/` redirects home while empty.
+  // Strict onboarding: any route other than the welcome page redirects home
+  // while empty. `/about` stays reachable so the welcome footer's link works.
   // The welcome screen lives on `/`, so this never loops. Waits for the
   // bootstrap specifically (not refresh loading) so a home revalidation
   // never triggers a redirect.
+  const booklessRoutes = new Set(['/', '/about']);
   $effect(() => {
-    if (!dbBootstrapping.value && !dbSession.value && page.url.pathname !== '/') {
+    if (!dbBootstrapping.value && !dbSession.value && !booklessRoutes.has(page.url.pathname)) {
       goto(resolve('/'), { replaceState: true });
     }
   });
@@ -125,28 +119,21 @@
 <svelte:document onkeydown={handleKeydown} />
 
 <div class="[--header-height:calc(--spacing(10))]">
-  {#if showAppChrome}
-    <Sidebar.Provider class="flex flex-col">
-      <TitleBar />
-      <div class="flex flex-1 overflow-hidden">
+  <Sidebar.Provider class={cn('flex flex-col', !showSidebar && 'bg-sidebar')}>
+    <TitleBar showSidebarTrigger={showSidebar} />
+    <div class="flex flex-1 overflow-hidden">
+      {#if showSidebar}
         <AppSidebar />
-        <Sidebar.Inset class="min-w-0">
-          <main id="main-content" class="flex-1 overflow-auto p-8">
-            <div class="mx-auto w-full max-w-7xl">
-              {@render children()}
-            </div>
-          </main>
-        </Sidebar.Inset>
-      </div>
-    </Sidebar.Provider>
-  {:else}
-    <div class="flex h-svh flex-col">
-      <MinimalTitleBar />
-      <main id="main-content" class="relative flex flex-1 flex-col overflow-auto">
-        {@render children()}
-      </main>
+      {/if}
+      <Sidebar.Inset class={cn('min-w-0', !showSidebar && 'mx-2 mb-2 rounded-xl shadow-sm')}>
+        <main id="main-content" class="flex flex-1 flex-col overflow-auto p-8">
+          <div class="mx-auto flex w-full max-w-7xl flex-1 flex-col">
+            {@render children()}
+          </div>
+        </main>
+      </Sidebar.Inset>
     </div>
-  {/if}
+  </Sidebar.Provider>
 </div>
 
 <Sonner theme={resolvedTheme} />

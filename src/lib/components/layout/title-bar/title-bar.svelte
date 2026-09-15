@@ -12,6 +12,8 @@
   import PaletteTrigger from './palette-trigger.svelte';
   import WindowControls from './window-controls.svelte';
 
+  let { showSidebarTrigger = true }: { showSidebarTrigger?: boolean } = $props();
+
   const {
     inTauri,
     isMac,
@@ -43,7 +45,9 @@
 
   <div class="flex h-full min-w-0 flex-1 items-center gap-2 px-3">
     <div class="flex shrink-0 items-center gap-0.5">
-      <SidebarTrigger class="text-muted-foreground" />
+      {#if showSidebarTrigger}
+        <SidebarTrigger class="text-muted-foreground" />
+      {/if}
       <Button
         variant="ghost"
         size="icon-sm"

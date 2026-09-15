@@ -4,6 +4,7 @@ import {
   EMPTY_DASH,
   fmtPct,
   formatDateRange,
+  formatRelativeTime,
   parseLocalDate,
   plural,
   signColor,
@@ -96,5 +97,24 @@ describe('plural', () => {
     expect(plural(1, 'account')).toBe('1 account');
     expect(plural(0, 'account')).toBe('0 accounts');
     expect(plural(3, 'account')).toBe('3 accounts');
+  });
+});
+
+describe('formatRelativeTime', () => {
+  const now = Date.UTC(2026, 0, 15, 12, 0, 0);
+
+  it('collapses sub-minute differences to "just now"', () => {
+    expect(formatRelativeTime(now / 1000 - 30, now)).toBe('just now');
+    expect(formatRelativeTime(now / 1000, now)).toBe('just now');
+  });
+
+  it('picks the coarsest matching unit', () => {
+    expect(formatRelativeTime(now / 1000 - 120, now)).toBe('2 minutes ago');
+    expect(formatRelativeTime(now / 1000 - 3 * 60 * 60, now)).toBe('3 hours ago');
+    expect(formatRelativeTime(now / 1000 - 2 * 24 * 60 * 60, now)).toBe('2 days ago');
+  });
+
+  it('handles future timestamps', () => {
+    expect(formatRelativeTime(now / 1000 + 2 * 60 * 60, now)).toBe('in 2 hours');
   });
 });
