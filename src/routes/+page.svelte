@@ -24,9 +24,7 @@
 </svelte:head>
 
 {#if dbBootstrapping.value && !dbSession.value}
-  <section class="flex flex-col gap-6">
-    <PageSkeleton variant="history" />
-  </section>
+  <PageSkeleton variant="welcome" />
 {:else if !dbSession.value}
   <WelcomeScreen />
 {/if}

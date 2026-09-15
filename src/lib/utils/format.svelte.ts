@@ -35,6 +35,17 @@ function cachedDateTimeFormat(
   return fmt;
 }
 
+const relativeTimeFormatCache = new Map<string, Intl.RelativeTimeFormat>();
+
+function cachedRelativeTimeFormat(locale: string): Intl.RelativeTimeFormat {
+  let fmt = relativeTimeFormatCache.get(locale);
+  if (!fmt) {
+    fmt = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
+    relativeTimeFormatCache.set(locale, fmt);
+  }
+  return fmt;
+}
+
 export function signColor(value: number, positiveGood = true): string {
   if (positiveGood) {
     return value >= 0 ? 'text-success' : 'text-destructive';
@@ -145,6 +156,31 @@ export function formatDate(date: string | Date, opts?: Intl.DateTimeFormatOption
   const d = parseLocalDate(date);
   const o = opts ?? { month: 'short', day: 'numeric', year: 'numeric' };
   return cachedDateTimeFormat(appSettings.value.locale, o).format(d);
+}
+
+const RELATIVE_TIME_UNITS: readonly (readonly [Intl.RelativeTimeFormatUnit, number])[] = [
+  ['year', 365 * 24 * 60 * 60 * 1000],
+  ['month', 30 * 24 * 60 * 60 * 1000],
+  ['day', 24 * 60 * 60 * 1000],
+  ['hour', 60 * 60 * 1000],
+  ['minute', 60 * 1000]
+];
+
+/**
+ * Elapsed time since a unix-seconds instant, e.g. "2 days ago" (localized,
+ * `numeric: 'auto'`). Sub-minute differences collapse to "just now".
+ */
+export function formatRelativeTime(epochSeconds: number, now = Date.now()): string {
+  const diffMs = epochSeconds * 1000 - now;
+  for (const [unit, unitMs] of RELATIVE_TIME_UNITS) {
+    if (Math.abs(diffMs) >= unitMs) {
+      return cachedRelativeTimeFormat(appSettings.value.locale).format(
+        Math.round(diffMs / unitMs),
+        unit
+      );
+    }
+  }
+  return 'just now';
 }
 
 /** Integer axis/tick label in the app locale (thousands separators, no decimals). */

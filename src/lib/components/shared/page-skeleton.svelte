@@ -14,6 +14,7 @@
     variant
   }: {
     variant:
+      | 'welcome'
       | 'history'
       | 'accounts'
       | 'transactions'
@@ -26,7 +27,25 @@
   } = $props();
 </script>
 
-{#if variant === 'history'}
+{#if variant === 'welcome'}
+  <div class="m-auto flex w-full max-w-2xl flex-col gap-10 py-8">
+    <div class="flex flex-col items-center gap-5">
+      <Skeleton class="size-24 rounded-2xl" />
+      <div class="flex w-full flex-col items-center gap-3">
+        <Skeleton class="h-4 w-44" />
+        <Skeleton class="h-10 w-80 max-w-full" />
+        <Skeleton class="h-4 w-full max-w-md" />
+      </div>
+    </div>
+    <div class="flex flex-col items-center gap-3">
+      <div class="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+        <Skeleton class="h-9 w-full rounded-lg sm:w-40" />
+        <Skeleton class="h-9 w-full rounded-lg sm:w-40" />
+      </div>
+      <Skeleton class="h-3 w-36" />
+    </div>
+  </div>
+{:else if variant === 'history'}
   <PageHeaderSkeleton />
   <TableSkeleton cols={4} />
 {:else if variant === 'accounts'}

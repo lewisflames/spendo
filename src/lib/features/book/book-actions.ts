@@ -7,7 +7,7 @@ import { toast } from '$lib/components/ui/sonner';
 import { activeBookPath, dbSession, setActiveBookPath, setDbSession } from '$lib/stores/db.svelte';
 import { loadBookSettings, resetBookSettings } from '$lib/stores/book-settings.svelte';
 import { appSettings } from '$lib/stores/settings.svelte';
-import { closeBook, createBookAt, openBook, saveBookAs } from '$lib/tauri';
+import { closeBook, createBookAt, openBook, saveBookAs, type DataSummary } from '$lib/tauri';
 import { ensureSpendoExtension } from '$lib/utils/book';
 import { defaultCurrencyForLocale } from '$lib/utils/currency';
 import { errMsg } from '$lib/utils/error';
@@ -32,6 +32,32 @@ async function reloadBookSettings() {
   }
 }
 
+/** Shared success tail of every book switch: adopt the session, sync
+ * book-scoped settings, announce. The `switching` guard is the caller's job. */
+async function activateBook(path: string, summary: DataSummary, message: string): Promise<void> {
+  setDbSession(summary);
+  setActiveBookPath(path);
+  await reloadBookSettings();
+  toast.success(message);
+}
+
+/** Open a book at a known path (welcome drag-and-drop). Failures toast and
+ * return false so callers can keep the user on the welcome screen. */
+export async function openBookAt(path: string): Promise<boolean> {
+  if (switching) return false;
+  switching = true;
+  try {
+    const result = await openBook(path);
+    await activateBook(path, result.summary, `Opened ${await basename(path)}`);
+    return true;
+  } catch (e: unknown) {
+    toast.error(errMsg(e, 'Failed to open book'));
+    return false;
+  } finally {
+    switching = false;
+  }
+}
+
 export async function openBookViaDialog(): Promise<boolean> {
   if (switching) return false;
   let selected: string | string[] | null;
@@ -42,23 +68,12 @@ export async function openBookViaDialog(): Promise<boolean> {
     return false;
   }
   if (!selected || Array.isArray(selected)) return false;
-  switching = true;
-  try {
-    const result = await openBook(selected);
-    setDbSession(result.summary);
-    setActiveBookPath(selected);
-    await reloadBookSettings();
-    toast.success(`Opened ${await basename(selected)}`);
-    return true;
-  } catch (e: unknown) {
-    toast.error(errMsg(e, 'Failed to open book'));
-    return false;
-  } finally {
-    switching = false;
-  }
+  return openBookAt(selected);
 }
 
-export async function createBookViaDialog(): Promise<boolean> {
+/** Create a book at a user-chosen path. `currency` defaults to the locale's
+ * when the caller (welcome screen) doesn't offer a picker. */
+export async function createBookViaDialog(currency?: string): Promise<boolean> {
   if (switching) return false;
   let target: string | null;
   try {
@@ -69,14 +84,11 @@ export async function createBookViaDialog(): Promise<boolean> {
   }
   if (!target) return false;
   const file = ensureSpendoExtension(target);
-  const currency = defaultCurrencyForLocale(appSettings.value.locale);
+  const base = currency ?? defaultCurrencyForLocale(appSettings.value.locale);
   switching = true;
   try {
-    const result = await createBookAt(file, currency);
-    setDbSession(result.summary);
-    setActiveBookPath(file);
-    await reloadBookSettings();
-    toast.success(`Book created (${currency})`);
+    const result = await createBookAt(file, base);
+    await activateBook(file, result.summary, `Book created (${base})`);
     return true;
   } catch (e: unknown) {
     toast.error(errMsg(e, 'Failed to create book'));
@@ -100,10 +112,7 @@ export async function saveBookAsViaDialog(): Promise<boolean> {
   switching = true;
   try {
     const result = await saveBookAs(file);
-    setDbSession(result.summary);
-    setActiveBookPath(file);
-    await reloadBookSettings();
-    toast.success(`Book saved as ${await basename(file)}`);
+    await activateBook(file, result.summary, `Book saved as ${await basename(file)}`);
     return true;
   } catch (e: unknown) {
     toast.error(errMsg(e, 'Failed to save book'));
@@ -138,9 +147,9 @@ export async function closeActiveBook(): Promise<boolean> {
   }
 }
 
-export async function revealActiveBook(): Promise<void> {
-  const path = activeBookPath.value;
-  if (!path) return;
+/** The path-taking variants are the single implementation for callers that
+ * already have a book path (active-book menus, dialogs). */
+export async function revealBookAt(path: string): Promise<void> {
   try {
     await revealItemInDir(path);
   } catch (e: unknown) {
@@ -148,9 +157,7 @@ export async function revealActiveBook(): Promise<void> {
   }
 }
 
-export async function copyActiveBookPath(): Promise<boolean> {
-  const path = activeBookPath.value;
-  if (!path) return false;
+export async function copyBookPathAt(path: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(path);
     toast.success('Book path copied');
@@ -159,4 +166,16 @@ export async function copyActiveBookPath(): Promise<boolean> {
     toast.error(errMsg(e, 'Failed to copy path'));
     return false;
   }
+}
+
+export async function revealActiveBook(): Promise<void> {
+  const path = activeBookPath.value;
+  if (!path) return;
+  await revealBookAt(path);
+}
+
+export async function copyActiveBookPath(): Promise<boolean> {
+  const path = activeBookPath.value;
+  if (!path) return false;
+  return copyBookPathAt(path);
 }

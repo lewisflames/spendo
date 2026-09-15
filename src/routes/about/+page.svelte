@@ -1,7 +1,10 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import { Badge } from '$lib/components/ui/badge';
+  import { Button } from '$lib/components/ui/button';
   import * as Card from '$lib/components/ui/card';
   import { Wallet, Terminal, Palette, Component, Paintbrush, CloudDownload } from '@lucide/svelte';
+  import { dbSession } from '$lib/stores/db.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
 </script>
 
@@ -11,7 +14,11 @@
 </svelte:head>
 
 <div class="flex flex-col gap-6">
-  <PageHeader title="About Spendo" description="What is Spendo and how it works" />
+  <PageHeader title="About Spendo" description="What is Spendo and how it works">
+    {#if !dbSession.value}
+      <Button variant="outline" href={resolve('/')}>Back to welcome</Button>
+    {/if}
+  </PageHeader>
 
   <Card.Root>
     <Card.Header>

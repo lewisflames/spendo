@@ -14,3 +14,11 @@ export function bookDisplayName(path: string | null): string {
   const base = path.split(/[\\/]/).pop() ?? path;
   return base.replace(/\.spendo$/i, '') || base;
 }
+
+/** Parent folder of a book path for compact secondary text, or `null` when
+ * the file sits at the filesystem root. */
+export function bookFolder(path: string): string | null {
+  const idx = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+  if (idx <= 0) return null;
+  return path.slice(0, idx);
+}
