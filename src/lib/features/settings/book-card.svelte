@@ -6,27 +6,15 @@
   import * as Dialog from '$lib/components/ui/dialog';
   import IconCardHeader from '$lib/components/shared/icon-card-header.svelte';
   import SettingSelectRow from './setting-select-row.svelte';
-  import { BOOK_CURRENCIES, defaultCurrencyForLocale } from '$lib/utils/currency';
-  import { ensureSpendoExtension } from '$lib/utils/book';
+  import { BOOK_CURRENCIES } from '$lib/utils/currency';
   import { errMsg } from '$lib/utils/error';
   import { toast } from '$lib/components/ui/sonner';
-  import { revealItemInDir } from '@tauri-apps/plugin-opener';
-  import { open, save } from '@tauri-apps/plugin-dialog';
-  import { basename } from '@tauri-apps/api/path';
   import { resolve } from '$app/paths';
-  import { HardDrive, FolderOpen, Save, Plus, ExternalLink, Copy, Check } from '@lucide/svelte';
-  import {
-    dbSession,
-    activeBookPath,
-    setActiveBookPath,
-    setDbSession
-  } from '$lib/stores/db.svelte';
-  import { appSettings } from '$lib/stores/settings.svelte';
-  import { createBookAt, openBook, saveBookAs, setBaseCurrency } from '$lib/tauri';
+  import { HardDrive, Copy, Check } from '@lucide/svelte';
+  import { dbSession, activeBookPath, setDbSession } from '$lib/stores/db.svelte';
+  import { setBaseCurrency } from '$lib/tauri';
+  import { copyActiveBookPath } from '$lib/features/book/book-actions';
 
-  let { onBookChanged }: { onBookChanged: () => Promise<void> } = $props();
-
-  let switching = $state(false);
   let copied = $state(false);
   let savingCurrency = $state(false);
   let currencyDialogOpen = $state(false);
@@ -72,114 +60,19 @@
     }
   }
 
-  async function handleOpenBook() {
-    if (switching) return;
-    let selected: string | string[] | null;
-    try {
-      selected = await open({
-        multiple: false,
-        filters: [{ name: 'Spendo book', extensions: ['spendo', 'db', 'sqlite'] }]
-      });
-    } catch (e: unknown) {
-      toast.error(errMsg(e, 'Failed to open file dialog'));
-      return;
-    }
-    if (!selected || Array.isArray(selected)) return;
-    switching = true;
-    try {
-      const result = await openBook(selected);
-      setDbSession(result.summary);
-      setActiveBookPath(selected);
-      await onBookChanged();
-      toast.success(`Opened ${await basename(selected)}`);
-    } catch (e: unknown) {
-      toast.error(errMsg(e, 'Failed to open book'));
-    } finally {
-      switching = false;
-    }
-  }
-
-  async function handleNewBook() {
-    if (switching) return;
-    let target: string | null;
-    try {
-      target = await save({
-        defaultPath: 'book.spendo',
-        filters: [{ name: 'Spendo book', extensions: ['spendo'] }]
-      });
-    } catch (e: unknown) {
-      toast.error(errMsg(e, 'Failed to open save dialog'));
-      return;
-    }
-    if (!target) return;
-    const file = ensureSpendoExtension(target);
-    const currency = defaultCurrencyForLocale(appSettings.value.locale);
-    switching = true;
-    try {
-      const result = await createBookAt(file, currency);
-      setDbSession(result.summary);
-      setActiveBookPath(file);
-      await onBookChanged();
-      toast.success(`Book created (${currency})`);
-    } catch (e: unknown) {
-      toast.error(errMsg(e, 'Failed to create book'));
-    } finally {
-      switching = false;
-    }
-  }
-
-  async function handleSaveAs() {
-    if (switching || !dbSession.value) return;
-    let target: string | null;
-    try {
-      target = await save({
-        defaultPath: 'book.spendo',
-        filters: [{ name: 'Spendo book', extensions: ['spendo'] }]
-      });
-    } catch (e: unknown) {
-      toast.error(errMsg(e, 'Failed to open save dialog'));
-      return;
-    }
-    if (!target) return;
-    const file = ensureSpendoExtension(target);
-    switching = true;
-    try {
-      const result = await saveBookAs(file);
-      setDbSession(result.summary);
-      setActiveBookPath(file);
-      await onBookChanged();
-      toast.success(`Book saved as ${await basename(file)}`);
-    } catch (e: unknown) {
-      toast.error(errMsg(e, 'Failed to save book'));
-    } finally {
-      switching = false;
-    }
-  }
-
-  async function handleRevealDb() {
-    if (!activePath) return;
-    try {
-      await revealItemInDir(activePath);
-    } catch (e: unknown) {
-      toast.error(errMsg(e, 'Failed to open file manager'));
-    }
-  }
-
   async function handleCopyPath() {
-    if (!activePath) return;
-    try {
-      await navigator.clipboard.writeText(activePath);
+    if (await copyActiveBookPath()) {
       copied = true;
-      toast.success('Book path copied');
       setTimeout(() => (copied = false), 1500);
-    } catch (e: unknown) {
-      toast.error(errMsg(e, 'Failed to copy path'));
     }
   }
 </script>
 
 <Card.Root>
-  <IconCardHeader title="Book" description="Your book is a portable .spendo file.">
+  <IconCardHeader
+    title="Book"
+    description="Your book is a portable .spendo file. Open, create or close books from the menu at the bottom of the sidebar."
+  >
     {#snippet icon()}
       <HardDrive aria-hidden="true" class="size-4 text-muted-foreground" />
     {/snippet}
@@ -212,47 +105,27 @@
         </span>
       {/if}
     </SettingSelectRow>
-    <div class="flex flex-col items-start gap-3">
-      <div class="flex w-full items-center gap-2">
-        <code
-          class="max-w-full flex-1 truncate rounded bg-muted px-2 py-1 font-mono text-xs text-muted-foreground"
-          title={activePath ?? undefined}
-        >
-          {activePath ?? 'No book open'}
-        </code>
-        <Button
-          variant="outline"
-          size="icon"
-          disabled={!activePath}
-          onclick={handleCopyPath}
-          aria-label="Copy book path"
-          title="Copy book path"
-        >
-          {#if copied}
-            <Check aria-hidden="true" class="size-4" />
-          {:else}
-            <Copy aria-hidden="true" class="size-4" />
-          {/if}
-        </Button>
-      </div>
-      <div class="flex flex-wrap gap-2">
-        <Button variant="outline" disabled={switching} onclick={handleOpenBook}>
-          <FolderOpen aria-hidden="true" class="size-4" />
-          {switching ? 'Working...' : 'Open...'}
-        </Button>
-        <Button variant="outline" disabled={switching || !dbSession.value} onclick={handleSaveAs}>
-          <Save aria-hidden="true" class="size-4" />
-          Save as...
-        </Button>
-        <Button variant="outline" disabled={switching} onclick={handleNewBook}>
-          <Plus aria-hidden="true" class="size-4" />
-          New...
-        </Button>
-        <Button variant="outline" disabled={!activePath} onclick={handleRevealDb}>
-          <ExternalLink aria-hidden="true" class="size-4" />
-          Reveal in file manager
-        </Button>
-      </div>
+    <div class="flex w-full items-center gap-2">
+      <code
+        class="max-w-full flex-1 truncate rounded bg-muted px-2 py-1 font-mono text-xs text-muted-foreground"
+        title={activePath ?? undefined}
+      >
+        {activePath ?? 'No book open'}
+      </code>
+      <Button
+        variant="outline"
+        size="icon"
+        disabled={!activePath}
+        onclick={handleCopyPath}
+        aria-label="Copy book path"
+        title="Copy book path"
+      >
+        {#if copied}
+          <Check aria-hidden="true" class="size-4" />
+        {:else}
+          <Copy aria-hidden="true" class="size-4" />
+        {/if}
+      </Button>
     </div>
   </Card.Content>
 </Card.Root>
