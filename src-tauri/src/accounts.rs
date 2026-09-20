@@ -164,7 +164,12 @@ fn value_account_rows(
             && row.commodity_mnemonic.is_some()
         {
             if let Some(ref mnemonic) = row.commodity_mnemonic {
-                if let Some(price) = unified_prices.get(mnemonic) {
+                let price = row
+                    .commodity_guid
+                    .as_deref()
+                    .and_then(|guid| unified_prices.get(guid))
+                    .copied();
+                if let Some(price) = price {
                     let adjusted = if utils::is_credit_normal(&row.account_type) {
                         -row.quantity
                     } else {

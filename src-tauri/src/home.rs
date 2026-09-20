@@ -50,10 +50,10 @@ pub fn get_summary(conn: &Connection) -> Result<DataSummary, String> {
 
     // Net worth in report currency: cash per account currency converted at latest FX,
     // investments marked to market with report-currency-normalized prices.
-    let cash_rows: Vec<(String, f64, f64, f64)> = {
+    let cash_rows: Vec<(String, String, f64, f64, f64)> = {
         let mut stmt = conn
             .prepare(&format!(
-                "SELECT c.mnemonic,
+                "SELECT c.guid, c.mnemonic,
                         COALESCE(SUM(CASE WHEN a.account_type IN ({})
                             THEN {} ELSE 0 END), 0) as cash_assets,
                         COALESCE(SUM(CASE WHEN a.account_type IN ({})
@@ -65,7 +65,7 @@ pub fn get_summary(conn: &Connection) -> Result<DataSummary, String> {
                  JOIN commodities c ON c.guid = a.commodity_guid
                  JOIN transactions t ON t.guid = s.tx_guid
                  WHERE {}
-                 GROUP BY c.mnemonic",
+                 GROUP BY c.guid, c.mnemonic",
                 utils::cash_like_types_sql(),
                 utils::RAW_AMOUNT,
                 utils::investment_types_sql(),
@@ -77,7 +77,7 @@ pub fn get_summary(conn: &Connection) -> Result<DataSummary, String> {
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?))
             })
             .map_err(|e| e.to_string())?;
         rows.collect::<Result<Vec<_>, _>>()
@@ -89,10 +89,10 @@ pub fn get_summary(conn: &Connection) -> Result<DataSummary, String> {
 
     let net_worth: f64 = cash_rows
         .iter()
-        .map(|(mnemonic, cash_assets, shares, liabilities)| {
+        .map(|(guid, mnemonic, cash_assets, shares, liabilities)| {
             let cash_val = fx::convert(*cash_assets - *liabilities, mnemonic, &currency, &fx_map);
             let inv_val = if *shares != 0.0 {
-                unified_prices.get(mnemonic).copied().unwrap_or(0.0) * shares
+                unified_prices.get(guid).copied().unwrap_or(0.0) * shares
             } else {
                 0.0
             };

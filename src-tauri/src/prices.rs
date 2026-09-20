@@ -87,19 +87,22 @@ pub fn list_commodities(conn: &Connection) -> Result<Vec<CommodityInfo>, String>
     Ok(rows)
 }
 
+/// Latest `rn`-th price row per commodity. Keyed by commodity GUID (a
+/// mnemonic can repeat across namespaces, e.g. the same ticker on two
+/// exchanges) with the mnemonic kept for display only.
+/// Returns `(commodity_guid, mnemonic, price, date, quote_currency_mnemonic)`.
 fn nth_price_raw(
     conn: &Connection,
     rn: u32,
-) -> Result<Vec<(String, f64, String, String)>, String> {
-    // (mnemonic, price, date, quote_currency_mnemonic)
+) -> Result<Vec<(String, String, f64, String, String)>, String> {
     let mut stmt = conn
         .prepare(&format!(
-            "SELECT mnemonic, price, date, quote FROM (
-                    SELECT c.mnemonic,
+            "SELECT guid, mnemonic, price, date, quote FROM (
+                    SELECT c.guid, c.mnemonic,
                         {} as price,
                         p.date,
                         cur.mnemonic as quote,
-                        ROW_NUMBER() OVER (PARTITION BY c.mnemonic ORDER BY p.date DESC, p.guid DESC) as rn
+                        ROW_NUMBER() OVER (PARTITION BY c.guid ORDER BY p.date DESC, p.guid DESC) as rn
                     FROM prices p
                     JOIN commodities c ON c.guid = p.commodity_guid
                     JOIN commodities cur ON cur.guid = p.currency_guid
@@ -111,7 +114,13 @@ fn nth_price_raw(
 
     let rows = stmt
         .query_map([rn], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+            ))
         })
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
@@ -123,7 +132,7 @@ fn nth_price_raw(
 fn get_latest_live_prices(conn: &Connection) -> Result<Vec<PriceEntry>, String> {
     Ok(nth_price_raw(conn, 1)?
         .into_iter()
-        .map(|(mnemonic, price, date, currency)| PriceEntry {
+        .map(|(_guid, mnemonic, price, date, currency)| PriceEntry {
             mnemonic,
             price,
             price_date: date,
@@ -799,10 +808,11 @@ fn assemble_result(
     )
 }
 
+/// Latest price per commodity GUID, normalized to the report currency.
 pub fn get_cached_prices_map(conn: &Connection) -> Result<HashMap<String, f64>, String> {
     Ok(latest_prices_normalized(conn, 1)?
         .into_iter()
-        .map(|(mnemonic, price, _, _)| (mnemonic, price))
+        .map(|(guid, _, price, _, _)| (guid, price))
         .collect())
 }
 
@@ -811,7 +821,7 @@ pub fn get_cached_prices_with_date_map(
 ) -> Result<HashMap<String, (f64, String)>, String> {
     Ok(latest_prices_normalized(conn, 1)?
         .into_iter()
-        .map(|(mnemonic, price, date, _)| (mnemonic, (price, date)))
+        .map(|(guid, _, price, date, _)| (guid, (price, date)))
         .collect())
 }
 
@@ -822,17 +832,18 @@ pub fn get_cached_prev_prices_map(
 ) -> Result<HashMap<String, (f64, String)>, String> {
     Ok(latest_prices_normalized(conn, 2)?
         .into_iter()
-        .map(|(mnemonic, price, date, _)| (mnemonic, (price, date)))
+        .map(|(guid, _, price, date, _)| (guid, (price, date)))
         .collect())
 }
 
-/// Latest-price rows normalized to the report currency:
-/// (mnemonic, price, price date, quote mnemonic). Single window-function scan
-/// plus one FX-history scan shared by every cached-price map above.
+/// Latest-price rows normalized to the report currency, keyed by commodity
+/// GUID: (guid, mnemonic, price, price date, quote mnemonic). Single
+/// window-function scan plus one FX-history scan shared by every cached-price
+/// map above.
 fn latest_prices_normalized(
     conn: &Connection,
     rn: u32,
-) -> Result<Vec<(String, f64, String, String)>, String> {
+) -> Result<Vec<(String, String, f64, String, String)>, String> {
     let rows = nth_price_raw(conn, rn)?;
     if rows.is_empty() {
         return Ok(vec![]);
@@ -842,7 +853,7 @@ fn latest_prices_normalized(
     // One rate map per distinct price date instead of one query per commodity.
     let mut rates_by_date: HashMap<String, HashMap<String, f64>> = HashMap::new();
     rows.into_iter()
-        .map(|(mnemonic, price, date, quote)| {
+        .map(|(guid, mnemonic, price, date, quote)| {
             let normalized = if quote == report_mnemonic {
                 price
             } else {
@@ -851,18 +862,18 @@ fn latest_prices_normalized(
                     .or_insert_with(|| fx_history.map_for_date(&date));
                 price * rates.get(&quote).copied().unwrap_or(1.0)
             };
-            Ok((mnemonic, normalized, date, quote))
+            Ok((guid, mnemonic, normalized, date, quote))
         })
         .collect()
 }
 
-/// Quote currency mnemonic per commodity (from each commodity's latest price),
-/// used as the cost-basis currency proxy for stock accounts. One query instead
-/// of one lookup per commodity.
+/// Quote currency mnemonic per commodity GUID (from each commodity's latest
+/// price), used as the cost-basis currency proxy for stock accounts. One query
+/// instead of one lookup per commodity.
 pub fn latest_quote_currencies(conn: &Connection) -> Result<HashMap<String, String>, String> {
     Ok(nth_price_raw(conn, 1)?
         .into_iter()
-        .map(|(mnemonic, _, _, quote)| (mnemonic, quote))
+        .map(|(guid, _, _, _, quote)| (guid, quote))
         .collect())
 }
 
@@ -1045,6 +1056,33 @@ mod tests {
         };
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].1, (12.5 * PRICE_SCALE as f64).round() as i64);
+    }
+
+    /// Regression: cached prices were keyed by mnemonic, so two commodities
+    /// sharing a ticker (same symbol on different exchanges) collapsed into one
+    /// price; the window function also emitted only one row per mnemonic.
+    #[test]
+    fn cached_prices_keep_same_mnemonic_commodities_separate() {
+        let conn = setup_commodities();
+        conn.execute(
+            "INSERT INTO commodities (guid, mnemonic, namespace, fullname) VALUES
+             ('c-bhp-us', 'BHP', 'NYSE', 'BHP NYSE'),
+             ('c-bhp-au', 'BHP', 'ASX', 'BHP ASX')",
+            [],
+        )
+        .unwrap();
+        for (guid, value_num) in [("c-bhp-us", 5_000i64), ("c-bhp-au", 7_000)] {
+            conn.execute(
+                "INSERT INTO prices (guid, commodity_guid, currency_guid, value_num, value_denom, date)
+                 VALUES (?1, ?2, 'c-eur', ?3, 100, '2024-01-05')",
+                rusqlite::params![format!("p-{guid}"), guid, value_num],
+            )
+            .unwrap();
+        }
+
+        let map = get_cached_prices_map(&conn).unwrap();
+        assert!((map.get("c-bhp-us").copied().unwrap() - 50.0).abs() < 1e-9);
+        assert!((map.get("c-bhp-au").copied().unwrap() - 70.0).abs() < 1e-9);
     }
 
     #[test]
