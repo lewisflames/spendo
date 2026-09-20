@@ -11,8 +11,6 @@
     nodeCategory
   } from '$lib/features/accounts/account-types';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
-  import { useUrlParams, dateParam } from '$lib/hooks/use-url-params.svelte';
-  import { today } from '$lib/utils/date-utils.svelte';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
   import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
   import BookGate from '$lib/components/shared/book-gate.svelte';
@@ -20,8 +18,6 @@
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import PageSkeleton from '$lib/components/shared/page-skeleton.svelte';
   import KpiCard from '$lib/components/shared/kpi-card.svelte';
-  import { AsOfPicker } from '$lib/components/shared/as-of-picker';
-  import FutureAsOfNote from '$lib/components/shared/future-as-of-note.svelte';
   import MissingFxWarning from '$lib/features/reports/missing-fx-warning.svelte';
   import { clampZero, formatSessionCurrency, signColor, plural } from '$lib/utils/format.svelte';
   import AccountTable from '$lib/features/accounts/account-table.svelte';
@@ -43,20 +39,11 @@
     LIABILITY: 'text-destructive'
   };
 
-  let asOf = $state(today.value);
   let dialogOpen = $state(false);
 
-  useUrlParams([
-    dateParam(
-      'asOf',
-      () => (asOf === today.value ? null : asOf || null),
-      (v) => (asOf = v ?? today.value)
-    )
-  ]);
-
   const res = useAsyncData({
-    enabled: () => !!dbSession.value && !!asOf,
-    fetch: () => fetchAccounts(asOf || undefined),
+    enabled: () => !!dbSession.value,
+    fetch: () => fetchAccounts(),
     label: 'Failed to load accounts'
   });
 
@@ -115,7 +102,6 @@
             New account
           </Button>
         {/if}
-        <AsOfPicker bind:value={asOf} />
       </div>
     </PageHeader>
 
@@ -178,7 +164,6 @@
       {/if}
 
       {#if !res.loading && !res.error}
-        <FutureAsOfNote {asOf} />
         <p class="text-xs text-muted-foreground">
           {#if balanced}
             Balanced · Assets = Liabilities + Equity (incl. unrealized gains) + Retained earnings.

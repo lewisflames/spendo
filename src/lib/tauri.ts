@@ -98,7 +98,7 @@ export interface AccountsResult {
   byType: Record<string, TypeSummary>;
   totalAccounts: number;
   reportCurrency: string;
-  /** Cumulative income minus expenses as of the requested date. */
+  /** Cumulative income minus expenses to date. */
   retainedEarnings: number;
   /** Market minus cost for priced investments. */
   unrealizedGains: number;
@@ -522,8 +522,8 @@ export const deleteImportRule = (id: number): Promise<void> =>
 export const setBaseCurrency = (currency: string): Promise<EmptyBookResult> =>
   invoke<EmptyBookResult>('set_base_currency', { currency });
 
-export const fetchAccounts = (asOf?: string): Promise<AccountsResult> =>
-  invoke<AccountsResult>('fetch_accounts', { asOf: asOf ?? null });
+export const fetchAccounts = (): Promise<AccountsResult> =>
+  invoke<AccountsResult>('fetch_accounts');
 
 export interface BookCurrency {
   guid: string;
@@ -746,8 +746,7 @@ export const fetchAccountDetail = (
   dateTo?: string,
   search?: string,
   sortBy?: TxSortKey,
-  sortDir?: SortDir,
-  asOf?: string
+  sortDir?: SortDir
 ): Promise<AccountDetailResult> =>
   invoke<AccountDetailResult>('fetch_account_detail', {
     guid,
@@ -757,8 +756,7 @@ export const fetchAccountDetail = (
     dateTo: dateTo ?? null,
     search: search ?? null,
     sortBy: sortBy ?? null,
-    sortDir: sortDir ?? null,
-    asOf: asOf ?? null
+    sortDir: sortDir ?? null
   });
 
 export const fetchAccountBalanceTrend = (guid: string): Promise<AccountBalancePoint[]> =>

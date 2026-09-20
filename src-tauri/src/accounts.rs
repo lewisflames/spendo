@@ -1,5 +1,4 @@
-use chrono::Local;
-use rusqlite::{params, Connection};
+use rusqlite::Connection;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 
@@ -68,20 +67,9 @@ struct AccountRow {
     tx_count: i64,
 }
 
-/// Load every account (excluding ROOT) with its as-of balance, quantity and
-/// transaction count. `as_of` bounds splits through the shared visibility
-/// window; `None` means current state.
-fn load_account_rows(conn: &Connection, as_of: Option<&str>) -> Result<Vec<AccountRow>, String> {
-    // Half-open everywhere: `post_date` is `YYYY-MM-DD HH:MM:SS`, so
-    // `< date(?,'+1 day')` includes the whole as-of day. `None` means current
-    // state (today), matching `VISIBLE_TX_FILTER` semantics. The upper bound
-    // is capped at the shared visibility window so a future as-of never leaks
-    // future transactions (mirrors `reports.rs`).
-    let date_expr: String = match as_of {
-        Some(d) => utils::validate_iso_date(d)?,
-        None => Local::now().format("%Y-%m-%d").to_string(),
-    };
-
+/// Load every account (excluding ROOT) with its current balance, quantity and
+/// transaction count, bounded by the shared visibility window.
+fn load_account_rows(conn: &Connection) -> Result<Vec<AccountRow>, String> {
     let sql = format!("SELECT a.guid, a.name, a.account_type, a.parent_guid, a.code, a.description, a.placeholder,
                       c.mnemonic as commodity_mnemonic, c.guid as commodity_guid,
                       COALESCE(b.balance, 0) as balance,
@@ -96,7 +84,7 @@ fn load_account_rows(conn: &Connection, as_of: Option<&str>) -> Result<Vec<Accou
                         COUNT(DISTINCT s.tx_guid) as tx_count
                  FROM splits s
                  JOIN transactions t ON t.guid = s.tx_guid
-                 WHERE t.post_date < min(date(?1, '+1 day'), {})
+                 WHERE t.post_date < {}
                  GROUP BY s.account_guid
                ) b ON b.account_guid = a.guid
                WHERE a.account_type != 'ROOT'
@@ -107,7 +95,7 @@ fn load_account_rows(conn: &Connection, as_of: Option<&str>) -> Result<Vec<Accou
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
 
     let rows: Vec<AccountRow> = stmt
-        .query_map(params![date_expr], |row| {
+        .query_map([], |row| {
             Ok(AccountRow {
                 guid: row.get(0)?,
                 name: row.get(1)?,
@@ -344,15 +332,12 @@ fn assemble_accounts_result(
     }
 }
 
-fn fetch_accounts_inner(
-    conn: &Connection,
-    as_of: Option<&str>,
-) -> Result<AccountsResult, String> {
-    let rows = load_account_rows(conn, as_of)?;
+fn fetch_accounts_inner(conn: &Connection) -> Result<AccountsResult, String> {
+    let rows = load_account_rows(conn)?;
 
     let unified_prices = get_cached_prices_map(conn)?;
     let report_currency = fx::get_report_currency_mnemonic(conn)?.unwrap_or_default();
-    let fx_map = fx::get_fx_map(conn, as_of)?;
+    let fx_map = fx::get_fx_map(conn, None)?;
 
     let valuation = value_account_rows(&rows, &unified_prices, &report_currency, &fx_map);
     let trees = build_account_tree(&rows, &valuation.node_map);
@@ -444,15 +429,13 @@ type AccountTreeSlice = (
 /// Direct children (for the child table), the whole subtree (for the
 /// balance-composition chart) and the parent (for the pie's parent-ratio
 /// label) of one account, from a single tree fetch so the detail view needs
-/// no second full-tree fetch. `as_of` is forwarded to the tree fetch so
-/// detail balances agree with the accounts page for the same date.
-/// Empty/`None` when the account is missing from the tree.
+/// no second full-tree fetch. Empty/`None` when the account is missing from
+/// the tree.
 pub fn fetch_children_and_subtree(
     conn: &Connection,
     parent_guid: &str,
-    as_of: Option<&str>,
 ) -> Result<AccountTreeSlice, String> {
-    let result = fetch_accounts_inner(conn, as_of)?;
+    let result = fetch_accounts_inner(conn)?;
     let (parent, node) = find_account_with_parent(&result.trees, parent_guid);
     let Some(node) = node else {
         return Ok((Vec::new(), None, None));
@@ -482,14 +465,8 @@ pub fn fetch_children_and_subtree(
 }
 
 #[tauri::command]
-pub async fn fetch_accounts(
-    state: State<'_, AppState>,
-    as_of: Option<String>,
-) -> Result<AccountsResult, String> {
-    run_blocking(state.db.clone(), move |conn| {
-        fetch_accounts_inner(conn, as_of.as_deref())
-    })
-    .await
+pub async fn fetch_accounts(state: State<'_, AppState>) -> Result<AccountsResult, String> {
+    run_blocking(state.db.clone(), fetch_accounts_inner).await
 }
 
 /// One ACCOUNTS-group destination: the top-level account representing a
@@ -641,7 +618,7 @@ mod tests {
     #[test]
     fn priced_investments_use_market_and_unpriced_contribute_zero() {
         let conn = setup_investments();
-        let result = fetch_accounts_inner(&conn, None).unwrap();
+        let result = fetch_accounts_inner(&conn).unwrap();
 
         // Cash 500 + AAPL market 1500 + unpriced XYZ 0.
         assert_eq!(result.by_type.get("ASSET").unwrap().total_balance, 2000.0);
@@ -650,15 +627,8 @@ mod tests {
         assert_eq!(result.missing_prices.len(), 1);
         assert_eq!(result.missing_prices[0].mnemonic, "XYZ");
 
-        let (_, subtree, _) = fetch_children_and_subtree(&conn, "assets", None).unwrap();
+        let (_, subtree, _) = fetch_children_and_subtree(&conn, "assets").unwrap();
         assert_eq!(subtree.unwrap().balance, 2000.0);
-    }
-
-    #[test]
-    fn investment_balances_respect_as_of() {
-        let conn = setup_investments();
-        let result = fetch_accounts_inner(&conn, Some("2024-01-15")).unwrap();
-        assert_eq!(result.by_type.get("ASSET").unwrap().total_balance, 500.0);
     }
 
     #[test]

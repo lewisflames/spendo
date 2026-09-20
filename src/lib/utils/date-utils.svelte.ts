@@ -11,7 +11,7 @@ export function calendarDateToStr(cd: CalendarDate): string {
   return cd.toString();
 }
 
-/** Local today as `YYYY-MM-DD` (single source for as-of defaults/guards). */
+/** Local today as `YYYY-MM-DD` (single source for date defaults/guards). */
 export function todayStr(): string {
   const d = new Date();
   const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -21,7 +21,7 @@ export function todayStr(): string {
 
 /**
  * Shared reactive local "today". Read `today.value` from components so
- * "today"-dependent UI (due badges, as-of defaults, future-date guards) rolls
+ * "today"-dependent UI (due badges, date defaults, future-date guards) rolls
  * over at midnight instead of freezing on the date the page mounted.
  */
 export const today = $state({ value: todayStr() });

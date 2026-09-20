@@ -96,9 +96,9 @@ pub struct AccountDetailResult {
     pub parent: Option<ParentAccountInfo>,
 }
 
-/// Ledger query parameters shared by the count and page queries. `as_of`
-/// caps the point-in-time balance views (header, summary, children, pie);
-/// the transaction ledger keeps its own `date_from`/`date_to` filters.
+/// Ledger query parameters shared by the count and page queries. Balance
+/// views (header, summary, children, pie) always reflect current state; the
+/// transaction ledger keeps its own `date_from`/`date_to` filters.
 struct TxQuery<'a> {
     page: i64,
     page_size: i64,
@@ -107,17 +107,6 @@ struct TxQuery<'a> {
     search: Option<&'a str>,
     sort_by: Option<&'a str>,
     sort_dir: Option<&'a str>,
-    as_of: Option<&'a str>,
-}
-
-/// Effective as-of day for point-in-time balance queries: the explicit date
-/// or today. Callers additionally cap at the shared visibility window in SQL
-/// (mirroring `accounts.rs`) so a future as-of never leaks future
-/// transactions.
-fn effective_as_of(as_of: Option<&str>) -> String {
-    as_of
-        .map(str::to_string)
-        .unwrap_or_else(|| Local::now().format("%Y-%m-%d").to_string())
 }
 
 /// Grouped per-transaction effects keyed by GUID: `(post_date, description,
@@ -192,31 +181,21 @@ fn filter_clauses(
     Ok(w)
 }
 
-/// Income/expense totals across transactions in the subtree as of `as_of`
-/// that match `search`. Effects are converted to the report currency and
-/// bucketed by the split account's category: EXPENSE is debit-normal, so
-/// spending (a positive signed effect) counts as an expense there, while
-/// balance-sheet/income accounts keep the sign heuristic (inflow = income).
+/// Income/expense totals across transactions in the subtree that match
+/// `search`. Effects are converted to the report currency and bucketed by the
+/// split account's category: EXPENSE is debit-normal, so spending (a positive
+/// signed effect) counts as an expense there, while balance-sheet/income
+/// accounts keep the sign heuristic (inflow = income).
 fn compute_summary(
     conn: &Connection,
     ctx: &FxCtx,
     sub_guids: &[String],
     search: Option<&str>,
-    as_of: Option<&str>,
 ) -> Result<AccountSummary, String> {
     let in_list = sql::in_clause(sub_guids.len());
     let sub_params = sql::string_param_refs(sub_guids);
 
-    let mut w = filter_clauses(None, None, search, sub_guids.len(), false)?;
-    // Point-in-time cap (the ledger's own date filters don't apply here by
-    // design); half-open and visibility-capped like the balance queries.
-    w.add(
-        &format!(
-            "t.post_date < min(date({{}}, '+1 day'), {})",
-            utils::VISIBLE_NOW_EXPR
-        ),
-        vec![Box::new(effective_as_of(as_of))],
-    );
+    let w = filter_clauses(None, None, search, sub_guids.len(), false)?;
     let sum_extra_sql = w.and_clause("AND");
 
     let summary_sql = format!(
@@ -285,9 +264,6 @@ fn fetch_account_detail_inner(
     guid: &str,
     query: TxQuery<'_>,
 ) -> Result<AccountDetailResult, String> {
-    if let Some(as_of) = query.as_of {
-        utils::validate_iso_date(as_of)?;
-    }
     let header = load_account_header(conn, guid)?;
     let sub_guids = accounts::get_subaccount_guids(conn, guid)?;
 
@@ -296,11 +272,10 @@ fn fetch_account_detail_inner(
     }
 
     let descendants_count = (sub_guids.len() as i64) - 1;
-    let (child_accounts, subtree, parent) =
-        accounts::fetch_children_and_subtree(conn, guid, query.as_of)?;
+    let (child_accounts, subtree, parent) = accounts::fetch_children_and_subtree(conn, guid)?;
     let ctx = FxCtx {
         report_currency: fx::get_report_currency_mnemonic(conn)?.unwrap_or_default(),
-        fx_map: fx::get_fx_map(conn, query.as_of)?,
+        fx_map: fx::get_fx_map(conn, None)?,
     };
 
     // Single source of truth: the KPI balance is the tree-consistent subtree
@@ -309,7 +284,7 @@ fn fetch_account_detail_inner(
     // from the tree (e.g. ROOT, which the tree excludes).
     let balance = subtree.as_ref().map(|n| n.balance).unwrap_or(0.0);
 
-    let summary = compute_summary(conn, &ctx, &sub_guids, query.search, query.as_of)?;
+    let summary = compute_summary(conn, &ctx, &sub_guids, query.search)?;
     let tx_page = load_tx_page(conn, &ctx, &sub_guids, &query)?;
 
     Ok(AccountDetailResult {
@@ -369,8 +344,6 @@ fn load_tx_page(
         page_size,
         sort_by,
         sort_dir,
-        // The ledger keeps its own date filters; as-of caps balances only.
-        as_of: _,
         ..
     } = *query;
 
@@ -812,7 +785,6 @@ pub async fn fetch_account_detail(
     search: Option<String>,
     sort_by: Option<String>,
     sort_dir: Option<String>,
-    as_of: Option<String>,
 ) -> Result<AccountDetailResult, String> {
     run_blocking(state.db.clone(), move |conn| {
         fetch_account_detail_inner(
@@ -826,7 +798,6 @@ pub async fn fetch_account_detail(
                 search: search.as_deref(),
                 sort_by: sort_by.as_deref(),
                 sort_dir: sort_dir.as_deref(),
-                as_of: as_of.as_deref(),
             },
         )
     })
@@ -1078,7 +1049,6 @@ mod tests {
                 search: None,
                 sort_by: None,
                 sort_dir: None,
-                as_of: None,
             },
         )
         .unwrap();
@@ -1104,7 +1074,6 @@ mod tests {
                 search: None,
                 sort_by: None,
                 sort_dir: None,
-                as_of: None,
             },
         )
         .unwrap_err();
@@ -1154,16 +1123,16 @@ mod tests {
         let conn = setup();
 
         // 'checking' sits under 'assets', whose subtree balance is 70 (100 - 30).
-        let (_, _, parent) = accounts::fetch_children_and_subtree(&conn, "checking", None).unwrap();
+        let (_, _, parent) = accounts::fetch_children_and_subtree(&conn, "checking").unwrap();
         let parent = parent.unwrap();
         assert_eq!(parent.guid, "assets");
         assert_eq!(parent.balance, 70.0);
 
         // 'assets' is top-level: its parent is the excluded ROOT node.
-        let (_, _, parent) = accounts::fetch_children_and_subtree(&conn, "assets", None).unwrap();
+        let (_, _, parent) = accounts::fetch_children_and_subtree(&conn, "assets").unwrap();
         assert!(parent.is_none());
 
-        let (_, subtree, parent) = accounts::fetch_children_and_subtree(&conn, "nope", None).unwrap();
+        let (_, subtree, parent) = accounts::fetch_children_and_subtree(&conn, "nope").unwrap();
         assert!(subtree.is_none());
         assert!(parent.is_none());
     }
@@ -1194,7 +1163,6 @@ mod tests {
                 search: None,
                 sort_by: None,
                 sort_dir: None,
-                as_of: None,
             },
         )
         .unwrap();
@@ -1220,7 +1188,6 @@ mod tests {
                 search: None,
                 sort_by: None,
                 sort_dir: None,
-                as_of: None,
             },
         )
         .unwrap();
@@ -1231,69 +1198,17 @@ mod tests {
     }
 
     #[test]
-    fn detail_as_of_caps_balances_but_not_ledger() {
+    fn detail_children_match_tree_and_trend_spans_full_history() {
         let conn = setup();
 
-        fn query(as_of: Option<&str>) -> TxQuery<'_> {
-            TxQuery {
-                page: 1,
-                page_size: 50,
-                date_from: None,
-                date_to: None,
-                search: None,
-                sort_by: None,
-                sort_dir: None,
-                as_of,
-            }
-        }
-
-        // As of 2024-01-15 only t1 (+100) counts towards balances.
-        let result = fetch_account_detail_inner(&conn, "checking", query(Some("2024-01-15")))
-            .unwrap();
-        assert_eq!(result.account.balance, 100.0);
-        assert_eq!(result.summary.total_transactions, 1);
-        assert_eq!(result.summary.total_income, 100.0);
-        assert_eq!(result.summary.total_expenses, 0.0);
-        // The ledger itself is unaffected: both transactions still list.
-        assert_eq!(result.total, 2);
-        assert_eq!(result.transactions.len(), 2);
-
-        // Without as-of the balance reflects both transactions.
-        let result = fetch_account_detail_inner(&conn, "checking", query(None)).unwrap();
-        assert_eq!(result.account.balance, 70.0);
-        assert_eq!(result.summary.total_transactions, 2);
-
-        // A future as-of is capped at the visibility window: same as today.
-        let result =
-            fetch_account_detail_inner(&conn, "checking", query(Some("2999-01-01"))).unwrap();
-        assert_eq!(result.account.balance, 70.0);
-        assert_eq!(result.summary.total_transactions, 2);
-
-        // KPI agrees with the tree-consistent subtree balance by construction.
-        let (_, subtree, _) =
-            accounts::fetch_children_and_subtree(&conn, "checking", Some("2024-01-15"))
-                .unwrap();
-        assert_eq!(subtree.unwrap().balance, 100.0);
-    }
-
-    #[test]
-    fn detail_as_of_applies_to_children_and_subtree() {
-        let conn = setup();
-
-        // Child balances follow the as-of date.
-        let (children, subtree, _) =
-            accounts::fetch_children_and_subtree(&conn, "assets", Some("2024-01-15")).unwrap();
+        // Child balances agree with the tree-consistent subtree balance.
+        let (children, subtree, _) = accounts::fetch_children_and_subtree(&conn, "assets").unwrap();
         assert_eq!(children.len(), 1);
         assert_eq!(children[0].guid, "checking");
-        assert_eq!(children[0].balance, 100.0);
-        assert_eq!(subtree.unwrap().balance, 100.0);
-
-        let (children, _, _) =
-            accounts::fetch_children_and_subtree(&conn, "assets", None).unwrap();
         assert_eq!(children[0].balance, 70.0);
+        assert_eq!(subtree.unwrap().balance, 70.0);
 
-        // The trend always spans the full history (the as-of cutoff is only
-        // a frontend marker line, never a truncation).
+        // The trend always spans the full history.
         let trend = fetch_account_balance_trend_inner(&conn, "assets").unwrap();
         assert_eq!(
             trend,
@@ -1330,7 +1245,6 @@ mod tests {
                 search: None,
                 sort_by: Some("amount"),
                 sort_dir: Some("desc"),
-                as_of: None,
             },
         )
         .unwrap();
@@ -1351,7 +1265,6 @@ mod tests {
                 search: None,
                 sort_by: Some("amount"),
                 sort_dir: Some("asc"),
-                as_of: None,
             },
         )
         .unwrap();
@@ -1415,7 +1328,6 @@ mod tests {
             search: None,
             sort_by: None,
             sort_dir: None,
-            as_of: None,
         }
     }
 
@@ -1456,37 +1368,5 @@ mod tests {
             (result.account.balance - 1000.0).abs() > 0.01,
             "must not be the old market-minus-cost total"
         );
-    }
-
-    #[test]
-    fn detail_as_of_caps_investment_balances() {
-        let conn = setup_investments();
-        let (children, subtree, _) =
-            accounts::fetch_children_and_subtree(&conn, "assets", Some("2024-01-15")).unwrap();
-        // Only the cash leg exists as of mid-January.
-        assert_eq!(subtree.unwrap().balance, 500.0);
-        let broker_balance = children
-            .iter()
-            .find(|c| c.guid == "broker")
-            .map(|c| c.balance)
-            .unwrap();
-        assert_eq!(broker_balance, 0.0);
-
-        let result = fetch_account_detail_inner(
-            &conn,
-            "assets",
-            TxQuery {
-                page: 1,
-                page_size: 50,
-                date_from: None,
-                date_to: None,
-                search: None,
-                sort_by: None,
-                sort_dir: None,
-                as_of: Some("2024-01-15"),
-            },
-        )
-        .unwrap();
-        assert_eq!(result.account.balance, 500.0);
     }
 }
