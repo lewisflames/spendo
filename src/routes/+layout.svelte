@@ -59,13 +59,15 @@
   });
 
   // Keep the changes history current while a book is open: the side panel and
-  // the global undo/redo shortcuts both read this store, and imports or manual
-  // edits move the data summary. Sidebar roots + badges share the same trigger
-  // set (pathname refreshes cover reconcile/schedule mutations).
+  // the global undo/redo shortcuts both read this store, and every logged
+  // mutation bumps `summary.historyRevision`. Sidebar roots + badges share the
+  // same trigger set (pathname covers navigation-only flows; mutations that
+  // log without touching the summary call `ensureDbSessionLoaded(true)`).
   $effect(() => {
     void dbSession.value;
     void dbSession.value?.summary.totalTransactions;
     void dbSession.value?.summary.totalAccounts;
+    void dbSession.value?.summary.historyRevision;
     void page.url.pathname;
     // The refresh reads and writes its own store synchronously (spread in
     // `patch`), which would otherwise be tracked here and re-trigger this

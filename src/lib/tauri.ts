@@ -26,19 +26,37 @@ export interface DataSummary {
   earliestDate: string | null;
   latestDate: string | null;
   netWorth: number;
+  /** Newest `change_log` id; bumps whenever a logged change lands. */
+  historyRevision: number;
 }
 
 /** Sortable ledger columns shared by transactions + account detail. Backend falls back silently on unknown values, so keep this in sync. */
 export type TxSortKey = 'date' | 'description' | 'amount';
 type SortDir = 'asc' | 'desc';
 
+/** Backend change kinds (`change_log.kind`). Keep in sync with `history.rs`. */
+export type ChangeKind =
+  | 'tx_create'
+  | 'tx_update'
+  | 'tx_delete'
+  | 'account_create'
+  | 'account_update'
+  | 'account_delete'
+  | 'import'
+  | 'reconcile'
+  | 'revert'
+  | 'redo';
+
+/** Backend change sources (`change_log.source`). */
+export type ChangeSource = 'manual' | 'import' | 'csv' | 'schedule' | 'system';
+
 /** One row of the unified changes history (imports + manual edits). */
 export interface ChangeEntry {
   id: number;
   occurredAt: string;
-  kind: string;
+  kind: ChangeKind;
   label: string;
-  source: string;
+  source: ChangeSource;
   transactionsAffected: number;
   accountsAffected: number;
   revertsId: number | null;
@@ -54,6 +72,24 @@ interface ChangeHistory {
   undoableId: number | null;
   /** Most recently undone change eligible for redo (LIFO), if any. */
   redoableId: number | null;
+  /** Older entries exist beyond this page (fetch with `beforeId`). */
+  hasMore: boolean;
+  /** Total entries in the log, all pages. */
+  total: number;
+}
+
+/** Per-table impact of one change (`changed` still exists, `removed` is gone). */
+export interface ChangeEntryTable {
+  tableName: string;
+  added: number;
+  changed: number;
+  removed: number;
+}
+
+/** Parsed `detail_json` + impact breakdown for one change (detail dialog). */
+export interface ChangeEntryDetail {
+  detail: Record<string, unknown> | null;
+  tables: ChangeEntryTable[];
 }
 
 interface ImportResult {
@@ -341,8 +377,20 @@ export const getBookSettings = (): Promise<BookSettings> =>
 export const setBookSetting = (key: string, value: string): Promise<BookSettings> =>
   invoke<BookSettings>('set_book_setting', { key, value });
 
-export const fetchChangeHistory = (): Promise<ChangeHistory> =>
-  invoke<ChangeHistory>('fetch_change_history');
+export const fetchChangeHistory = (
+  beforeId?: number | null,
+  pageSize?: number | null
+): Promise<ChangeHistory> =>
+  invoke<ChangeHistory>('fetch_change_history', {
+    beforeId: beforeId ?? null,
+    pageSize: pageSize ?? null
+  });
+
+export const fetchChangeEntry = (id: number): Promise<ChangeEntryDetail> =>
+  invoke<ChangeEntryDetail>('fetch_change_entry', { id });
+
+export const clearChangeHistory = (): Promise<DataSummary> =>
+  invoke<DataSummary>('clear_change_history');
 
 export const undoHistoryEntry = (id: number): Promise<DataSummary> =>
   invoke<DataSummary>('undo_history_entry', { id });
@@ -1136,6 +1184,7 @@ export const searchGlobal = (query: string, limitPerGroup?: number): Promise<Glo
 export type MockPayloads = {
   add_attachments: AttachmentInfo[];
   clear_app_db: void;
+  clear_change_history: DataSummary;
   close_book: EmptyBookResult;
   create_account: string;
   create_book_at: EmptyBookResult;
@@ -1168,6 +1217,7 @@ export type MockPayloads = {
   fetch_budget_vs_actual: BudgetActualRow[];
   fetch_budget_years: number[];
   fetch_change_history: ChangeHistory;
+  fetch_change_entry: ChangeEntryDetail;
   fetch_holding_detail: HoldingDetail;
   fetch_home_data: HomeDataResult;
   fetch_import_rules: ImportRule[];

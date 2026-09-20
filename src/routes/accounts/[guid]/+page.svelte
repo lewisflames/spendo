@@ -6,7 +6,7 @@
   import { toast } from '$lib/components/ui/sonner';
   import { Button } from '$lib/components/ui/button';
   import AccountDialog, { type AccountInitial } from '$lib/features/accounts/account-dialog.svelte';
-  import { dbBootstrapping, dbSession } from '$lib/stores/db.svelte';
+  import { dbBootstrapping, dbSession, refreshSession } from '$lib/stores/db.svelte';
   import { appSettings, applyPageSize } from '$lib/stores/settings.svelte';
   import { setBreadcrumb } from '$lib/stores/breadcrumb.svelte';
   import { fetchAccountDetail } from '$lib/tauri';
@@ -204,6 +204,7 @@
           initial={editInitial}
           onSaved={() => {
             res.reload();
+            refreshSession();
             toast.success('Account updated');
           }}
           onDeleted={() => {
@@ -218,6 +219,7 @@
           parentPreset={res.data.account.guid}
           onSaved={() => {
             res.reload();
+            refreshSession();
             toast.success('Account created');
           }}
           onError={(msg) => toast.error(msg)}
