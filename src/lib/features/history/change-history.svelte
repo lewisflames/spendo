@@ -42,13 +42,13 @@
 </script>
 
 {#if changeHistory.value.loading && changeHistory.value.entries.length === 0}
-  <div class="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-3">
+  <div class="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto py-2 pr-2 pl-0">
     {#each Array(5) as _, i (i)}
       <Skeleton class="h-16 w-full rounded-lg" />
     {/each}
   </div>
 {:else}
-  <div class="min-h-0 flex-1 overflow-y-auto p-3">
+  <div class="min-h-0 flex-1 overflow-y-auto py-2 pr-2 pl-0">
     {#if changeHistory.value.error}
       <ErrorCard message={changeHistory.value.error} onRetry={() => void refreshChangeHistory()} />
     {/if}

@@ -72,8 +72,8 @@
 </script>
 
 <Sidebar.Root class="top-(--header-height) h-[calc(100svh-var(--header-height))]!">
-  <Sidebar.Content>
-    <Sidebar.Group>
+  <Sidebar.Content class="group-data-[collapsible=icon]:gap-2">
+    <Sidebar.Group class="pr-0">
       <Sidebar.Menu>
         <Sidebar.MenuItem>
           <Sidebar.MenuButton
@@ -92,7 +92,7 @@
     </Sidebar.Group>
 
     {#each groups as group (group.label)}
-      <Sidebar.Group>
+      <Sidebar.Group class="pr-0">
         <Sidebar.GroupLabel>{group.label}</Sidebar.GroupLabel>
         <Sidebar.GroupContent>
           <Sidebar.Menu>
@@ -129,7 +129,7 @@
       </Sidebar.Group>
     {/each}
   </Sidebar.Content>
-  <Sidebar.Footer>
+  <Sidebar.Footer class="pr-0">
     <Sidebar.Menu>
       <Sidebar.MenuItem>
         <DropdownMenu.Root>
