@@ -503,10 +503,14 @@ fn fetch_pnl_report_inner(
     prev_date_from: Option<&str>,
     prev_date_to: Option<&str>,
 ) -> Result<ProfitLossReport, String> {
+    let date_from = utils::validate_iso_date(date_from)?;
+    let date_to = utils::validate_iso_date(date_to)?;
+    let prev_date_from = utils::validate_optional_iso_date(prev_date_from)?;
+    let prev_date_to = utils::validate_optional_iso_date(prev_date_to)?;
     if date_from > date_to {
         return Err("dateFrom must not be after dateTo".to_string());
     }
-    let current = fetch_pnl_window(conn, date_from, date_to)?;
+    let current = fetch_pnl_window(conn, &date_from, &date_to)?;
 
     let push_pnl = |r: &RawAccountBalance, indent: i32, total: f64| -> ProfitLossRow {
         ProfitLossRow {
@@ -521,8 +525,12 @@ fn fetch_pnl_report_inner(
     };
 
     // Previous period — subtract span to get same-length prior window
-    let (prev_date_from_owned, prev_date_to_owned) =
-        resolve_pnl_prev_window(date_from, date_to, prev_date_from, prev_date_to)?;
+    let (prev_date_from_owned, prev_date_to_owned) = resolve_pnl_prev_window(
+        &date_from,
+        &date_to,
+        prev_date_from.as_deref(),
+        prev_date_to.as_deref(),
+    )?;
     let prev = fetch_pnl_window(conn, &prev_date_from_owned, &prev_date_to_owned)?;
 
     // Re-attach inactive placeholder parents (and union prev-only accounts)
@@ -635,10 +643,12 @@ fn fetch_pnl_trend_inner(
     date_from: &str,
     date_to: &str,
 ) -> Result<Vec<PnlTrendPoint>, String> {
+    let date_from = utils::validate_iso_date(date_from)?;
+    let date_to = utils::validate_iso_date(date_to)?;
     if date_from > date_to {
         return Err("dateFrom must not be after dateTo".to_string());
     }
-    let buckets = fetch_monthly_buckets(conn, date_from, date_to)?;
+    let buckets = fetch_monthly_buckets(conn, &date_from, &date_to)?;
     let (converted, _, _) = convert_buckets(conn, &buckets)?;
     let mut per_month: HashMap<String, (f64, f64)> = HashMap::new();
     for b in &converted {
@@ -648,8 +658,8 @@ fn fetch_pnl_trend_inner(
             per_month.entry(b.month.clone()).or_default().1 += b.amount;
         }
     }
-    let start = utils::month_number(date_from)?;
-    let end = utils::month_number(date_to)?;
+    let start = utils::month_number(&date_from)?;
+    let end = utils::month_number(&date_to)?;
     let mut points = Vec::with_capacity((end - start + 1).max(0) as usize);
     for m in start..=end {
         let month = utils::format_month(m);
@@ -715,6 +725,15 @@ mod tests {
             .query_row("SELECT date(?1, '+1 day')", params![to], |r| r.get(0))
             .unwrap();
         assert!(advanced.is_some(), "month-end must be a full date");
+    }
+
+    /// Regression: the P&L commands did no date validation, so `2024-1-5`
+    /// compared lexicographically / emptied the window silently.
+    #[test]
+    fn pnl_rejects_malformed_dates() {
+        let conn = setup_pnl_fixture();
+        assert!(fetch_pnl_trend_inner(&conn, "2024-1-5", "2024-02-01").is_err());
+        assert!(fetch_pnl_report_inner(&conn, "2024-01-01", "2024-2-01", None, None).is_err());
     }
 
     fn setup_pnl_fixture() -> Connection {

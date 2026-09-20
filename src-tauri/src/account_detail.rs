@@ -7,7 +7,7 @@ use tauri::State;
 
 use crate::accounts;
 use crate::accounts::{AccountNode, ChildAccountInfo, ParentAccountInfo};
-use crate::db::{run_blocking, AppState};
+use crate::db::{run_blocking, AppError, AppState};
 use crate::fx;
 use crate::prices::get_cached_prices_map;
 use crate::sql;
@@ -180,13 +180,16 @@ fn filter_clauses(
     search: Option<&str>,
     param_offset: usize,
     include_baseline: bool,
-) -> sql::WhereBuilder {
+) -> Result<sql::WhereBuilder, AppError> {
     let mut w = sql::WhereBuilder::new(param_offset);
     if include_baseline {
         w.push_raw(utils::VISIBLE_TX_FILTER);
     }
-    sql::push_tx_date_search(&mut w, date_from, date_to, search);
-    w
+    let from =
+        utils::validate_optional_iso_date(date_from).map_err(AppError::Validation)?;
+    let to = utils::validate_optional_iso_date(date_to).map_err(AppError::Validation)?;
+    sql::push_tx_date_search(&mut w, from.as_deref(), to.as_deref(), search);
+    Ok(w)
 }
 
 /// Income/expense totals across transactions in the subtree as of `as_of`
@@ -204,7 +207,7 @@ fn compute_summary(
     let in_list = sql::in_clause(sub_guids.len());
     let sub_params = sql::string_param_refs(sub_guids);
 
-    let mut w = filter_clauses(None, None, search, sub_guids.len(), false);
+    let mut w = filter_clauses(None, None, search, sub_guids.len(), false)?;
     // Point-in-time cap (the ledger's own date filters don't apply here by
     // design); half-open and visibility-capped like the balance queries.
     w.add(
@@ -421,7 +424,7 @@ fn count_subtree_transactions(
         query.search,
         sub_guids.len(),
         true,
-    );
+    )?;
     let count_sql = format!(
         "SELECT COUNT(DISTINCT t.guid) as cnt
          FROM transactions t
@@ -454,7 +457,7 @@ fn fetch_tx_effects(
     sub_guids: &[String],
     query: &TxQuery<'_>,
 ) -> Result<Vec<TxEffect>, String> {
-    let w = filter_clauses(query.date_from, query.date_to, query.search, 1, true);
+    let w = filter_clauses(query.date_from, query.date_to, query.search, 1, true)?;
 
     let grouped_balance = utils::signed_amount_expr("t.raw_amount", "t.account_type");
 
@@ -1080,6 +1083,29 @@ mod tests {
         assert_eq!(result.summary.total_transactions, 2);
         assert!((result.summary.total_expenses - 42.10).abs() < 1e-9);
         assert!((result.summary.total_income - 5.0).abs() < 1e-9);
+    }
+
+    /// Regression: malformed ledger filter dates used to silently return an
+    /// empty page instead of an error.
+    #[test]
+    fn detail_rejects_malformed_date_filters() {
+        let conn = setup();
+        let err = fetch_account_detail_inner(
+            &conn,
+            "checking",
+            TxQuery {
+                page: 1,
+                page_size: 50,
+                date_from: Some("2024-1-5"),
+                date_to: None,
+                search: None,
+                sort_by: None,
+                sort_dir: None,
+                as_of: None,
+            },
+        )
+        .unwrap_err();
+        assert!(err.contains("Invalid date"), "unexpected: {err}");
     }
 
     #[test]

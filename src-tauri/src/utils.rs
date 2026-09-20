@@ -91,6 +91,16 @@ pub fn opt_text(s: &Option<String>) -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
+/// Normalize an optional `YYYY-MM-DD` filter bound; `None`/blank pass through.
+/// Malformed values would otherwise turn `date(?, '+1 day')` into NULL and
+/// silently empty the query instead of erroring.
+pub fn validate_optional_iso_date(raw: Option<&str>) -> Result<Option<String>, String> {
+    match raw.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(value) => validate_iso_date(value).map(Some),
+        None => Ok(None),
+    }
+}
+
 /// Truncate user text to at most `max_bytes` **without splitting a UTF-8
 /// character**, appending `…` when anything was cut. History labels are
 /// byte-capped so the log stays readable, but names/descriptions may hold any
