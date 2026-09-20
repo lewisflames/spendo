@@ -5,6 +5,7 @@ use tauri::State;
 
 use crate::db::{run_blocking, with_tx_err, AppError, AppState};
 use crate::history;
+use crate::utils;
 use crate::utils::opt_text;
 
 /// Creatable account types (mirrors `TYPE_TO_CATEGORY` keys minus the
@@ -194,13 +195,7 @@ fn validate_account_input(
 }
 
 fn account_label(name: &str, verb: &str) -> String {
-    let t = name.trim();
-    const MAX: usize = 80;
-    if t.len() > MAX {
-        format!("{verb} {}…", &t[..MAX])
-    } else {
-        format!("{verb} {t}")
-    }
+    format!("{verb} {}", utils::truncate_chars(name.trim(), 80))
 }
 
 fn create_account_inner(conn: &Connection, input: AccountInput) -> Result<String, AppError> {
