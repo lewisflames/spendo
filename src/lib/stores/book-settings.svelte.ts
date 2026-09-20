@@ -28,7 +28,7 @@ let inflight: Promise<BookSettings> | null = null;
 
 /** Fetch the active book's settings (placeholder returns defaults). */
 export function loadBookSettings(force = false): Promise<BookSettings> {
-  if (inflight) return inflight;
+  if (inflight && !force) return inflight;
   if (!force && loaded) return Promise.resolve(bookSettings.value);
   const p = getBookSettings()
     .then((settings) => {
