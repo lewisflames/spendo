@@ -4,21 +4,18 @@
   import * as Dialog from '$lib/components/ui/dialog';
   import IconCardHeader from '$lib/components/shared/icon-card-header.svelte';
   import SettingSelectRow from './setting-select-row.svelte';
-  import { Trash2, RotateCcw, History } from '@lucide/svelte';
-  import { dbSession, clearSession, setDbSession } from '$lib/stores/db.svelte';
+  import { Trash2, RotateCcw } from '@lucide/svelte';
+  import { dbSession, clearSession } from '$lib/stores/db.svelte';
   import { resetBookSettings } from '$lib/stores/book-settings.svelte';
-  import { clearAppDb, clearChangeHistory } from '$lib/tauri';
-  import { refreshChangeHistory } from '$lib/features/history/history.svelte';
+  import { clearAppDb } from '$lib/tauri';
   import { errMsg } from '$lib/utils/error';
   import { toast } from '$lib/components/ui/sonner';
 
   let { onResetPreferences }: { onResetPreferences: () => void } = $props();
 
   let clearDialogOpen = $state(false);
-  let clearHistoryDialogOpen = $state(false);
   let resetDialogOpen = $state(false);
   let clearing = $state(false);
-  let clearingHistory = $state(false);
 
   async function handleClearDb() {
     clearing = true;
@@ -32,20 +29,6 @@
       toast.error(errMsg(e, 'Failed to clear database'));
     } finally {
       clearing = false;
-    }
-  }
-
-  async function handleClearHistory() {
-    clearingHistory = true;
-    try {
-      setDbSession(await clearChangeHistory());
-      await refreshChangeHistory();
-      clearHistoryDialogOpen = false;
-      toast.success('Changes history cleared');
-    } catch (e: unknown) {
-      toast.error(errMsg(e, 'Failed to clear changes history'));
-    } finally {
-      clearingHistory = false;
     }
   }
 
@@ -64,7 +47,7 @@
   <Card.Content class="flex flex-col items-start gap-4">
     <SettingSelectRow
       label="Clear all data"
-      description="Delete accounts, transactions, scheduled transactions, budgets, prices and history from this book"
+      description="Delete accounts, transactions, scheduled transactions, budgets and prices from this book"
       class="w-full"
     >
       <Dialog.Root bind:open={clearDialogOpen}>
@@ -80,8 +63,7 @@
             <Dialog.Title>Clear all data?</Dialog.Title>
             <Dialog.Description>
               This will permanently delete all accounts, transactions, scheduled transactions,
-              budgets, prices, symbol overrides and changes history. Your appearance preferences
-              will be preserved.
+              budgets, prices and symbol overrides. Your appearance preferences will be preserved.
             </Dialog.Description>
           </Dialog.Header>
           <Dialog.Footer>
@@ -98,44 +80,6 @@
     {#if !dbSession.value}
       <p class="text-xs text-muted-foreground">No data imported yet — nothing to clear.</p>
     {/if}
-    <SettingSelectRow
-      label="Clear changes history"
-      description="Remove the undo/redo log and compact this book. Book data is kept, but undo and redo stop working."
-      class="w-full"
-    >
-      <Dialog.Root bind:open={clearHistoryDialogOpen}>
-        <Button
-          variant="outline"
-          disabled={!dbSession.value || clearingHistory}
-          onclick={() => (clearHistoryDialogOpen = true)}
-        >
-          <History aria-hidden="true" class="size-4" />
-          Clear history
-        </Button>
-        <Dialog.Content>
-          <Dialog.Header>
-            <Dialog.Title>Clear changes history?</Dialog.Title>
-            <Dialog.Description>
-              This permanently removes the recorded changes and their snapshots. Your accounts,
-              transactions, budgets and schedules are untouched, but undo and redo will have nothing
-              to restore until new changes are made.
-            </Dialog.Description>
-          </Dialog.Header>
-          <Dialog.Footer>
-            <Button
-              variant="outline"
-              onclick={() => (clearHistoryDialogOpen = false)}
-              disabled={clearingHistory}
-            >
-              Cancel
-            </Button>
-            <Button variant="destructive" onclick={handleClearHistory} disabled={clearingHistory}>
-              {clearingHistory ? 'Clearing...' : 'Yes, clear history'}
-            </Button>
-          </Dialog.Footer>
-        </Dialog.Content>
-      </Dialog.Root>
-    </SettingSelectRow>
     <SettingSelectRow
       label="Reset preferences"
       description="Restore theme, density, locale and list settings to defaults"

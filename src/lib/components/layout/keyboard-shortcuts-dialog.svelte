@@ -19,10 +19,7 @@
     { keys: ['Alt', '←'], description: 'Go back' },
     { keys: ['Alt', '→'], description: 'Go forward' },
     { keys: [modKey, 'Shift', 'T'], description: 'Toggle theme' },
-    { keys: [modKey, 'B'], description: 'Toggle sidebar' },
-    { keys: [modKey, 'H'], description: 'Toggle changes history' },
-    { keys: [modKey, 'Z'], description: 'Undo last change' },
-    { keys: [modKey, 'Shift', 'Z'], description: 'Redo last change' }
+    { keys: [modKey, 'B'], description: 'Toggle sidebar' }
   ];
 
   const navShortcuts: ShortcutEntry[] = NAV_GROUPS.flatMap((group) => group.items).flatMap(

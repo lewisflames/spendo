@@ -18,8 +18,8 @@ export const dbBootstrapping = $state<{ value: boolean }>({ value: true });
 
 /**
  * Single write path for the session so every flow (bootstrap, open/new/save,
- * import, reimport, revert) goes through one place. Pass `null` to return to
- * the empty state.
+ * import, reimport) goes through one place. Pass `null` to return to the empty
+ * state.
  */
 export function setDbSession(summary: DataSummary | null) {
   dbSession.value = summary ? { summary } : null;
@@ -76,10 +76,10 @@ export function clearSession() {
 }
 
 /**
- * Fire-and-forget session refresh after a logged mutation that returns no
- * summary (account edits, reconcile saves). The refreshed `historyRevision`
- * makes the layout effect reload the changes-history panel; a failure is
- * ignored because the next navigation retries.
+ * Fire-and-forget session refresh after a mutation that returns no summary
+ * (account edits, reconcile saves). The refreshed summary makes the layout
+ * effect reload nav roots and badges; a failure is ignored because the next
+ * navigation retries.
  */
 export function refreshSession() {
   void ensureDbSessionLoaded(true).catch(() => {});

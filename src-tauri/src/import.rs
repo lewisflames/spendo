@@ -6,7 +6,6 @@ use std::fs;
 use tauri::State;
 
 use crate::db::{self, connect_source_db, init_db, AppError, AppState};
-use crate::history;
 use crate::home::{get_summary, DataSummary};
 use crate::init;
 use crate::prices::{self, PriceError, PricesResult};
@@ -1112,9 +1111,8 @@ fn delete_orphans_rows(
 }
 
 /// Every account that has at least one budget row. The sweep must not delete
-/// these: `budgets.account_guid` cascades and budgets are outside the history
-/// snapshots, so the delete would be permanent. Mirrors the manual-delete
-/// guard in `accounts_mut.rs`.
+/// these: `budgets.account_guid` cascades, so the delete would be permanent.
+/// Mirrors the manual-delete guard in `accounts_mut.rs`.
 fn accounts_with_budgets(conn: &Connection) -> Result<Vec<String>, AppError> {
     let mut stmt = conn.prepare("SELECT DISTINCT account_guid FROM budgets")?;
     let rows = stmt
@@ -1124,11 +1122,11 @@ fn accounts_with_budgets(conn: &Connection) -> Result<Vec<String>, AppError> {
 }
 
 /// Canonical default roots the source book doesn't cover, as local GUIDs.
-/// These survive the orphan sweep (and its revert snapshots) so re-imports
-/// stay no-ops and their GUIDs stay stable; source-provided roots of the same
-/// category replace them through the normal merge/sweep path. Only roots whose
-/// parent ROOT survives the import are protected — the seeded ROOT of a fresh
-/// book is swept in favor of the source's ROOT, taking its roots with it.
+/// These survive the orphan sweep so re-imports stay no-ops and their GUIDs
+/// stay stable; source-provided roots of the same category replace them
+/// through the normal merge/sweep path. Only roots whose parent ROOT survives
+/// the import are protected — the seeded ROOT of a fresh book is swept in
+/// favor of the source's ROOT, taking its roots with it.
 fn protected_default_roots(conn: &Connection, src: &SourceData) -> Result<Vec<String>, AppError> {
     let src_roots: HashSet<&str> = src
         .accounts
@@ -1376,8 +1374,8 @@ pub struct GnuCashImportInput {
 
 /// Accounts the orphan sweep must keep: canonical roots for categories the
 /// source doesn't cover, accounts carrying budgets (the FK cascade would
-/// destroy budgets, which are outside undo snapshots), accounts referenced by
-/// import rules (same cascade problem), and accounts referenced by schedules.
+/// destroy budgets), accounts referenced by import rules (same cascade
+/// problem), and accounts referenced by schedules.
 fn protected_accounts(conn: &Connection, src: &SourceData) -> Result<HashSet<String>, AppError> {
     let mut protected: HashSet<String> =
         protected_default_roots(conn, src)?.into_iter().collect();
@@ -1414,8 +1412,7 @@ impl ExistingData {
     }
 }
 
-/// Added/updated/orphaned tallies for one import merge, shared by the merge
-/// steps and the history row.
+/// Added/updated/orphaned tallies for one import merge.
 #[derive(Default)]
 struct MergeCounts {
     commodities_added: i64,
@@ -1433,126 +1430,6 @@ struct MergeCounts {
     schedules_added: i64,
     schedules_updated: i64,
     schedules_skipped: i64,
-}
-
-impl MergeCounts {
-    fn has_changes(&self) -> bool {
-        self.accounts_added != 0
-            || self.transactions_added != 0
-            || self.splits_added != 0
-            || self.commodities_added != 0
-            || self.accounts_updated != 0
-            || self.transactions_updated != 0
-            || self.splits_updated != 0
-            || self.commodities_updated != 0
-            || self.accounts_orphaned != 0
-            || self.transactions_orphaned != 0
-            || self.splits_orphaned != 0
-            || self.commodities_orphaned != 0
-            || self.schedules_added != 0
-            || self.schedules_updated != 0
-    }
-
-    fn history_detail(&self, filename: &str, source_path: &str, sha256: &str) -> String {
-        serde_json::json!({
-            "filename": filename,
-            "filePath": source_path,
-            "sha256": sha256,
-            "accountsAdded": self.accounts_added,
-            "transactionsAdded": self.transactions_added,
-            "splitsAdded": self.splits_added,
-            "commoditiesAdded": self.commodities_added,
-            "accountsUpdated": self.accounts_updated,
-            "transactionsUpdated": self.transactions_updated,
-            "splitsUpdated": self.splits_updated,
-            "accountsOrphaned": self.accounts_orphaned,
-            "transactionsOrphaned": self.transactions_orphaned,
-            "splitsOrphaned": self.splits_orphaned,
-            "commoditiesOrphaned": self.commodities_orphaned,
-            "schedulesAdded": self.schedules_added,
-            "schedulesUpdated": self.schedules_updated,
-            "schedulesSkipped": self.schedules_skipped,
-        })
-        .to_string()
-    }
-}
-
-fn capture_snapshot(conn: &Connection, table: &'static str, guid: &str) -> Result<history::Snapshot<'static>, AppError> {
-    Ok(history::Snapshot {
-        table_name: table,
-        row_guid: guid.to_string(),
-        before_json: history::snapshot_row(conn, table, guid)?,
-    })
-}
-
-/// Snapshot added rows as absent (revert deletes them) and changed rows with
-/// their current image (revert restores it); unchanged rows are skipped.
-fn capture_changed<T: Importable>(
-    conn: &Connection,
-    table: &'static str,
-    src: &[T],
-    existing: &HashMap<String, T>,
-    snapshots: &mut Vec<history::Snapshot<'static>>,
-) -> Result<(), AppError> {
-    for r in src {
-        match existing.get(r.guid()) {
-            None => snapshots.push(capture_snapshot(conn, table, r.guid())?),
-            Some(ex) if r.has_changes(ex) => snapshots.push(capture_snapshot(conn, table, r.guid())?),
-            _ => {}
-        }
-    }
-    Ok(())
-}
-
-/// Snapshot destination rows absent from the source (the merge deletes them).
-/// `skip` defends app-managed rows the sweep is told to keep (protected
-/// default roots) from being captured as orphans.
-fn capture_orphaned<T: Importable>(
-    conn: &Connection,
-    table: &'static str,
-    src: &[T],
-    existing: &HashMap<String, T>,
-    skip: &HashSet<String>,
-    snapshots: &mut Vec<history::Snapshot<'static>>,
-) -> Result<(), AppError> {
-    let src_guids: HashSet<&str> = src.iter().map(|r| r.guid()).collect();
-    for guid in existing.keys() {
-        if !src_guids.contains(guid.as_str()) && !skip.contains(guid) {
-            snapshots.push(capture_snapshot(conn, table, guid)?);
-        }
-    }
-    Ok(())
-}
-
-/// Capture before-images for every row the merge is about to touch so the
-/// single history row can revert this import. With `delete_orphans` off the
-/// sweep doesn't run, so there are no orphan deletes to snapshot.
-fn capture_import_snapshots(
-    conn: &Connection,
-    src: &SourceData,
-    existing: &ExistingData,
-    protected: &HashSet<String>,
-    delete_orphans: bool,
-) -> Result<Vec<history::Snapshot<'static>>, AppError> {
-    let mut snapshots = Vec::new();
-    capture_changed(conn, "commodities", &src.commodities, &existing.commodities, &mut snapshots)?;
-    capture_changed(conn, "accounts", &src.accounts, &existing.accounts, &mut snapshots)?;
-    capture_changed(conn, "transactions", &src.transactions, &existing.transactions, &mut snapshots)?;
-    capture_changed(conn, "splits", &src.splits, &existing.splits, &mut snapshots)?;
-    // Schedules have no `Importable` impl (their template encoding lives in
-    // `schedules.rs`); snapshot every candidate row so undo can delete added
-    // schedules and restore changed definitions. Unchanged rows restore as
-    // no-ops.
-    for schedule in &src.schedules {
-        snapshots.push(capture_snapshot(conn, "recurring_schedules", &schedule.guid)?);
-    }
-    if delete_orphans {
-        capture_orphaned(conn, "commodities", &src.commodities, &existing.commodities, &HashSet::new(), &mut snapshots)?;
-        capture_orphaned(conn, "accounts", &src.accounts, &existing.accounts, protected, &mut snapshots)?;
-        capture_orphaned(conn, "transactions", &src.transactions, &existing.transactions, &HashSet::new(), &mut snapshots)?;
-        capture_orphaned(conn, "splits", &src.splits, &existing.splits, &HashSet::new(), &mut snapshots)?;
-    }
-    Ok(snapshots)
 }
 
 /// Upsert source rows over the destination, then delete orphans (protected
@@ -1602,8 +1479,8 @@ fn apply_merge(
 fn import_gnucash_inner(
     dest_conn: &Connection,
     source_path: &str,
-    filename: &str,
-    sha256: &str,
+    _filename: &str,
+    _sha256: &str,
     delete_orphans: bool,
 ) -> Result<ImportResult, AppError> {
     let source = connect_source_db(&std::path::PathBuf::from(source_path))
@@ -1633,7 +1510,7 @@ fn import_gnucash_inner(
     populate_source_guids(dest_conn, "tmp_src_splits", &split_guids)?;
 
     // Materialize sweep-protected GUIDs before the transaction so the orphan
-    // sweep (and its revert snapshots) can skip them. Empty set = no exclusion.
+    // sweep can skip them. Empty set = no exclusion.
     let protected = protected_accounts(dest_conn, &src)?;
     let protected_guids: Vec<String> = protected.iter().cloned().collect();
     populate_source_guids(dest_conn, "tmp_protected_accounts", &protected_guids)?;
@@ -1645,10 +1522,10 @@ fn import_gnucash_inner(
 
     let mut counts = MergeCounts::default();
 
-    // Counts live inside the txn so the numbers in the history row match
-    // the deletes they report. Temp tables live on the long-lived
-    // connection; drop them after the txn instead of letting them linger
-    // until the next import recreates them.
+    // Counts live inside the txn so the numbers the caller reports match the
+    // deletes they describe. Temp tables live on the long-lived connection;
+    // drop them after the txn instead of letting them linger until the next
+    // import recreates them.
     let tx_result: Result<(), AppError> = db::with_tx_err(dest_conn, || {
         if delete_orphans {
             counts.commodities_orphaned =
@@ -1662,8 +1539,6 @@ fn import_gnucash_inner(
         }
 
         let existing = ExistingData::load(dest_conn)?;
-        let mut snapshots =
-            capture_import_snapshots(dest_conn, &src, &existing, &protected, delete_orphans)?;
         apply_merge(
             dest_conn,
             &src,
@@ -1673,28 +1548,8 @@ fn import_gnucash_inner(
             delete_orphans,
         )?;
 
-        // Categories the source never covered: create the canonical root now
-        // and record it as added, so reverting this import removes it again.
-        for guid in init::ensure_default_roots(dest_conn)? {
-            snapshots.push(history::Snapshot {
-                table_name: "accounts",
-                row_guid: guid,
-                before_json: None,
-            });
-        }
-
-        if counts.has_changes() {
-            history::insert_change_entry(
-                dest_conn,
-                "import",
-                &format!("Imported {filename}"),
-                "import",
-                counts.transactions_added + counts.transactions_updated + counts.transactions_orphaned,
-                counts.accounts_added + counts.accounts_updated + counts.accounts_orphaned,
-                Some(&counts.history_detail(filename, source_path, sha256)),
-                &snapshots,
-            )?;
-        }
+        // Categories the source never covered: create the canonical root now.
+        init::ensure_default_roots(dest_conn)?;
 
         Ok(())
     });
@@ -1936,11 +1791,10 @@ mod tests {
     }
 
     /// End-to-end: import a minimal GnuCash source into a book with local-only
-    /// rows, asserting the single history row, the reimport pointer, the
-    /// no-op second import, and a full revert (orphans restored, added
-    /// rows removed).
+    /// rows; the merge adds source rows, sweeps orphans, and an identical
+    /// reimport is a no-op.
     #[test]
-    fn import_logs_single_row_and_reverts() {
+    fn import_merges_and_sweeps_orphans() {
         let dir =
             std::env::temp_dir().join(format!("spendo-import-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -1988,14 +1842,7 @@ mod tests {
         assert_eq!(result.splits_added, 1);
         assert_eq!(result.splits_orphaned, 1);
 
-        // Exactly one history row; orphans are gone from the data.
-        let log = history::fetch_change_history_inner(&dest).unwrap();
-        assert_eq!(log.entries.len(), 1);
-        assert_eq!(log.entries[0].kind, "import");
-        assert_eq!(log.entries[0].label, "Imported book.gnucash");
-        assert_eq!(log.entries[0].transactions_affected, 2);
-        assert_eq!(log.entries[0].accounts_affected, 3);
-        assert_eq!(log.undoable_id, Some(log.entries[0].id));
+        // Orphans are gone from the data.
         let count = |table: &str| -> i64 {
             dest.query_row(
                 &format!("SELECT COUNT(*) FROM {table}"),
@@ -2015,32 +1862,10 @@ mod tests {
             "Groceries"
         );
 
-        // Identical reimport is a no-op and logs nothing new.
+        // Identical reimport is a no-op.
         let again = import_gnucash_inner(&dest, &src_str, "book.gnucash", "deadbeef", true).unwrap();
         assert_eq!(again.transactions_added, 0);
         assert_eq!(again.transactions_orphaned, 0);
-        assert_eq!(
-            history::fetch_change_history_inner(&dest)
-                .unwrap()
-                .entries
-                .len(),
-            1
-        );
-
-        // Revert removes added rows and restores the orphaned local rows.
-        history::undo_history_entry_inner(&dest, log.entries[0].id).unwrap();
-        assert_eq!(count("transactions"), 1);
-        assert_eq!(
-            dest.query_row(
-                "SELECT description FROM transactions WHERE guid = 't-extra'",
-                [],
-                |row| row.get::<_, String>(0),
-            )
-            .unwrap(),
-            "Local only"
-        );
-        assert_eq!(count("accounts"), 1);
-        assert_eq!(count("commodities"), 1);
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -2109,30 +1934,6 @@ mod tests {
         let again = import_gnucash_inner(&dest, &src_str, "book.gnucash", "cafe", true).unwrap();
         assert_eq!(again.accounts_orphaned, 0);
         assert_eq!(roots(&dest), after_first);
-        assert_eq!(
-            history::fetch_change_history_inner(&dest)
-                .unwrap()
-                .entries
-                .len(),
-            1
-        );
-
-        // Revert restores the seeded book: five canonical roots under one ROOT.
-        let log = history::fetch_change_history_inner(&dest).unwrap();
-        history::undo_history_entry_inner(&dest, log.entries[0].id).unwrap();
-        let root_count: i64 = dest
-            .query_row(
-                "SELECT COUNT(*) FROM accounts WHERE account_type = 'ROOT'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(root_count, 1);
-        assert_eq!(roots(&dest).len(), 5);
-        let total: i64 = dest
-            .query_row("SELECT COUNT(*) FROM accounts", [], |row| row.get(0))
-            .unwrap();
-        assert_eq!(total, 6);
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -2183,10 +1984,6 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM accounts", [], |r| r.get(0))
             .unwrap();
         assert_eq!(accounts_after, accounts_before);
-        assert!(history::fetch_change_history_inner(&dest)
-            .unwrap()
-            .entries
-            .is_empty());
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -2233,8 +2030,8 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// Regression: sweeping a budgeted account cascades the budget rows away
-    /// (budgets are outside undo snapshots), so the sweep must skip them.
+    /// Regression: sweeping a budgeted account cascades the budget rows away,
+    /// so the sweep must skip them.
     #[test]
     fn import_preserves_budgets_on_orphaned_accounts() {
         let (dir, src_str) = tmp_source(
@@ -2463,7 +2260,7 @@ mod tests {
 
     /// End-to-end SX conversion: source templates become schedules, template
     /// plumbing is excluded from the entity merge, the pointer skips generated
-    /// instances, skipped schedules are reported, and undo removes them again.
+    /// instances, and skipped schedules are reported.
     #[test]
     fn import_converts_scheduled_transactions_and_excludes_templates() {
         let dir = std::env::temp_dir().join(format!("spendo-import-sx-{}", uuid::Uuid::new_v4()));
@@ -2562,22 +2359,10 @@ mod tests {
             .any(|s| s["accountGuid"] == "checking" && s["amount"] == -1000.0));
         assert!(splits.iter().any(|s| s["memo"] == "rent"));
 
-        // A re-import is a no-op that logs nothing new.
+        // A re-import is a no-op.
         let again = import_gnucash_inner(&dest, &src_str, "book.gnucash", "hash", true).unwrap();
         assert_eq!(again.schedules_added, 0);
         assert_eq!(again.schedules_updated, 0);
-        assert_eq!(
-            history::fetch_change_history_inner(&dest)
-                .unwrap()
-                .entries
-                .len(),
-            1
-        );
-
-        // Undo of the import reverts the schedule with the rest of the merge.
-        let log = history::fetch_change_history_inner(&dest).unwrap();
-        history::undo_history_entry_inner(&dest, log.entries[0].id).unwrap();
-        assert_eq!(count(&dest, "recurring_schedules"), 0);
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -2630,7 +2415,7 @@ mod tests {
     }
 
     /// The sweep keeps accounts a schedule still references, like budgets and
-    /// import rules (config tables are outside the undo snapshots).
+    /// import rules (config tables with FK/dangling-reference semantics).
     #[test]
     fn import_preserves_accounts_referenced_by_schedules() {
         let dir = std::env::temp_dir().join(format!("spendo-import-sx3-{}", uuid::Uuid::new_v4()));

@@ -1,10 +1,8 @@
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 use tauri::State;
 
 use crate::db::{run_blocking, with_tx_err, AppError, AppState};
-use crate::history;
 use crate::sql;
 use crate::utils;
 
@@ -225,7 +223,8 @@ fn mark_reconcile_splits_inner(
     conn: &Connection,
     input: MarkReconcileInput,
 ) -> Result<MarkReconcileResult, AppError> {
-    let account = load_reconcilable_account(conn, &input.account_guid)?;
+    // Validate the target is a real, reconcilable account before touching rows.
+    load_reconcilable_account(conn, &input.account_guid)?;
     if input.updates.is_empty() {
         return Err(AppError::Validation("No changes to save".to_string()));
     }
@@ -288,30 +287,8 @@ fn mark_reconcile_splits_inner(
     if pending.is_empty() {
         return Ok(MarkReconcileResult { updated: 0 });
     }
-    let tx_guids: HashSet<String> = rows.iter().map(|(_, _, tx, _)| tx.clone()).collect();
-    let marked_cleared = pending.iter().filter(|(_, s)| s == "c").count() as i64;
-    let marked_new = pending.len() as i64 - marked_cleared;
-    let label = format!(
-        "Reconcile {} — marked {marked_cleared} cleared",
-        account.name.trim()
-    );
-    let detail = serde_json::json!({
-        "accountGuid": input.account_guid,
-        "markedCleared": marked_cleared,
-        "markedNew": marked_new,
-    })
-    .to_string();
-
     let updated = pending.len() as i64;
     with_tx_err(conn, || -> Result<(), AppError> {
-        let mut snapshots = Vec::with_capacity(pending.len());
-        for (guid, _) in &pending {
-            snapshots.push(history::Snapshot {
-                table_name: "splits",
-                row_guid: guid.clone(),
-                before_json: history::snapshot_row(conn, "splits", guid)?,
-            });
-        }
         for (guid, want) in &pending {
             let reconciled = if want == "c" { 1 } else { 0 };
             conn.execute(
@@ -319,16 +296,6 @@ fn mark_reconcile_splits_inner(
                 params![want, reconciled, guid],
             )?;
         }
-        history::insert_change_entry(
-            conn,
-            "reconcile",
-            &label,
-            "manual",
-            tx_guids.len() as i64,
-            1,
-            Some(&detail),
-            &snapshots,
-        )?;
         Ok(())
     })?;
     Ok(MarkReconcileResult { updated })
@@ -364,7 +331,8 @@ fn finish_reconciliation_inner(
         return Err(AppError::Validation("Ending balance is too large".to_string()));
     }
     let statement_date = validate_statement_date(&input.statement_date)?;
-    let account = load_reconcilable_account(conn, &input.account_guid)?;
+    // Validate the target is a real, reconcilable account before touching rows.
+    load_reconcilable_account(conn, &input.account_guid)?;
 
     let starting_balance = sum_by_state(conn, &input.account_guid, "y", &statement_date)?;
     let cleared_total = sum_by_state(conn, &input.account_guid, "c", &statement_date)?;
@@ -378,55 +346,15 @@ fn finish_reconciliation_inner(
     if guids.is_empty() {
         return Err(AppError::Validation("Nothing cleared to reconcile".to_string()));
     }
-    let tx_count: i64 = {
-        let sql = format!(
-            "SELECT COUNT(DISTINCT tx_guid) FROM splits WHERE guid IN ({})",
-            sql::in_clause(guids.len())
-        );
-        let mut stmt = conn.prepare(&sql)?;
-        let refs = sql::string_param_refs(&guids);
-        stmt.query_row(refs.as_slice(), |row| row.get(0))?
-    };
-    let label = format!(
-        "Reconciled {} to {:.2}",
-        account.name.trim(),
-        input.ending_balance
-    );
-    let detail = serde_json::json!({
-        "accountGuid": input.account_guid,
-        "statementDate": statement_date,
-        "endingBalance": input.ending_balance,
-        "startingBalance": starting_balance,
-        "clearedCount": guids.len(),
-    })
-    .to_string();
     let reconciled_count = guids.len() as i64;
 
     with_tx_err(conn, || -> Result<(), AppError> {
-        let mut snapshots = Vec::with_capacity(guids.len());
-        for guid in &guids {
-            snapshots.push(history::Snapshot {
-                table_name: "splits",
-                row_guid: guid.clone(),
-                before_json: history::snapshot_row(conn, "splits", guid)?,
-            });
-        }
         for guid in &guids {
             conn.execute(
                 "UPDATE splits SET reconcile_state = 'y', reconciled = 1 WHERE guid = ?1",
                 params![guid],
             )?;
         }
-        history::insert_change_entry(
-            conn,
-            "reconcile",
-            &label,
-            "manual",
-            tx_count,
-            1,
-            Some(&detail),
-            &snapshots,
-        )?;
         Ok(())
     })?;
 
@@ -559,7 +487,7 @@ mod tests {
     }
 
     #[test]
-    fn mark_flips_n_to_c_and_logs_history() {
+    fn mark_flips_n_to_c() {
         let conn = setup();
         seed(&conn);
         let out = mark_reconcile_splits_inner(
@@ -578,14 +506,6 @@ mod tests {
             .query_row("SELECT reconcile_state FROM splits WHERE guid = 's-t3'", [], |r| r.get(0))
             .unwrap();
         assert_eq!(state, "c");
-        let kinds: Vec<String> = {
-            let mut stmt = conn.prepare("SELECT kind FROM change_log").unwrap();
-            stmt.query_map([], |r| r.get(0))
-                .unwrap()
-                .collect::<Result<Vec<_>, _>>()
-                .unwrap()
-        };
-        assert_eq!(kinds, vec!["reconcile"]);
     }
 
     #[test]

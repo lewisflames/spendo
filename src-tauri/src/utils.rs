@@ -102,10 +102,10 @@ pub fn validate_optional_iso_date(raw: Option<&str>) -> Result<Option<String>, S
 }
 
 /// Truncate user text to at most `max_bytes` **without splitting a UTF-8
-/// character**, appending `…` when anything was cut. History labels are
-/// byte-capped so the log stays readable, but names/descriptions may hold any
-/// script — a raw `&s[..max_bytes]` panics (and `panic = "abort"` in release
-/// kills the process) when the cut lands inside a multibyte char.
+/// character**, appending `…` when anything was cut. Imported names and
+/// descriptions may hold any script — a raw `&s[..max_bytes]` panics (and
+/// `panic = "abort"` in release kills the process) when the cut lands inside a
+/// multibyte char.
 pub fn truncate_chars(s: &str, max_bytes: usize) -> String {
     if s.len() <= max_bytes {
         return s.to_string();

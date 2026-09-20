@@ -4,8 +4,6 @@ use std::collections::HashSet;
 use tauri::State;
 
 use crate::db::{run_blocking, with_tx_err, AppError, AppState};
-use crate::history;
-use crate::utils;
 use crate::utils::opt_text;
 
 /// Creatable account types (mirrors `TYPE_TO_CATEGORY` keys minus the
@@ -202,14 +200,9 @@ fn validate_account_input(
     Ok(parent)
 }
 
-fn account_label(name: &str, verb: &str) -> String {
-    format!("{verb} {}", utils::truncate_chars(name.trim(), 80))
-}
-
 fn create_account_inner(conn: &Connection, input: AccountInput) -> Result<String, AppError> {
     let parent = validate_account_input(conn, &input, None)?;
     let guid = uuid::Uuid::new_v4().to_string();
-    let label = account_label(input.name.trim(), "Create");
 
     with_tx_err(conn, || {
         conn.execute(
@@ -229,20 +222,6 @@ fn create_account_inner(conn: &Connection, input: AccountInput) -> Result<String
             ],
         )
         ?;
-        history::insert_change_entry(
-            conn,
-            "account_create",
-            &label,
-            "manual",
-            0,
-            1,
-            None,
-            &[history::Snapshot {
-                table_name: "accounts",
-                row_guid: guid.clone(),
-                before_json: None,
-            }],
-        )?;
         Ok(guid.clone())
     })
 }
@@ -270,14 +249,8 @@ fn update_account_inner(
         return Err(AppError::Validation("Accounts cannot be converted to ROOT".to_string()));
     }
     let parent = validate_account_input(conn, &input, Some(guid))?;
-    let label = account_label(input.name.trim(), "Update");
 
     with_tx_err(conn, || {
-        let snapshots = vec![history::Snapshot {
-            table_name: "accounts",
-            row_guid: guid.to_string(),
-            before_json: history::snapshot_row(conn, "accounts", guid)?,
-        }];
         conn.execute(
             "UPDATE accounts SET name = ?1, account_type = ?2, parent_guid = ?3,
                     code = ?4, description = ?5, placeholder = ?6,
@@ -295,30 +268,19 @@ fn update_account_inner(
             ],
         )
         ?;
-        history::insert_change_entry(
-            conn,
-            "account_update",
-            &label,
-            "manual",
-            0,
-            1,
-            None,
-            &snapshots,
-        )?;
         Ok(())
     })
 }
 
 fn delete_account_inner(conn: &Connection, guid: &str) -> Result<(), AppError> {
-    let row: Option<(String, String)> = conn
+    let account_type: Option<String> = conn
         .query_row(
-            "SELECT name, account_type FROM accounts WHERE guid = ?1",
+            "SELECT account_type FROM accounts WHERE guid = ?1",
             params![guid],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| row.get(0),
         )
-        .optional()
-        ?;
-    let Some((name, account_type)) = row else {
+        .optional()?;
+    let Some(account_type) = account_type else {
         return Err(AppError::NotFound("Account not found — it may have been removed".to_string()));
     };
     if account_type == "ROOT" {
@@ -360,8 +322,8 @@ fn delete_account_inner(conn: &Connection, guid: &str) -> Result<(), AppError> {
     if budgets > 0 {
         return Err(AppError::Validation("Cannot delete — budgets reference it. Remove the budgets first.".to_string()));
     }
-    // Import rules are book config outside undo; the FK cascade would drop them
-    // silently, so guard like budgets.
+    // Import rules are book config; the FK cascade would drop them silently,
+    // so guard like budgets.
     let rules: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM import_rules WHERE account_guid = ?1",
@@ -390,25 +352,9 @@ fn delete_account_inner(conn: &Connection, guid: &str) -> Result<(), AppError> {
         ));
     }
 
-    let label = account_label(&name, "Delete");
     with_tx_err(conn, || {
-        let snapshots = vec![history::Snapshot {
-            table_name: "accounts",
-            row_guid: guid.to_string(),
-            before_json: history::snapshot_row(conn, "accounts", guid)?,
-        }];
         conn.execute("DELETE FROM accounts WHERE guid = ?1", params![guid])
             ?;
-        history::insert_change_entry(
-            conn,
-            "account_delete",
-            &label,
-            "manual",
-            0,
-            1,
-            None,
-            &snapshots,
-        )?;
         Ok(())
     })
 }
@@ -511,7 +457,7 @@ mod tests {
     }
 
     #[test]
-    fn create_validates_and_logs_history() {
+    fn create_validates_and_update_round_trips() {
         let conn = setup();
         assert!(create_account_inner(&conn, input("", None)).is_err());
         let mut bad = input("Food", None);
@@ -522,14 +468,6 @@ mod tests {
         assert!(create_account_inner(&conn, input("Food", Some("assets"))).is_err());
         // Same name under a different parent is fine.
         create_account_inner(&conn, input("Food", None)).expect("create runs");
-        let count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM change_log WHERE kind = 'account_create'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(count, 2);
         // Update round-trips.
         let upd = input("Food", Some("assets"));
         update_account_inner(&conn, &g1, upd).expect("update runs");
@@ -564,7 +502,7 @@ mod tests {
         )
         .unwrap();
         assert!(delete_account_inner(&conn, "checking").unwrap_err().to_string().contains("split"));
-        // Delete blocked with budgets (would CASCADE unsnapshotted rows).
+        // Delete blocked with budgets (the FK cascade would drop them silently).
         conn.execute(
             "INSERT INTO budgets (guid, account_guid, year, amount, created_at)
              VALUES ('b1', 'assets', 2024, 100, '2024-01-01')",
@@ -580,15 +518,7 @@ mod tests {
         )
         .unwrap();
         assert!(delete_account_inner(&conn, &leaf).unwrap_err().to_string().contains("budget"));
-        // Clean leaf deletes and logs.
+        // Clean leaf deletes.
         delete_account_inner(&conn, &child).expect("delete runs");
-        let kinds: Vec<String> = {
-            let mut stmt = conn.prepare("SELECT kind FROM change_log ORDER BY id").unwrap();
-            stmt.query_map([], |r| r.get(0))
-                .unwrap()
-                .collect::<Result<Vec<_>, _>>()
-                .unwrap()
-        };
-        assert!(kinds.contains(&"account_delete".to_string()));
     }
 }

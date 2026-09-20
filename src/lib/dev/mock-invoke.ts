@@ -11,9 +11,6 @@
  */
 import type {
   AccountNode,
-  ChangeEntryDetail,
-  ChangeKind,
-  ChangeSource,
   CsvPreset,
   DataSummary,
   Schedule,
@@ -53,24 +50,6 @@ interface AttachmentRecord {
   byteSize: number;
   createdAt: string;
   isImage: boolean;
-}
-
-interface Snapshot {
-  accounts: FixtureAccount[];
-  transactions: FixtureTx[];
-}
-
-interface HistoryRecord {
-  id: number;
-  occurredAt: string;
-  kind: ChangeKind;
-  label: string;
-  source: ChangeSource;
-  transactionsAffected: number;
-  accountsAffected: number;
-  /** State before this change, restored by undo. */
-  snapshot: Snapshot;
-  revertedBy: number | null;
 }
 
 interface TxInputLike {
@@ -142,9 +121,6 @@ const state = {
   overrides: new Map<string, string>(),
   allocationTargets: new Map<string, number>(),
   attachments: [] as AttachmentRecord[],
-  history: [] as HistoryRecord[],
-  redoSnapshots: new Map<number, Snapshot>(),
-  nextHistoryId: 1,
   csvPresets: new Map<string, CsvPreset>(),
   importRules: [] as ImportRuleLike[],
   nextImportRuleId: 1,
@@ -297,8 +273,7 @@ function dataSummary(): DataSummary {
     totalTransactions: txs.length,
     earliestDate: dates[0] ?? null,
     latestDate: dates.at(-1) ?? null,
-    netWorth: nodeBalance('assets') - nodeBalance('liabilities'),
-    historyRevision: state.nextHistoryId - 1
+    netWorth: nodeBalance('assets') - nodeBalance('liabilities')
   };
 }
 
@@ -311,32 +286,6 @@ function homeData(): MockPayloads['fetch_home_data'] {
 function emptyBookResult(): MockPayloads['open_book'] {
   const summary = dataSummary();
   return { hasData: summary.totalTransactions > 0, summary };
-}
-
-function snapshot(): Snapshot {
-  return { accounts: clone(state.accounts), transactions: clone(state.transactions) };
-}
-
-function recordHistory(
-  kind: ChangeKind,
-  label: string,
-  source: ChangeSource,
-  impact: { transactionsAffected?: number; accountsAffected?: number } = {},
-  before: Snapshot = snapshot()
-): void {
-  state.history.push({
-    id: state.nextHistoryId++,
-    occurredAt: nowIso(),
-    kind,
-    label,
-    source,
-    transactionsAffected: impact.transactionsAffected ?? 0,
-    accountsAffected: impact.accountsAffected ?? 0,
-    snapshot: before,
-    revertedBy: null
-  });
-  // A new change invalidates the redo stack (linear history).
-  state.redoSnapshots.clear();
 }
 
 /** Split GUID is `${txGuid}-${splitIndex}` — see `toSplitInfo`. */
@@ -703,9 +652,6 @@ function createTransaction(input: TxInputLike): string {
       };
     })
   });
-  recordHistory('tx_create', `Created "${input.description?.trim() || 'transaction'}"`, 'manual', {
-    transactionsAffected: 1
-  });
   return guid;
 }
 
@@ -727,19 +673,13 @@ function updateTransaction(args: Record<string, unknown>): void {
       quantity: split.quantity ?? null
     };
   });
-  recordHistory('tx_update', `Updated "${tx.description || 'transaction'}"`, 'manual', {
-    transactionsAffected: 1
-  });
 }
 
 function deleteTransaction(guid: string): void {
   const index = state.transactions.findIndex((t) => t.guid === guid);
   if (index === -1) throw new Error(`[mock] Unknown transaction ${guid}`);
-  const [removed] = state.transactions.splice(index, 1);
+  state.transactions.splice(index, 1);
   state.attachments = state.attachments.filter((a) => a.txGuid !== guid);
-  recordHistory('tx_delete', `Deleted "${removed.description || 'transaction'}"`, 'manual', {
-    transactionsAffected: 1
-  });
 }
 
 // ── books / settings ───────────────────────────────────────────────────────
@@ -1364,8 +1304,6 @@ const handlers: HandlerMap = {
   clear_app_db: () => {
     state.transactions = [];
     state.accounts = state.accounts.filter((a) => a.guid === 'root' || a.parentGuid === 'root');
-    state.history = [];
-    state.redoSnapshots.clear();
   },
 
   // Accounts
@@ -1387,9 +1325,6 @@ const handlers: HandlerMap = {
       commodity: commodity?.mnemonic ?? null,
       commodityGuid: commodity?.guid ?? null
     });
-    recordHistory('account_create', `Created account "${input.name}"`, 'manual', {
-      accountsAffected: 1
-    });
     return guid;
   },
   update_account: (args) => {
@@ -1408,9 +1343,6 @@ const handlers: HandlerMap = {
       commodity: commodity?.mnemonic ?? null,
       commodityGuid: commodity?.guid ?? null
     });
-    recordHistory('account_update', `Updated account "${input.name}"`, 'manual', {
-      accountsAffected: 1
-    });
   },
   delete_account: (args) => {
     const guid = String(args.guid);
@@ -1421,9 +1353,6 @@ const handlers: HandlerMap = {
     state.transactions = state.transactions.filter(
       (tx) => !tx.splits.some((s) => removed.has(s.accountGuid))
     );
-    recordHistory('account_delete', `Deleted account "${acc.name}"`, 'manual', {
-      accountsAffected: removed.size
-    });
   },
 
   // Transactions
@@ -1433,69 +1362,6 @@ const handlers: HandlerMap = {
   create_transaction: (args) => createTransaction(args.input as TxInputLike),
   update_transaction: (args) => updateTransaction(args),
   delete_transaction: (args) => deleteTransaction(String(args.guid)),
-
-  // History
-  fetch_change_history: (args) => {
-    const pageSize = Math.max(1, Math.min(500, Number(args.pageSize) || 100));
-    const beforeId =
-      args.beforeId === null || args.beforeId === undefined ? null : Number(args.beforeId);
-    const all = [...state.history].reverse();
-    const start = beforeId === null ? 0 : all.findIndex((e) => e.id < beforeId);
-    const page = start === -1 ? [] : all.slice(start, start + pageSize + 1);
-    const hasMore = page.length > pageSize;
-    const entries = page.slice(0, pageSize).map((entry) => ({
-      id: entry.id,
-      occurredAt: entry.occurredAt,
-      kind: entry.kind,
-      label: entry.label,
-      source: entry.source,
-      transactionsAffected: entry.transactionsAffected,
-      accountsAffected: entry.accountsAffected,
-      revertsId: null,
-      revertedBy: entry.revertedBy,
-      sourcePath: null,
-      filename: null
-    }));
-    const undoable = [...state.history].reverse().find((e) => e.revertedBy === null)?.id ?? null;
-    const redoable =
-      [...state.history]
-        .reverse()
-        .find((e) => e.revertedBy !== null && state.redoSnapshots.has(e.id))?.id ?? null;
-    return { entries, undoableId: undoable, redoableId: redoable, hasMore, total: all.length };
-  },
-  fetch_change_entry: (args): ChangeEntryDetail => {
-    const entryId = Number(args.id);
-    const entry = state.history.find((e) => e.id === entryId);
-    if (!entry) throw new Error(`[mock] Unknown history entry ${entryId}`);
-    return { detail: null, tables: [] };
-  },
-  clear_change_history: () => {
-    state.history = [];
-    state.redoSnapshots.clear();
-    return dataSummary();
-  },
-  undo_history_entry: (args) => {
-    const entryId = Number(args.id);
-    const entry = state.history.find((e) => e.id === entryId);
-    if (!entry || entry.revertedBy !== null) return dataSummary();
-    state.redoSnapshots.set(entry.id, snapshot());
-    state.accounts = clone(entry.snapshot.accounts);
-    state.transactions = clone(entry.snapshot.transactions);
-    entry.revertedBy = entry.id;
-    return dataSummary();
-  },
-  redo_history_entry: (args) => {
-    const entryId = Number(args.id);
-    const entry = state.history.find((e) => e.id === entryId);
-    const restored = state.redoSnapshots.get(entryId);
-    if (entry && restored) {
-      state.accounts = clone(restored.accounts);
-      state.transactions = clone(restored.transactions);
-      state.redoSnapshots.delete(entryId);
-      entry.revertedBy = null;
-    }
-    return dataSummary();
-  },
 
   // Books
   open_book: () => emptyBookResult(),

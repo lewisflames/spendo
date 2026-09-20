@@ -6,12 +6,6 @@
   import { MediaQuery } from 'svelte/reactivity';
   import * as Sidebar from '$lib/components/ui/sidebar/index.js';
   import { AppSidebar } from '$lib/components/layout/app-sidebar';
-  import { HistorySidebar } from '$lib/components/layout/history-sidebar';
-  import {
-    refreshChangeHistory,
-    redoLatestChange,
-    undoLatestChange
-  } from '$lib/features/history/history.svelte';
   import {
     appSettings,
     saveSettings,
@@ -35,9 +29,7 @@
   import GnuCashImportDialog from '$lib/features/book/gnucash-import-dialog.svelte';
   import {
     keyboardShortcutsDialog as shortcutsDialog,
-    commandPalette,
-    historySidebar,
-    toggleHistorySidebar
+    commandPalette
   } from '$lib/stores/ui.svelte';
   import '../app.css';
 
@@ -57,22 +49,15 @@
     loadActiveBook().catch(() => {});
   });
 
-  // Keep the changes history current while a book is open: the side panel and
-  // the global undo/redo shortcuts both read this store, and every logged
-  // mutation bumps `summary.historyRevision`. Sidebar roots + badges share the
-  // same trigger set (pathname covers navigation-only flows; mutations that
-  // log without touching the summary call `ensureDbSessionLoaded(true)`).
+  // Keep sidebar roots + badges current while a book is open: they refresh on
+  // navigation and whenever the data summary changes (mutations that return no
+  // summary call `refreshSession()`, which forces a new summary).
   $effect(() => {
     void dbSession.value;
     void dbSession.value?.summary.totalTransactions;
     void dbSession.value?.summary.totalAccounts;
-    void dbSession.value?.summary.historyRevision;
     void page.url.pathname;
-    // The refresh reads and writes its own store synchronously (spread in
-    // `patch`), which would otherwise be tracked here and re-trigger this
-    // effect on every write — an infinite update loop.
     untrack(() => {
-      void refreshChangeHistory();
       void refreshNav();
     });
   });
@@ -155,20 +140,9 @@
       return;
     }
     if (!(e.ctrlKey || e.metaKey)) return;
-    if (e.key.toLowerCase() === 'z') {
-      e.preventDefault();
-      if (e.shiftKey) void redoLatestChange();
-      else void undoLatestChange();
-      return;
-    }
     if (e.key.toLowerCase() === 't' && e.shiftKey) {
       e.preventDefault();
       toggleTheme();
-      return;
-    }
-    if (e.key.toLowerCase() === 'h') {
-      e.preventDefault();
-      toggleHistorySidebar();
       return;
     }
     if (e.key.toLowerCase() === 'b') {
@@ -182,11 +156,7 @@
 
 <div class="[--header-height:calc(--spacing(10))]">
   <Sidebar.Provider class={cn('flex flex-col', !showSidebar && 'bg-sidebar')}>
-    <TitleBar
-      showSidebarTrigger={showSidebar}
-      showHistoryToggle={showSidebar}
-      showHome={showSidebar}
-    />
+    <TitleBar showSidebarTrigger={showSidebar} showHome={showSidebar} />
     <div class="flex flex-1 overflow-hidden">
       {#if showSidebar}
         <AppSidebar />
@@ -198,9 +168,6 @@
           </div>
         </main>
       </Sidebar.Inset>
-      {#if showSidebar && historySidebar.value}
-        <HistorySidebar />
-      {/if}
     </div>
   </Sidebar.Provider>
 </div>

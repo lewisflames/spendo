@@ -50,7 +50,7 @@
     </SettingSelectRow>
     <SettingSelectRow
       label="Rows per page"
-      description="Applies to every list: transactions, ledger, history, holdings"
+      description="Applies to every list: transactions, ledger, holdings"
     >
       <Select.Root
         type="single"

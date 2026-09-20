@@ -22,13 +22,9 @@ pub struct AppState {
 /// books (which share table names like `accounts`/`splits`) and random SQLite.
 pub const SPENDO_APP_ID: i32 = 0x5350_4e44; // 'SPND'
 
-/// User-data tables shared by the history snapshots and the import orphan
-/// sweep. Interpolating table names into SQL is only safe through this
+/// User-data tables whose names may be interpolated into SQL by the import
+/// orphan sweep. Interpolating table names into SQL is only safe through this
 /// allowlist — never inline a table name without `validate_data_table`.
-///
-/// `recurring_schedules` is here so a GnuCash import can snapshot the schedules
-/// it adds/changes and undo them with the rest of the merge. Manual schedule
-/// CRUD still writes no history entries.
 pub(crate) const DATA_TABLES: &[&str] =
     &["commodities", "accounts", "transactions", "splits", "recurring_schedules"];
 
@@ -227,29 +223,6 @@ CREATE TABLE IF NOT EXISTS prices (
 	date TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS change_log (
-	id INTEGER PRIMARY KEY AUTOINCREMENT,
-	occurred_at TEXT NOT NULL,
-	kind TEXT NOT NULL,
-	label TEXT NOT NULL,
-	source TEXT NOT NULL,
-	transactions_affected INTEGER DEFAULT 0,
-	accounts_affected INTEGER DEFAULT 0,
-	detail_json TEXT,
-	reverts_id INTEGER REFERENCES change_log(id),
-	reverted_by INTEGER REFERENCES change_log(id)
-);
-
-CREATE TABLE IF NOT EXISTS change_snapshots (
-	entry_id INTEGER NOT NULL REFERENCES change_log(id) ON DELETE CASCADE,
-	table_name TEXT NOT NULL,
-	row_guid TEXT NOT NULL,
-	before_json TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_change_log_occurred ON change_log(occurred_at DESC, id DESC);
-CREATE INDEX IF NOT EXISTS idx_snapshots_entry ON change_snapshots(entry_id);
-
 CREATE INDEX IF NOT EXISTS idx_transactions_post_date ON transactions(post_date);
 CREATE INDEX IF NOT EXISTS idx_transactions_post_date_guid ON transactions(post_date, guid);
 CREATE INDEX IF NOT EXISTS idx_splits_tx_guid ON splits(tx_guid);
@@ -283,9 +256,8 @@ CREATE TABLE IF NOT EXISTS symbol_overrides (
 
 -- Receipts/documents attached to a transaction. Bytes live in the book itself
 -- so the `.spendo` file stays portable (Save As copies them via VACUUM INTO).
--- Deliberately outside `DATA_TABLES`: attachments are not part of linear undo,
--- and deleting a transaction (manual delete or the GnuCash orphan sweep)
--- removes its attachments through the FK cascade.
+-- Deleting a transaction (manual delete or the GnuCash orphan sweep) removes
+-- its attachments through the FK cascade.
 CREATE TABLE IF NOT EXISTS attachments (
 	guid TEXT PRIMARY KEY,
 	tx_guid TEXT NOT NULL REFERENCES transactions(guid) ON DELETE CASCADE,
@@ -304,10 +276,8 @@ CREATE INDEX IF NOT EXISTS idx_attachments_tx_guid ON attachments(tx_guid);
 -- holds a serialized `TxInput`-shaped template; posting materializes one real
 -- transaction per due occurrence and advances `next_due_date`. `NULL`
 -- `next_due_date` means completed (end date / occurrence cap reached).
--- Manual CRUD writes no `change_log` entries (schedule definitions are future
--- intent, not money movement), but a GnuCash import snapshots the schedules it
--- adds/changes so undoing the import reverts them too. The GnuCash orphan
--- sweep never deletes schedules (nor accounts they reference).
+-- The GnuCash orphan sweep never deletes schedules (nor accounts they
+-- reference).
 CREATE TABLE IF NOT EXISTS recurring_schedules (
 	guid TEXT PRIMARY KEY,
 	name TEXT NOT NULL,
@@ -326,8 +296,8 @@ CREATE TABLE IF NOT EXISTS recurring_schedules (
 CREATE INDEX IF NOT EXISTS idx_schedules_active_due ON recurring_schedules(active, next_due_date);
 
 -- Saved CSV import mapping presets, keyed by a hash of the normalized header
--- row. Book-scoped convenience config: deliberately outside `DATA_TABLES`
--- (not part of linear undo) and dropped by `clear_db` like any other table.
+-- row. Book-scoped convenience config, dropped by `clear_db` like any other
+-- table.
 CREATE TABLE IF NOT EXISTS csv_import_presets (
 	signature TEXT PRIMARY KEY,
 	name TEXT NOT NULL,
@@ -336,8 +306,8 @@ CREATE TABLE IF NOT EXISTS csv_import_presets (
 );
 
 -- Description-match rules that pick the category (offset account) for a CSV
--- import row. Like budgets, they are user config outside undo, so account
--- deletion is guarded instead of cascading silently.
+-- import row. User config, so account deletion is guarded instead of
+-- cascading silently.
 CREATE TABLE IF NOT EXISTS import_rules (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	priority INTEGER NOT NULL,
@@ -350,9 +320,9 @@ CREATE TABLE IF NOT EXISTS import_rules (
 CREATE INDEX IF NOT EXISTS idx_import_rules_priority ON import_rules(priority, id);
 
 -- Target allocation per commodity for the portfolio rebalance calculator.
--- Book-scoped user config: deliberately outside `DATA_TABLES` (not part of
--- linear undo) like `import_rules`. A target dies with its commodity through
--- the FK cascade, e.g. when the GnuCash orphan sweep drops one.
+-- Book-scoped user config like `import_rules`. A target dies with its
+-- commodity through the FK cascade, e.g. when the GnuCash orphan sweep drops
+-- one.
 CREATE TABLE IF NOT EXISTS allocation_targets (
 	commodity_guid TEXT PRIMARY KEY REFERENCES commodities(guid) ON DELETE CASCADE,
 	target_pct REAL NOT NULL
@@ -452,7 +422,9 @@ pub fn clear_last_book(app_data_dir: &Path) {
 
 /// Full database reset: drops every app table and recreates the current
 /// `SCHEMA`. This is the supported upgrade path while there are no
-/// migrations — Settings → Clear all data, then re-import.
+/// migrations — Settings → Clear all data, then re-import. The `change_log` /
+/// `change_snapshots` drops purge the audit log that pre-removal books still
+/// carry.
 pub fn clear_db(conn: &Connection) -> Result<()> {
     let drops = conn.execute_batch(
         "PRAGMA foreign_keys = OFF;
@@ -474,8 +446,8 @@ pub fn clear_db(conn: &Connection) -> Result<()> {
            DROP TABLE IF EXISTS app_settings;",
     );
     // Restore foreign keys on every path: a failed drop must not leave the
-    // live connection with FK enforcement off (the revert safety net and
-    // orphan handling depend on real FK errors).
+    // live connection with FK enforcement off (orphan handling depends on real
+    // FK errors).
     let restore = conn.execute_batch("PRAGMA foreign_keys = ON;");
     drops?;
     restore?;
@@ -512,7 +484,7 @@ mod tests {
             .execute("DELETE FROM fk_parent WHERE id = 1", [])
             .unwrap_err();
         // Other constraint failures must NOT classify as FK violations
-        // (the old substring match masked them as "blocked" reverts).
+        // (an old substring match misclassified them as FK errors).
         let unique_err = conn
             .execute("INSERT INTO fk_parent VALUES (1)", [])
             .unwrap_err();
@@ -579,8 +551,6 @@ mod tests {
             "app_settings",
             "attachments",
             "budgets",
-            "change_log",
-            "change_snapshots",
             "commodities",
             "prices",
             "recurring_schedules",

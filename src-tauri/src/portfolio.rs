@@ -66,8 +66,8 @@ pub struct PortfolioData {
     pub value_trend: Vec<PortfolioValuePoint>,
 }
 
-/// Saved rebalance target for one commodity. Book-scoped user config,
-/// deliberately outside `DATA_TABLES`/undo like `import_rules`.
+/// Saved rebalance target for one commodity. Book-scoped user config like
+/// `import_rules`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AllocationTarget {

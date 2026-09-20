@@ -6,8 +6,8 @@ use crate::db::{run_blocking, with_tx_err, AppError, AppState};
 use crate::utils;
 
 /// One description-match rule: the first rule (by priority, then id) whose
-/// pattern matches a CSV row's description picks that row's category. Rules are
-/// book-scoped user config, deliberately outside `DATA_TABLES`/undo.
+/// pattern matches a CSV row's description picks that row's category. Rules
+/// are book-scoped user config.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportRule {
@@ -222,7 +222,7 @@ pub(crate) fn resolve_account(
 }
 
 /// Accounts referenced by rules. The GnuCash orphan sweep must skip them: the
-/// FK cascade would silently drop the rules (they are outside undo snapshots).
+/// FK cascade would silently drop the rules.
 pub(crate) fn rule_account_guids(conn: &Connection) -> Result<Vec<String>, AppError> {
     let mut stmt = conn
         .prepare("SELECT DISTINCT account_guid FROM import_rules")

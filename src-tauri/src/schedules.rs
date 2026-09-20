@@ -5,7 +5,6 @@ use std::collections::{HashMap, HashSet};
 use tauri::State;
 
 use crate::db::{run_blocking, with_tx_err, AppError, AppState};
-use crate::history;
 use crate::sql;
 use crate::transactions::{SplitInput, TxInput};
 use crate::utils;
@@ -846,8 +845,7 @@ pub(crate) fn apply_imported_schedule(
 
 /// Account GUIDs referenced by any schedule template. The GnuCash orphan sweep
 /// uses this to keep accounts a schedule still needs (deleting them would leave
-/// dangling template references, and the sweep is outside undo snapshots for
-/// config tables).
+/// dangling template references).
 pub(crate) fn schedule_account_guids(conn: &Connection) -> Result<Vec<String>, AppError> {
     let mut stmt = conn.prepare("SELECT template_json FROM recurring_schedules")?;
     let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
@@ -860,22 +858,9 @@ pub(crate) fn schedule_account_guids(conn: &Connection) -> Result<Vec<String>, A
 
 // ── Post / skip ──────────────────────────────────────────────────────────────
 
-fn schedule_tx_label(template: &StoredTemplate, schedule_name: &str) -> String {
-    let base = template
-        .description
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .unwrap_or(schedule_name);
-    utils::truncate_chars(base, 80)
-}
-
 /// Materialize the due occurrence as a real transaction and advance the
-/// pointer atomically. The new transaction is an ordinary `tx_create` with
-/// `source = "schedule"` (plus `scheduleGuid` in the detail JSON), and the
-/// schedule row is snapshotted alongside it, so linear undo restores both the
-/// money movement and the pointer. Posting is manual-only: due dates are always
-/// ≤ today, so the manual future-date block is never bypassed.
+/// pointer atomically. Posting is manual-only: due dates are always ≤ today,
+/// so the manual future-date block is never bypassed.
 fn post_schedule_occurrence_inner(
     conn: &Connection,
     guid: &str,
@@ -918,19 +903,6 @@ fn post_schedule_occurrence_inner(
     // or turned into placeholders since the schedule was created.
     let post_date = crate::transactions::validate_tx_input(conn, &input)?;
     let tx_guid = uuid::Uuid::new_v4().to_string();
-    let accounts_affected = input
-        .splits
-        .iter()
-        .map(|s| s.account_guid.clone())
-        .collect::<HashSet<_>>()
-        .len() as i64;
-    let label = schedule_tx_label(&template, &row.name);
-    let detail = serde_json::json!({
-        "postDate": post_date,
-        "scheduleGuid": guid,
-        "scheduleName": row.name,
-    })
-    .to_string();
 
     with_tx_err(conn, || {
         conn.execute(
@@ -944,39 +916,7 @@ fn post_schedule_occurrence_inner(
                 opt_text(&input.notes),
             ],
         )?;
-        let split_guids =
-            crate::transactions::insert_split_rows(conn, &tx_guid, &input.splits)?;
-        let mut snapshots = vec![
-            history::Snapshot {
-                table_name: "transactions",
-                row_guid: tx_guid.clone(),
-                before_json: None,
-            },
-            // Restores `occurrences_posted` / `next_due_date` on undo so the
-            // occurrence can be posted again (redo re-advances it).
-            history::Snapshot {
-                table_name: "recurring_schedules",
-                row_guid: guid.to_string(),
-                before_json: history::snapshot_row(conn, "recurring_schedules", guid)?,
-            },
-        ];
-        for g in &split_guids {
-            snapshots.push(history::Snapshot {
-                table_name: "splits",
-                row_guid: g.clone(),
-                before_json: None,
-            });
-        }
-        history::insert_change_entry(
-            conn,
-            "tx_create",
-            &label,
-            "schedule",
-            1,
-            accounts_affected,
-            Some(&detail),
-            &snapshots,
-        )?;
+        crate::transactions::insert_split_rows(conn, &tx_guid, &input.splits)?;
         let posted = row.occurrences_posted + 1;
         let advanced =
             next_occurrence(parse_stored_date(&due)?, &row.frequency, row.interval_mult)?
@@ -1325,52 +1265,7 @@ mod tests {
             .unwrap();
         assert_eq!(splits, 2);
 
-        // Logged as schedule-sourced so history shows where it came from.
-        let (kind, source): (String, String) = conn
-            .query_row(
-                "SELECT kind, source FROM change_log ORDER BY id DESC LIMIT 1",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!((kind.as_str(), source.as_str()), ("tx_create", "schedule"));
-
         // Pointer advanced one month, posted count bumped.
-        let after = fetch_schedule_inner(&conn, &s.guid).unwrap();
-        assert_eq!(after.next_due_date.as_deref(), Some("2024-02-01"));
-        assert_eq!(after.occurrences_posted, 1);
-    }
-
-    /// Undo restores the pointer with the transaction, so the occurrence is not
-    /// silently skipped; redo re-advances it.
-    #[test]
-    fn undo_of_post_restores_the_pointer_and_redo_re_advances_it() {
-        let conn = setup();
-        let s = create_schedule_inner(&conn, balanced_input()).unwrap();
-        post_schedule_occurrence_inner(&conn, &s.guid).unwrap();
-        let entry_id = crate::history::fetch_change_history_inner(&conn)
-            .unwrap()
-            .entries[0]
-            .id;
-
-        crate::history::undo_history_entry_inner(&conn, entry_id).unwrap();
-        let after = fetch_schedule_inner(&conn, &s.guid).unwrap();
-        assert_eq!(after.next_due_date.as_deref(), Some("2024-01-01"));
-        assert_eq!(after.occurrences_posted, 0);
-        let txs: i64 = conn
-            .query_row("SELECT COUNT(*) FROM transactions", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(txs, 0);
-
-        crate::history::redo_history_entry_inner(&conn, entry_id).unwrap();
-        let after = fetch_schedule_inner(&conn, &s.guid).unwrap();
-        assert_eq!(after.next_due_date.as_deref(), Some("2024-02-01"));
-        assert_eq!(after.occurrences_posted, 1);
-
-        // Undo again, then post: the restored pointer makes the occurrence
-        // postable instead of "completed"/skipped.
-        crate::history::undo_history_entry_inner(&conn, entry_id).unwrap();
-        post_schedule_occurrence_inner(&conn, &s.guid).unwrap();
         let after = fetch_schedule_inner(&conn, &s.guid).unwrap();
         assert_eq!(after.next_due_date.as_deref(), Some("2024-02-01"));
         assert_eq!(after.occurrences_posted, 1);
@@ -1455,20 +1350,5 @@ mod tests {
         delete_schedule_inner(&conn, &s.guid).unwrap();
         assert!(fetch_schedule_inner(&conn, &s.guid).is_err());
         assert!(fetch_schedules_inner(&conn).unwrap().is_empty());
-    }
-
-    #[test]
-    fn crud_leaves_no_history_entries() {
-        // Schedule definitions stay out of `change_log` so the linear-undo
-        // head is never hijacked by a no-op entry (only posted money moves).
-        let conn = setup();
-        let s = create_schedule_inner(&conn, balanced_input()).unwrap();
-        update_schedule_inner(&conn, &s.guid, balanced_input()).unwrap();
-        set_schedule_active_inner(&conn, &s.guid, false).unwrap();
-        skip_schedule_occurrence_inner(&conn, &s.guid).unwrap_err();
-        let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM change_log", [], |row| row.get(0))
-            .unwrap();
-        assert_eq!(count, 0);
     }
 }

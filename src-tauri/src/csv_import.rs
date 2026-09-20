@@ -6,7 +6,6 @@ use std::path::PathBuf;
 use tauri::State;
 
 use crate::db::{ensure_same_book, run_blocking, run_io, with_tx_err, AppError, AppState};
-use crate::history;
 use crate::import_rules;
 use crate::transactions;
 use crate::utils;
@@ -142,7 +141,6 @@ pub struct CsvCommitResult {
     pub created: i64,
     pub skipped_duplicates: i64,
     pub skipped_errors: i64,
-    pub entry_id: i64,
     pub label: String,
 }
 
@@ -993,7 +991,6 @@ struct StagedSelection {
     to_insert: Vec<StagedRow>,
     skipped_duplicates: i64,
     skipped_errors: i64,
-    rules_applied: i64,
 }
 
 fn duplicate_flags(
@@ -1303,12 +1300,10 @@ fn commit_inner(
         &parsed.rows,
         input.selected_keys.clone(),
     )?;
-    let (entry_id, label) = insert_staged_rows(
+    let label = insert_staged_rows(
         conn,
         &input.path,
         &input.target_account_guid,
-        &input.offset_account_guid,
-        selection.rules_applied,
         &selection.to_insert,
     )?;
     // Remember the mapping only after the rows landed, so a failed commit never
@@ -1338,7 +1333,6 @@ fn commit_inner(
         created: selection.to_insert.len() as i64,
         skipped_duplicates: selection.skipped_duplicates,
         skipped_errors: selection.skipped_errors,
-        entry_id,
         label,
     })
 }
@@ -1418,7 +1412,6 @@ fn select_rows_to_insert(
     let mut to_insert: Vec<StagedRow> = Vec::new();
     let mut skipped_duplicates = 0;
     let mut skipped_errors = 0;
-    let mut rules_applied = 0;
     let mut ordered_keys: Vec<i64> = by_key.keys().copied().collect();
     ordered_keys.sort();
     for key in ordered_keys {
@@ -1446,9 +1439,6 @@ fn select_rows_to_insert(
             skipped_errors += 1;
             continue;
         };
-        if row.rule_matched {
-            rules_applied += 1;
-        }
         to_insert.push(StagedRow {
             post_date: date,
             description: desc,
@@ -1467,36 +1457,20 @@ fn select_rows_to_insert(
         to_insert,
         skipped_duplicates,
         skipped_errors,
-        rules_applied,
     })
 }
 
-/// Insert the staged rows inside one transaction and record a history entry.
-/// Returns `(entry_id, label)`.
+/// Insert the staged rows inside one transaction. Returns the import label.
 fn insert_staged_rows(
     conn: &Connection,
     path: &str,
     target_guid: &str,
-    offset_guid: &str,
-    rules_applied: i64,
     to_insert: &[StagedRow],
-) -> Result<(i64, String), AppError> {
+) -> Result<String, AppError> {
     let filename = filename_of(path);
     let label = format!("CSV import {filename} ({} transactions)", to_insert.len());
-    let detail = serde_json::json!({
-        "filePath": path,
-        "filename": filename,
-        "targetAccountGuid": target_guid,
-        "offsetAccountGuid": offset_guid,
-        "created": to_insert.len(),
-        "rulesApplied": rules_applied,
-    })
-    .to_string();
 
-    let entry_id = with_tx_err(conn, || {
-        let mut snapshots: Vec<history::Snapshot<'_>> = Vec::new();
-        // Own the GUID strings inside the txn so snapshot borrows stay valid.
-        let mut owned_guids: Vec<(String, Vec<String>)> = Vec::new();
+    with_tx_err(conn, || -> Result<(), AppError> {
         for row in to_insert {
             let tx_guid = uuid::Uuid::new_v4().to_string();
             let description = {
@@ -1528,42 +1502,11 @@ fn insert_staged_rows(
                     memo: None,
                 },
             ];
-            let split_guids = transactions::insert_split_rows(conn, &tx_guid, &splits)?;
-            owned_guids.push((tx_guid, split_guids));
+            transactions::insert_split_rows(conn, &tx_guid, &splits)?;
         }
-        for (tx_guid, split_guids) in &owned_guids {
-            snapshots.push(history::Snapshot {
-                table_name: "transactions",
-                row_guid: tx_guid.clone(),
-                before_json: None,
-            });
-            for g in split_guids {
-                snapshots.push(history::Snapshot {
-                    table_name: "splits",
-                    row_guid: g.clone(),
-                    before_json: None,
-                });
-            }
-        }
-        let mut distinct_accounts: HashSet<&str> = HashSet::new();
-        distinct_accounts.insert(target_guid);
-        for row in to_insert {
-            distinct_accounts.insert(row.offset_guid.as_str());
-        }
-        let entry_id = history::insert_change_entry(
-            conn,
-            "import",
-            &label,
-            "csv",
-            to_insert.len() as i64,
-            distinct_accounts.len() as i64,
-            Some(&detail),
-            &snapshots,
-        )
-        .map_err(AppError::from)?;
-        Ok::<i64, AppError>(entry_id)
+        Ok(())
     })?;
-    Ok((entry_id, label))
+    Ok(label)
 }
 
 #[tauri::command]
@@ -1830,26 +1773,12 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM transactions", [], |r| r.get(0))
             .unwrap();
         assert_eq!(tx_count, 2);
-        let (kind, source): (String, String) = conn
-            .query_row(
-                "SELECT kind, source FROM change_log WHERE id = ?1",
-                params![result.entry_id],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!((kind.as_str(), source.as_str()), ("import", "csv"));
 
         // Second preview of the same file flags both rows as duplicates.
         let second = preview_inner(&conn, input, &bytes).expect("re-preview runs");
         assert_eq!(second.valid_count, 0);
         assert_eq!(second.duplicate_count, 2);
 
-        // Linear undo removes the imported transactions.
-        crate::history::undo_history_entry_inner(&conn, result.entry_id).expect("undo runs");
-        let tx_count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM transactions", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(tx_count, 0);
         std::fs::remove_file(&path).ok();
     }
 
@@ -2073,15 +2002,6 @@ mod tests {
         };
         assert_eq!(splits_for("coffee"), 1);
         assert_eq!(splits_for("groceries"), 1);
-
-        let detail: String = conn
-            .query_row(
-                "SELECT detail_json FROM change_log WHERE id = ?1",
-                params![result.entry_id],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert!(detail.contains("\"rulesApplied\":1"), "{detail}");
 
         std::fs::remove_file(&path).ok();
     }

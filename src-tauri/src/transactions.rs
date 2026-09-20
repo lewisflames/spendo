@@ -1,11 +1,9 @@
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 use tauri::State;
 
 use crate::db::{run_blocking, with_tx_err, AppError, AppState};
 use crate::fx;
-use crate::history;
 use crate::sql;
 use crate::utils;
 use crate::utils::opt_text;
@@ -342,17 +340,6 @@ pub(crate) fn validate_tx_body_with(
     }
 
     Ok(())
-}
-
-fn tx_label(input: &TxInput) -> String {
-    match opt_text(&input.description) {
-        Some(d) => utils::truncate_chars(&d, 80),
-        None => "Manual transaction".to_string(),
-    }
-}
-
-fn tx_detail_json(post_date: &str) -> String {
-    serde_json::json!({ "postDate": post_date }).to_string()
 }
 
 /// Shared transaction-list WHERE builder. `param_offset` reserves leading
@@ -850,28 +837,6 @@ pub(crate) fn insert_split_rows(
     Ok(guids)
 }
 
-fn existing_split_guids(conn: &Connection, tx_guid: &str) -> Result<Vec<String>, AppError> {
-    let mut stmt = conn
-        .prepare("SELECT guid FROM splits WHERE tx_guid = ?1")
-        ?;
-    let rows = stmt
-        .query_map(params![tx_guid], |row| row.get(0))
-        ?;
-    let guids = rows
-        .collect::<Result<Vec<String>, _>>()
-        ?;
-    Ok(guids)
-}
-
-/// Distinct account GUIDs currently touched by a transaction's splits, for
-/// the history entry's `accounts_affected` metadata.
-fn affected_account_guids(conn: &Connection, tx_guid: &str) -> Result<HashSet<String>, AppError> {
-    let mut stmt = conn.prepare("SELECT DISTINCT account_guid FROM splits WHERE tx_guid = ?1")?;
-    let rows = stmt.query_map(params![tx_guid], |row| row.get(0))?;
-    let guids = rows.collect::<Result<HashSet<String>, _>>()?;
-    Ok(guids)
-}
-
 /// Manual edits re-create splits, so they must not touch cleared/reconciled
 /// rows — those transitions belong to the reconcile workflow.
 fn reject_when_reconciled(conn: &Connection, tx_guid: &str, action: &str) -> Result<(), AppError> {
@@ -890,17 +855,8 @@ fn reject_when_reconciled(conn: &Connection, tx_guid: &str, action: &str) -> Res
 }
 
 fn create_transaction_inner(conn: &Connection, input: TxInput) -> Result<String, AppError> {
-
     let post_date = validate_tx_input(conn, &input)?;
     let tx_guid = uuid::Uuid::new_v4().to_string();
-    let label = tx_label(&input);
-    let detail = tx_detail_json(&post_date);
-    let accounts_affected = input
-        .splits
-        .iter()
-        .map(|s| s.account_guid.clone())
-        .collect::<HashSet<_>>()
-        .len() as i64;
 
     with_tx_err(conn, || {
         conn.execute(
@@ -915,29 +871,7 @@ fn create_transaction_inner(conn: &Connection, input: TxInput) -> Result<String,
             ],
         )
         ?;
-        let split_guids = insert_split_rows(conn, &tx_guid, &input.splits)?;
-        let mut snapshots = vec![history::Snapshot {
-            table_name: "transactions",
-            row_guid: tx_guid.clone(),
-            before_json: None,
-        }];
-        for g in &split_guids {
-            snapshots.push(history::Snapshot {
-                table_name: "splits",
-                row_guid: g.clone(),
-                before_json: None,
-            });
-        }
-        history::insert_change_entry(
-            conn,
-            "tx_create",
-            &label,
-            "manual",
-            1,
-            accounts_affected,
-            Some(&detail),
-            &snapshots,
-        )?;
+        insert_split_rows(conn, &tx_guid, &input.splits)?;
         Ok(tx_guid.clone())
     })
 }
@@ -964,26 +898,8 @@ fn update_transaction_inner(
     // wipe reconciliation state. Block edits while any split is cleared or
     // reconciled — the reconcile page owns those transitions.
     reject_when_reconciled(conn, guid, "edit")?;
-    let old_splits = existing_split_guids(conn, guid)?;
-    let mut affected_accounts = affected_account_guids(conn, guid)?;
-    affected_accounts.extend(input.splits.iter().map(|s| s.account_guid.clone()));
-    let accounts_affected = affected_accounts.len() as i64;
-    let label = tx_label(&input);
-    let detail = tx_detail_json(&post_date);
 
     with_tx_err(conn, || {
-        let mut snapshots = vec![history::Snapshot {
-            table_name: "transactions",
-            row_guid: guid.to_string(),
-            before_json: history::snapshot_row(conn, "transactions", guid)?,
-        }];
-        for g in &old_splits {
-            snapshots.push(history::Snapshot {
-                table_name: "splits",
-                row_guid: g.clone(),
-                before_json: history::snapshot_row(conn, "splits", g)?,
-            });
-        }
         conn.execute(
             "UPDATE transactions SET post_date = ?1, description = ?2, num = ?3, notes = ?4
              WHERE guid = ?5",
@@ -998,37 +914,12 @@ fn update_transaction_inner(
         ?;
         conn.execute("DELETE FROM splits WHERE tx_guid = ?1", params![guid])
             ?;
-        let new_guids = insert_split_rows(conn, guid, &input.splits)?;
-        for g in &new_guids {
-            snapshots.push(history::Snapshot {
-                table_name: "splits",
-                row_guid: g.clone(),
-                before_json: None,
-            });
-        }
-        history::insert_change_entry(
-            conn,
-            "tx_update",
-            &label,
-            "manual",
-            1,
-            accounts_affected,
-            Some(&detail),
-            &snapshots,
-        )?;
+        insert_split_rows(conn, guid, &input.splits)?;
         Ok(())
     })
 }
 
 fn delete_transaction_inner(conn: &Connection, guid: &str) -> Result<(), AppError> {
-    let before: Option<String> = conn
-        .query_row(
-            "SELECT description FROM transactions WHERE guid = ?1",
-            params![guid],
-            |row| row.get::<_, Option<String>>(0),
-        )
-        .optional()?
-        .flatten();
     let exists = conn
         .query_row(
             "SELECT 1 FROM transactions WHERE guid = ?1",
@@ -1042,47 +933,12 @@ fn delete_transaction_inner(conn: &Connection, guid: &str) -> Result<(), AppErro
         return Err(AppError::NotFound("Transaction not found — it may have been removed".to_string()));
     }
     reject_when_reconciled(conn, guid, "delete")?;
-    let old_splits = existing_split_guids(conn, guid)?;
-    let accounts_affected = affected_account_guids(conn, guid)?.len() as i64;
-    let label = before
-        .as_deref()
-        .map(|d| {
-            let t = d.trim();
-            if t.is_empty() {
-                "Delete manual transaction".to_string()
-            } else {
-                format!("Delete {}", utils::truncate_chars(t, 80))
-            }
-        })
-        .unwrap_or_else(|| "Delete manual transaction".to_string());
 
     with_tx_err(conn, || {
-        let mut snapshots = vec![history::Snapshot {
-            table_name: "transactions",
-            row_guid: guid.to_string(),
-            before_json: history::snapshot_row(conn, "transactions", guid)?,
-        }];
-        for g in &old_splits {
-            snapshots.push(history::Snapshot {
-                table_name: "splits",
-                row_guid: g.clone(),
-                before_json: history::snapshot_row(conn, "splits", g)?,
-            });
-        }
         conn.execute("DELETE FROM splits WHERE tx_guid = ?1", params![guid])
             ?;
         conn.execute("DELETE FROM transactions WHERE guid = ?1", params![guid])
             ?;
-        history::insert_change_entry(
-            conn,
-            "tx_delete",
-            &label,
-            "manual",
-            1,
-            accounts_affected,
-            None,
-            &snapshots,
-        )?;
         Ok(())
     })
 }
@@ -1238,7 +1094,7 @@ mod tests {
     }
 
     #[test]
-    fn create_balanced_transaction_persists_and_logs_history() {
+    fn create_balanced_transaction_persists() {
         let conn = setup_two_accounts();
         let guid = create_transaction_inner(&conn, balanced_input()).expect("create runs");
         let detail = fetch_transaction_inner(&conn, &guid)
@@ -1256,28 +1112,6 @@ mod tests {
         amounts.sort_by(|a, b| a.total_cmp(b));
         assert!((amounts[0] + 42.10).abs() < 1e-6);
         assert!((amounts[1] - 42.10).abs() < 1e-6);
-        let count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM change_log WHERE kind = 'tx_create'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(count, 1);
-    }
-
-    #[test]
-    fn tx_label_truncates_multibyte_descriptions_safely() {
-        // Regression: `&s[..80]` used to panic (process abort in release) when
-        // byte 80 landed inside a multibyte character.
-        let mut input = balanced_input();
-        input.description = Some("漢".repeat(27));
-        let label = tx_label(&input);
-        assert_eq!(label, format!("{}…", "漢".repeat(26)));
-        // Descriptions at or under the cap pass through untouched.
-        let mut short = balanced_input();
-        short.description = Some("é".repeat(40));
-        assert_eq!(tx_label(&short), "é".repeat(40));
     }
 
     #[test]
@@ -1385,7 +1219,7 @@ mod tests {
     }
 
     #[test]
-    fn update_replaces_splits_and_delete_removes_with_history() {
+    fn update_replaces_splits_and_delete_removes() {
         let conn = setup_two_accounts();
         let guid = create_transaction_inner(&conn, balanced_input()).expect("create runs");
         let mut edited = balanced_input();
@@ -1401,27 +1235,6 @@ mod tests {
 
         delete_transaction_inner(&conn, &guid).expect("delete runs");
         assert!(fetch_transaction_inner(&conn, &guid).expect("query runs").is_none());
-        let kinds: Vec<String> = {
-            let mut stmt = conn
-                .prepare("SELECT kind FROM change_log ORDER BY id")
-                .unwrap();
-            stmt.query_map([], |r| r.get(0))
-                .unwrap()
-                .collect::<Result<Vec<_>, _>>()
-                .unwrap()
-        };
-        assert_eq!(kinds, vec!["tx_create", "tx_update", "tx_delete"]);
-        // Every history entry reports the real number of affected accounts.
-        let affected: Vec<i64> = {
-            let mut stmt = conn
-                .prepare("SELECT accounts_affected FROM change_log ORDER BY id")
-                .unwrap();
-            stmt.query_map([], |r| r.get(0))
-                .unwrap()
-                .collect::<Result<Vec<_>, _>>()
-                .unwrap()
-        };
-        assert_eq!(affected, vec![2, 2, 2]);
     }
 
     #[test]
