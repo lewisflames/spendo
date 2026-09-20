@@ -14,7 +14,7 @@
   aria-label="Changes history"
   class="flex w-80 shrink-0 flex-col overflow-hidden bg-sidebar"
 >
-  <header class="flex h-10 shrink-0 items-center justify-between gap-2 px-3">
+  <header class="flex h-10 shrink-0 items-center justify-between gap-2 pr-2 pl-0">
     <div class="flex min-w-0 items-center gap-2">
       <History aria-hidden="true" class="size-4 shrink-0 text-muted-foreground" />
       <h2 class="truncate text-sm font-semibold">History</h2>
