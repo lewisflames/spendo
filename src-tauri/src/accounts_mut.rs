@@ -66,6 +66,14 @@ fn validate_scalar_fields(input: &AccountInput) -> Result<&str, AppError> {
     if !ACCOUNT_TYPES.contains(&input.account_type.as_str()) {
         return Err(AppError::Validation(format!("Invalid account type: {}", input.account_type)));
     }
+    // A postable account without a currency would be dropped from ledger/split
+    // queries (INNER JOIN commodities) while still counting in balances —
+    // require one. Placeholders are never posted to, so they may stay bare.
+    if !input.placeholder && input.commodity_guid.is_none() {
+        return Err(AppError::Validation(
+            "Pick a currency for this account".to_string(),
+        ));
+    }
     if let Some(ref code) = input.code {
         if code.len() > 100 {
             return Err(AppError::Validation("Code is too long (max 100)".to_string()));
@@ -438,6 +446,21 @@ mod tests {
             commodity_guid: Some("c-eur".to_string()),
             placeholder: false,
         }
+    }
+
+    #[test]
+    fn create_requires_currency_for_postable_accounts() {
+        let conn = setup();
+        let mut no_currency = input("Food", None);
+        no_currency.commodity_guid = None;
+        let err = create_account_inner(&conn, no_currency).unwrap_err();
+        assert!(err.to_string().contains("currency"), "unexpected: {err}");
+
+        // Placeholders are never posted to, so they may stay currency-less.
+        let mut placeholder = input("Reserved", None);
+        placeholder.commodity_guid = None;
+        placeholder.placeholder = true;
+        assert!(create_account_inner(&conn, placeholder).is_ok());
     }
 
     #[test]
