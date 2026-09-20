@@ -14,7 +14,7 @@
   } from '$lib/tauri';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import { useUrlParams, yearParam } from '$lib/hooks/use-url-params.svelte';
-  import { Pencil, Trash2 } from '@lucide/svelte';
+  import { ArrowLeft, Pencil, Trash2 } from '@lucide/svelte';
   import { errMsg } from '$lib/utils/error';
   import { toast } from '$lib/components/ui/sonner';
   import PageHeader from '$lib/components/layout/page-header.svelte';
@@ -136,6 +136,10 @@
   <div class="flex flex-col gap-6">
     <PageHeader title={accountName} description={headerDescription}>
       <div class="flex flex-wrap items-center gap-2">
+        <Button variant="outline" href={resolve('/budgets')}>
+          <ArrowLeft aria-hidden="true" class="size-4" />
+          Budgets
+        </Button>
         <BudgetYearStepper
           bind:yearSel={by.yearSel}
           yearOptions={by.yearOptions}
@@ -185,12 +189,7 @@
         description="This account has no budget for the selected year. Years without a budget stay empty."
       >
         {#snippet action()}
-          <div class="flex items-center gap-2">
-            <Button onclick={() => (showEditDialog = true)}>Set budget</Button>
-            <Button variant="outline" onclick={() => goto(resolve('/budgets'))}
-              >Back to budgets</Button
-            >
-          </div>
+          <Button onclick={() => (showEditDialog = true)}>Set budget</Button>
         {/snippet}
       </EmptyState>
     {:else}
