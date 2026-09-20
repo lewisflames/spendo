@@ -515,8 +515,9 @@ pub(crate) fn fetch_change_history_page_inner(
     })
 }
 
-/// First page of the change log, newest first. Kept for callers that don't
-/// paginate (import/csv tests, one-shot reads).
+/// First page of the change log, newest first. Unpaginated convenience used
+/// by tests (import, csv, schedules and history) to read the log.
+#[cfg(test)]
 pub(crate) fn fetch_change_history_inner(conn: &Connection) -> Result<ChangeHistory, String> {
     fetch_change_history_page_inner(conn, None, None)
 }
