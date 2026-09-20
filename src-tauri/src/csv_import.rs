@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use tauri::State;
 
-use crate::db::{run_blocking, run_io, with_tx_err, AppError, AppState};
+use crate::db::{ensure_same_book, run_blocking, run_io, with_tx_err, AppError, AppState};
 use crate::history;
 use crate::transactions;
 
@@ -1213,9 +1213,16 @@ pub async fn csv_commit(
     state: State<'_, AppState>,
     input: CsvCommitInput,
 ) -> Result<CsvCommitResult, String> {
+    // Capture the active book before reading/parsing the file so a switch
+    // during preparation aborts instead of writing into the new book.
+    let generation = state
+        .book_generation
+        .load(std::sync::atomic::Ordering::SeqCst);
     let path = input.path.clone();
     let bytes = run_io(move || read_file_bytes(&path).map_err(String::from)).await?;
+    let generation_handle = state.book_generation.clone();
     run_blocking(state.db.clone(), move |conn| {
+        ensure_same_book(&generation_handle, generation)?;
         commit_inner(conn, input, &bytes).map_err(String::from)
     })
     .await
