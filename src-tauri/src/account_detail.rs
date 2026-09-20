@@ -846,6 +846,9 @@ pub struct AccountBalancePoint {
 /// `signed_amount_expr`, so running sums can be aggregated as-is.
 /// Half-open dates (`>= start AND < date(end, '+1 day')`): `post_date` carries
 /// `HH:MM:SS`, so `<= YYYY-MM-DD` would drop end-day timed rows.
+/// Returns `(post_date, commodity_guid, mnemonic, summed delta)`. The GUID
+/// keys price lookups (mnemonics can repeat across namespaces); the mnemonic
+/// is for FX/display.
 fn subtree_deltas_by_day(
     conn: &Connection,
     sub_guids: &[String],
@@ -853,10 +856,10 @@ fn subtree_deltas_by_day(
     type_filter: &str,
     start_date: &str,
     end_date: &str,
-) -> Result<Vec<(String, String, f64)>, String> {
+) -> Result<Vec<(String, String, String, f64)>, String> {
     let n = sub_guids.len();
     let sql = format!(
-        "SELECT t.post_date, c.mnemonic, COALESCE(SUM({}), 0)
+        "SELECT t.post_date, c.guid, c.mnemonic, COALESCE(SUM({}), 0)
          FROM splits s
          JOIN accounts a ON a.guid = s.account_guid
          JOIN commodities c ON c.guid = a.commodity_guid
@@ -864,7 +867,7 @@ fn subtree_deltas_by_day(
          WHERE s.account_guid IN ({}) {}
            AND t.post_date >= ?{}
            AND t.post_date < min(date(?{}, '+1 day'), {})
-         GROUP BY t.post_date, c.mnemonic
+         GROUP BY t.post_date, c.guid, c.mnemonic
          ORDER BY t.post_date ASC",
         amount_expr,
         sql::in_clause(n),
@@ -880,7 +883,7 @@ fn subtree_deltas_by_day(
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map(params.as_slice(), |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
         })
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
@@ -915,7 +918,7 @@ fn fetch_account_balance_trend_inner(
     let unified_prices = get_cached_prices_map(conn)?;
 
     let mut cash_by_day: HashMap<String, Vec<(String, f64)>> = HashMap::new();
-    for (day, mnemonic, delta) in subtree_deltas_by_day(
+    for (day, _guid, mnemonic, delta) in subtree_deltas_by_day(
         conn,
         &sub_guids,
         &signed_cash,
@@ -926,7 +929,7 @@ fn fetch_account_balance_trend_inner(
         cash_by_day.entry(day).or_default().push((mnemonic, delta));
     }
     let mut shares_by_day: HashMap<String, Vec<(String, f64)>> = HashMap::new();
-    for (day, mnemonic, delta) in subtree_deltas_by_day(
+    for (day, guid, _mnemonic, delta) in subtree_deltas_by_day(
         conn,
         &sub_guids,
         &signed_shares,
@@ -937,7 +940,7 @@ fn fetch_account_balance_trend_inner(
         shares_by_day
             .entry(day)
             .or_default()
-            .push((mnemonic, delta));
+            .push((guid, delta));
     }
 
     let days: BTreeSet<String> = cash_by_day
@@ -975,7 +978,7 @@ fn fetch_account_balance_trend_inner(
             .sum();
         let shares_total: f64 = shares_running
             .iter()
-            .map(|(mn, q)| unified_prices.get(mn).unwrap_or(&0.0) * q)
+            .map(|(guid, q)| unified_prices.get(guid).unwrap_or(&0.0) * q)
             .sum();
         trend.push(AccountBalancePoint {
             date: day,

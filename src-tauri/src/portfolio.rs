@@ -317,7 +317,7 @@ fn build_commodity_groups(
 
     for r in rows {
         let quote_currency = quote_currencies
-            .get(&r.mnemonic)
+            .get(&r.commodity_guid)
             .cloned()
             .unwrap_or_else(|| report_currency.clone());
         let cost_converted = fx::convert(r.cost, &quote_currency, &report_currency, &fx_map);
@@ -357,13 +357,10 @@ fn value_commodity_groups(
     let holdings: Vec<PortfolioHolding> = commodity_map
         .into_iter()
         .map(|(guid, group)| {
-            let price_info = prices_with_date_map.get(&group.mnemonic);
+            let price_info = prices_with_date_map.get(&guid);
             let price = price_info.map(|p| p.0);
             let price_date = price_info.map(|p| p.1.clone());
-            let prev_price = prev_prices_map
-                .get(&group.mnemonic)
-                .map(|p| p.0)
-                .filter(|_| price.is_some());
+            let prev_price = prev_prices_map.get(&guid).map(|p| p.0).filter(|_| price.is_some());
             let market_value = group.total_shares * price.unwrap_or(0.0);
             let avg_cost = if group.total_shares != 0.0 {
                 group.total_cost / group.total_shares
@@ -534,9 +531,9 @@ fn load_trend_inputs(conn: &Connection, filter: Option<&str>) -> Result<TrendInp
     // Cost-basis currency per commodity (its price quote currency)
     let quote_currencies = latest_quote_currencies(conn)?;
     let mut guid_to_quote: HashMap<String, String> = HashMap::new();
-    for (guid, mnemonic) in &guid_to_mnemonic {
+    for guid in guid_to_mnemonic.keys() {
         let quote = quote_currencies
-            .get(mnemonic)
+            .get(guid)
             .cloned()
             .unwrap_or_else(|| report_currency.clone());
         guid_to_quote.insert(guid.clone(), quote);
