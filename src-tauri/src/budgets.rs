@@ -120,7 +120,7 @@ fn validate_amount(amount: f64) -> Result<(), String> {
 /// Months elapsed in `year` for pacing: 12 for past years, the current month
 /// (1–12) for the current year, 0 for future years.
 fn elapsed_months_for_year(year: i32) -> i32 {
-    let now = chrono::Utc::now();
+    let now = chrono::Local::now();
     let cy = now.year();
     let cm = now.month() as i32;
     if year < cy {
@@ -734,7 +734,7 @@ fn fetch_budget_detail_inner(
 fn fetch_budget_date_range_inner(conn: &Connection) -> Result<BudgetDateRange, String> {
     let (earliest, latest) = utils::visible_tx_window(conn)?;
 
-    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     // Clamp the upper bound to today so an empty book still offers the
     // current year in the picker.
     let latest_date = match latest {

@@ -135,16 +135,20 @@ pub const QUANTITY_AMOUNT: &str = "CAST(s.quantity_num AS REAL) / CAST(s.quantit
 /// transactions are excluded so net worth, PnL, budgets and portfolio agree
 /// across pages for the same book.
 ///
+/// The window is evaluated in the user's local timezone (`localtime`), matching
+/// the frontend's `todayStr()` — backend `Utc` "today" would reject/hide the
+/// user's current day east of UTC. Timestamps (`iso_now`) stay UTC.
+///
 /// Canonical date contract (half-open everywhere):
 /// `from >= start AND to < date(end, '+1 day')`. Never use `<= YYYY-MM-DD`
 /// against `post_date` (`YYYY-MM-DD HH:MM:SS`) — lexicographic `<=` drops
 /// end-day timed rows. Use `< date(?, '+1 day')` or `substr(post_date,1,10)`.
-pub const VISIBLE_TX_FILTER: &str = "t.post_date < date('now', '+1 day')";
+pub const VISIBLE_TX_FILTER: &str = "t.post_date < date('now', 'localtime', '+1 day')";
 
 /// Bare "now + 1 day" expression for queries that cap a caller-supplied upper
 /// bound (e.g. PnL `min(date(?,'+1 day'), VISIBLE_NOW)`). Must stay in sync
 /// with [`VISIBLE_TX_FILTER`].
-pub const VISIBLE_NOW_EXPR: &str = "date('now', '+1 day')";
+pub const VISIBLE_NOW_EXPR: &str = "date('now', 'localtime', '+1 day')";
 
 /// Escape `%`, `_` and `\` in user input for LIKE patterns used together
 /// with `ESCAPE '\'`, so searching for a literal `%` matches a literal `%`

@@ -1,4 +1,4 @@
-use chrono::Utc;
+use chrono::Local;
 use rusqlite::Connection;
 use serde::Serialize;
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -117,7 +117,7 @@ struct TxQuery<'a> {
 fn effective_as_of(as_of: Option<&str>) -> String {
     as_of
         .map(str::to_string)
-        .unwrap_or_else(|| Utc::now().format("%Y-%m-%d").to_string())
+        .unwrap_or_else(|| Local::now().format("%Y-%m-%d").to_string())
 }
 
 /// Grouped per-transaction effects keyed by GUID: `(post_date, description,
@@ -891,7 +891,7 @@ fn fetch_account_balance_trend_inner(
 
     // Full history through today: the chart always shows all data, with the
     // as-of cutoff (if any) drawn as a marker line by the frontend.
-    let end_date = Utc::now().format("%Y-%m-%d").to_string();
+    let end_date = Local::now().format("%Y-%m-%d").to_string();
     let start_date = "0000-01-01";
     let signed_cash = utils::signed_amount_expr(utils::RAW_AMOUNT, "a.account_type");
     let cash_filter = format!("AND a.account_type NOT IN ({})", utils::investment_types_sql());

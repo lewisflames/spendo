@@ -609,7 +609,9 @@ fn post_schedule_occurrence_inner(
     let due = row.next_due_date.clone().ok_or_else(|| {
         AppError::Validation("Schedule is completed — no occurrences remain".to_string())
     })?;
-    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    // Local "today": the frontend enables Post from its local date, so the
+    // backend must use the same clock.
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     if due > today {
         return Err(AppError::Validation(format!(
             "Not due yet — the next occurrence is {due}"

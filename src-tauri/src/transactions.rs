@@ -180,7 +180,9 @@ fn validate_post_date(post_date: &str) -> Result<String, AppError> {
         return Err(AppError::Validation("Date is required".to_string()));
     }
     let normalized = utils::validate_iso_date(trimmed).map_err(AppError::Validation)?;
-    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    // Local "today" so users east of UTC can post their current day (matches
+    // the frontend's `todayStr` and the visibility window).
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     if normalized > today {
         return Err(AppError::Validation("Future dates are not allowed".to_string()));
     }
@@ -1217,6 +1219,14 @@ mod tests {
         let mut short = balanced_input();
         short.description = Some("é".repeat(40));
         assert_eq!(tx_label(&short), "é".repeat(40));
+    }
+
+    #[test]
+    fn validate_post_date_accepts_local_today() {
+        // Canary: backend "today" must match the frontend's local `todayStr`,
+        // not UTC, or users east of UTC cannot enter today's transactions.
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        assert_eq!(validate_post_date(&today).unwrap(), today);
     }
 
     #[test]

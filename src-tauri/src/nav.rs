@@ -21,7 +21,7 @@ fn nav_badges_inner(conn: &Connection) -> Result<NavBadges, String> {
         .query_row(
             "SELECT COUNT(*) FROM recurring_schedules
              WHERE active = 1 AND next_due_date IS NOT NULL
-               AND substr(next_due_date, 1, 10) <= date('now')",
+               AND substr(next_due_date, 1, 10) <= date('now', 'localtime')",
             [],
             |row| row.get(0),
         )
