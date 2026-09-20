@@ -250,30 +250,24 @@ pub(crate) fn validate_tx_body(conn: &Connection, input: &TxInput) -> Result<(),
         if s.account_guid.trim().is_empty() {
             return Err(AppError::Validation(format!("Split {n}: account is required")));
         }
-        let placeholder: Option<i64> = conn
+        let account: Option<(i64, String)> = conn
             .query_row(
-                "SELECT placeholder FROM accounts WHERE guid = ?1",
+                "SELECT COALESCE(placeholder, 0), account_type FROM accounts WHERE guid = ?1",
                 params![s.account_guid],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
-            .optional()
-            ?
-            .flatten();
-        // Distinguish missing (None + no row) from present-with-NULL: re-query
-        // existence explicitly since `placeholder` is nullable.
-        let exists: bool = conn
-            .query_row(
-                "SELECT 1 FROM accounts WHERE guid = ?1",
-                params![s.account_guid],
-                |_| Ok(()),
-            )
-            .optional()
-            ?
-            .is_some();
-        if !exists {
+            .optional()?;
+        let Some((placeholder, account_type)) = account else {
             return Err(AppError::NotFound(format!("Split {n}: account not found")));
+        };
+        // The internal ROOT is not a real account: posting to it corrupts the
+        // balance-sheet identity (the picker never offers it).
+        if account_type == "ROOT" {
+            return Err(AppError::Validation(format!(
+                "Split {n}: the root account cannot hold splits"
+            )));
         }
-        if placeholder.unwrap_or(0) != 0 {
+        if placeholder != 0 {
             return Err(AppError::Validation(format!("Split {n}: placeholder accounts cannot hold splits")));
         }
         if !s.amount.is_finite() {
@@ -1319,6 +1313,15 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.contains("Invalid date"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn create_rejects_splits_on_the_root_account() {
+        let conn = setup_two_accounts();
+        let mut input = balanced_input();
+        input.splits[0].account_guid = "root".to_string();
+        let err = create_transaction_inner(&conn, input).unwrap_err();
+        assert!(err.to_string().contains("root account"), "unexpected: {err}");
     }
 
     #[test]

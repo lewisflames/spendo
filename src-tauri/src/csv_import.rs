@@ -567,28 +567,25 @@ fn validate_accounts(conn: &Connection, target: &str, offset: &str) -> Result<()
         ));
     }
     for (label, guid) in [("Target", target), ("Offset", offset)] {
-        let row: Option<(i64,)> = conn
+        let row: Option<(i64, String)> = conn
             .query_row(
-                "SELECT placeholder FROM accounts WHERE guid = ?1",
+                "SELECT COALESCE(placeholder, 0), account_type FROM accounts WHERE guid = ?1",
                 params![guid],
-                |r| r.get(0),
+                |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()
-            .map_err(AppError::from)?
-            .map(|p: Option<i64>| (p.unwrap_or(0),));
-        let exists: bool = conn
-            .query_row(
-                "SELECT 1 FROM accounts WHERE guid = ?1",
-                params![guid],
-                |_| Ok(()),
-            )
-            .optional()
-            .map_err(AppError::from)?
-            .is_some();
-        if !exists {
+            .map_err(AppError::from)?;
+        let Some((placeholder, account_type)) = row else {
             return Err(AppError::NotFound(format!("{label} account not found")));
+        };
+        // The internal ROOT is not a real account: posting to it corrupts the
+        // balance-sheet identity (the picker never offers it).
+        if account_type == "ROOT" {
+            return Err(AppError::Validation(format!(
+                "{label} account is the root account and cannot hold splits"
+            )));
         }
-        if row.map(|(p,)| p).unwrap_or(0) != 0 {
+        if placeholder != 0 {
             return Err(AppError::Validation(format!(
                 "{label} account is a placeholder and cannot hold splits"
             )));
@@ -1364,6 +1361,16 @@ mod tests {
         assert!(detect_dot_thousands(&rows(&["1,23", "1.234"]), false, &mapping()));
         assert!(!detect_dot_thousands(&rows(&["1,23", "1.23"]), false, &mapping()));
         assert!(!detect_dot_thousands(&rows(&["1.23", "1.234"]), false, &mapping()));
+    }
+
+    #[test]
+    /// The internal ROOT must never be a CSV target/offset, even though the
+    /// backend would otherwise accept it (placeholder = 0).
+    #[test]
+    fn validate_accounts_rejects_root() {
+        let conn = csv_e2e_setup();
+        let err = validate_accounts(&conn, "root", "groceries").unwrap_err();
+        assert!(err.to_string().contains("root account"), "unexpected: {err}");
     }
 
     #[test]
