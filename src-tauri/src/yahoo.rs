@@ -74,7 +74,9 @@ pub fn derive_yahoo_symbols(mnemonic: &str, namespace: &str, crypto_suffix: &str
 }
 
 /// Infer the quote currency of a Yahoo symbol (e.g. "AAPL" on NASDAQ -> USD,
-/// "SIE.DE" -> EUR, "BTC-EUR" -> EUR). Falls back to the report currency.
+/// "SIE.DE" -> EUR, "BTC-EUR" -> EUR). Falls back to the report currency —
+/// this is only a fallback: `YahooHistory.currency` (Yahoo's `meta.currency`)
+/// wins when it is present and known to the book.
 pub fn quote_currency_for_symbol(sym: &str, namespace: &str, report: &str) -> String {
     if sym.ends_with(".DE") || sym.ends_with(".AS") || sym.ends_with(".PA") {
         return "EUR".to_string();
@@ -91,14 +93,17 @@ pub fn quote_currency_for_symbol(sym: &str, namespace: &str, report: &str) -> St
     if sym.ends_with(".TO") {
         return "CAD".to_string();
     }
-    if sym.contains('-') {
+    // Only crypto pairs encode their quote currency after the dash; for
+    // equities (`BRK-B`) that segment is part of the ticker, not a currency.
+    if namespace == "CRYPTO" {
         if let Some((_, quote)) = sym.split_once('-') {
             if !quote.is_empty() {
                 return quote.to_string();
             }
         }
     }
-    if !sym.contains('.') && matches!(namespace, "NYSE" | "NASDAQ" | "AMEX") {
+    // US exchanges quote in USD regardless of dotted tickers (`BRK.B`).
+    if matches!(namespace, "NYSE" | "NASDAQ" | "AMEX") {
         return "USD".to_string();
     }
     report.to_string()
@@ -116,8 +121,22 @@ struct YahooChart {
 
 #[derive(Debug, Deserialize)]
 struct YahooChartResult {
+    meta: Option<YahooMeta>,
     timestamp: Option<Vec<i64>>,
     indicators: Option<YahooIndicators>,
+}
+
+#[derive(Debug, Deserialize)]
+struct YahooMeta {
+    currency: Option<String>,
+}
+
+/// One symbol's fetched history plus the quote currency Yahoo reported
+/// (`meta.currency`), which is authoritative over suffix guessing.
+#[derive(Debug, Clone, PartialEq)]
+pub struct YahooHistory {
+    pub prices: Vec<(i64, f64)>,
+    pub currency: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -152,7 +171,7 @@ pub async fn fetch_single_yahoo_history(
     symbol: &str,
     period1: Option<i64>,
     period2: i64,
-) -> Result<Vec<(i64, f64)>, String> {
+) -> Result<YahooHistory, String> {
     let encoded = percent_encode(symbol);
     let url = if let Some(p1) = period1 {
         format!(
@@ -188,6 +207,11 @@ pub async fn fetch_single_yahoo_history(
         .map_err(|e| format!("Yahoo Finance API error: {}", e))?;
 
     if let Some(result) = data.chart.result.first() {
+        let currency = result
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.currency.clone())
+            .filter(|c| !c.trim().is_empty());
         let timestamps = result.timestamp.as_deref().unwrap_or(&[]);
         let closes = result
             .indicators
@@ -199,13 +223,18 @@ pub async fn fetch_single_yahoo_history(
         let prices: Vec<(i64, f64)> = timestamps
             .iter()
             .zip(closes.iter())
-            .filter_map(|(ts, price)| price.map(|p| (*ts, p)))
+            .filter_map(|(ts, price)| match price {
+                // Zero/NaN closes poison every later FX conversion (inverse
+                // rates become infinite, prices saturate on write).
+                Some(p) if p.is_finite() && *p > 0.0 => Some((*ts, *p)),
+                _ => None,
+            })
             .collect();
 
         if prices.is_empty() {
             Err("No price data in response".to_string())
         } else {
-            Ok(prices)
+            Ok(YahooHistory { prices, currency })
         }
     } else {
         Err("No result from Yahoo".to_string())
@@ -248,7 +277,12 @@ mod tests {
     }
 
     #[test]
-    fn quote_currency_from_symbol_shape() {        assert_eq!(quote_currency_for_symbol("AAPL", "NASDAQ", "EUR"), "USD");
+    fn quote_currency_from_symbol_shape() {
+        assert_eq!(quote_currency_for_symbol("AAPL", "NASDAQ", "EUR"), "USD");
+        // Dotted/dashed US tickers are still USD — the post-dash segment of
+        // `BRK-B` is part of the ticker, not a quote currency.
+        assert_eq!(quote_currency_for_symbol("BRK.B", "NYSE", "EUR"), "USD");
+        assert_eq!(quote_currency_for_symbol("BRK-B", "NYSE", "EUR"), "USD");
         assert_eq!(quote_currency_for_symbol("SIE.DE", "XETRA", "USD"), "EUR");
         assert_eq!(quote_currency_for_symbol("BP.L", "LSE", "EUR"), "GBP");
         assert_eq!(quote_currency_for_symbol("7203.T", "JPX", "EUR"), "JPY");

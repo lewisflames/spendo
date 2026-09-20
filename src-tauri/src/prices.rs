@@ -8,7 +8,7 @@ use crate::db::{self, AppError, AppState};
 use crate::fx;
 use crate::utils;
 use crate::yahoo::{
-    derive_yahoo_symbols, fetch_single_yahoo_history, quote_currency_for_symbol,
+    derive_yahoo_symbols, fetch_single_yahoo_history, quote_currency_for_symbol, YahooHistory,
     SUPPORTED_CRYPTO_FIAT,
 };
 
@@ -248,7 +248,7 @@ pub(crate) struct PriceFetchPlan {
 
 pub(crate) struct PendingPriceWrites {
     symbol_map: HashMap<String, String>,
-    yahoo_history: HashMap<String, Vec<(i64, f64)>>,
+    yahoo_history: HashMap<String, YahooHistory>,
     assigned: HashSet<String>,
     report_currency_guid: Option<String>,
     report_currency: Option<String>,
@@ -361,6 +361,12 @@ fn write_history_prices(
     let mut insert = conn.prepare(&insert_sql).map_err(|e| e.to_string())?;
 
     for (date_str, price) in &dated {
+        // Yahoo occasionally returns 0/NaN closes; casting those to the scaled
+        // integer would store `i64::MAX` (inf) or a bogus 0 and poison every
+        // later conversion.
+        if !price.is_finite() || *price <= 0.0 {
+            continue;
+        }
         let price_guid = format!("{}-{}", commodity_guid, date_str);
         let value_num = (*price * PRICE_SCALE as f64).round() as i64;
         insert
@@ -400,13 +406,20 @@ pub(crate) fn write_price_data(conn: &Connection, data: &PendingPriceWrites) -> 
         };
 
         // Store prices in their actual quote currency so normalization at read time
-        // can convert to the report currency. Fall back to the report currency GUID
-        // when the quote currency isn't present in the book.
-        let quote = quote_currency_for_symbol(
-            sym,
-            &commodity.namespace,
-            report_currency.as_deref().unwrap_or(""),
-        );
+        // can convert to the report currency. Yahoo's `meta.currency` is
+        // authoritative; the symbol-shape heuristic is only a fallback. Fall back
+        // to the report currency GUID when the quote currency isn't in the book.
+        let quote = history
+            .currency
+            .clone()
+            .filter(|c| currency_guid_map.contains_key(c))
+            .unwrap_or_else(|| {
+                quote_currency_for_symbol(
+                    sym,
+                    &commodity.namespace,
+                    report_currency.as_deref().unwrap_or(""),
+                )
+            });
         let currency_guid = currency_guid_map
             .get(&quote)
             .cloned()
@@ -415,7 +428,7 @@ pub(crate) fn write_price_data(conn: &Connection, data: &PendingPriceWrites) -> 
             continue;
         };
 
-        write_history_prices(conn, &commodity.guid, &cg, history)?;
+        write_history_prices(conn, &commodity.guid, &cg, &history.prices)?;
     }
 
     // FX rates: each book currency quoted in the report currency.
@@ -579,13 +592,13 @@ fn plan_symbols(pre: &PriceFetchPlan) -> Result<SymbolPlan, String> {
 
 /// Fetched Yahoo histories and per-symbol failures.
 struct FetchOutcome {
-    yahoo_history: HashMap<String, Vec<(i64, f64)>>,
+    yahoo_history: HashMap<String, YahooHistory>,
     yahoo_errors: HashMap<String, String>,
 }
 
 /// Fetch all planned symbols concurrently with a concurrency limit.
 async fn fetch_all_histories(symbols: &SymbolPlan) -> FetchOutcome {
-    let mut yahoo_history: HashMap<String, Vec<(i64, f64)>> = HashMap::new();
+    let mut yahoo_history: HashMap<String, YahooHistory> = HashMap::new();
     let mut yahoo_errors: HashMap<String, String> = HashMap::new();
 
     // Fetch prices concurrently with a concurrency limit
@@ -670,10 +683,17 @@ fn assemble_result(
             if fx_primary_done.contains(mnemonic) {
                 continue;
             }
-            let inverted: Vec<(i64, f64)> = history.iter().map(|(ts, p)| (*ts, 1.0 / *p)).collect();
+            // Guard the division even though the fetch path filters: a zero
+            // rate would become `inf` and poison every conversion.
+            let inverted: Vec<(i64, f64)> = history
+                .prices
+                .iter()
+                .filter(|entry| entry.1.is_finite() && entry.1 > 0.0)
+                .map(|(ts, p)| (*ts, 1.0 / *p))
+                .collect();
             fx_history.insert(mnemonic.clone(), inverted);
         } else {
-            fx_history.insert(mnemonic.clone(), history.clone());
+            fx_history.insert(mnemonic.clone(), history.prices.clone());
             fx_primary_done.insert(mnemonic.clone());
         }
     }
@@ -684,17 +704,20 @@ fn assemble_result(
 
     for (sym, mnemonic) in &mnemonic_by_symbol {
         if let Some(history) = yahoo_history.get(sym) {
-            if let Some((_, latest_price)) = history.last() {
+            if let Some((_, latest_price)) = history.prices.last() {
                 let namespace = commodities
                     .iter()
                     .find(|c| c.mnemonic == *mnemonic)
                     .map(|c| c.namespace.as_str())
                     .unwrap_or("");
-                let quote = quote_currency_for_symbol(
-                    sym,
-                    namespace,
-                    report_currency.as_deref().unwrap_or(""),
-                );
+                // Yahoo's meta currency beats the symbol-shape heuristic.
+                let quote = history.currency.clone().unwrap_or_else(|| {
+                    quote_currency_for_symbol(
+                        sym,
+                        namespace,
+                        report_currency.as_deref().unwrap_or(""),
+                    )
+                });
                 latest_prices.push(PriceEntry {
                     mnemonic: mnemonic.clone(),
                     price: *latest_price,
@@ -995,6 +1018,33 @@ mod tests {
         assert!(normalize_symbol("AA PL").is_err());
         assert!(normalize_symbol("A/B").is_err());
         assert!(normalize_symbol(&"A".repeat(33)).is_err());
+    }
+
+    /// Regression: zero/non-finite closes must never reach the integer price
+    /// columns (`inf` saturates to `i64::MAX`, `NaN` becomes 0).
+    #[test]
+    fn write_history_prices_skips_non_positive_and_non_finite() {
+        let conn = setup_commodities();
+        let ts = 1_700_000_000i64;
+        let history = vec![
+            (ts, 0.0),
+            (ts + 86_400, f64::NAN),
+            (ts + 172_800, f64::INFINITY),
+            (ts + 259_200, 12.5),
+        ];
+        write_history_prices(&conn, "c-aapl", "c-eur", &history).unwrap();
+
+        let rows: Vec<(String, i64)> = {
+            let mut stmt = conn
+                .prepare("SELECT date, value_num FROM prices ORDER BY date")
+                .unwrap();
+            stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].1, (12.5 * PRICE_SCALE as f64).round() as i64);
     }
 
     #[test]
