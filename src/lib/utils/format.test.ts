@@ -4,6 +4,8 @@ import {
   EMPTY_DASH,
   fmtPct,
   formatBytes,
+  formatCurrency,
+  formatDate,
   formatDateRange,
   formatRelativeTime,
   parseLocalDate,
@@ -62,6 +64,15 @@ describe('formatBytes', () => {
   });
 });
 
+describe('formatCurrency', () => {
+  it('falls back to a plain number for unusable currency codes', () => {
+    for (const currency of ['Unknown', '']) {
+      expect(() => formatCurrency(1, currency)).not.toThrow();
+      expect(formatCurrency(1, currency).length).toBeGreaterThan(0);
+    }
+  });
+});
+
 describe('parseLocalDate', () => {
   it('parses date-only strings as local midnight, not UTC', () => {
     const d = parseLocalDate('2024-01-15');
@@ -78,9 +89,36 @@ describe('parseLocalDate', () => {
     expect(d.getDate()).toBe(1);
   });
 
+  it('pins time-bearing strings to their date portion as local midnight', () => {
+    const d = parseLocalDate('2024-01-15 10:30:00');
+    expect(d.getFullYear()).toBe(2024);
+    expect(d.getMonth()).toBe(0);
+    expect(d.getDate()).toBe(15);
+  });
+
+  it('keeps full ISO-8601 timestamps as instants', () => {
+    const iso = '2024-01-15T10:30:00.000Z';
+    expect(parseLocalDate(iso).getTime()).toBe(new Date(iso).getTime());
+  });
+
   it('passes Date instances through the constructor', () => {
     const src = new Date(2024, 5, 10, 12);
     expect(parseLocalDate(src).getTime()).toBe(src.getTime());
+  });
+});
+
+describe('formatDate', () => {
+  it('returns unparseable strings verbatim', () => {
+    expect(formatDate('not-a-date')).toBe('not-a-date');
+  });
+
+  it('renders a dash for empty input', () => {
+    expect(formatDate('')).toBe(EMPTY_DASH);
+  });
+
+  it('formats time-bearing strings via their date portion', () => {
+    expect(() => formatDate('2024-01-15 10:30:00')).not.toThrow();
+    expect(formatDate('2024-01-15 10:30:00')).toContain('2024');
   });
 });
 
