@@ -18,6 +18,7 @@
     type BookCurrency
   } from '$lib/tauri';
   import { errMsg } from '$lib/utils/error';
+  import { sessionCurrency } from '$lib/utils/format.svelte';
   import { ACCOUNT_TYPES } from './account-types';
   import { flattenAccountsForPicker, subtreeGuids } from './account-picker-utils';
 
@@ -64,6 +65,9 @@
   let confirmDelete = $state(false);
   let formError = $state('');
   let showErrors = $state(false);
+  // Create forms opened before the currency list resolved still need the
+  // report-currency default applied once `currencies` arrives.
+  let currencyDefaultPending = $state(false);
 
   let accountsData = $state<AccountsResult | null>(null);
   let currencies = $state<BookCurrency[]>([]);
@@ -106,15 +110,37 @@
       description = initial.description ?? '';
       commodityGuid = initial.commodityGuid ?? '';
       placeholder = initial.placeholder;
+      currencyDefaultPending = false;
     } else {
       name = '';
       accountType = 'BANK';
       parentGuid = parentPreset ?? '';
       code = '';
       description = '';
-      commodityGuid = '';
+      commodityGuid = reportCurrencyGuid();
       placeholder = false;
+      currencyDefaultPending = commodityGuid === '';
     }
+  }
+
+  /** GUID of the book's report currency, or '' when the list isn't loaded yet. */
+  function reportCurrencyGuid(): string {
+    const code = sessionCurrency();
+    return currencies.find((c) => c.mnemonic === code)?.guid ?? '';
+  }
+
+  /**
+   * The currency list loads asynchronously after the dialog opens, so a create
+   * form opened before it arrives still has no default; apply the report
+   * currency once the list resolves. The pending flag keeps this from
+   * overriding a currency the user picked in the meantime.
+   */
+  function applyCurrencyDefault(): void {
+    if (mode !== 'create' || !currencyDefaultPending) return;
+    const guid = reportCurrencyGuid();
+    if (!guid) return;
+    commodityGuid = guid;
+    currencyDefaultPending = false;
   }
 
   useDialogReset(() => open, syncDefaults);
@@ -128,6 +154,7 @@
         if (cancelled) return;
         accountsData = a;
         currencies = c;
+        applyCurrencyDefault();
       })
       .catch((e: unknown) => {
         if (cancelled) return;
@@ -143,7 +170,10 @@
 
   let nameError = $derived(!name.trim() ? 'Name is required' : '');
   let typeError = $derived(ACCOUNT_TYPES.includes(accountType) ? '' : 'Pick an account type');
-  let canSave = $derived(!saving && !deleting && !nameError && !typeError && !loading);
+  let currencyError = $derived(!placeholder && !commodityGuid ? 'Pick a currency' : '');
+  let canSave = $derived(
+    !saving && !deleting && !nameError && !typeError && !currencyError && !loading
+  );
 
   function buildInput(): AccountInput {
     return {
@@ -254,9 +284,13 @@
           {/if}
         </div>
         <div class="flex flex-col gap-1.5">
-          <label for="acct-currency" class="text-sm font-medium">Currency (optional)</label>
+          <label for="acct-currency" class="text-sm font-medium">Currency</label>
           <Select.Root type="single" bind:value={commodityGuid} items={currencyItems}>
-            <Select.Trigger id="acct-currency" class="w-full">
+            <Select.Trigger
+              id="acct-currency"
+              class="w-full"
+              aria-invalid={showErrors && !!currencyError}
+            >
               <SelectPrimitive.Value placeholder="None" />
             </Select.Trigger>
             <Select.Content>
@@ -266,6 +300,9 @@
               {/each}
             </Select.Content>
           </Select.Root>
+          {#if showErrors && currencyError}
+            <p role="alert" class="text-xs text-destructive">{currencyError}</p>
+          {/if}
         </div>
       </div>
 
