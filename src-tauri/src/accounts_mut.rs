@@ -360,6 +360,21 @@ fn delete_account_inner(conn: &Connection, guid: &str) -> Result<(), AppError> {
     if budgets > 0 {
         return Err(AppError::Validation("Cannot delete — budgets reference it. Remove the budgets first.".to_string()));
     }
+    // Schedule templates embed account GUIDs in JSON (no FK), so deleting would
+    // leave them failing at posting time.
+    let schedules: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM recurring_schedules WHERE instr(template_json, ?1) > 0",
+            params![guid],
+            |row| row.get(0),
+        )
+        ?;
+    if schedules > 0 {
+        return Err(AppError::Validation(
+            "Cannot delete — schedules reference it. Update or remove those schedules first."
+                .to_string(),
+        ));
+    }
 
     let label = account_label(&name, "Delete");
     with_tx_err(conn, || {
@@ -461,6 +476,24 @@ mod tests {
         placeholder.commodity_guid = None;
         placeholder.placeholder = true;
         assert!(create_account_inner(&conn, placeholder).is_ok());
+    }
+
+    #[test]
+    fn delete_blocks_accounts_referenced_by_schedules() {
+        let conn = setup();
+        let guid = create_account_inner(&conn, input("Food", Some("assets"))).unwrap();
+        conn.execute(
+            "INSERT INTO recurring_schedules
+               (guid, name, frequency, start_date, template_json, created_at)
+             VALUES ('s1', 'Rent', 'monthly', '2024-01-01', ?1, '2024-01-01T00:00:00Z')",
+            params![format!(
+                r#"{{"splits":[{{"accountGuid":"{guid}","amount":-100.0}}]}}"#
+            )],
+        )
+        .unwrap();
+
+        let err = delete_account_inner(&conn, &guid).unwrap_err();
+        assert!(err.to_string().contains("schedules"), "unexpected: {err}");
     }
 
     #[test]
