@@ -19,6 +19,29 @@ export function todayStr(): string {
   return `${d.getFullYear()}-${m}-${day}`;
 }
 
+/**
+ * Shared reactive local "today". Read `today.value` from components so
+ * "today"-dependent UI (due badges, as-of defaults, future-date guards) rolls
+ * over at midnight instead of freezing on the date the page mounted.
+ */
+export const today = $state({ value: todayStr() });
+
+function refreshToday(): void {
+  const next = todayStr();
+  if (today.value !== next) today.value = next;
+}
+
+// Browser-only wiring; vitest imports this module under Node, where neither
+// `window` nor `document` exists.
+if (typeof window !== 'undefined') {
+  setInterval(refreshToday, 60_000);
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) refreshToday();
+    });
+  }
+}
+
 /** Strict `YYYY-MM-DD` check with round-trip validation (rejects 2024-02-30). */
 export function isIsoDate(value: string): boolean {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);

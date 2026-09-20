@@ -12,7 +12,7 @@
   } from '$lib/features/accounts/account-types';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import { useUrlParams, dateParam } from '$lib/hooks/use-url-params.svelte';
-  import { todayStr } from '$lib/utils/date-utils.svelte';
+  import { today } from '$lib/utils/date-utils.svelte';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
   import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
   import BookGate from '$lib/components/shared/book-gate.svelte';
@@ -43,14 +43,14 @@
     LIABILITY: 'text-destructive'
   };
 
-  let asOf = $state(todayStr());
+  let asOf = $state(today.value);
   let dialogOpen = $state(false);
 
   useUrlParams([
     dateParam(
       'asOf',
-      () => (asOf === todayStr() ? null : asOf || null),
-      (v) => (asOf = v ?? todayStr())
+      () => (asOf === today.value ? null : asOf || null),
+      (v) => (asOf = v ?? today.value)
     )
   ]);
 

@@ -21,11 +21,11 @@
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import { openTransaction } from '$lib/utils/navigation';
   import { formatDate, plural, sessionCurrency } from '$lib/utils/format.svelte';
-  import { todayStr } from '$lib/utils/date-utils.svelte';
+  import { today as sharedToday } from '$lib/utils/date-utils.svelte';
   import { errMsg } from '$lib/utils/error';
 
   let currency = $derived(sessionCurrency());
-  let today = $derived(todayStr());
+  let today = $derived(sharedToday.value);
 
   const res = useAsyncData({
     enabled: () => !!dbSession.value,
