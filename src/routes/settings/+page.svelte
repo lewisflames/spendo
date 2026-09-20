@@ -3,8 +3,7 @@
   import AppearanceCard from '$lib/features/settings/appearance-card.svelte';
   import BookCard from '$lib/features/settings/book-card.svelte';
   import DangerZoneCard from '$lib/features/settings/danger-zone-card.svelte';
-  import DataExport from '$lib/features/settings/data-export.svelte';
-  import DataImport from '$lib/features/settings/data-import.svelte';
+  import ImportExportCard from '$lib/features/settings/import-export-card.svelte';
   import DisplayCard from '$lib/features/settings/display-card.svelte';
   import ReportingCard from '$lib/features/settings/reporting-card.svelte';
   import { appSettings, resetSettings } from '$lib/stores/settings.svelte';
@@ -56,9 +55,7 @@
 
   <ReportingCard error={bookSettingsError} onRetry={() => void refreshBookSettings()} />
 
-  <DataImport />
-
-  <DataExport />
+  <ImportExportCard error={bookSettingsError} onRetry={() => void refreshBookSettings()} />
 
   <DangerZoneCard onResetPreferences={handleResetPreferences} />
 </div>
