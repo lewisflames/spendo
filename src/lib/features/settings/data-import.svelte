@@ -70,7 +70,7 @@
           Map columns and dry-run a preview before importing
         </span>
       </div>
-      <Button variant="outline" href={resolve('/settings/import')} disabled={!dbSession.value}>
+      <Button variant="outline" href={resolve('/import/csv')} disabled={!dbSession.value}>
         <FileUp aria-hidden="true" class="size-4" />
         Import CSV...
       </Button>

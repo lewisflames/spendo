@@ -6,6 +6,8 @@ import {
   ArrowRight,
   CalendarPlus,
   CircleHelp,
+  FileDown,
+  FileSpreadsheet,
   FolderOpen,
   FolderPlus,
   History,
@@ -29,6 +31,12 @@ import {
   openBookViaDialog,
   saveBookAsViaDialog
 } from '$lib/features/book/book-actions';
+import {
+  exportAccountsCsvViaDialog,
+  exportTransactionsCsvViaDialog,
+  importGnucashViaDialog,
+  openCsvImport
+} from '$lib/features/book/import-export-actions';
 import { goBack, goForward } from '$lib/stores/nav-history.svelte';
 
 type PaletteGroup = 'Go to' | 'Actions';
@@ -69,7 +77,7 @@ export const PALETTE_COMMANDS: PaletteCommand[] = [
     title: 'Go to Settings',
     group: 'Go to',
     icon: Settings,
-    keywords: ['settings', 'preferences', 'export', 'import'],
+    keywords: ['settings', 'preferences'],
     run: () => goto(resolve('/settings'))
   },
   {
@@ -161,13 +169,46 @@ export const PALETTE_COMMANDS: PaletteCommand[] = [
     }
   },
   {
-    id: 'import-data',
-    title: 'Import data…',
+    id: 'import-gnucash',
+    title: 'Import GnuCash file…',
     group: 'Actions',
     icon: Upload,
-    keywords: ['import', 'gnucash', 'csv', 'bank statement', 'merge'],
+    keywords: ['import', 'gnucash', 'merge', 'file'],
     when: () => dbSession.value !== null,
-    run: () => goto(resolve('/settings/import'))
+    run: () => {
+      void importGnucashViaDialog();
+    }
+  },
+  {
+    id: 'import-csv',
+    title: 'Import bank CSV…',
+    group: 'Actions',
+    icon: FileSpreadsheet,
+    keywords: ['import', 'csv', 'bank statement', 'mapping', 'merge'],
+    when: () => dbSession.value !== null,
+    run: () => openCsvImport()
+  },
+  {
+    id: 'export-transactions-csv',
+    title: 'Export transactions CSV…',
+    group: 'Actions',
+    icon: FileDown,
+    keywords: ['export', 'csv', 'transactions', 'download', 'backup'],
+    when: () => dbSession.value !== null,
+    run: () => {
+      void exportTransactionsCsvViaDialog();
+    }
+  },
+  {
+    id: 'export-accounts-csv',
+    title: 'Export accounts CSV…',
+    group: 'Actions',
+    icon: FileDown,
+    keywords: ['export', 'csv', 'accounts', 'download', 'backup'],
+    when: () => dbSession.value !== null,
+    run: () => {
+      void exportAccountsCsvViaDialog();
+    }
   },
   {
     id: 'close-book',

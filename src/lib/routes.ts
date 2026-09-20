@@ -11,7 +11,7 @@ const ROUTE_TITLES: Record<string, string> = {
   '/scheduled/new': 'New schedule',
   '/reconcile': 'Reconcile',
   '/settings': 'Settings',
-  '/settings/import': 'Import CSV',
+  '/import/csv': 'Import CSV',
   '/about': 'About',
   '/budgets': 'Budgets',
   '/reports/pnl': 'Profit & Loss',
