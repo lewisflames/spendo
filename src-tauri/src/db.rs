@@ -333,14 +333,28 @@ pub fn init_db(conn: &Connection) -> Result<()> {
 
 pub fn connect_db(db_path: &PathBuf) -> Result<Connection> {
     let conn = Connection::open(db_path)?;
-    conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")?;
+    configure_connection(&conn, true)?;
     Ok(conn)
+}
+
+/// Shared connection configuration: FK enforcement on every connection, WAL
+/// only for file-backed books (in-memory DBs have no sidecars), and a busy
+/// timeout so a second process or tool touching the file waits instead of
+/// failing instantly with `database is locked`.
+fn configure_connection(conn: &Connection, file_backed: bool) -> Result<()> {
+    conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+    if file_backed {
+        conn.execute_batch("PRAGMA journal_mode = WAL;")?;
+    }
+    conn.busy_timeout(std::time::Duration::from_secs(5))?;
+    Ok(())
 }
 
 /// Fresh in-memory placeholder book (schema, no rows) for the book-less state:
 /// startup before any New/Open, and `books::close_book`.
 pub fn open_placeholder() -> Result<Connection> {
     let conn = Connection::open_in_memory()?;
+    configure_connection(&conn, false)?;
     init_db(&conn)?;
     Ok(conn)
 }
