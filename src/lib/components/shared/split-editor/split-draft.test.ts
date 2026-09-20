@@ -10,9 +10,26 @@ import {
 } from './split-draft';
 
 describe('parseAmount', () => {
-  it('parses finite numbers and trims whitespace', () => {
+  it('parses finite decimals and trims whitespace', () => {
     expect(parseAmount(' 12.5 ')).toBe(12.5);
     expect(parseAmount('-3')).toBe(-3);
+    expect(parseAmount('+0.25')).toBe(0.25);
+  });
+
+  it('treats a comma as the decimal separator', () => {
+    expect(parseAmount('1,50')).toBe(1.5);
+    expect(parseAmount('-2,25')).toBe(-2.25);
+  });
+
+  it('rejects hex, scientific notation and malformed separators', () => {
+    expect(parseAmount('0x10')).toBeNull();
+    expect(parseAmount('1e3')).toBeNull();
+    expect(parseAmount('1.2.3')).toBeNull();
+    expect(parseAmount('1,')).toBeNull();
+    expect(parseAmount(',5')).toBeNull();
+    expect(parseAmount('1 000')).toBeNull();
+    expect(parseAmount('Infinity')).toBeNull();
+    expect(parseAmount('NaN')).toBeNull();
   });
 
   it('returns null for empty or non-numeric input', () => {
