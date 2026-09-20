@@ -25,7 +25,6 @@
   import PageHeaderSkeleton from '$lib/components/shared/page-header-skeleton.svelte';
   import * as Card from '$lib/components/ui/card';
   import { Skeleton } from '$lib/components/ui/skeleton';
-  import { todayStr } from '$lib/utils/date-utils.svelte';
   import KpiCardRow from '$lib/components/shared/kpi-card-row.svelte';
   import BalanceTrendChart from '$lib/features/accounts/balance-trend-chart.svelte';
   import BalancePie from '$lib/features/accounts/balance-pie.svelte';
@@ -53,9 +52,6 @@
   let searchInput = $state('');
   let dateFrom = $state('');
   let dateTo = $state('');
-  // Point-in-time view for balances (header/KPIs/children/pie/trend). The
-  // transaction ledger keeps its own From/To filters independently.
-  let asOf = $state(todayStr());
 
   let search = useDebouncedSearch(() => searchInput);
 
@@ -82,21 +78,12 @@
       'to',
       () => dateTo || null,
       (v) => (dateTo = v ?? '')
-    ),
-    dateParam(
-      'asOf',
-      () => (asOf === todayStr() ? null : asOf || null),
-      (v) => (asOf = v ?? todayStr())
     )
   ]);
 
-  // As-of view state for balances.
-  let isToday = $derived(!asOf || asOf === todayStr());
-
   // Reset query state on account switch and page 1 on sort change. Runs
   // before the fetch effect in the same flush, so the fetch sees the reset
-  // page immediately. `asOf` is intentionally left URL-driven (entering from
-  // the list starts at today).
+  // page immediately.
   useResetPageOnChange(
     () => guid ?? '',
     () => {
@@ -127,8 +114,7 @@
         dateTo || undefined,
         search.value || undefined,
         sortBy,
-        sortDir,
-        asOf || undefined
+        sortDir
       );
     },
     label: 'Failed to load account transactions',
@@ -192,12 +178,7 @@
     {#if (res.loading || dbBootstrapping.value) && !res.data}
       <PageHeaderSkeleton />
     {:else if res.data}
-      <AccountDetailHeader
-        account={res.data.account}
-        summary={res.data.summary}
-        {isToday}
-        bind:asOf
-      >
+      <AccountDetailHeader account={res.data.account} summary={res.data.summary}>
         {#if dbSession.value}
           {#if guid && res.data && isReconcilable(res.data.account.accountType, res.data.account.placeholder)}
             <Button variant="outline" href={resolve('/reconcile/[guid]', { guid })}>
@@ -247,7 +228,7 @@
     {#if (res.loading || dbBootstrapping.value) && !res.data}
       <KpiCardRow />
     {:else if res.data}
-      <AccountKpiCards summary={res.data.summary} {currentBalance} {isToday} {asOf} />
+      <AccountKpiCards summary={res.data.summary} {currentBalance} />
     {/if}
 
     <!-- Balance over time + composition. The grid keeps its shape across the
@@ -258,7 +239,7 @@
       <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div class={showPie || chartsLoading ? 'lg:col-span-2' : 'lg:col-span-3'}>
           {#if dbSession.value}
-            <BalanceTrendChart {guid} accountType={res.data?.account.accountType} {asOf} />
+            <BalanceTrendChart {guid} accountType={res.data?.account.accountType} />
           {:else}
             <Card.Root>
               <Card.Header>

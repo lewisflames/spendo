@@ -3,7 +3,7 @@
   import * as Chart from '$lib/components/ui/chart';
   import ChartTooltipRow from '$lib/components/ui/chart/chart-tooltip-row.svelte';
   import { Skeleton } from '$lib/components/ui/skeleton';
-  import { AreaChart, BarChart, AnnotationLine } from 'layerchart';
+  import { AreaChart, BarChart } from 'layerchart';
   import { formatCurrency, formatDate, formatInteger } from '$lib/utils/format.svelte';
   import { curveStepAfter } from 'd3-shape';
 
@@ -20,11 +20,6 @@
     color?: string;
   };
 
-  /** Vertical marker (e.g. the as-of cutoff); hidden when outside the shown range. */
-  type TimeSeriesReferenceLine = {
-    date: Date;
-  };
-
   let {
     title,
     description = '',
@@ -37,7 +32,6 @@
     currency,
     tooltipTotals,
     variant = 'area',
-    referenceLine = null,
     showRangeFilter = true
   }: {
     title: string;
@@ -51,7 +45,6 @@
     currency: string;
     tooltipTotals?: TimeSeriesTooltipTotal[];
     variant?: 'area' | 'bar';
-    referenceLine?: TimeSeriesReferenceLine | null;
     showRangeFilter?: boolean;
   } = $props();
 
@@ -74,22 +67,6 @@
       ? data.filter((d) => getX(d).getTime() >= rangeThreshold)
       : data
   );
-
-  // Only draw the marker when it lands inside the visible domain — e.g. a
-  // range-button zoom can push an old cutoff out of view.
-  let showReferenceLine = $derived.by(() => {
-    if (!referenceLine || filteredData.length === 0) return false;
-    const t = referenceLine.date.getTime();
-    if (Number.isNaN(t)) return false;
-    let min = Infinity;
-    let max = -Infinity;
-    for (const d of filteredData) {
-      const x = getX(d).getTime();
-      if (x < min) min = x;
-      if (x > max) max = x;
-    }
-    return t >= min && t <= max;
-  });
 
   let visibleSeries = $derived.by(() => {
     const filtered = series.filter((s) =>
@@ -137,21 +114,6 @@
       color={total.color}
     />
   {/each}
-{/snippet}
-
-{#snippet chartAboveMarks()}
-  {#if showReferenceLine && referenceLine}
-    <AnnotationLine
-      x={referenceLine.date}
-      props={{
-        line: {
-          stroke: 'var(--color-foreground)',
-          strokeWidth: 2,
-          dashArray: '5 4'
-        }
-      }}
-    />
-  {/if}
 {/snippet}
 
 <Card.Root>
@@ -237,7 +199,6 @@
               xAxis: { format: xTickFormatter },
               yAxis: { format: yTickFormatter }
             }}
-            aboveMarks={chartAboveMarks}
           >
             {#snippet tooltip()}
               <Chart.Tooltip
