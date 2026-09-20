@@ -24,7 +24,7 @@
     type TxInput
   } from '$lib/tauri';
   import { errMsg } from '$lib/utils/error';
-  import { isFutureDate, isIsoDate, todayStr } from '$lib/utils/date-utils.svelte';
+  import { isIsoDate, today as sharedToday, todayStr } from '$lib/utils/date-utils.svelte';
   import { plural } from '$lib/utils/format.svelte';
   import { flattenAccountsForPicker } from '$lib/features/accounts/account-picker-utils';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
@@ -99,10 +99,13 @@
     flattenAccountsForPicker(accountsRes.data?.trees, { hidePlaceholders: true })
   );
 
+  // Shared local date; the guard re-evaluates after midnight (same comparison
+  // as `isFutureDate`, but against the reactive clock).
+  let today = $derived(sharedToday.value);
   let dateError = $derived.by(() => {
     if (!postDate) return 'Date is required';
     if (!isIsoDate(postDate)) return 'Use a valid date (YYYY-MM-DD)';
-    if (isFutureDate(postDate)) return 'Future dates are not allowed';
+    if (postDate > today) return 'Future dates are not allowed';
     return '';
   });
 

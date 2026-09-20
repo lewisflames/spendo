@@ -16,7 +16,7 @@
   } from '$lib/tauri';
   import { sessionCurrency, plural } from '$lib/utils/format.svelte';
   import { errMsg } from '$lib/utils/error';
-  import { todayStr } from '$lib/utils/date-utils.svelte';
+  import { today } from '$lib/utils/date-utils.svelte';
   import BookGate from '$lib/components/shared/book-gate.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
@@ -41,7 +41,7 @@
   let guid = $derived(page.params.guid);
   let currency = $derived(sessionCurrency());
 
-  let statementDate = $state(todayStr());
+  let statementDate = $state(today.value);
   let endingBalanceInput = $state('');
   let searchInput = $state('');
   let search = useDebouncedSearch(() => searchInput);
@@ -54,8 +54,8 @@
   useUrlParams([
     dateParam(
       'statement',
-      () => (statementDate === todayStr() ? null : statementDate || null),
-      (v) => (statementDate = v ?? todayStr())
+      () => (statementDate === today.value ? null : statementDate || null),
+      (v) => (statementDate = v ?? today.value)
     ),
     debouncedSearchParam(
       'q',
