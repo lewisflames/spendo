@@ -140,6 +140,7 @@ const state = {
   schedules: [] as Schedule[],
   budgets: clone(BUDGET_PLANS),
   overrides: new Map<string, string>(),
+  allocationTargets: new Map<string, number>(),
   attachments: [] as AttachmentRecord[],
   history: [] as HistoryRecord[],
   redoSnapshots: new Map<number, Snapshot>(),
@@ -1059,6 +1060,16 @@ function portfolioData(): MockPayloads['fetch_portfolio_data'] {
   };
 }
 
+function allocationTargets(): MockPayloads['fetch_allocation_targets'] {
+  return [...state.allocationTargets.entries()]
+    .map(([commodityGuid, targetPct]) => ({ commodityGuid, targetPct }))
+    .sort((a, b) => {
+      const ma = COMMODITIES.find((c) => c.guid === a.commodityGuid)?.mnemonic ?? '';
+      const mb = COMMODITIES.find((c) => c.guid === b.commodityGuid)?.mnemonic ?? '';
+      return ma.localeCompare(mb) || a.commodityGuid.localeCompare(b.commodityGuid);
+    });
+}
+
 function holdingDetail(args: Record<string, unknown>): MockPayloads['fetch_holding_detail'] {
   const commodityGuid = String(args.commodityGuid);
   const acc = investmentAccounts().find((a) => a.commodityGuid === commodityGuid);
@@ -1638,6 +1649,12 @@ const handlers: HandlerMap = {
   // Portfolio
   fetch_portfolio_data: () => portfolioData(),
   fetch_holding_detail: (args) => holdingDetail(args),
+  fetch_allocation_targets: () => allocationTargets(),
+  save_allocation_targets: (args) => {
+    const targets = (args.targets ?? []) as MockPayloads['fetch_allocation_targets'];
+    state.allocationTargets = new Map(targets.map((t) => [t.commodityGuid, Number(t.targetPct)]));
+    return allocationTargets();
+  },
   fetch_symbol_overrides: () =>
     COMMODITIES.filter((c) => c.namespace !== 'CURRENCY').map((c) => ({
       commodityGuid: c.guid,

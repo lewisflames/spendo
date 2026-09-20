@@ -1059,6 +1059,18 @@ export const fetchHoldingDetail = (
     search: search ?? null
   });
 
+/** Saved rebalance target for one commodity (portfolio rebalance calculator). */
+interface AllocationTarget {
+  commodityGuid: string;
+  targetPct: number;
+}
+
+export const fetchAllocationTargets = (): Promise<AllocationTarget[]> =>
+  invoke<AllocationTarget[]>('fetch_allocation_targets');
+
+export const saveAllocationTargets = (targets: AllocationTarget[]): Promise<AllocationTarget[]> =>
+  invoke<AllocationTarget[]>('save_allocation_targets', { targets });
+
 // ── Reconciliation (statement workflow for cash-like accounts) ──
 
 export interface ReconcileCandidate {
@@ -1209,6 +1221,7 @@ export type MockPayloads = {
   fetch_account_detail: AccountDetailResult;
   fetch_accounts: AccountsResult;
   fetch_active_book: ActiveBook;
+  fetch_allocation_targets: AllocationTarget[];
   fetch_attachment_data: AttachmentData;
   fetch_attachments: AttachmentInfo[];
   fetch_book_currencies: BookCurrency[];
@@ -1243,6 +1256,7 @@ export type MockPayloads = {
   preview_gnucash_import: GnuCashPreview;
   redo_history_entry: DataSummary;
   refresh_prices: PricesResult;
+  save_allocation_targets: AllocationTarget[];
   save_book_as: EmptyBookResult;
   search_global: GlobalSearchResult;
   set_base_currency: EmptyBookResult;

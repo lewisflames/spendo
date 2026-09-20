@@ -1,10 +1,10 @@
 use chrono::{NaiveDate, Utc};
-use rusqlite::Connection;
-use serde::Serialize;
+use rusqlite::{params, Connection};
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use tauri::State;
 
-use crate::db::{run_blocking, AppState};
+use crate::db::{run_blocking, with_tx_err, AppError, AppState};
 use crate::fx;
 use crate::prices::{
     get_cached_prev_prices_map, get_cached_prices_with_date_map, get_last_refresh_timestamp,
@@ -64,6 +64,22 @@ pub struct PortfolioData {
     pub last_refreshed: Option<String>,
     pub holdings: Vec<PortfolioHolding>,
     pub value_trend: Vec<PortfolioValuePoint>,
+}
+
+/// Saved rebalance target for one commodity. Book-scoped user config,
+/// deliberately outside `DATA_TABLES`/undo like `import_rules`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AllocationTarget {
+    pub commodity_guid: String,
+    pub target_pct: f64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AllocationTargetInput {
+    pub commodity_guid: String,
+    pub target_pct: f64,
 }
 
 #[derive(Debug, Serialize)]
@@ -715,6 +731,112 @@ fn fetch_portfolio_data_inner(conn: &Connection) -> Result<PortfolioData, String
     })
 }
 
+// ── Rebalance allocation targets (book-scoped config) ────────────────────────
+
+/// Percentage-point slack that absorbs floating-point dust when validating the
+/// target sum (e.g. 33.4 + 33.3 + 33.3).
+const TARGET_SUM_EPSILON: f64 = 1e-6;
+
+fn fetch_allocation_targets_inner(conn: &Connection) -> Result<Vec<AllocationTarget>, AppError> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT t.commodity_guid, t.target_pct
+             FROM allocation_targets t
+             JOIN commodities c ON c.guid = t.commodity_guid
+             ORDER BY c.mnemonic ASC, t.commodity_guid ASC",
+        )
+        .map_err(AppError::from)?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(AllocationTarget {
+                commodity_guid: row.get(0)?,
+                target_pct: row.get(1)?,
+            })
+        })
+        .map_err(AppError::from)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(AppError::from)?;
+    Ok(rows)
+}
+
+/// Reject values that could never describe an allocation: out-of-range or
+/// non-finite percentages, duplicates, sums above 100%, unknown commodities.
+fn validate_allocation_targets(
+    conn: &Connection,
+    targets: &[AllocationTargetInput],
+) -> Result<(), AppError> {
+    let mut seen: HashSet<&str> = HashSet::new();
+    let mut total = 0.0;
+    for t in targets {
+        if !t.target_pct.is_finite() || !(0.0..=100.0).contains(&t.target_pct) {
+            return Err(AppError::Validation(format!(
+                "Target percentage for {} must be between 0 and 100",
+                t.commodity_guid
+            )));
+        }
+        if !seen.insert(t.commodity_guid.as_str()) {
+            return Err(AppError::Validation(format!(
+                "Duplicate target for commodity {}",
+                t.commodity_guid
+            )));
+        }
+        total += t.target_pct;
+    }
+    if total > 100.0 + TARGET_SUM_EPSILON {
+        return Err(AppError::Validation(
+            "Target allocation must not exceed 100%".to_string(),
+        ));
+    }
+
+    // Validate GUIDs in chunks so a large portfolio never builds one massive
+    // `IN (…)` list. Duplicates are already rejected, so a matching count
+    // means every GUID exists.
+    for chunk in targets.chunks(sql::MAX_IN_PARAMS) {
+        let placeholders = (1..=chunk.len())
+            .map(|i| format!("?{i}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let params: Vec<Box<dyn rusqlite::ToSql>> = chunk
+            .iter()
+            .map(|t| Box::new(t.commodity_guid.clone()) as Box<dyn rusqlite::ToSql>)
+            .collect();
+        let count: i64 = conn
+            .query_row(
+                &format!("SELECT COUNT(*) FROM commodities WHERE guid IN ({placeholders})"),
+                sql::param_refs(&params).as_slice(),
+                |row| row.get(0),
+            )
+            .map_err(AppError::from)?;
+        if count as usize != chunk.len() {
+            return Err(AppError::Validation(
+                "Target allocation references an unknown commodity".to_string(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Replace the book's targets wholesale (the payload is tiny and the client
+/// always has the full picture). Wrapped in a transaction so a failed insert
+/// can't leave a half-saved allocation behind.
+fn save_allocation_targets_inner(
+    conn: &Connection,
+    targets: &[AllocationTargetInput],
+) -> Result<Vec<AllocationTarget>, AppError> {
+    validate_allocation_targets(conn, targets)?;
+    with_tx_err(conn, || {
+        conn.execute("DELETE FROM allocation_targets", [])?;
+        let mut stmt = conn.prepare(
+            "INSERT INTO allocation_targets (commodity_guid, target_pct) VALUES (?1, ?2)",
+        )?;
+        for t in targets {
+            stmt.execute(params![t.commodity_guid, t.target_pct])?;
+        }
+        Ok::<(), AppError>(())
+    })?;
+    fetch_allocation_targets_inner(conn)
+}
+
 /// One page of a holding's buy/sell activity with pagination metadata.
 struct HoldingTxPage {
     transactions: Vec<HoldingTransaction>,
@@ -909,6 +1031,27 @@ pub async fn fetch_holding_detail(
 ) -> Result<HoldingDetail, String> {
     run_blocking(state.db.clone(), move |conn| {
         fetch_holding_detail_inner(conn, &commodity_guid, page, page_size, search.as_deref())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn fetch_allocation_targets(
+    state: State<'_, AppState>,
+) -> Result<Vec<AllocationTarget>, String> {
+    run_blocking(state.db.clone(), |conn| {
+        fetch_allocation_targets_inner(conn).map_err(String::from)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn save_allocation_targets(
+    state: State<'_, AppState>,
+    targets: Vec<AllocationTargetInput>,
+) -> Result<Vec<AllocationTarget>, String> {
+    run_blocking(state.db.clone(), move |conn| {
+        save_allocation_targets_inner(conn, &targets).map_err(String::from)
     })
     .await
 }
@@ -1108,5 +1251,100 @@ mod tests {
         assert_eq!(data.total_cost_basis, 1700.0);
         assert_eq!(data.total_gain_loss, -200.0);
         assert!((data.total_gain_loss_pct - (-200.0 / 1700.0) * 100.0).abs() < 1e-9);
+    }
+
+    fn target(commodity_guid: &str, target_pct: f64) -> AllocationTargetInput {
+        AllocationTargetInput {
+            commodity_guid: commodity_guid.to_string(),
+            target_pct,
+        }
+    }
+
+    #[test]
+    fn allocation_targets_round_trip_and_replace() {
+        let conn = setup_valued_portfolio();
+        assert!(fetch_allocation_targets_inner(&conn).unwrap().is_empty());
+
+        let saved = save_allocation_targets_inner(
+            &conn,
+            &[target("c-aapl", 60.0), target("c-xyz", 40.0)],
+        )
+        .unwrap();
+        // Mnemonic order (AAPL before XYZ), values preserved.
+        assert_eq!(saved.len(), 2);
+        assert_eq!(saved[0].commodity_guid, "c-aapl");
+        assert_eq!(saved[0].target_pct, 60.0);
+        assert_eq!(saved[1].commodity_guid, "c-xyz");
+        assert_eq!(saved[1].target_pct, 40.0);
+
+        // A bulk replace drops targets that are no longer sent.
+        let replaced = save_allocation_targets_inner(&conn, &[target("c-xyz", 100.0)]).unwrap();
+        assert_eq!(replaced.len(), 1);
+        assert_eq!(replaced[0].commodity_guid, "c-xyz");
+        assert_eq!(replaced[0].target_pct, 100.0);
+
+        // The full snapshot survives a fresh read.
+        assert_eq!(fetch_allocation_targets_inner(&conn).unwrap(), replaced);
+
+        // An empty list clears the book's targets.
+        assert!(save_allocation_targets_inner(&conn, &[]).unwrap().is_empty());
+        assert!(fetch_allocation_targets_inner(&conn).unwrap().is_empty());
+    }
+
+    #[test]
+    fn allocation_targets_reject_invalid_values() {
+        let conn = setup_valued_portfolio();
+
+        // Out-of-range and non-finite percentages.
+        for (pct, label) in [
+            (-0.1, "negative"),
+            (100.1, "over 100"),
+            (f64::NAN, "nan"),
+            (f64::INFINITY, "infinite"),
+        ] {
+            assert!(
+                save_allocation_targets_inner(&conn, &[target("c-aapl", pct)]).is_err(),
+                "accepted {label} target {pct}"
+            );
+        }
+
+        // Sum above 100, duplicates and unknown commodities.
+        assert!(save_allocation_targets_inner(
+            &conn,
+            &[target("c-aapl", 60.0), target("c-xyz", 50.0)]
+        )
+        .is_err());
+        assert!(save_allocation_targets_inner(
+            &conn,
+            &[target("c-aapl", 10.0), target("c-aapl", 20.0)]
+        )
+        .is_err());
+        assert!(save_allocation_targets_inner(&conn, &[target("missing", 10.0)]).is_err());
+
+        // Failed writes leave the stored state untouched, and boundary values
+        // (0 and 100, sum exactly 100) are accepted.
+        assert!(fetch_allocation_targets_inner(&conn).unwrap().is_empty());
+        let saved = save_allocation_targets_inner(
+            &conn,
+            &[target("c-aapl", 100.0), target("c-xyz", 0.0)],
+        )
+        .unwrap();
+        assert_eq!(saved.len(), 2);
+        assert_eq!(saved[1].target_pct, 0.0);
+    }
+
+    #[test]
+    fn allocation_targets_cascade_with_commodity_delete() {
+        let conn = setup_valued_portfolio();
+        save_allocation_targets_inner(&conn, &[target("c-aapl", 50.0), target("c-xyz", 50.0)])
+            .unwrap();
+
+        // Removing the commodity (e.g. the GnuCash orphan sweep) drops its
+        // target but leaves the rest untouched.
+        conn.execute("DELETE FROM commodities WHERE guid = 'c-aapl'", [])
+            .unwrap();
+        let remaining = fetch_allocation_targets_inner(&conn).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].commodity_guid, "c-xyz");
     }
 }
