@@ -72,6 +72,12 @@ pub(crate) fn snapshot_row(
             "SELECT guid, tx_guid, account_guid, value_num, value_denom, quantity_num, quantity_denom,
                     reconcile_state, reconciled, memo FROM splits WHERE guid = ?1"
         }
+        "recurring_schedules" => {
+            "SELECT guid, name, frequency, interval_mult, start_date, end_date,
+                    max_occurrences, occurrences_posted, next_due_date, active,
+                    template_json, created_at
+             FROM recurring_schedules WHERE guid = ?1"
+        }
         _ => return Err(format!("Invalid table name: {table}")),
     };
     let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
@@ -110,6 +116,25 @@ pub(crate) fn snapshot_row(
                     "description": row.get::<_, Option<String>>(2)?,
                     "num": row.get::<_, Option<String>>(3)?,
                     "notes": row.get::<_, Option<String>>(4)?,
+                }))
+            })
+            .optional()
+            .map_err(|e| e.to_string())?,
+        "recurring_schedules" => stmt
+            .query_row([guid], |row| {
+                Ok(serde_json::json!({
+                    "guid": row.get::<_, String>(0)?,
+                    "name": row.get::<_, String>(1)?,
+                    "frequency": row.get::<_, String>(2)?,
+                    "interval_mult": row.get::<_, i64>(3)?,
+                    "start_date": row.get::<_, String>(4)?,
+                    "end_date": row.get::<_, Option<String>>(5)?,
+                    "max_occurrences": row.get::<_, Option<i64>>(6)?,
+                    "occurrences_posted": row.get::<_, i64>(7)?,
+                    "next_due_date": row.get::<_, Option<String>>(8)?,
+                    "active": row.get::<_, i64>(9)?,
+                    "template_json": row.get::<_, String>(10)?,
+                    "created_at": row.get::<_, String>(11)?,
                 }))
             })
             .optional()
@@ -220,6 +245,42 @@ fn restore_snapshot_row(conn: &Connection, table: &str, before: &str) -> Result<
                     opt_str_field(&v, "description"),
                     opt_str_field(&v, "num"),
                     opt_str_field(&v, "notes"),
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        "recurring_schedules" => {
+            conn.execute(
+                "INSERT INTO recurring_schedules
+                 (guid, name, frequency, interval_mult, start_date, end_date,
+                  max_occurrences, occurrences_posted, next_due_date, active,
+                  template_json, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                 ON CONFLICT(guid) DO UPDATE SET
+                     name = excluded.name,
+                     frequency = excluded.frequency,
+                     interval_mult = excluded.interval_mult,
+                     start_date = excluded.start_date,
+                     end_date = excluded.end_date,
+                     max_occurrences = excluded.max_occurrences,
+                     occurrences_posted = excluded.occurrences_posted,
+                     next_due_date = excluded.next_due_date,
+                     active = excluded.active,
+                     template_json = excluded.template_json,
+                     created_at = excluded.created_at",
+                params![
+                    str_field(&v, "guid")?,
+                    str_field(&v, "name")?,
+                    str_field(&v, "frequency")?,
+                    int_field(&v, "interval_mult")?,
+                    str_field(&v, "start_date")?,
+                    opt_str_field(&v, "end_date"),
+                    v.get("max_occurrences").and_then(|x| x.as_i64()),
+                    int_field(&v, "occurrences_posted")?,
+                    opt_str_field(&v, "next_due_date"),
+                    int_field(&v, "active")?,
+                    str_field(&v, "template_json")?,
+                    str_field(&v, "created_at")?,
                 ],
             )
             .map_err(|e| e.to_string())?;
@@ -405,7 +466,7 @@ pub(crate) fn fetch_change_history_inner(conn: &Connection) -> Result<ChangeHist
 /// Apply an entry's snapshots: delete rows it added (children first), then
 /// restore rows it changed or removed (parents first so references resolve).
 fn restore_entry_snapshots(conn: &Connection, entry_id: i64) -> Result<(), String> {
-    for table in ["splits", "transactions", "accounts", "commodities"] {
+    for table in ["splits", "transactions", "accounts", "commodities", "recurring_schedules"] {
         validate_data_table(table)?;
         let sql = format!(
             "DELETE FROM {table} WHERE guid IN (
@@ -415,7 +476,7 @@ fn restore_entry_snapshots(conn: &Connection, entry_id: i64) -> Result<(), Strin
         conn.execute(&sql, params![entry_id, table])
             .map_err(|e| e.to_string())?;
     }
-    for table in ["commodities", "accounts", "transactions", "splits"] {
+    for table in ["commodities", "accounts", "transactions", "splits", "recurring_schedules"] {
         let mut stmt = conn
             .prepare(
                 "SELECT before_json FROM change_snapshots

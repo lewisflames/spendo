@@ -16,6 +16,7 @@ import {
 import { ensureCsvExtension } from '$lib/utils/book';
 import { todayStr } from '$lib/utils/date-utils.svelte';
 import { errMsg } from '$lib/utils/error';
+import { plural } from '$lib/utils/format.svelte';
 import { exportDatePattern, exportFilename } from './exporters';
 import {
   closeGnucashImportDialog,
@@ -101,12 +102,23 @@ export async function confirmGnucashImport(deleteOrphans: boolean): Promise<bool
     });
     setDbSession(result.summary);
     closeGnucashImportDialog();
-    const changed =
+    const transactionsChanged =
       result.transactionsAdded + result.transactionsUpdated + result.transactionsOrphaned;
-    if (changed) {
-      const parts = [`${result.transactionsAdded} added`];
-      if (result.transactionsUpdated) parts.push(`${result.transactionsUpdated} updated`);
-      if (result.transactionsOrphaned) parts.push(`${result.transactionsOrphaned} removed`);
+    const schedulesChanged = result.schedulesAdded + result.schedulesUpdated;
+    if (transactionsChanged || schedulesChanged) {
+      const parts: string[] = [];
+      if (transactionsChanged) {
+        parts.push(`${result.transactionsAdded} added`);
+        if (result.transactionsUpdated) parts.push(`${result.transactionsUpdated} updated`);
+        if (result.transactionsOrphaned) parts.push(`${result.transactionsOrphaned} removed`);
+      }
+      if (result.schedulesAdded) parts.push(`${plural(result.schedulesAdded, 'schedule')} added`);
+      if (result.schedulesUpdated) {
+        parts.push(`${plural(result.schedulesUpdated, 'schedule')} updated`);
+      }
+      if (result.schedulesSkipped) {
+        parts.push(`${plural(result.schedulesSkipped, 'schedule')} skipped`);
+      }
       toast.success(`Imported ${preview.filename} — ${parts.join(' · ')}`);
     } else {
       toast.warning('No new data imported');

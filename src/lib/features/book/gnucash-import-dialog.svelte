@@ -28,6 +28,9 @@
     preview ? preview.accountsOrphaned + preview.transactionsOrphaned : 0
   );
   const hasRemovals = $derived(removedCount > 0);
+  const scheduleCount = $derived(preview ? preview.schedulesAdded + preview.schedulesUpdated : 0);
+  const skippedSchedules = $derived(preview?.skippedSchedules ?? []);
+  const shownSkipped = $derived(skippedSchedules.slice(0, 5));
 </script>
 
 {#if preview}
@@ -52,6 +55,35 @@
           <p class="text-xs text-muted-foreground">accounts &amp; transactions</p>
         </div>
       </div>
+
+      {#if scheduleCount > 0}
+        <p class="text-sm text-muted-foreground">
+          {scheduleCount} scheduled
+          {scheduleCount === 1 ? 'transaction' : 'transactions'}
+          {preview.schedulesAdded > 0 && preview.schedulesUpdated > 0
+            ? `(${preview.schedulesAdded} added, ${preview.schedulesUpdated} updated)`
+            : preview.schedulesAdded > 0
+              ? 'added'
+              : 'updated'}
+        </p>
+      {/if}
+
+      {#if skippedSchedules.length > 0}
+        <div class="rounded-md border p-3 text-sm">
+          <p>
+            {skippedSchedules.length} scheduled
+            {skippedSchedules.length === 1 ? 'transaction' : 'transactions'} can't be imported.
+          </p>
+          <ul class="mt-2 space-y-1 text-muted-foreground">
+            {#each shownSkipped as skipped, i (i)}
+              <li>{skipped.name} — {skipped.reason}</li>
+            {/each}
+            {#if skippedSchedules.length > shownSkipped.length}
+              <li>and {skippedSchedules.length - shownSkipped.length} more</li>
+            {/if}
+          </ul>
+        </div>
+      {/if}
 
       {#if hasRemovals}
         <div class="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm">

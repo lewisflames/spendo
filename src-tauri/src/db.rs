@@ -25,7 +25,12 @@ pub const SPENDO_APP_ID: i32 = 0x5350_4e44; // 'SPND'
 /// User-data tables shared by the history snapshots and the import orphan
 /// sweep. Interpolating table names into SQL is only safe through this
 /// allowlist — never inline a table name without `validate_data_table`.
-pub(crate) const DATA_TABLES: &[&str] = &["commodities", "accounts", "transactions", "splits"];
+///
+/// `recurring_schedules` is here so a GnuCash import can snapshot the schedules
+/// it adds/changes and undo them with the rest of the merge. Manual schedule
+/// CRUD still writes no history entries.
+pub(crate) const DATA_TABLES: &[&str] =
+    &["commodities", "accounts", "transactions", "splits", "recurring_schedules"];
 
 pub(crate) fn validate_data_table(table: &str) -> Result<(), String> {
     if DATA_TABLES.contains(&table) {
@@ -299,8 +304,10 @@ CREATE INDEX IF NOT EXISTS idx_attachments_tx_guid ON attachments(tx_guid);
 -- holds a serialized `TxInput`-shaped template; posting materializes one real
 -- transaction per due occurrence and advances `next_due_date`. `NULL`
 -- `next_due_date` means completed (end date / occurrence cap reached).
--- Deliberately outside `DATA_TABLES`: schedule definitions are not part of
--- linear undo, and the GnuCash orphan sweep must never delete them.
+-- Manual CRUD writes no `change_log` entries (schedule definitions are future
+-- intent, not money movement), but a GnuCash import snapshots the schedules it
+-- adds/changes so undoing the import reverts them too. The GnuCash orphan
+-- sweep never deletes schedules (nor accounts they reference).
 CREATE TABLE IF NOT EXISTS recurring_schedules (
 	guid TEXT PRIMARY KEY,
 	name TEXT NOT NULL,
