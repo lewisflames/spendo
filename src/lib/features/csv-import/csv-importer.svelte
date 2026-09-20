@@ -7,6 +7,7 @@
     csvCommit,
     csvDetect,
     csvPreview,
+    deleteCsvPreset,
     fetchAccounts,
     fetchHomeData,
     type AccountsResult,
@@ -17,6 +18,7 @@
   import { dbSession, setDbSession } from '$lib/stores/db.svelte';
   import { errMsg } from '$lib/utils/error';
   import { plural } from '$lib/utils/format.svelte';
+  import { flattenAccountsForPicker } from '$lib/features/accounts/account-picker-utils';
   import { guessMapping } from '$lib/features/csv-import/guess';
   import FileStep from '$lib/features/csv-import/steps/file-step.svelte';
   import MappingStep from '$lib/features/csv-import/steps/mapping-step.svelte';
@@ -40,6 +42,13 @@
   let amountCol = $state<number | null>(2);
   let debitCol = $state<number | null>(null);
   let creditCol = $state<number | null>(null);
+  let numCol = $state<number | null>(null);
+  let notesCol = $state<number | null>(null);
+
+  let signature = $state<string | null>(null);
+  let presetApplied = $state(false);
+  let rememberMapping = $state(true);
+  let presetAccounts = $state<{ target: string; offset: string } | null>(null);
 
   let targetAccountGuid = $state('');
   let offsetAccountGuid = $state('');
@@ -61,6 +70,14 @@
 
   let accountsData = $state<AccountsResult | null>(null);
   let accountsError = $state<string | null>(null);
+
+  const targetCommodity = $derived(
+    targetAccountGuid
+      ? (flattenAccountsForPicker(accountsData?.trees, { hidePlaceholders: true }).find(
+          (a) => a.guid === targetAccountGuid
+        )?.commodity ?? null)
+      : null
+  );
 
   // Load account trees once a book is present (for both pickers). A failed
   // load surfaces inline: without an error the pickers just stay empty and
@@ -89,17 +106,50 @@
   });
 
   function applyDetect(d: CsvDetectResult) {
+    const maxCol = Math.max(0, d.columnCount - 1);
+    const clamp = (i: number) => Math.min(i, maxCol);
     detect = d;
     delimiter = d.delimiter;
     hasHeader = d.hasHeader;
     const g = guessMapping(d.headers, d.columnCount);
-    dateCol = Math.min(g.dateCol, Math.max(0, d.columnCount - 1));
-    descCol = Math.min(g.descCol, Math.max(0, d.columnCount - 1));
+    dateCol = clamp(g.dateCol);
+    descCol = clamp(g.descCol);
     usePair = g.usePair;
-    amountCol = g.amountCol !== null ? Math.min(g.amountCol, d.columnCount - 1) : null;
-    debitCol = g.debitCol !== null ? Math.min(g.debitCol, d.columnCount - 1) : null;
-    creditCol = g.creditCol !== null ? Math.min(g.creditCol, d.columnCount - 1) : null;
+    amountCol = g.amountCol !== null ? clamp(g.amountCol) : null;
+    debitCol = g.debitCol !== null ? clamp(g.debitCol) : null;
+    creditCol = g.creditCol !== null ? clamp(g.creditCol) : null;
+    numCol = g.numCol !== null ? clamp(g.numCol) : null;
+    notesCol = g.notesCol !== null ? clamp(g.notesCol) : null;
+    signature = d.signature;
+    presetApplied = false;
+    presetAccounts = null;
+    const p = d.preset;
+    if (p) {
+      delimiter = p.delimiter;
+      hasHeader = p.hasHeader;
+      datePreference = p.datePreference === 'mdy' ? 'mdy' : 'dmy';
+      usePair = p.mapping.debitCol != null || p.mapping.creditCol != null;
+      amountCol = p.mapping.amountCol ?? null;
+      debitCol = p.mapping.debitCol ?? null;
+      creditCol = p.mapping.creditCol ?? null;
+      numCol = p.mapping.numCol ?? null;
+      notesCol = p.mapping.notesCol ?? null;
+      presetAccounts = { target: p.targetAccountGuid, offset: p.offsetAccountGuid };
+      presetApplied = true;
+    }
   }
+
+  // Apply the saved preset's accounts once the tree is available. The picker
+  // only accepts real account guids, so the check also drops stale presets.
+  $effect(() => {
+    if (!presetAccounts || !accountsData) return;
+    const guids = new Set(
+      flattenAccountsForPicker(accountsData.trees, { hidePlaceholders: true }).map((a) => a.guid)
+    );
+    if (guids.has(presetAccounts.target)) targetAccountGuid = presetAccounts.target;
+    if (guids.has(presetAccounts.offset)) offsetAccountGuid = presetAccounts.offset;
+    presetAccounts = null;
+  });
 
   async function handlePickFile() {
     if (picking) return;
@@ -133,8 +183,8 @@
       amountCol: usePair ? null : amountCol,
       debitCol: usePair ? debitCol : null,
       creditCol: usePair ? creditCol : null,
-      numCol: null,
-      notesCol: null
+      numCol,
+      notesCol
     };
   }
 
@@ -149,6 +199,7 @@
     try {
       const result = await csvPreview({
         path,
+        fileSha256: detect?.sha256 ?? '',
         encoding: detect?.encoding ?? null,
         delimiter,
         hasHeader,
@@ -178,6 +229,7 @@
     try {
       const result = await csvCommit({
         path,
+        fileSha256: detect?.sha256 ?? '',
         encoding: detect?.encoding ?? null,
         delimiter,
         hasHeader,
@@ -185,7 +237,8 @@
         targetAccountGuid,
         offsetAccountGuid,
         datePreference,
-        selectedKeys: [...selected]
+        selectedKeys: [...selected],
+        rememberMapping
       });
       commitResult = result;
       step = 'done';
@@ -203,6 +256,17 @@
     }
   }
 
+  async function forgetPreset() {
+    if (!signature) return;
+    try {
+      await deleteCsvPreset(signature);
+      presetApplied = false;
+      toast.success('Saved mapping forgotten');
+    } catch (e: unknown) {
+      toast.error(errMsg(e, 'Failed to forget the saved mapping'));
+    }
+  }
+
   function resetWizard() {
     step = 'file';
     path = '';
@@ -217,6 +281,12 @@
     detectError = null;
     previewError = null;
     commitError = null;
+    numCol = null;
+    notesCol = null;
+    signature = null;
+    presetApplied = false;
+    rememberMapping = true;
+    presetAccounts = null;
   }
 </script>
 
@@ -235,12 +305,18 @@
     bind:amountCol
     bind:debitCol
     bind:creditCol
+    bind:numCol
+    bind:notesCol
     bind:targetAccountGuid
     bind:offsetAccountGuid
+    bind:rememberMapping
     {accountsData}
     {accountsError}
     {previewError}
     {previewing}
+    {presetApplied}
+    hasSignature={signature !== null}
+    onForgetPreset={() => void forgetPreset()}
     onPreview={() => void handlePreview()}
     onReset={resetWizard}
     onRetryAccounts={() => void loadAccounts()}
@@ -253,6 +329,7 @@
     bind:pageSize
     {commitError}
     {committing}
+    {targetCommodity}
     onCommit={() => void handleCommit()}
     onBack={() => (step = 'mapping')}
   />

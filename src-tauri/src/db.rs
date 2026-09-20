@@ -318,6 +318,30 @@ CREATE TABLE IF NOT EXISTS recurring_schedules (
 
 CREATE INDEX IF NOT EXISTS idx_schedules_active_due ON recurring_schedules(active, next_due_date);
 
+-- Saved CSV import mapping presets, keyed by a hash of the normalized header
+-- row. Book-scoped convenience config: deliberately outside `DATA_TABLES`
+-- (not part of linear undo) and dropped by `clear_db` like any other table.
+CREATE TABLE IF NOT EXISTS csv_import_presets (
+	signature TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	mapping_json TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+
+-- Description-match rules that pick the category (offset account) for a CSV
+-- import row. Like budgets, they are user config outside undo, so account
+-- deletion is guarded instead of cascading silently.
+CREATE TABLE IF NOT EXISTS import_rules (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	priority INTEGER NOT NULL,
+	match_type TEXT NOT NULL,
+	pattern TEXT NOT NULL,
+	account_guid TEXT NOT NULL REFERENCES accounts(guid) ON DELETE CASCADE,
+	created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_import_rules_priority ON import_rules(priority, id);
+
 CREATE TABLE IF NOT EXISTS app_settings (
 	key TEXT PRIMARY KEY,
 	value TEXT NOT NULL
@@ -418,6 +442,8 @@ pub fn clear_db(conn: &Connection) -> Result<()> {
         "PRAGMA foreign_keys = OFF;
           DROP TABLE IF EXISTS attachments;
           DROP TABLE IF EXISTS budgets;
+          DROP TABLE IF EXISTS csv_import_presets;
+          DROP TABLE IF EXISTS import_rules;
           DROP TABLE IF EXISTS prices;
           DROP TABLE IF EXISTS splits;
           DROP TABLE IF EXISTS transactions;

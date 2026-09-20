@@ -6,6 +6,8 @@ interface GuessedMapping {
   amountCol: number | null;
   debitCol: number | null;
   creditCol: number | null;
+  numCol: number | null;
+  notesCol: number | null;
   usePair: boolean;
 }
 
@@ -18,10 +20,18 @@ function findCol(headers: string[], keys: string[]): number | null {
   return null;
 }
 
+/** Like {@link findCol}, but never steals a column another field already uses. */
+function findFreeCol(headers: string[], keys: string[], taken: number[]): number | null {
+  const idx = findCol(headers, keys);
+  return idx !== null && !taken.includes(idx) ? idx : null;
+}
+
 /**
  * Guess date/description/amount columns from headers (or the first sample
  * row when the file has no header). Debit+Credit wins when both are found;
- * otherwise a single Amount column. Falls back to 0/1/last-column positions.
+ * otherwise a single Amount column. Reference/notes columns are guessed only
+ * when they don't collide with the fields above. Falls back to 0/1/last-column
+ * positions.
  */
 export function guessMapping(headers: string[], columnCount: number): GuessedMapping {
   const dateCol = findCol(headers, ['date', 'datum', 'posted', 'value date', 'booking']) ?? 0;
@@ -30,11 +40,31 @@ export function guessMapping(headers: string[], columnCount: number): GuessedMap
     (columnCount > 1 ? 1 : 0);
   const debitCol = findCol(headers, ['debit', 'soll', 'paid out', 'withdrawal', 'spent']);
   const creditCol = findCol(headers, ['credit', 'haben', 'paid in', 'deposit', 'received']);
-  if (debitCol !== null && creditCol !== null && debitCol !== creditCol) {
-    return { dateCol, descCol, amountCol: null, debitCol, creditCol, usePair: true };
-  }
-  const amountCol =
-    findCol(headers, ['amount', 'sum', 'betrag', 'value', 'total']) ??
-    (columnCount > 0 ? columnCount - 1 : 0);
-  return { dateCol, descCol, amountCol, debitCol: null, creditCol: null, usePair: false };
+  const pair = debitCol !== null && creditCol !== null && debitCol !== creditCol;
+  const amountCol = pair
+    ? null
+    : (findCol(headers, ['amount', 'sum', 'betrag', 'value', 'total']) ??
+      (columnCount > 0 ? columnCount - 1 : 0));
+
+  const taken = [dateCol, descCol, amountCol, debitCol, creditCol].filter(
+    (c): c is number => c !== null
+  );
+  const numCol = findFreeCol(
+    headers,
+    ['reference', 'ref', 'number', 'transaction id', 'cheque', 'check no'],
+    taken
+  );
+  if (numCol !== null) taken.push(numCol);
+  const notesCol = findFreeCol(headers, ['note', 'notes', 'memo', 'details'], taken);
+
+  return {
+    dateCol,
+    descCol,
+    amountCol,
+    debitCol: pair ? debitCol : null,
+    creditCol: pair ? creditCol : null,
+    numCol,
+    notesCol,
+    usePair: pair
+  };
 }

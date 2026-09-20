@@ -1,9 +1,9 @@
 use rusqlite::Connection;
-use serde::Serialize;
+use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use tauri::State;
 
-use crate::db::{run_blocking, AppState};
+use crate::db::{run_blocking, run_io, AppError, AppState};
 use crate::tree;
 use crate::utils;
 
@@ -12,8 +12,12 @@ use crate::utils;
 /// (Multi-split checked, `GnuCash Export Settings` preset). Transaction-level
 /// fields repeat on every split row — the importer tolerates repeats and it
 /// keeps the CSV self-describing without blank-continuation parsing.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
+///
+/// This is a complete dump: unlike the ledger queries it deliberately does NOT
+/// apply the visibility window, so future-dated transactions survive the
+/// export. A round trip back into Spendo flags those rows as errors (the CSV
+/// importer keeps its future-date block).
+#[derive(Debug, Clone)]
 pub struct ExportSplitRow {
     pub tx_guid: String,
     pub split_guid: String,
@@ -41,8 +45,7 @@ pub struct ExportSplitRow {
 /// GnuCash account import can recreate parents first. Balances are
 /// deliberately omitted: they are report-currency converted snapshots and
 /// would corrupt a re-import — balances rebuild from the transactions file.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone)]
 pub struct ExportAccountRow {
     pub guid: String,
     /// `None` for top-level accounts (parent is the internal ROOT or missing).
@@ -84,13 +87,11 @@ fn fetch_export_transactions_inner(conn: &Connection) -> Result<Vec<ExportSplitR
          JOIN transactions t ON t.guid = s.tx_guid
          JOIN accounts a ON a.guid = s.account_guid
          LEFT JOIN commodities c ON c.guid = a.commodity_guid
-         WHERE {}
          ORDER BY t.post_date DESC, t.guid DESC,
                   ABS(CAST(s.value_num AS REAL) / CAST(s.value_denom AS REAL)) DESC,
                   s.guid ASC",
         utils::RAW_AMOUNT,
         utils::QUANTITY_AMOUNT,
-        utils::VISIBLE_TX_FILTER
     );
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
     let rows = stmt
@@ -286,18 +287,229 @@ fn fetch_export_accounts_inner(conn: &Connection) -> Result<Vec<ExportAccountRow
     Ok(out)
 }
 
-#[tauri::command]
-pub async fn fetch_export_transactions(
-    state: State<'_, AppState>,
-) -> Result<Vec<ExportSplitRow>, String> {
-    run_blocking(state.db.clone(), fetch_export_transactions_inner).await
+// ── CSV assembly + wire inputs ───────────────────────────────────────────────
+
+/// Column order of the transactions export (GnuCash multi-split shape).
+const TRANSACTIONS_EXPORT_HEADERS: [&str; 13] = [
+    "Date",
+    "Transaction ID",
+    "Number",
+    "Description",
+    "Notes",
+    "Commodity/Currency",
+    "Memo",
+    "Full Account Name",
+    "Account Name",
+    "Amount",
+    "Reconciled",
+    "Price",
+    "Split ID",
+];
+
+/// Column order of the account-tree export, parents before children.
+const ACCOUNTS_EXPORT_HEADERS: [&str; 10] = [
+    "Type",
+    "Full Name",
+    "Name",
+    "Code",
+    "Description",
+    "Commodity",
+    "Commodity Namespace",
+    "Placeholder",
+    "GUID",
+    "Parent GUID",
+];
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransactionsExportInput {
+    pub path: String,
+    pub delimiter: String,
+    /// `"iso"` keeps `YYYY-MM-DD`; `"locale"` renders via `date_parts` /
+    /// `date_separator` (derived from `Intl.DateTimeFormat` in the webview so
+    /// the file matches the locale the user sees).
+    pub date_format: String,
+    pub date_parts: Option<String>,
+    pub date_separator: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountsExportInput {
+    pub path: String,
+    pub delimiter: String,
+}
+
+fn validate_delimiter(raw: &str) -> Result<u8, AppError> {
+    match raw {
+        "," => Ok(b','),
+        ";" => Ok(b';'),
+        other => Err(AppError::Validation(format!(
+            "Unsupported CSV delimiter: {other:?}"
+        ))),
+    }
+}
+
+fn validate_export_path(path: &str) -> Result<(), AppError> {
+    if path.trim().is_empty() {
+        return Err(AppError::Validation("Export path is required".to_string()));
+    }
+    Ok(())
+}
+
+/// `None` = ISO passthrough. Locale parts must be one of the three numeric
+/// orders with a short separator.
+fn validate_date_options(
+    date_format: &str,
+    parts: Option<&str>,
+    separator: Option<&str>,
+) -> Result<Option<(String, String)>, AppError> {
+    match date_format {
+        "iso" => Ok(None),
+        "locale" => {
+            let parts = parts.unwrap_or("dmy").to_string();
+            if !matches!(parts.as_str(), "dmy" | "mdy" | "ymd") {
+                return Err(AppError::Validation(format!(
+                    "Unsupported date part order: {parts}"
+                )));
+            }
+            let separator = separator.unwrap_or("/").to_string();
+            if separator.is_empty() || separator.chars().count() > 2 {
+                return Err(AppError::Validation(
+                    "Unsupported date separator".to_string(),
+                ));
+            }
+            Ok(Some((parts, separator)))
+        }
+        other => Err(AppError::Validation(format!(
+            "Unsupported date format: {other}"
+        ))),
+    }
+}
+
+/// Render an already-validated `YYYY-MM-DD` date; malformed input passes
+/// through untouched rather than dropping data.
+fn format_export_date(iso: &str, locale: Option<&(String, String)>) -> String {
+    let Some((parts, separator)) = locale else {
+        return iso.to_string();
+    };
+    let mut it = iso.splitn(3, '-');
+    let (Some(year), Some(month), Some(day)) = (it.next(), it.next(), it.next()) else {
+        return iso.to_string();
+    };
+    match parts.as_str() {
+        "mdy" => format!("{month}{separator}{day}{separator}{year}"),
+        "ymd" => format!("{year}{separator}{month}{separator}{day}"),
+        _ => format!("{day}{separator}{month}{separator}{year}"),
+    }
+}
+
+/// BOM + `csv::Writer` output. The writer's default quoting (delimiter, quote,
+/// newline) matches the previous frontend `escapeCell` behaviour.
+fn build_csv_bytes(
+    delimiter: u8,
+    headers: &[&str],
+    rows: &[Vec<String>],
+) -> Result<Vec<u8>, AppError> {
+    let mut writer = csv::WriterBuilder::new()
+        .delimiter(delimiter)
+        .from_writer(Vec::new());
+    writer
+        .write_record(headers)
+        .map_err(|e| AppError::Validation(format!("Failed to build CSV: {e}")))?;
+    for row in rows {
+        writer
+            .write_record(row)
+            .map_err(|e| AppError::Validation(format!("Failed to build CSV: {e}")))?;
+    }
+    let mut bytes = writer
+        .into_inner()
+        .map_err(|e| AppError::Validation(format!("Failed to build CSV: {e}")))?;
+    let mut out = Vec::with_capacity(bytes.len() + 3);
+    out.extend_from_slice(b"\xEF\xBB\xBF");
+    out.append(&mut bytes);
+    Ok(out)
+}
+
+fn split_row_cells(row: &ExportSplitRow, locale: Option<&(String, String)>) -> Vec<String> {
+    vec![
+        format_export_date(&row.post_date, locale),
+        row.tx_guid.clone(),
+        row.num.clone().unwrap_or_default(),
+        row.description.clone().unwrap_or_default(),
+        row.notes.clone().unwrap_or_default(),
+        row.commodity.clone().unwrap_or_default(),
+        row.memo.clone().unwrap_or_default(),
+        row.full_account_name.clone(),
+        row.account_name.clone(),
+        format!("{}", row.amount),
+        row.reconcile_state.clone().unwrap_or_default(),
+        format!("{}", row.price),
+        row.split_guid.clone(),
+    ]
+}
+
+fn account_row_cells(row: &ExportAccountRow) -> Vec<String> {
+    vec![
+        row.account_type.clone(),
+        row.full_name.clone(),
+        row.name.clone(),
+        row.code.clone().unwrap_or_default(),
+        row.description.clone().unwrap_or_default(),
+        row.commodity.clone().unwrap_or_default(),
+        row.commodity_namespace.clone().unwrap_or_default(),
+        if row.placeholder { "TRUE" } else { "FALSE" }.to_string(),
+        row.guid.clone(),
+        row.parent_guid.clone().unwrap_or_default(),
+    ]
+}
+
+// ── Commands ─────────────────────────────────────────────────────────────────
+
+/// Full-book transactions CSV written straight to the user's chosen path: rows
+/// are read under the DB lock, the file write happens on `run_io` without it.
 #[tauri::command]
-pub async fn fetch_export_accounts(
+pub async fn export_transactions_csv(
     state: State<'_, AppState>,
-) -> Result<Vec<ExportAccountRow>, String> {
-    run_blocking(state.db.clone(), fetch_export_accounts_inner).await
+    input: TransactionsExportInput,
+) -> Result<(), String> {
+    let delimiter = validate_delimiter(&input.delimiter).map_err(String::from)?;
+    validate_export_path(&input.path).map_err(String::from)?;
+    let locale = validate_date_options(
+        &input.date_format,
+        input.date_parts.as_deref(),
+        input.date_separator.as_deref(),
+    )
+    .map_err(String::from)?;
+
+    let rows = run_blocking(state.db.clone(), fetch_export_transactions_inner).await?;
+    let cells: Vec<Vec<String>> = rows
+        .iter()
+        .map(|r| split_row_cells(r, locale.as_ref()))
+        .collect();
+    let bytes =
+        build_csv_bytes(delimiter, &TRANSACTIONS_EXPORT_HEADERS, &cells).map_err(String::from)?;
+    let path = input.path;
+    run_io(move || std::fs::write(&path, bytes).map_err(|e| format!("Failed to write file: {e}")))
+        .await
+}
+
+/// Full account-tree CSV written straight to the user's chosen path.
+#[tauri::command]
+pub async fn export_accounts_csv(
+    state: State<'_, AppState>,
+    input: AccountsExportInput,
+) -> Result<(), String> {
+    let delimiter = validate_delimiter(&input.delimiter).map_err(String::from)?;
+    validate_export_path(&input.path).map_err(String::from)?;
+
+    let rows = run_blocking(state.db.clone(), fetch_export_accounts_inner).await?;
+    let cells: Vec<Vec<String>> = rows.iter().map(account_row_cells).collect();
+    let bytes =
+        build_csv_bytes(delimiter, &ACCOUNTS_EXPORT_HEADERS, &cells).map_err(String::from)?;
+    let path = input.path;
+    run_io(move || std::fs::write(&path, bytes).map_err(|e| format!("Failed to write file: {e}")))
+        .await
 }
 
 #[cfg(test)]
@@ -342,29 +554,74 @@ mod tests {
     }
 
     #[test]
-    fn split_rows_carry_full_paths_and_raw_amounts() {
+    fn split_rows_include_future_dates_and_full_paths() {
         let conn = setup();
         let rows = fetch_export_transactions_inner(&conn).unwrap();
-        // Future-dated transaction stays out via the visibility window.
-        assert_eq!(rows.len(), 2);
-        assert!(rows.iter().all(|r| r.tx_guid == "t1"));
+        // Complete dump: the future-dated transaction is included.
+        assert_eq!(rows.len(), 3);
+        let future = rows.iter().find(|r| r.tx_guid == "t-future").unwrap();
+        assert_eq!(future.post_date, "2099-01-01");
+
+        let t1: Vec<&ExportSplitRow> = rows.iter().filter(|r| r.tx_guid == "t1").collect();
+        assert_eq!(t1.len(), 2);
         // Largest-magnitude split first.
-        assert_eq!(rows[0].account_name, "Broker");
-        assert_eq!(rows[0].full_account_name, "Assets:Broker");
-        assert_eq!(rows[0].post_date, "2024-03-01");
-        assert_eq!(rows[0].amount, 1000.0);
-        assert_eq!(rows[0].price, 100.0);
-        assert_eq!(rows[0].commodity.as_deref(), Some("AAPL"));
-        assert_eq!(rows[1].full_account_name, "Assets:Checking");
-        assert_eq!(rows[1].amount, -50.0);
-        assert_eq!(rows[1].price, 1.0);
-        assert_eq!(rows[1].memo.as_deref(), Some("card"));
-        assert_eq!(rows[1].reconcile_state.as_deref(), Some("c"));
+        assert_eq!(t1[0].account_name, "Broker");
+        assert_eq!(t1[0].full_account_name, "Assets:Broker");
+        assert_eq!(t1[0].post_date, "2024-03-01");
+        assert_eq!(t1[0].amount, 1000.0);
+        assert_eq!(t1[0].price, 100.0);
+        assert_eq!(t1[0].commodity.as_deref(), Some("AAPL"));
+        assert_eq!(t1[1].full_account_name, "Assets:Checking");
+        assert_eq!(t1[1].amount, -50.0);
+        assert_eq!(t1[1].price, 1.0);
+        assert_eq!(t1[1].memo.as_deref(), Some("card"));
+        assert_eq!(t1[1].reconcile_state.as_deref(), Some("c"));
         // Transaction-level fields repeat on every split row.
-        assert!(rows
+        assert!(t1
             .iter()
             .all(|r| r.description.as_deref() == Some("Groceries")));
-        assert!(rows.iter().all(|r| r.num.as_deref() == Some("12")));
+        assert!(t1.iter().all(|r| r.num.as_deref() == Some("12")));
+    }
+
+    #[test]
+    fn export_csv_bytes_have_bom_headers_and_escaping() {
+        let rows = vec![vec![
+            "a,b".to_string(),
+            "line\nbreak".to_string(),
+            "plain".to_string(),
+        ]];
+        let bytes = build_csv_bytes(b',', &["H1", "H2", "H3"], &rows).unwrap();
+        assert!(bytes.starts_with(b"\xEF\xBB\xBF"));
+        let text = String::from_utf8(bytes[3..].to_vec())
+            .unwrap()
+            .replace("\r\n", "\n");
+        assert_eq!(text, "H1,H2,H3\n\"a,b\",\"line\nbreak\",plain\n");
+    }
+
+    #[test]
+    fn export_csv_supports_semicolon() {
+        let bytes = build_csv_bytes(b';', &["A", "B"], &[vec!["1".into(), "2".into()]]).unwrap();
+        let text = String::from_utf8(bytes[3..].to_vec())
+            .unwrap()
+            .replace("\r\n", "\n");
+        assert_eq!(text, "A;B\n1;2\n");
+    }
+
+    #[test]
+    fn export_date_options_validate_and_format() {
+        assert!(validate_date_options("iso", None, None).unwrap().is_none());
+        let locale = validate_date_options("locale", Some("dmy"), Some("/")).unwrap();
+        assert_eq!(format_export_date("2024-03-01", locale.as_ref()), "01/03/2024");
+        let locale = validate_date_options("locale", Some("mdy"), Some(".")).unwrap();
+        assert_eq!(format_export_date("2024-03-01", locale.as_ref()), "03.01.2024");
+        let locale = validate_date_options("locale", Some("ymd"), Some("-")).unwrap();
+        assert_eq!(format_export_date("2024-03-01", locale.as_ref()), "2024-03-01");
+        // Malformed input passes through rather than dropping the date.
+        assert_eq!(format_export_date("not-a-date", None), "not-a-date");
+        assert!(validate_date_options("us", None, None).is_err());
+        assert!(validate_date_options("locale", Some("ydm"), None).is_err());
+        assert!(validate_date_options("locale", None, Some("")).is_err());
+        assert!(validate_delimiter("|").is_err());
     }
 
     #[test]

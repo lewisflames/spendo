@@ -7,7 +7,9 @@ use tauri::State;
 
 use crate::db::{ensure_same_book, run_blocking, run_io, with_tx_err, AppError, AppState};
 use crate::history;
+use crate::import_rules;
 use crate::transactions;
+use crate::utils;
 
 /// Upper bounds keep a hostile CSV from materializing the whole book over IPC.
 /// 10 MiB ≈ ~200k typical bank rows; the row cap binds the preview payload.
@@ -20,7 +22,7 @@ const SAMPLE_ROWS: usize = 5;
 /// Column→field mapping. Exactly one of `amountCol` or the
 /// `debitCol`+`creditCol` pair must be set; indices are 0-based into the
 /// parsed record (missing cells read as empty).
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CsvMapping {
     pub date_col: usize,
@@ -36,6 +38,9 @@ pub struct CsvMapping {
 #[serde(rename_all = "camelCase")]
 pub struct CsvPreviewInput {
     pub path: String,
+    /// Hash of the file bytes as detected; the preview refuses to run against
+    /// different content so the dry run always matches what was parsed.
+    pub file_sha256: String,
     pub encoding: Option<String>,
     pub delimiter: Option<String>,
     pub has_header: Option<bool>,
@@ -50,6 +55,9 @@ pub struct CsvPreviewInput {
 #[serde(rename_all = "camelCase")]
 pub struct CsvCommitInput {
     pub path: String,
+    /// Hash captured at detect/preview time; the commit aborts when the file
+    /// changed in between (row keys would otherwise select different rows).
+    pub file_sha256: String,
     pub encoding: Option<String>,
     pub delimiter: Option<String>,
     pub has_header: Option<bool>,
@@ -58,6 +66,25 @@ pub struct CsvCommitInput {
     pub offset_account_guid: String,
     pub date_preference: Option<String>,
     pub selected_keys: Vec<i64>,
+    /// Upsert the mapping as this header layout's preset when the commit lands.
+    pub remember_mapping: bool,
+}
+
+/// Saved mapping for one bank-statement layout, applied automatically when a
+/// file with the same normalized header row is detected. Headerless files get
+/// no preset (no stable key).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CsvPreset {
+    pub signature: String,
+    pub name: String,
+    pub encoding: Option<String>,
+    pub delimiter: String,
+    pub has_header: bool,
+    pub date_preference: String,
+    pub mapping: CsvMapping,
+    pub target_account_guid: String,
+    pub offset_account_guid: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -71,6 +98,12 @@ pub struct CsvDetectResult {
     pub row_count: i64,
     pub sample_rows: Vec<Vec<String>>,
     pub filename: String,
+    /// SHA-256 of the file bytes; preview/commit echo it back for TOCTOU safety.
+    pub sha256: String,
+    /// Normalized header-row signature (`None` for headerless files).
+    pub signature: Option<String>,
+    /// Saved mapping for this signature, when one exists in the book.
+    pub preset: Option<CsvPreset>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -83,6 +116,11 @@ pub struct CsvPreviewRow {
     pub amount: Option<f64>,
     pub valid: bool,
     pub duplicate: bool,
+    /// Category this row will post against (import-rule match or the fallback
+    /// offset account), for the preview's Category column.
+    pub offset_account_name: String,
+    /// True when an import rule picked the category.
+    pub rule_matched: bool,
     pub error: Option<String>,
 }
 
@@ -154,6 +192,27 @@ fn filename_of(path: &str) -> String {
         .and_then(|n| n.to_str())
         .unwrap_or("import.csv")
         .to_string()
+}
+
+/// SHA-256 of raw bytes, same hex encoding as `csv_row_hash`.
+fn bytes_sha256(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect()
+}
+
+/// Refuse file content that no longer matches what the user selected/previewed.
+fn ensure_unchanged_file(bytes: &[u8], expected: &str) -> Result<(), AppError> {
+    if bytes_sha256(bytes) != expected {
+        return Err(AppError::Validation(
+            "CSV file changed since it was selected — pick the file again".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 /// Decode bytes to text. BOM-aware: UTF-8 BOM stripped, UTF-16 LE/BE via
@@ -514,6 +573,20 @@ fn cell_at(cells: &[String], idx: Option<usize>) -> String {
     idx.and_then(|i| cells.get(i)).cloned().unwrap_or_default()
 }
 
+/// GUID→name for every account, used to label preview rows' categories.
+fn load_account_names(conn: &Connection) -> Result<HashMap<String, String>, AppError> {
+    let mut stmt = conn
+        .prepare("SELECT guid, name FROM accounts")
+        .map_err(AppError::from)?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(AppError::from)?;
+    rows.collect::<Result<HashMap<_, _>, _>>()
+        .map_err(AppError::from)
+}
+
 fn require_col(idx: usize, column_count: usize, name: &str) -> Result<(), AppError> {
     if idx >= column_count {
         return Err(AppError::Validation(format!(
@@ -555,6 +628,38 @@ fn validate_mapping(mapping: &CsvMapping, column_count: usize) -> Result<bool, A
     }
 }
 
+/// Reject accounts that must not hold splits: the internal ROOT (posting to it
+/// corrupts the balance-sheet identity) and placeholders. Shared by the CSV
+/// pickers and the import-rule editor.
+pub(crate) fn ensure_postable_account(
+    conn: &Connection,
+    guid: &str,
+    label: &str,
+) -> Result<(), AppError> {
+    let row: Option<(i64, String)> = conn
+        .query_row(
+            "SELECT COALESCE(placeholder, 0), account_type FROM accounts WHERE guid = ?1",
+            params![guid],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()
+        .map_err(AppError::from)?;
+    let Some((placeholder, account_type)) = row else {
+        return Err(AppError::NotFound(format!("{label} account not found")));
+    };
+    if account_type == "ROOT" {
+        return Err(AppError::Validation(format!(
+            "{label} account is the root account and cannot hold splits"
+        )));
+    }
+    if placeholder != 0 {
+        return Err(AppError::Validation(format!(
+            "{label} account is a placeholder and cannot hold splits"
+        )));
+    }
+    Ok(())
+}
+
 fn validate_accounts(conn: &Connection, target: &str, offset: &str) -> Result<(), AppError> {
     if target.trim().is_empty() || offset.trim().is_empty() {
         return Err(AppError::Validation(
@@ -566,31 +671,10 @@ fn validate_accounts(conn: &Connection, target: &str, offset: &str) -> Result<()
             "Target and offset accounts must differ".to_string(),
         ));
     }
-    for (label, guid) in [("Target", target), ("Offset", offset)] {
-        let row: Option<(i64, String)> = conn
-            .query_row(
-                "SELECT COALESCE(placeholder, 0), account_type FROM accounts WHERE guid = ?1",
-                params![guid],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .optional()
-            .map_err(AppError::from)?;
-        let Some((placeholder, account_type)) = row else {
-            return Err(AppError::NotFound(format!("{label} account not found")));
-        };
-        // The internal ROOT is not a real account: posting to it corrupts the
-        // balance-sheet identity (the picker never offers it).
-        if account_type == "ROOT" {
-            return Err(AppError::Validation(format!(
-                "{label} account is the root account and cannot hold splits"
-            )));
-        }
-        if placeholder != 0 {
-            return Err(AppError::Validation(format!(
-                "{label} account is a placeholder and cannot hold splits"
-            )));
-        }
-    }
+    // The internal ROOT is not a real account: posting to it corrupts the
+    // balance-sheet identity (the picker never offers it).
+    ensure_postable_account(conn, target, "Target")?;
+    ensure_postable_account(conn, offset, "Offset")?;
     Ok(())
 }
 
@@ -615,32 +699,38 @@ fn amount_to_value_num(amount: f64) -> i64 {
     (amount * transactions::VALUE_DENOM as f64).round() as i64
 }
 
-fn load_existing_hashes(
+/// Existing rows in the target account for the parsed date window, keyed by
+/// [`csv_row_hash`] with the number of copies the book holds. Counts (not a
+/// set) let a file that legitimately contains more copies of a same-day charge
+/// than the book import the surplus.
+fn load_existing_counts(
     conn: &Connection,
     target_guid: &str,
     min_date: &str,
     max_date: &str,
-) -> Result<HashSet<String>, AppError> {
+) -> Result<HashMap<String, i64>, AppError> {
     let mut stmt = conn
         .prepare(
-            "SELECT substr(t.post_date, 1, 10), s.value_num, t.description
+            "SELECT substr(t.post_date, 1, 10), s.value_num, COALESCE(t.description, ''), COUNT(*)
              FROM splits s JOIN transactions t ON t.guid = s.tx_guid
              WHERE s.account_guid = ?1
-               AND substr(t.post_date, 1, 10) BETWEEN ?2 AND ?3",
+               AND substr(t.post_date, 1, 10) BETWEEN ?2 AND ?3
+             GROUP BY 1, 2, 3",
         )
         .map_err(AppError::from)?;
     let rows = stmt
         .query_map(params![target_guid, min_date, max_date], |row| {
             let date: String = row.get(0)?;
             let value_num: i64 = row.get(1)?;
-            let desc: Option<String> = row.get(2)?;
-            Ok((date, value_num, desc.unwrap_or_default()))
+            let desc: String = row.get(2)?;
+            let count: i64 = row.get(3)?;
+            Ok((date, value_num, desc, count))
         })
         .map_err(AppError::from)?;
-    let mut out = HashSet::new();
+    let mut out = HashMap::new();
     for row in rows {
-        let (date, value_num, desc) = row.map_err(AppError::from)?;
-        out.insert(csv_row_hash(&date, value_num, &desc));
+        let (date, value_num, desc, count) = row.map_err(AppError::from)?;
+        out.insert(csv_row_hash(&date, value_num, &desc), count);
     }
     Ok(out)
 }
@@ -656,6 +746,11 @@ struct ParsedRow {
     value_num: Option<i64>,
     num: Option<String>,
     notes: Option<String>,
+    /// Category for this row: an import-rule match, else the fallback offset.
+    /// `None` on error rows (they are never staged).
+    offset_guid: Option<String>,
+    /// True when an import rule picked the category.
+    rule_matched: bool,
     error: Option<String>,
 }
 
@@ -684,6 +779,8 @@ impl ParsedRow {
             value_num: amount.map(amount_to_value_num),
             num,
             notes,
+            offset_guid: None,
+            rule_matched: false,
             error: Some(error),
         }
     }
@@ -775,6 +872,9 @@ fn parse_file_rows(
     // File-wide decimal convention, computed once: a lone dot is a thousands
     // separator only when the file demonstrably uses comma decimals.
     let dot_is_thousands = detect_dot_thousands(data, use_pair, mapping);
+    // Import rules, loaded once: the first match picks the category per row,
+    // the mapping step's offset account stays the fallback.
+    let rules = import_rules::RuleMatcher::load(conn)?;
 
     let mut rows = Vec::with_capacity(data.len());
     for (i, cells) in data.iter().enumerate() {
@@ -823,6 +923,9 @@ fn parse_file_rows(
             let t = cell_at(cells, mapping.notes_col).trim().to_string();
             if t.is_empty() { None } else { Some(t) }
         };
+        let rule_match = rules.resolve(&description);
+        let rule_matched = rule_match.is_some();
+        let offset = rule_match.unwrap_or(offset_guid).to_string();
         // Reuse the manual-editor gate (future-date block, placeholder and
         // balance checks) so preview errors match commit errors exactly.
         let tx = transactions::TxInput {
@@ -838,7 +941,7 @@ fn parse_file_rows(
                     memo: None,
                 },
                 transactions::SplitInput {
-                    account_guid: offset_guid.to_string(),
+                    account_guid: offset.clone(),
                     amount: -amount,
                     quantity: None,
                     memo: None,
@@ -867,27 +970,41 @@ fn parse_file_rows(
             value_num: Some(amount_to_value_num(amount)),
             num,
             notes,
+            offset_guid: Some(offset),
+            rule_matched,
             error: None,
         });
     }
     Ok(ParsedFile { rows })
 }
 
-/// One validated CSV row staged for insert: date, description, original key,
-/// optional num/notes, and the signed target-leg amount.
-type StagedRow = (String, String, String, Option<String>, Option<String>, f64);
+/// One validated CSV row staged for insert: date, description, optional
+/// num/notes, signed target-leg amount and the resolved category account.
+struct StagedRow {
+    post_date: String,
+    description: String,
+    num: Option<String>,
+    notes: Option<String>,
+    amount: f64,
+    offset_guid: String,
+}
 
 struct StagedSelection {
     to_insert: Vec<StagedRow>,
     skipped_duplicates: i64,
     skipped_errors: i64,
+    rules_applied: i64,
 }
 
 fn duplicate_flags(
     rows: &[ParsedRow],
-    existing: &HashSet<String>,
+    existing: &HashMap<String, i64>,
 ) -> HashMap<i64, bool> {
     let mut flags: HashMap<i64, bool> = HashMap::new();
+    // Copy so the caller's counts stay untouched; consuming one copy per
+    // duplicate keeps a file with two identical charges importable while the
+    // book only holds one, and still flags a replay of an already-imported file.
+    let mut remaining = existing.clone();
     for row in rows {
         if row.error.is_some() {
             flags.insert(row.key, false);
@@ -898,11 +1015,14 @@ fn duplicate_flags(
             row.value_num.unwrap_or(0),
             row.description.as_deref().unwrap_or(""),
         );
-        // Only rows already in the book are duplicates: repeated rows inside
-        // one file are legitimate (two identical same-day charges) and stay
-        // importable; a second commit of the same file is caught by the DB
-        // hash on the next preview.
-        flags.insert(row.key, existing.contains(&hash));
+        let duplicate = match remaining.get_mut(&hash) {
+            Some(count) if *count > 0 => {
+                *count -= 1;
+                true
+            }
+            _ => false,
+        };
+        flags.insert(row.key, duplicate);
     }
     flags
 }
@@ -922,23 +1042,110 @@ fn duplicate_flags_for_rows(
     dates.sort();
     let existing = match (dates.first(), dates.last()) {
         (Some(min), Some(max)) => {
-            load_existing_hashes(conn, target_guid, min, max)?
+            load_existing_counts(conn, target_guid, min, max)?
         }
-        _ => HashSet::new(),
+        _ => HashMap::new(),
     };
     Ok(duplicate_flags(rows, &existing))
+}
+
+// ── Mapping presets ──────────────────────────────────────────────────────────
+
+/// Stable key for "the same bank statement layout": the normalized header row.
+/// Headerless files have no stable key, so they don't get presets.
+fn preset_signature(headers: &[String], has_header: bool) -> Option<String> {
+    if !has_header {
+        return None;
+    }
+    let normalized: Vec<String> = headers.iter().map(|h| h.trim().to_lowercase()).collect();
+    if normalized.iter().all(|h| h.is_empty()) {
+        return None;
+    }
+    Some(bytes_sha256(normalized.join("\u{1f}").as_bytes()))
+}
+
+/// Human-readable label for the detect notice.
+fn preset_name(headers: &[String]) -> String {
+    let mut name = headers
+        .iter()
+        .map(|h| h.trim())
+        .filter(|h| !h.is_empty())
+        .take(3)
+        .collect::<Vec<_>>()
+        .join(" · ");
+    if name.chars().count() > 80 {
+        name = name.chars().take(80).collect();
+    }
+    if name.is_empty() {
+        name = "CSV mapping".to_string();
+    }
+    name
+}
+
+fn load_preset(conn: &Connection, signature: &str) -> Result<Option<CsvPreset>, AppError> {
+    let json: Option<String> = conn
+        .query_row(
+            "SELECT mapping_json FROM csv_import_presets WHERE signature = ?1",
+            params![signature],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(AppError::from)?;
+    match json {
+        Some(json) => serde_json::from_str(&json)
+            .map(Some)
+            .map_err(|e| AppError::Validation(format!("Saved mapping is unreadable: {e}"))),
+        None => Ok(None),
+    }
+}
+
+fn save_preset(conn: &Connection, preset: &CsvPreset) -> Result<(), AppError> {
+    let json = serde_json::to_string(preset)
+        .map_err(|e| AppError::Validation(format!("Failed to store mapping: {e}")))?;
+    conn.execute(
+        "INSERT INTO csv_import_presets (signature, name, mapping_json, updated_at)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(signature) DO UPDATE SET
+           name = excluded.name,
+           mapping_json = excluded.mapping_json,
+           updated_at = excluded.updated_at",
+        params![preset.signature, preset.name, json, utils::iso_now()],
+    )
+    .map_err(AppError::from)?;
+    Ok(())
+}
+
+fn delete_preset(conn: &Connection, signature: &str) -> Result<(), AppError> {
+    conn.execute(
+        "DELETE FROM csv_import_presets WHERE signature = ?1",
+        params![signature],
+    )
+    .map_err(AppError::from)?;
+    Ok(())
 }
 
 // ── Commands ─────────────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub async fn csv_detect(path: String) -> Result<CsvDetectResult, String> {
+pub async fn csv_detect(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<CsvDetectResult, String> {
     // File read + parsing run on a blocking thread (the file may be ~10 MiB).
-    run_io(move || csv_detect_inner(&path)).await
+    let mut detect = run_io(move || csv_detect_inner(&path)).await?;
+    // Saved mapping lookup is a book-scoped DB read, separate from file I/O.
+    if let Some(signature) = detect.signature.clone() {
+        detect.preset = run_blocking(state.db.clone(), move |conn| {
+            load_preset(conn, &signature).map_err(String::from)
+        })
+        .await?;
+    }
+    Ok(detect)
 }
 
 fn csv_detect_inner(path: &str) -> Result<CsvDetectResult, String> {
     let bytes = read_file_bytes(path).map_err(String::from)?;
+    let sha256 = bytes_sha256(&bytes);
     let (text, encoding) = decode_bytes(&bytes, None);
     let (_, delimiter) = parse_delimiter(None, &text).map_err(String::from)?;
     let delim_byte = delimiter.as_bytes()[0];
@@ -956,6 +1163,7 @@ fn csv_detect_inner(path: &str) -> Result<CsvDetectResult, String> {
         (1..=column_count).map(|i| format!("Column {i}")).collect()
     };
     let start = if has_header { 1 } else { 0 };
+    let signature = preset_signature(&headers, has_header);
     let sample_rows: Vec<Vec<String>> = records
         .iter()
         .skip(start)
@@ -971,6 +1179,9 @@ fn csv_detect_inner(path: &str) -> Result<CsvDetectResult, String> {
         row_count: data_len,
         sample_rows,
         filename: filename_of(&path),
+        sha256,
+        signature,
+        preset: None,
     })
 }
 
@@ -979,6 +1190,7 @@ fn preview_inner(
     input: CsvPreviewInput,
     bytes: &[u8],
 ) -> Result<CsvPreviewResult, AppError> {
+    ensure_unchanged_file(bytes, &input.file_sha256)?;
     let (text, _) = decode_bytes(bytes, input.encoding.as_deref());
     let (delim_byte, _) = parse_delimiter(input.delimiter.as_deref(), &text)?;
     let records = parse_records(&text, delim_byte)?;
@@ -997,6 +1209,11 @@ fn preview_inner(
     )?;
 
     let dup_flags = duplicate_flags_for_rows(conn, &input.target_account_guid, &parsed.rows)?;
+    let account_names = load_account_names(conn)?;
+    let fallback_name = account_names
+        .get(&input.offset_account_guid)
+        .cloned()
+        .unwrap_or_default();
 
     let mut out_rows = Vec::with_capacity(parsed.rows.len());
     let mut valid_count = 0;
@@ -1012,6 +1229,12 @@ fn preview_inner(
         } else {
             valid_count += 1;
         }
+        let offset_account_name = row
+            .offset_guid
+            .as_ref()
+            .and_then(|g| account_names.get(g))
+            .cloned()
+            .unwrap_or_else(|| fallback_name.clone());
         out_rows.push(CsvPreviewRow {
             key: row.key,
             raw: row.raw,
@@ -1020,6 +1243,8 @@ fn preview_inner(
             amount: row.amount,
             valid,
             duplicate,
+            offset_account_name,
+            rule_matched: row.rule_matched,
             error: row.error,
         });
     }
@@ -1064,20 +1289,51 @@ fn commit_inner(
     input: CsvCommitInput,
     bytes: &[u8],
 ) -> Result<CsvCommitResult, AppError> {
-    let parsed = parse_commit_rows(conn, &input, bytes)?;
+    ensure_unchanged_file(bytes, &input.file_sha256)?;
+    let CommitParse {
+        parsed,
+        signature,
+        name,
+        delimiter,
+        has_header,
+    } = parse_commit_rows(conn, &input, bytes)?;
     let selection = select_rows_to_insert(
         conn,
         &input.target_account_guid,
         &parsed.rows,
-        input.selected_keys,
+        input.selected_keys.clone(),
     )?;
     let (entry_id, label) = insert_staged_rows(
         conn,
         &input.path,
         &input.target_account_guid,
         &input.offset_account_guid,
+        selection.rules_applied,
         &selection.to_insert,
     )?;
+    // Remember the mapping only after the rows landed, so a failed commit never
+    // leaves a preset pointing at a mapping that was never applied.
+    if input.remember_mapping {
+        if let Some(signature) = signature {
+            save_preset(
+                conn,
+                &CsvPreset {
+                    signature,
+                    name,
+                    encoding: input.encoding.clone(),
+                    delimiter,
+                    has_header,
+                    date_preference: input
+                        .date_preference
+                        .clone()
+                        .unwrap_or_else(|| "dmy".to_string()),
+                    mapping: input.mapping.clone(),
+                    target_account_guid: input.target_account_guid.clone(),
+                    offset_account_guid: input.offset_account_guid.clone(),
+                },
+            )?;
+        }
+    }
     Ok(CsvCommitResult {
         created: selection.to_insert.len() as i64,
         skipped_duplicates: selection.skipped_duplicates,
@@ -1087,21 +1343,38 @@ fn commit_inner(
     })
 }
 
+/// Parsed commit plus the effective file options a saved preset needs.
+struct CommitParse {
+    parsed: ParsedFile,
+    signature: Option<String>,
+    name: String,
+    delimiter: String,
+    has_header: bool,
+}
+
 /// Decode, parse and validate the commit input into rows.
 fn parse_commit_rows(
     conn: &Connection,
     input: &CsvCommitInput,
     bytes: &[u8],
-) -> Result<ParsedFile, AppError> {
+) -> Result<CommitParse, AppError> {
     let (text, _) = decode_bytes(bytes, input.encoding.as_deref());
-    let (delim_byte, _) = parse_delimiter(input.delimiter.as_deref(), &text)?;
+    let (delim_byte, delimiter) = parse_delimiter(input.delimiter.as_deref(), &text)?;
     let records = parse_records(&text, delim_byte)?;
     let has_header = input.has_header.unwrap_or_else(|| {
         records.first().map(|r| looks_like_header(r)).unwrap_or(false)
     });
+    let headers: Vec<String> = if has_header {
+        records.first().cloned().unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let signature = preset_signature(&headers, has_header);
+    let name = preset_name(&headers);
     let date_preference = input.date_preference.as_deref().unwrap_or("dmy");
     let preview_input = CsvPreviewInput {
         path: input.path.clone(),
+        file_sha256: input.file_sha256.clone(),
         encoding: input.encoding.clone(),
         delimiter: input.delimiter.clone(),
         has_header: Some(has_header),
@@ -1110,7 +1383,7 @@ fn parse_commit_rows(
         offset_account_guid: input.offset_account_guid.clone(),
         date_preference: Some(date_preference.to_string()),
     };
-    parse_file_rows(
+    let parsed = parse_file_rows(
         conn,
         &records,
         has_header,
@@ -1118,7 +1391,14 @@ fn parse_commit_rows(
         &preview_input.target_account_guid,
         &preview_input.offset_account_guid,
         date_preference,
-    )
+    )?;
+    Ok(CommitParse {
+        parsed,
+        signature,
+        name,
+        delimiter,
+        has_header,
+    })
 }
 
 /// Filter the selected keys down to insertable rows, counting skipped
@@ -1138,6 +1418,7 @@ fn select_rows_to_insert(
     let mut to_insert: Vec<StagedRow> = Vec::new();
     let mut skipped_duplicates = 0;
     let mut skipped_errors = 0;
+    let mut rules_applied = 0;
     let mut ordered_keys: Vec<i64> = by_key.keys().copied().collect();
     ordered_keys.sort();
     for key in ordered_keys {
@@ -1156,20 +1437,26 @@ fn select_rows_to_insert(
             skipped_duplicates += 1;
             continue;
         }
-        let (Some(date), Some(desc), Some(amount)) =
-            (row.post_date.clone(), row.description.clone(), row.amount)
-        else {
+        let (Some(date), Some(desc), Some(amount), Some(offset)) = (
+            row.post_date.clone(),
+            row.description.clone(),
+            row.amount,
+            row.offset_guid.clone(),
+        ) else {
             skipped_errors += 1;
             continue;
         };
-        to_insert.push((
-            date,
-            desc,
-            key.to_string(),
-            row.num.clone(),
-            row.notes.clone(),
+        if row.rule_matched {
+            rules_applied += 1;
+        }
+        to_insert.push(StagedRow {
+            post_date: date,
+            description: desc,
+            num: row.num.clone(),
+            notes: row.notes.clone(),
             amount,
-        ));
+            offset_guid: offset,
+        });
     }
     if to_insert.is_empty() {
         return Err(AppError::Validation(
@@ -1180,6 +1467,7 @@ fn select_rows_to_insert(
         to_insert,
         skipped_duplicates,
         skipped_errors,
+        rules_applied,
     })
 }
 
@@ -1190,6 +1478,7 @@ fn insert_staged_rows(
     path: &str,
     target_guid: &str,
     offset_guid: &str,
+    rules_applied: i64,
     to_insert: &[StagedRow],
 ) -> Result<(i64, String), AppError> {
     let filename = filename_of(path);
@@ -1200,6 +1489,7 @@ fn insert_staged_rows(
         "targetAccountGuid": target_guid,
         "offsetAccountGuid": offset_guid,
         "created": to_insert.len(),
+        "rulesApplied": rules_applied,
     })
     .to_string();
 
@@ -1207,10 +1497,10 @@ fn insert_staged_rows(
         let mut snapshots: Vec<history::Snapshot<'_>> = Vec::new();
         // Own the GUID strings inside the txn so snapshot borrows stay valid.
         let mut owned_guids: Vec<(String, Vec<String>)> = Vec::new();
-        for (date, desc, _, num, notes, amount) in to_insert {
+        for row in to_insert {
             let tx_guid = uuid::Uuid::new_v4().to_string();
             let description = {
-                let t = desc.trim();
+                let t = row.description.trim();
                 if t.is_empty() { None } else { Some(t.to_string()) }
             };
             conn.execute(
@@ -1218,22 +1508,22 @@ fn insert_staged_rows(
                  VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![
                     tx_guid,
-                    date,
+                    row.post_date,
                     description,
-                    num.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()),
-                    notes.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()),
+                    row.num.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()),
+                    row.notes.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()),
                 ],
             )?;
             let splits = vec![
                 transactions::SplitInput {
                     account_guid: target_guid.to_string(),
-                    amount: *amount,
+                    amount: row.amount,
                     quantity: None,
                     memo: None,
                 },
                 transactions::SplitInput {
-                    account_guid: offset_guid.to_string(),
-                    amount: -*amount,
+                    account_guid: row.offset_guid.clone(),
+                    amount: -row.amount,
                     quantity: None,
                     memo: None,
                 },
@@ -1255,7 +1545,11 @@ fn insert_staged_rows(
                 });
             }
         }
-        let distinct_accounts: HashSet<&str> = [target_guid, offset_guid].into_iter().collect();
+        let mut distinct_accounts: HashSet<&str> = HashSet::new();
+        distinct_accounts.insert(target_guid);
+        for row in to_insert {
+            distinct_accounts.insert(row.offset_guid.as_str());
+        }
         let entry_id = history::insert_change_entry(
             conn,
             "import",
@@ -1288,6 +1582,18 @@ pub async fn csv_commit(
     run_blocking(state.db.clone(), move |conn| {
         ensure_same_book(&generation_handle, generation)?;
         commit_inner(conn, input, &bytes).map_err(String::from)
+    })
+    .await
+}
+
+/// Forget a saved mapping (the wizard's "Forget" action).
+#[tauri::command]
+pub async fn delete_csv_preset(
+    state: State<'_, AppState>,
+    signature: String,
+) -> Result<(), String> {
+    run_blocking(state.db.clone(), move |conn| {
+        delete_preset(conn, &signature).map_err(String::from)
     })
     .await
 }
@@ -1363,7 +1669,6 @@ mod tests {
         assert!(!detect_dot_thousands(&rows(&["1.23", "1.234"]), false, &mapping()));
     }
 
-    #[test]
     /// The internal ROOT must never be a CSV target/offset, even though the
     /// backend would otherwise accept it (placeholder = 0).
     #[test]
@@ -1473,6 +1778,7 @@ mod tests {
     fn preview_input(path: &str) -> CsvPreviewInput {
         CsvPreviewInput {
             path: path.to_string(),
+            file_sha256: bytes_sha256(&read_file_bytes(path).unwrap()),
             encoding: None,
             delimiter: None,
             has_header: Some(true),
@@ -1507,6 +1813,7 @@ mod tests {
 
         let commit = CsvCommitInput {
             path: path.clone(),
+            file_sha256: bytes_sha256(&bytes),
             encoding: None,
             delimiter: None,
             has_header: Some(true),
@@ -1515,6 +1822,7 @@ mod tests {
             offset_account_guid: input.offset_account_guid.clone(),
             date_preference: Some("dmy".to_string()),
             selected_keys: vec![0, 1],
+            remember_mapping: true,
         };
         let result = commit_inner(&conn, commit, &bytes).expect("commit runs");
         assert_eq!(result.created, 2);
@@ -1559,6 +1867,7 @@ mod tests {
 
         let commit = CsvCommitInput {
             path: path.clone(),
+            file_sha256: bytes_sha256(&bytes),
             encoding: None,
             delimiter: None,
             has_header: Some(true),
@@ -1567,6 +1876,7 @@ mod tests {
             offset_account_guid: "groceries".to_string(),
             date_preference: Some("dmy".to_string()),
             selected_keys: vec![0, 1],
+            remember_mapping: true,
         };
         let result = commit_inner(&conn, commit, &bytes).expect("commit runs");
         assert_eq!(result.created, 2);
@@ -1577,6 +1887,7 @@ mod tests {
             &conn,
             CsvCommitInput {
                 path: path.clone(),
+                file_sha256: bytes_sha256(&bytes),
                 encoding: None,
                 delimiter: None,
                 has_header: Some(true),
@@ -1585,11 +1896,192 @@ mod tests {
                 offset_account_guid: "groceries".to_string(),
                 date_preference: Some("dmy".to_string()),
                 selected_keys: vec![0, 1],
+            remember_mapping: true,
             },
             &bytes,
         )
         .unwrap_err();
         assert!(replay.to_string().contains("duplicates or errors"), "{replay}");
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    fn commit_input(path: &str, bytes: &[u8]) -> CsvCommitInput {
+        CsvCommitInput {
+            path: path.to_string(),
+            file_sha256: bytes_sha256(bytes),
+            encoding: None,
+            delimiter: None,
+            has_header: Some(true),
+            mapping: CsvMapping {
+                date_col: 0,
+                desc_col: 1,
+                amount_col: Some(2),
+                debit_col: None,
+                credit_col: None,
+                num_col: None,
+                notes_col: None,
+            },
+            target_account_guid: "checking".to_string(),
+            offset_account_guid: "groceries".to_string(),
+            date_preference: Some("dmy".to_string()),
+            selected_keys: vec![0, 1],
+            remember_mapping: true,
+        }
+    }
+
+    /// The file must not change between detect/preview and commit: row keys are
+    /// indices, so altered content would select different rows.
+    #[test]
+    fn stale_file_hash_is_rejected() {
+        let conn = csv_e2e_setup();
+        let csv = "Date,Description,Amount\n2024-01-05,Coffee,-3.50\n";
+        let path = write_temp_csv("stale-hash", csv);
+        let bytes = read_file_bytes(&path).unwrap();
+
+        let mut input = preview_input(&path);
+        input.file_sha256 = "0".repeat(64);
+        let err = preview_inner(&conn, input, &bytes).unwrap_err();
+        assert!(err.to_string().contains("changed"), "unexpected: {err}");
+
+        let stale = commit_input(&path, &bytes);
+        let mut stale = stale;
+        stale.file_sha256 = "0".repeat(64);
+        let err = commit_inner(&conn, stale, &bytes).unwrap_err();
+        assert!(err.to_string().contains("changed"), "unexpected: {err}");
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM transactions", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// Regression for count-based dedupe: the book holds one copy, the file has
+    /// two, so exactly the surplus imports.
+    #[test]
+    fn file_with_more_copies_than_book_imports_the_extras() {
+        let conn = csv_e2e_setup();
+        let one = "Date,Description,Amount\n2024-02-01,Shop,-5.00\n";
+        let path_one = write_temp_csv("one-copy", one);
+        let bytes_one = read_file_bytes(&path_one).unwrap();
+        let first = commit_inner(&conn, commit_input(&path_one, &bytes_one), &bytes_one).unwrap();
+        assert_eq!(first.created, 1);
+
+        let two = "Date,Description,Amount\n2024-02-01,Shop,-5.00\n2024-02-01,Shop,-5.00\n";
+        let path = write_temp_csv("two-copies", two);
+        let bytes = read_file_bytes(&path).unwrap();
+        let report = preview_inner(&conn, preview_input(&path), &bytes).unwrap();
+        assert_eq!(report.duplicate_count, 1);
+        assert_eq!(report.valid_count, 1);
+
+        let result = commit_inner(&conn, commit_input(&path, &bytes), &bytes).unwrap();
+        assert_eq!(result.created, 1);
+        assert_eq!(result.skipped_duplicates, 1);
+
+        // A third copy is a duplicate again.
+        let err = commit_inner(&conn, commit_input(&path, &bytes), &bytes).unwrap_err();
+        assert!(err.to_string().contains("duplicates or errors"), "{err}");
+
+        std::fs::remove_file(&path).ok();
+        std::fs::remove_file(&path_one).ok();
+    }
+
+    #[test]
+    fn preset_signature_normalizes_headers_and_skips_headerless() {
+        let a = preset_signature(&["Date".to_string(), " Description ".to_string()], true);
+        let b = preset_signature(&[" date".to_string(), "description".to_string()], true);
+        assert!(a.is_some());
+        assert_eq!(a, b);
+        assert!(preset_signature(&["Date".to_string()], false).is_none());
+        assert!(preset_signature(&["".to_string(), " ".to_string()], true).is_none());
+    }
+
+    #[test]
+    fn commit_saves_and_delete_forgets_preset() {
+        let conn = csv_e2e_setup();
+        let csv = "Date,Description,Amount\n2024-01-05,Coffee,-3.50\n";
+        let path = write_temp_csv("preset", csv);
+        let bytes = read_file_bytes(&path).unwrap();
+        let signature = preset_signature(
+            &[
+                "Date".to_string(),
+                "Description".to_string(),
+                "Amount".to_string(),
+            ],
+            true,
+        )
+        .unwrap();
+        assert!(load_preset(&conn, &signature).unwrap().is_none());
+
+        commit_inner(&conn, commit_input(&path, &bytes), &bytes).unwrap();
+        let preset = load_preset(&conn, &signature).unwrap().expect("preset saved");
+        assert_eq!(preset.target_account_guid, "checking");
+        assert_eq!(preset.offset_account_guid, "groceries");
+        assert_eq!(preset.delimiter, ",");
+        assert!(preset.has_header);
+        assert_eq!(preset.mapping.amount_col, Some(2));
+        assert_eq!(preset.name, "Date · Description · Amount");
+
+        delete_preset(&conn, &signature).unwrap();
+        assert!(load_preset(&conn, &signature).unwrap().is_none());
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// Import rules pick the category per row; unmatched rows keep the mapping
+    /// step's fallback offset account.
+    #[test]
+    fn import_rules_override_the_fallback_offset() {
+        let conn = csv_e2e_setup();
+        conn.execute(
+            "INSERT INTO accounts (guid, name, account_type, parent_guid, placeholder, commodity_guid)
+             VALUES ('coffee', 'Coffee', 'EXPENSE', 'root', 0, 'c-eur')",
+            [],
+        )
+        .unwrap();
+        crate::import_rules::create_import_rule_inner(
+            &conn,
+            &crate::import_rules::ImportRuleInput {
+                priority: 1,
+                match_type: "contains".to_string(),
+                pattern: "coffee".to_string(),
+                account_guid: "coffee".to_string(),
+            },
+        )
+        .unwrap();
+
+        let csv = "Date,Description,Amount\n2024-01-05,Morning Coffee,-3.50\n2024-01-06,Bakery,-12.00\n";
+        let path = write_temp_csv("rules", csv);
+        let bytes = read_file_bytes(&path).unwrap();
+
+        let report = preview_inner(&conn, preview_input(&path), &bytes).unwrap();
+        assert!(report.rows[0].rule_matched);
+        assert_eq!(report.rows[0].offset_account_name, "Coffee");
+        assert!(!report.rows[1].rule_matched);
+        assert_eq!(report.rows[1].offset_account_name, "Groceries");
+
+        let result = commit_inner(&conn, commit_input(&path, &bytes), &bytes).unwrap();
+        assert_eq!(result.created, 2);
+        let splits_for = |account: &str| -> i64 {
+            conn.query_row(
+                "SELECT COUNT(*) FROM splits WHERE account_guid = ?1",
+                params![account],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(splits_for("coffee"), 1);
+        assert_eq!(splits_for("groceries"), 1);
+
+        let detail: String = conn
+            .query_row(
+                "SELECT detail_json FROM change_log WHERE id = ?1",
+                params![result.entry_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(detail.contains("\"rulesApplied\":1"), "{detail}");
 
         std::fs::remove_file(&path).ok();
     }

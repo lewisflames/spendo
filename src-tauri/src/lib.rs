@@ -11,6 +11,7 @@ mod fx;
 mod history;
 mod home;
 mod import;
+mod import_rules;
 mod init;
 mod nav;
 mod portfolio;
@@ -92,14 +93,19 @@ pub fn run() {
             books::close_book,
             init::set_base_currency,
             settings::clear_app_db,
-            settings::write_text_file,
             settings::get_book_settings,
             settings::set_book_setting,
+            import::preview_gnucash_import,
+            import::fetch_last_import_source,
             import::import_gnucash,
-            import::reimport_last,
             csv_import::csv_detect,
             csv_import::csv_preview,
             csv_import::csv_commit,
+            csv_import::delete_csv_preset,
+            import_rules::fetch_import_rules,
+            import_rules::create_import_rule,
+            import_rules::update_import_rule,
+            import_rules::delete_import_rule,
             history::fetch_change_history,
             history::undo_history_entry,
             history::redo_history_entry,
@@ -125,8 +131,8 @@ pub fn run() {
             reconcile::fetch_reconcile_info,
             reconcile::mark_reconcile_splits,
             reconcile::finish_reconciliation,
-            export::fetch_export_transactions,
-            export::fetch_export_accounts,
+            export::export_transactions_csv,
+            export::export_accounts_csv,
             prices::refresh_prices,
             account_detail::fetch_account_detail,
             account_detail::fetch_account_balance_trend,

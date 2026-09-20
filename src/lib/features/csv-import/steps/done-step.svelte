@@ -2,7 +2,7 @@
   import * as Card from '$lib/components/ui/card';
   import { Button } from '$lib/components/ui/button';
   import { resolve } from '$app/paths';
-  import { ArrowLeft, CheckCircle2 } from '@lucide/svelte';
+  import { ArrowRight, CheckCircle2 } from '@lucide/svelte';
   import type { CsvCommitResult } from '$lib/tauri';
   import { plural } from '$lib/utils/format.svelte';
 
@@ -32,11 +32,15 @@
       panel if needed.
     </p>
     <div class="flex flex-wrap gap-2">
-      <Button href={resolve('/settings')}>
-        <ArrowLeft aria-hidden="true" class="size-4" />
-        Back to Settings
+      <Button href={resolve('/transactions')}>
+        <ArrowRight aria-hidden="true" class="size-4" />
+        View transactions
       </Button>
       <Button variant="outline" onclick={onReset}>Import another file</Button>
     </div>
+    <a
+      class="text-sm text-muted-foreground underline underline-offset-4"
+      href={resolve('/settings')}>Back to settings</a
+    >
   </Card.Content>
 </Card.Root>

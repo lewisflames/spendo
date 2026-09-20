@@ -19,4 +19,23 @@ describe('guessMapping', () => {
     expect(g.dateCol).toBe(0);
     expect(g.amountCol).toBe(2);
   });
+
+  it('guesses reference and notes columns when free', () => {
+    const g = guessMapping(['Date', 'Description', 'Reference', 'Amount', 'Notes'], 5);
+    expect(g.numCol).toBe(2);
+    expect(g.notesCol).toBe(4);
+  });
+
+  it('never assigns a reference column already used as description', () => {
+    // `Reference` is a description keyword: it must not be claimed twice.
+    const g = guessMapping(['Date', 'Reference', 'Amount'], 3);
+    expect(g.descCol).toBe(1);
+    expect(g.numCol).toBeNull();
+  });
+
+  it('leaves reference/notes unmapped when no candidate exists', () => {
+    const g = guessMapping(['Date', 'Description', 'Amount'], 3);
+    expect(g.numCol).toBeNull();
+    expect(g.notesCol).toBeNull();
+  });
 });
