@@ -19,7 +19,6 @@
   import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
-  import { setBreadcrumb } from '$lib/stores/breadcrumb.svelte';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import { useResetPageOnChange } from '$lib/hooks/use-page-reset.svelte';
   import { useUrlParams, pageParam } from '$lib/hooks/use-url-params.svelte';
@@ -118,14 +117,6 @@
       ? `Per-share price, quoted in ${priceCurrency} · 52W ${formatCurrency(priceRange.low, priceCurrency)} – ${formatCurrency(priceRange.high, priceCurrency)}`
       : `Per-share price, quoted in ${priceCurrency}`
   );
-
-  $effect(() => {
-    if (!dbSession.value) return;
-    // Track navigation explicitly so the crumb refreshes even when the
-    // payload is unchanged; title-bar falls back to the route title otherwise.
-    void page.url.pathname;
-    setBreadcrumb([{ name: 'Portfolio', href: resolve('/portfolio') }, { name }]);
-  });
 </script>
 
 <svelte:head>

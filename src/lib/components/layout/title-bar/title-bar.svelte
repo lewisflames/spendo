@@ -1,21 +1,23 @@
 <script lang="ts">
-  import { page } from '$app/state';
-  import { ArrowLeft, ArrowRight, History } from '@lucide/svelte';
+  import { resolve } from '$app/paths';
+  import { ArrowLeft, ArrowRight, History, House } from '@lucide/svelte';
   import { Button } from '$lib/components/ui/button';
   import { SidebarTrigger } from '$lib/components/ui/sidebar/index.js';
-  import { breadcrumb, type BreadcrumbItem } from '$lib/stores/breadcrumb.svelte';
   import { goBack, goForward, navHistory } from '$lib/stores/nav-history.svelte';
   import { historySidebar, toggleHistorySidebar } from '$lib/stores/ui.svelte';
-  import { routeTitle } from '$lib/routes';
   import { useWindowDrag } from '$lib/hooks/use-window-drag.svelte';
-  import * as Breadcrumb from '$lib/components/ui/breadcrumb';
-  import PaletteTrigger from './palette-trigger.svelte';
+  import CommandPalette from './command-palette.svelte';
   import WindowControls from './window-controls.svelte';
 
   let {
     showSidebarTrigger = true,
-    showHistoryToggle = true
-  }: { showSidebarTrigger?: boolean; showHistoryToggle?: boolean } = $props();
+    showHistoryToggle = true,
+    showHome = true
+  }: {
+    showSidebarTrigger?: boolean;
+    showHistoryToggle?: boolean;
+    showHome?: boolean;
+  } = $props();
 
   const {
     inTauri,
@@ -23,12 +25,6 @@
     onMouseDown: onHeaderMouseDown,
     onDoubleClick: onHeaderDoubleClick
   } = useWindowDrag();
-
-  const defaultItems: BreadcrumbItem[] = $derived([{ name: routeTitle(page.url.pathname) }]);
-
-  const items = $derived(
-    breadcrumb.value.route === page.url.pathname ? breadcrumb.value.items : defaultItems
-  );
 
   const canGoBack = $derived(navHistory.value.index > 0);
   const canGoForward = $derived(navHistory.value.index < navHistory.value.stack.length - 1);
@@ -46,52 +42,48 @@
     <div class="w-17.5 shrink-0"></div>
   {/if}
 
-  <div class="flex h-full min-w-0 flex-1 items-center gap-2 px-3">
-    <div class="flex shrink-0 items-center gap-0.5">
-      {#if showSidebarTrigger}
-        <SidebarTrigger class="text-muted-foreground" />
-      {/if}
+  <div class="flex h-full shrink-0 items-center gap-0.5 pl-3">
+    {#if showSidebarTrigger}
+      <SidebarTrigger class="text-muted-foreground" />
+    {/if}
+    <Button
+      variant="ghost"
+      size="icon-sm"
+      class="text-muted-foreground"
+      aria-label="Go back"
+      title="Go back"
+      disabled={!canGoBack}
+      onclick={goBack}
+    >
+      <ArrowLeft class="size-4" />
+    </Button>
+    <Button
+      variant="ghost"
+      size="icon-sm"
+      class="text-muted-foreground"
+      aria-label="Go forward"
+      title="Go forward"
+      disabled={!canGoForward}
+      onclick={goForward}
+    >
+      <ArrowRight class="size-4" />
+    </Button>
+    {#if showHome}
       <Button
         variant="ghost"
         size="icon-sm"
         class="text-muted-foreground"
-        aria-label="Go back"
-        title="Go back"
-        disabled={!canGoBack}
-        onclick={goBack}
+        href={resolve('/transactions')}
+        aria-label="Home"
+        title="Home"
       >
-        <ArrowLeft class="size-4" />
+        <House class="size-4" />
       </Button>
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        class="text-muted-foreground"
-        aria-label="Go forward"
-        title="Go forward"
-        disabled={!canGoForward}
-        onclick={goForward}
-      >
-        <ArrowRight class="size-4" />
-      </Button>
-      <PaletteTrigger />
-    </div>
+    {/if}
+  </div>
 
-    <Breadcrumb.Root>
-      <Breadcrumb.List>
-        {#each items as item, i (i)}
-          <Breadcrumb.Item>
-            {#if item.href && i < items.length - 1}
-              <Breadcrumb.Link href={item.href}>{item.name}</Breadcrumb.Link>
-            {:else}
-              <Breadcrumb.Page>{item.name}</Breadcrumb.Page>
-            {/if}
-          </Breadcrumb.Item>
-          {#if i < items.length - 1}
-            <Breadcrumb.Separator />
-          {/if}
-        {/each}
-      </Breadcrumb.List>
-    </Breadcrumb.Root>
+  <div class="flex h-full min-w-0 flex-1 items-center justify-center px-3">
+    <CommandPalette />
   </div>
 
   <div class="flex h-full shrink-0 items-center px-1">

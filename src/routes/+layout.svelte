@@ -33,7 +33,6 @@
   import { Sonner } from '$lib/components/ui/sonner';
   import KeyboardShortcutsDialog from '$lib/components/layout/keyboard-shortcuts-dialog.svelte';
   import GnuCashImportDialog from '$lib/features/book/gnucash-import-dialog.svelte';
-  import CommandPalette from '$lib/components/layout/command-palette.svelte';
   import {
     keyboardShortcutsDialog as shortcutsDialog,
     commandPalette,
@@ -183,7 +182,11 @@
 
 <div class="[--header-height:calc(--spacing(10))]">
   <Sidebar.Provider class={cn('flex flex-col', !showSidebar && 'bg-sidebar')}>
-    <TitleBar showSidebarTrigger={showSidebar} showHistoryToggle={showSidebar} />
+    <TitleBar
+      showSidebarTrigger={showSidebar}
+      showHistoryToggle={showSidebar}
+      showHome={showSidebar}
+    />
     <div class="flex flex-1 overflow-hidden">
       {#if showSidebar}
         <AppSidebar />
@@ -207,5 +210,3 @@
 <KeyboardShortcutsDialog />
 
 <GnuCashImportDialog />
-
-<CommandPalette />

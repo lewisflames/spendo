@@ -4,15 +4,10 @@
   import { ArrowLeft } from '@lucide/svelte';
   import { toast } from '$lib/components/ui/sonner';
   import { Button } from '$lib/components/ui/button';
-  import { setBreadcrumb } from '$lib/stores/breadcrumb.svelte';
   import ScheduleForm from '$lib/features/schedules/schedule-form.svelte';
   import BookGate from '$lib/components/shared/book-gate.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import type { Schedule } from '$lib/tauri';
-
-  $effect(() => {
-    setBreadcrumb([{ name: 'Scheduled', href: resolve('/scheduled') }, { name: 'New schedule' }]);
-  });
 
   function handleSaved(schedule: Schedule) {
     toast.success(`Created "${schedule.name}"`);

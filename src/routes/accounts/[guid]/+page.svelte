@@ -8,7 +8,6 @@
   import AccountDialog, { type AccountInitial } from '$lib/features/accounts/account-dialog.svelte';
   import { dbBootstrapping, dbSession, refreshSession } from '$lib/stores/db.svelte';
   import { appSettings, applyPageSize } from '$lib/stores/settings.svelte';
-  import { setBreadcrumb } from '$lib/stores/breadcrumb.svelte';
   import { fetchAccountDetail } from '$lib/tauri';
   import { clampZero, sessionCurrency } from '$lib/utils/format.svelte';
   import BookGate from '$lib/components/shared/book-gate.svelte';
@@ -156,16 +155,6 @@
   // before/after the pie data never changes the grid shape mid-paint.
   let chartsLoading = $derived((res.loading || dbBootstrapping.value) && !res.data);
   let showPie = $derived(!chartsLoading && hasPieData);
-
-  $effect(() => {
-    // Track navigation explicitly so the crumb refreshes even when the
-    // payload is unchanged; title-bar falls back to the route title otherwise.
-    void page.url.pathname;
-    setBreadcrumb([
-      { name: 'Accounts', href: resolve('/accounts') },
-      { name: res.data?.account.description ?? res.data?.account.name ?? 'Account' }
-    ]);
-  });
 </script>
 
 <svelte:head>

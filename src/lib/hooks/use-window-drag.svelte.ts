@@ -12,7 +12,13 @@ export function useWindowDrag() {
   const isMac = isMacPlatform();
 
   function isInteractive(e: MouseEvent): boolean {
-    return (e.target as Element).closest('button, a') !== null;
+    // Form fields and designated no-drag zones (e.g. the palette panel that
+    // overlays the header) must not start a window drag.
+    return (
+      (e.target as Element).closest(
+        'button, a, input, textarea, select, [contenteditable="true"], [data-drag-ignore]'
+      ) !== null
+    );
   }
 
   function onMouseDown(e: MouseEvent): void {

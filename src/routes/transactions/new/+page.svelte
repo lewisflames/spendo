@@ -4,18 +4,10 @@
   import { ArrowLeft } from '@lucide/svelte';
   import { toast } from '$lib/components/ui/sonner';
   import { Button } from '$lib/components/ui/button';
-  import { setBreadcrumb } from '$lib/stores/breadcrumb.svelte';
   import TransactionForm from '$lib/features/transactions/transaction-form.svelte';
   import BookGate from '$lib/components/shared/book-gate.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import { openTransaction } from '$lib/utils/navigation';
-
-  $effect(() => {
-    setBreadcrumb([
-      { name: 'Transactions', href: resolve('/transactions') },
-      { name: 'New transaction' }
-    ]);
-  });
 
   function handleSaved(guid: string) {
     toast.success('Transaction created');
