@@ -112,15 +112,25 @@ export function formatAllocPct(n: number): string {
 }
 
 export function formatCurrency(n: number, currency: string): string {
-  return cachedNumberFormat(appSettings.value.locale, {
-    style: 'currency',
-    currency
-  }).format(n);
+  try {
+    return cachedNumberFormat(appSettings.value.locale, {
+      style: 'currency',
+      currency
+    }).format(n);
+  } catch {
+    // A book without a usable ISO code (e.g. the "Unknown" fallback) makes
+    // Intl throw; degrade to a plain 2-decimal number instead of crashing.
+    return cachedNumberFormat(appSettings.value.locale, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(n);
+  }
 }
 
 /** The report currency of the imported book, or EUR before any import. */
 export function sessionCurrency(): string {
-  return dbSession.value?.summary.currency ?? 'EUR';
+  const currency = dbSession.value?.summary.currency;
+  return currency && /^[A-Za-z]{3}$/.test(currency) ? currency : 'EUR';
 }
 
 export function formatSessionCurrency(n: number): string {
@@ -130,7 +140,11 @@ export function formatSessionCurrency(n: number): string {
 /**
  * Parse date-only strings (`YYYY-MM-DD`) as local dates. The ES spec parses
  * them as UTC midnight, which renders as the previous day west of UTC.
- * Also accepts `YYYY-MM` (first of month, local) for trend charts.
+ * Also accepts `YYYY-MM` (first of month, local) for trend charts. Values
+ * that start with a date but carry a non-ISO time (`2024-01-15 10:30:00`)
+ * are pinned to their date portion as local midnight so parsing never
+ * depends on engine-lenient handling; full ISO-8601 `T` timestamps keep
+ * their instant semantics.
  */
 export function parseLocalDate(date: string | Date): Date {
   if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -138,6 +152,13 @@ export function parseLocalDate(date: string | Date): Date {
   }
   if (typeof date === 'string' && /^\d{4}-\d{2}$/.test(date)) {
     return new Date(`${date}-01T00:00:00`);
+  }
+  if (
+    typeof date === 'string' &&
+    /^\d{4}-\d{2}-\d{2}/.test(date) &&
+    !/^\d{4}-\d{2}-\d{2}T/.test(date)
+  ) {
+    return new Date(`${date.slice(0, 10)}T00:00:00`);
   }
   return new Date(date);
 }
@@ -154,6 +175,11 @@ export function yearOf(isoDate: string): number {
 
 export function formatDate(date: string | Date, opts?: Intl.DateTimeFormatOptions): string {
   const d = parseLocalDate(date);
+  if (Number.isNaN(d.getTime())) {
+    // Importers can store unparseable source dates verbatim; show them
+    // as-is rather than crashing or rendering "Invalid Date".
+    return typeof date === 'string' && date !== '' ? date : EMPTY_DASH;
+  }
   const o = opts ?? { month: 'short', day: 'numeric', year: 'numeric' };
   return cachedDateTimeFormat(appSettings.value.locale, o).format(d);
 }
