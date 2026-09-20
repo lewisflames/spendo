@@ -122,6 +122,21 @@ fn save_book_as_inner(
 }
 
 /// Swap the shared connection to `new_conn` and remember `new_path`.
+/// Summarize the incoming book *before* swapping it in: if the summary query
+/// fails, the live connection (and the recorded path) must stay on the old
+/// book instead of silently adopting one the session doesn't know about.
+fn swap_in_book(
+    conn: &mut rusqlite::Connection,
+    new_conn: rusqlite::Connection,
+    generation: &std::sync::atomic::AtomicU64,
+) -> Result<crate::home::DataSummary, String> {
+    let summary = get_summary(&new_conn)?;
+    *conn = new_conn;
+    generation.fetch_add(1, Ordering::SeqCst);
+    Ok(summary)
+}
+
+/// Swap the shared connection to `new_conn` and remember `new_path`.
 /// The connection swap runs on a blocking thread; the path mutex is only held
 /// for a `PathBuf` clone afterward (never the DB mutex in async context).
 /// The sidecar write must not fail the switch, so it is logged, not bubbled.
@@ -133,9 +148,7 @@ async fn activate_book(
     let generation = state.book_generation.clone();
     let summary = db::run_swap_blocking(state.db.clone(), move |conn| {
         db::checkpoint(conn);
-        *conn = new_conn;
-        generation.fetch_add(1, Ordering::SeqCst);
-        get_summary(conn)
+        swap_in_book(conn, new_conn, &generation)
     })
     .await?;
     // Brief path-mutex hold in async context: plain PathBuf clone, no I/O.
@@ -280,6 +293,32 @@ mod tests {
         let conn = db::connect_db(&path.to_path_buf()).unwrap();
         db::init_db(&conn).unwrap();
         db::stamp_app_id(&conn);
+    }
+
+    /// Regression: `activate_book` used to swap the live connection first and
+    /// only then summarize, so a failing summary left the session on a book
+    /// whose path was never recorded.
+    #[test]
+    fn failed_summary_leaves_the_old_book_active() {
+        let mut live = db::open_placeholder().unwrap();
+        live.execute(
+            "INSERT INTO commodities (guid, mnemonic, namespace) VALUES ('c-eur', 'EUR', 'CURRENCY')",
+            [],
+        )
+        .unwrap();
+        let generation = std::sync::atomic::AtomicU64::new(0);
+
+        // Missing schema: `get_summary` fails with "no such table".
+        let broken = rusqlite::Connection::open_in_memory().unwrap();
+        let err = swap_in_book(&mut live, broken, &generation).unwrap_err();
+        assert!(err.contains("no such table"), "unexpected: {err}");
+        assert_eq!(generation.load(Ordering::SeqCst), 0);
+
+        // The live connection is untouched and still usable.
+        let commodities: i64 = live
+            .query_row("SELECT COUNT(*) FROM commodities", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(commodities, 1);
     }
 
     #[test]
