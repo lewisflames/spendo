@@ -246,7 +246,9 @@ pub fn month_number(ym: &str) -> Result<i64, String> {
     if !(1..=12).contains(&m) {
         return Err(format!("Invalid month in month string: {}", ym));
     }
-    Ok(y * 12 + (m - 1))
+    y.checked_mul(12)
+        .and_then(|v| v.checked_add(m - 1))
+        .ok_or_else(|| format!("Month out of range: {ym}"))
 }
 
 /// Clamp a client-supplied page size into a sane range (SQLite treats negative
@@ -317,6 +319,8 @@ mod tests {
         assert_eq!(month_number("2024-02-05").unwrap(), 24_289);
         assert!(month_number("2024").is_err());
         assert!(month_number("2024-13x").is_err());
+        // Overflowing years must error, not wrap (release) or panic (debug).
+        assert!(month_number("999999999999999999-01").is_err());
     }
 
     #[test]
