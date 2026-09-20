@@ -468,7 +468,9 @@ fn resolve_pnl_prev_window(
             let span = t - f;
             let prev_start = utils::format_month(f - span - 1);
             let prev_end = utils::format_month(f - 1);
-            (prev_start, prev_end)
+            // Full dates: `date('2024-01', '+1 day')` is NULL in SQLite, which
+            // would silently empty the previous window (every change = 100%).
+            (format!("{prev_start}-01"), utils::month_end(&prev_end)?)
         }
     })
 }
@@ -698,6 +700,22 @@ mod tests {
     use super::*;
     use crate::db::init_db;
     use rusqlite::params;
+
+    /// Regression: the `(None, None)` fallback returned month-only strings
+    /// (`2023-12`), which SQLite's `date(?, '+1 day')` turns into NULL — the
+    /// whole previous window silently read as zero.
+    #[test]
+    fn prev_window_fallback_uses_full_dates() {
+        let (from, to) = resolve_pnl_prev_window("2024-03-01", "2024-05-31", None, None).unwrap();
+        assert_eq!(from, "2023-12-01");
+        assert_eq!(to, "2024-02-29");
+        // The bounds must survive SQLite date math (non-NULL).
+        let conn = Connection::open_in_memory().unwrap();
+        let advanced: Option<String> = conn
+            .query_row("SELECT date(?1, '+1 day')", params![to], |r| r.get(0))
+            .unwrap();
+        assert!(advanced.is_some(), "month-end must be a full date");
+    }
 
     fn setup_pnl_fixture() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
