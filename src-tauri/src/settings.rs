@@ -13,17 +13,6 @@ pub async fn clear_app_db(state: State<'_, AppState>) -> Result<(), String> {
     .await
 }
 
-/// Writes text (e.g. a CSV export) to a user-chosen path. The frontend shows
-/// the Tauri save dialog first and passes the confirmed path here; this
-/// command never touches the DB.
-#[tauri::command]
-pub async fn write_text_file(path: String, contents: String) -> Result<(), String> {
-    crate::db::run_io(move || {
-        std::fs::write(&path, contents).map_err(|e| format!("Failed to write file: {e}"))
-    })
-    .await
-}
-
 // ── Book-scoped settings (travel with the `.spendo` file) ──
 
 /// Full book-settings snapshot served to the frontend (camelCase). Stored as

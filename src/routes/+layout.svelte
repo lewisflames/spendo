@@ -32,6 +32,7 @@
   import { cn } from '$lib/utils';
   import { Sonner } from '$lib/components/ui/sonner';
   import KeyboardShortcutsDialog from '$lib/components/layout/keyboard-shortcuts-dialog.svelte';
+  import GnuCashImportDialog from '$lib/features/book/gnucash-import-dialog.svelte';
   import CommandPalette from '$lib/components/layout/command-palette.svelte';
   import {
     keyboardShortcutsDialog as shortcutsDialog,
@@ -202,5 +203,7 @@
 <Sonner theme={resolvedTheme} />
 
 <KeyboardShortcutsDialog />
+
+<GnuCashImportDialog />
 
 <CommandPalette />

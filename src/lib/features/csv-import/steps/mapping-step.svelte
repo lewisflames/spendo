@@ -25,12 +25,18 @@
     amountCol = $bindable(),
     debitCol = $bindable(),
     creditCol = $bindable(),
+    numCol = $bindable<number | null>(),
+    notesCol = $bindable<number | null>(),
     targetAccountGuid = $bindable(),
     offsetAccountGuid = $bindable(),
+    rememberMapping = $bindable(),
     accountsData,
     accountsError,
     previewError,
     previewing,
+    presetApplied,
+    hasSignature,
+    onForgetPreset,
     onPreview,
     onReset,
     onRetryAccounts
@@ -46,12 +52,18 @@
     amountCol: number | null;
     debitCol: number | null;
     creditCol: number | null;
+    numCol: number | null;
+    notesCol: number | null;
     targetAccountGuid: string;
     offsetAccountGuid: string;
+    rememberMapping: boolean;
     accountsData: AccountsResult | null;
     accountsError: string | null;
     previewError: string | null;
     previewing: boolean;
+    presetApplied: boolean;
+    hasSignature: boolean;
+    onForgetPreset: () => void;
     onPreview: () => void;
     onReset: () => void;
     onRetryAccounts: () => void;
@@ -93,6 +105,12 @@
       </Card.Description>
     </Card.Header>
     <Card.Content class="grid gap-4 md:grid-cols-2">
+      {#if presetApplied}
+        <div class="flex items-center gap-2 md:col-span-2">
+          <p class="text-sm text-muted-foreground">Saved mapping applied for this layout.</p>
+          <Button variant="ghost" size="sm" onclick={onForgetPreset}>Forget</Button>
+        </div>
+      {/if}
       <div class="flex flex-col gap-2">
         <span class="text-sm font-medium">Date column</span>
         <Select.Root
@@ -182,6 +200,40 @@
         </div>
       {/if}
       <div class="flex flex-col gap-2">
+        <span class="text-sm font-medium">Reference / number (optional)</span>
+        <Select.Root
+          type="single"
+          value={numCol !== null ? String(numCol) : 'none'}
+          onValueChange={(v) => (numCol = v === 'none' ? null : Number(v))}
+          items={[{ value: 'none', label: 'Not imported' }, ...columnOptions]}
+        >
+          <Select.Trigger><SelectPrimitive.Value /></Select.Trigger>
+          <Select.Content>
+            <Select.Item value="none" label="Not imported">Not imported</Select.Item>
+            {#each columnOptions as opt (opt.value)}
+              <Select.Item value={opt.value} label={opt.label}>{opt.label}</Select.Item>
+            {/each}
+          </Select.Content>
+        </Select.Root>
+      </div>
+      <div class="flex flex-col gap-2">
+        <span class="text-sm font-medium">Notes / memo (optional)</span>
+        <Select.Root
+          type="single"
+          value={notesCol !== null ? String(notesCol) : 'none'}
+          onValueChange={(v) => (notesCol = v === 'none' ? null : Number(v))}
+          items={[{ value: 'none', label: 'Not imported' }, ...columnOptions]}
+        >
+          <Select.Trigger><SelectPrimitive.Value /></Select.Trigger>
+          <Select.Content>
+            <Select.Item value="none" label="Not imported">Not imported</Select.Item>
+            {#each columnOptions as opt (opt.value)}
+              <Select.Item value={opt.value} label={opt.label}>{opt.label}</Select.Item>
+            {/each}
+          </Select.Content>
+        </Select.Root>
+      </div>
+      <div class="flex flex-col gap-2">
         <span class="text-sm font-medium">Target account (statement)</span>
         <AccountPicker
           bind:value={targetAccountGuid}
@@ -190,7 +242,7 @@
         />
       </div>
       <div class="flex flex-col gap-2">
-        <span class="text-sm font-medium">Offset account (category)</span>
+        <span class="text-sm font-medium">Fallback category (used when no rule matches)</span>
         <AccountPicker
           bind:value={offsetAccountGuid}
           options={pickerOptions}
@@ -243,6 +295,16 @@
         />
         <label for="csv-header" class="text-sm">First row is a header</label>
       </div>
+      {#if hasSignature}
+        <div class="flex items-center gap-2 md:col-span-2">
+          <Checkbox
+            checked={rememberMapping}
+            onCheckedChange={(v) => (rememberMapping = v === true)}
+            id="csv-remember"
+          />
+          <label for="csv-remember" class="text-sm">Remember this mapping for this bank</label>
+        </div>
+      {/if}
     </Card.Content>
   </Card.Root>
 

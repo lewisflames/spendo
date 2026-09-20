@@ -11,6 +11,7 @@
  */
 import type {
   AccountNode,
+  CsvPreset,
   DataSummary,
   Schedule,
   ScheduleFrequency,
@@ -96,6 +97,15 @@ interface CsvInputLike {
   targetAccountGuid: string;
   offsetAccountGuid: string;
   selectedKeys?: number[];
+  rememberMapping?: boolean;
+}
+
+interface ImportRuleLike {
+  id: number;
+  priority: number;
+  matchType: 'contains' | 'equals';
+  pattern: string;
+  accountGuid: string;
 }
 
 interface ScheduleInputLike {
@@ -131,6 +141,9 @@ const state = {
   history: [] as HistoryRecord[],
   redoSnapshots: new Map<number, Snapshot>(),
   nextHistoryId: 1,
+  csvPresets: new Map<string, CsvPreset>(),
+  importRules: [] as ImportRuleLike[],
+  nextImportRuleId: 1,
   bookSettings: {
     fiscalYearStartMonth: 1,
     defaultPnlPeriod: 'this_year' as const,
@@ -1413,7 +1426,9 @@ const handlers: HandlerMap = {
       transactionsAffected: entry.transactionsAffected,
       accountsAffected: entry.accountsAffected,
       revertsId: null,
-      revertedBy: entry.revertedBy
+      revertedBy: entry.revertedBy,
+      sourcePath: null,
+      filename: null
     }));
     const undoable = [...state.history].reverse().find((e) => e.revertedBy === null)?.id ?? null;
     const redoable =
@@ -1728,73 +1743,116 @@ const handlers: HandlerMap = {
   open_attachment: () => undefined,
 
   // CSV import
-  csv_detect: (args) => ({
-    encoding: 'UTF-8',
-    delimiter: ',',
-    hasHeader: true,
-    headers: ['Date', 'Description', 'Amount', 'Balance'],
-    columnCount: 4,
-    rowCount: 12,
-    sampleRows: [
-      ['2026-09-02', 'COFFEE SHOP', '-4.80', '1,204.10'],
-      ['2026-09-03', 'PAYROLL DEPOSIT', '3,200.00', '4,404.10'],
-      ['2026-09-04', 'GROCERY MARKET', '-86.42', '4,317.68']
-    ],
-    filename:
-      String(args.path ?? 'statement.csv')
-        .split('/')
-        .pop() ?? 'statement.csv'
-  }),
-  csv_preview: () => ({
-    rows: [
-      {
-        key: 0,
-        raw: ['2026-09-02', 'COFFEE SHOP', '-4.80'],
-        postDate: '2026-09-02',
-        description: 'COFFEE SHOP',
-        amount: -4.8,
-        valid: true,
-        duplicate: false,
-        error: null
-      },
-      {
-        key: 1,
-        raw: ['2026-09-04', 'GROCERY MARKET', '-86.42'],
-        postDate: '2026-09-04',
-        description: 'GROCERY MARKET',
-        amount: -86.42,
-        valid: true,
-        duplicate: true,
-        error: null
-      },
-      {
-        key: 2,
-        raw: ['2026-09-07', 'BOOKSTORE', '-32.10'],
-        postDate: '2026-09-07',
-        description: 'BOOKSTORE',
-        amount: -32.1,
-        valid: true,
-        duplicate: false,
-        error: null
-      },
-      {
-        key: 3,
-        raw: ['not-a-date', 'MYSTERY', 'abc'],
-        postDate: null,
-        description: 'MYSTERY',
-        amount: null,
-        valid: false,
-        duplicate: false,
-        error: 'Unparseable date'
-      }
-    ],
-    totalRows: 4,
-    validCount: 3,
-    duplicateCount: 1,
-    errorCount: 1,
-    minDate: '2026-09-02',
-    maxDate: '2026-09-07'
-  }),
+  csv_detect: (args) => {
+    const headers = ['Date', 'Description', 'Amount', 'Balance'];
+    const signature = `mock-${headers.join('|').toLowerCase()}`;
+    return {
+      encoding: 'UTF-8',
+      delimiter: ',',
+      hasHeader: true,
+      headers,
+      columnCount: 4,
+      rowCount: 12,
+      sampleRows: [
+        ['2026-09-02', 'COFFEE SHOP', '-4.80', '1,204.10'],
+        ['2026-09-03', 'PAYROLL DEPOSIT', '3,200.00', '4,404.10'],
+        ['2026-09-04', 'GROCERY MARKET', '-86.42', '4,317.68']
+      ],
+      filename:
+        String(args.path ?? 'statement.csv')
+          .split('/')
+          .pop() ?? 'statement.csv',
+      sha256: 'mock-sha256',
+      signature,
+      preset: state.csvPresets.get(signature) ?? null
+    };
+  },
+  csv_preview: (args) => {
+    const input = args.input as CsvInputLike;
+    const fallbackName = account(input.offsetAccountGuid)?.name ?? '';
+    const row = (
+      key: number,
+      raw: string[],
+      postDate: string | null,
+      description: string,
+      amount: number | null,
+      valid: boolean,
+      duplicate: boolean,
+      error: string | null
+    ) => {
+      const match = state.importRules
+        .sort((a, b) => a.priority - b.priority || a.id - b.id)
+        .find((r) =>
+          r.matchType === 'equals'
+            ? description.trim().toLowerCase() === r.pattern.trim().toLowerCase()
+            : description.toLowerCase().includes(r.pattern.trim().toLowerCase())
+        );
+      return {
+        key,
+        raw,
+        postDate,
+        description,
+        amount,
+        valid,
+        duplicate,
+        offsetAccountName: match
+          ? (account(match.accountGuid)?.name ?? fallbackName)
+          : fallbackName,
+        ruleMatched: Boolean(match),
+        error
+      };
+    };
+    return {
+      rows: [
+        row(
+          0,
+          ['2026-09-02', 'COFFEE SHOP', '-4.80'],
+          '2026-09-02',
+          'COFFEE SHOP',
+          -4.8,
+          true,
+          false,
+          null
+        ),
+        row(
+          1,
+          ['2026-09-04', 'GROCERY MARKET', '-86.42'],
+          '2026-09-04',
+          'GROCERY MARKET',
+          -86.42,
+          true,
+          true,
+          null
+        ),
+        row(
+          2,
+          ['2026-09-07', 'BOOKSTORE', '-32.10'],
+          '2026-09-07',
+          'BOOKSTORE',
+          -32.1,
+          true,
+          false,
+          null
+        ),
+        row(
+          3,
+          ['not-a-date', 'MYSTERY', 'abc'],
+          null,
+          'MYSTERY',
+          null,
+          false,
+          false,
+          'Unparseable date'
+        )
+      ],
+      totalRows: 4,
+      validCount: 3,
+      duplicateCount: 1,
+      errorCount: 1,
+      minDate: '2026-09-02',
+      maxDate: '2026-09-07'
+    };
+  },
   csv_commit: (args) => {
     const input = args.input as CsvInputLike;
     const keys = input.selectedKeys ?? [];
@@ -1811,6 +1869,27 @@ const handlers: HandlerMap = {
       });
       created += 1;
     }
+    if (input.rememberMapping) {
+      state.csvPresets.set('mock-date|description|amount|balance', {
+        signature: 'mock-date|description|amount|balance',
+        name: 'Date · Description · Amount',
+        encoding: 'UTF-8',
+        delimiter: ',',
+        hasHeader: true,
+        datePreference: 'dmy',
+        mapping: {
+          dateCol: 0,
+          descCol: 1,
+          amountCol: 2,
+          debitCol: null,
+          creditCol: null,
+          numCol: null,
+          notesCol: null
+        },
+        targetAccountGuid: input.targetAccountGuid,
+        offsetAccountGuid: input.offsetAccountGuid
+      });
+    }
     return {
       created,
       skippedDuplicates: keys.includes(1) ? 1 : 0,
@@ -1819,55 +1898,35 @@ const handlers: HandlerMap = {
       label: 'CSV import'
     };
   },
+  delete_csv_preset: (args) => {
+    state.csvPresets.delete(String(args.signature));
+    return undefined;
+  },
 
-  // Exports
-  fetch_export_transactions: () => {
-    const rows: MockPayloads['fetch_export_transactions'] = [];
-    for (const tx of visibleTxs()) {
-      tx.splits.forEach((split, index) => {
-        const acc = account(split.accountGuid);
-        rows.push({
-          txGuid: tx.guid,
-          splitGuid: `${tx.guid}-${index}`,
-          postDate: tx.postDate,
-          description: tx.description,
-          num: tx.num ?? null,
-          notes: tx.notes ?? null,
-          commodity: acc?.commodity ?? null,
-          memo: split.memo ?? null,
-          fullAccountName: accountPath(acc),
-          accountName: acc?.name ?? 'Unknown',
-          amount: splitAmount(split),
-          reconcileState: reconcileState(split),
-          price: marketPrice(acc?.commodity) ?? 1
-        });
-      });
-    }
-    return rows;
+  // Import rules
+  fetch_import_rules: () =>
+    state.importRules.map((r) => ({ ...r, accountName: account(r.accountGuid)?.name ?? '' })),
+  create_import_rule: (args) => {
+    const input = args.input as Omit<ImportRuleLike, 'id'>;
+    const rule = { id: state.nextImportRuleId++, ...input };
+    state.importRules.push(rule);
+    return { ...rule, accountName: account(rule.accountGuid)?.name ?? '' };
   },
-  fetch_export_accounts: () => {
-    const rows: MockPayloads['fetch_export_accounts'] = [];
-    const walk = (guid: string) => {
-      for (const acc of directChildren(guid).sort((a, b) => a.name.localeCompare(b.name))) {
-        rows.push({
-          guid: acc.guid,
-          parentGuid: acc.parentGuid,
-          accountType: acc.accountType,
-          fullName: accountPath(acc),
-          name: acc.name,
-          code: acc.code,
-          description: acc.description,
-          commodity: acc.commodity,
-          commodityNamespace:
-            COMMODITIES.find((c) => c.guid === acc.commodityGuid)?.namespace ?? null,
-          placeholder: acc.placeholder
-        });
-        walk(acc.guid);
-      }
-    };
-    walk('root');
-    return rows;
+  update_import_rule: (args) => {
+    const input = args.input as Omit<ImportRuleLike, 'id'>;
+    const rule = state.importRules.find((r) => r.id === Number(args.id));
+    if (!rule) throw new Error('[mock] Unknown import rule');
+    Object.assign(rule, input);
+    return { ...rule, accountName: account(rule.accountGuid)?.name ?? '' };
   },
+  delete_import_rule: (args) => {
+    state.importRules = state.importRules.filter((r) => r.id !== Number(args.id));
+    return undefined;
+  },
+
+  // Exports (written straight to disk by the backend; the mock is a no-op)
+  export_transactions_csv: () => undefined,
+  export_accounts_csv: () => undefined,
 
   // Global search
   search_global: (args) => {
@@ -1928,9 +1987,29 @@ const handlers: HandlerMap = {
   },
 
   // Misc
-  write_text_file: () => undefined,
-  import_gnucash: () => importResult(),
-  reimport_last: () => importResult()
+  preview_gnucash_import: (args) => ({
+    path: String(args.path ?? '/home/demo/Books/demo.gnucash'),
+    filename: String(args.filename ?? 'demo.gnucash'),
+    sha256: 'mock-sha256',
+    accountsAdded: 12,
+    accountsUpdated: 1,
+    accountsOrphaned: 2,
+    transactionsAdded: 0,
+    transactionsUpdated: 0,
+    transactionsOrphaned: 3,
+    splitsAdded: 0,
+    splitsUpdated: 0,
+    splitsOrphaned: 7,
+    commoditiesAdded: 0,
+    commoditiesUpdated: 0,
+    commoditiesOrphaned: 0,
+    orphanAccountNames: ['Local Savings', 'Holiday Fund']
+  }),
+  fetch_last_import_source: () => ({
+    path: '/home/demo/Books/demo.gnucash',
+    filename: 'demo.gnucash'
+  }),
+  import_gnucash: () => importResult()
 };
 
 function accountPath(acc: FixtureAccount | undefined): string {

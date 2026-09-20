@@ -7,7 +7,7 @@
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
   import { PaginationNav } from '$lib/components/shared/pagination-nav';
-  import { ArrowLeft, LoaderCircle, Upload } from '@lucide/svelte';
+  import { ArrowLeft, LoaderCircle, Sparkles, Upload } from '@lucide/svelte';
   import type { SvelteSet } from 'svelte/reactivity';
   import type { CsvPreviewResult } from '$lib/tauri';
   import {
@@ -25,6 +25,7 @@
     pageSize = $bindable(),
     commitError,
     committing,
+    targetCommodity,
     onCommit,
     onBack
   }: {
@@ -34,11 +35,12 @@
     pageSize: number;
     commitError: string | null;
     committing: boolean;
+    targetCommodity: string | null;
     onCommit: () => void;
     onBack: () => void;
   } = $props();
 
-  let currency = $derived(sessionCurrency());
+  let currency = $derived(targetCommodity ?? sessionCurrency());
 
   let totalPages = $derived(Math.max(1, Math.ceil(preview.rows.length / pageSize)));
   let pageRows = $derived.by(() => {
@@ -51,6 +53,9 @@
   );
   let allImportableSelected = $derived.by(
     () => importableKeys.length > 0 && importableKeys.every((k) => selected.has(k))
+  );
+  const rulesApplied = $derived(
+    preview.rows.filter((r) => r.valid && !r.duplicate && r.ruleMatched).length
   );
 
   function toggleRow(key: number, next: boolean) {
@@ -72,7 +77,8 @@
       <Card.Title>Dry-run preview</Card.Title>
       <Card.Description>
         {preview.validCount} ready · {preview.duplicateCount} duplicates (pre-unchecked) ·
-        {preview.errorCount} errors · {selected.size} selected
+        {preview.errorCount} errors · {selected.size} selected{#if rulesApplied > 0}
+          · {plural(rulesApplied, 'row')} via rules{/if}
       </Card.Description>
     </Card.Header>
     <Card.Content>
@@ -92,6 +98,7 @@
             </Table.Head>
             <Table.Head>Date</Table.Head>
             <Table.Head>Description</Table.Head>
+            <Table.Head>Category</Table.Head>
             <Table.Head class="text-right">Amount</Table.Head>
             <Table.Head>Status</Table.Head>
           </Table.Row>
@@ -114,6 +121,20 @@
               </Table.Cell>
               <Table.Cell class="max-w-md truncate font-medium" title={row.description ?? ''}>
                 {row.description || EMPTY_DASH}
+              </Table.Cell>
+              <Table.Cell
+                class="max-w-40 truncate text-muted-foreground"
+                title={row.ruleMatched ? 'Matched an import rule' : 'Fallback category'}
+              >
+                <span class="flex items-center gap-1">
+                  {#if row.ruleMatched}
+                    <Sparkles
+                      class="size-3 shrink-0 text-muted-foreground"
+                      aria-label="Matched an import rule"
+                    />
+                  {/if}
+                  {row.offsetAccountName}
+                </span>
               </Table.Cell>
               <Table.Cell class="text-right">
                 {row.amount !== null ? formatCurrency(row.amount, currency) : EMPTY_DASH}

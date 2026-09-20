@@ -20,6 +20,10 @@ pub struct ChangeEntry {
     pub accounts_affected: i64,
     pub reverts_id: Option<i64>,
     pub reverted_by: Option<i64>,
+    /// GnuCash imports only: source path + filename for the "Re-run import"
+    /// action on a history entry. `None` for CSV imports and manual edits.
+    pub source_path: Option<String>,
+    pub filename: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -318,7 +322,11 @@ fn list_change_entries(conn: &Connection) -> Result<Vec<ChangeEntry>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT id, occurred_at, kind, label, source,
-                    transactions_affected, accounts_affected, reverts_id, reverted_by
+                    transactions_affected, accounts_affected, reverts_id, reverted_by,
+                    CASE WHEN kind = 'import' AND source = 'import'
+                         THEN json_extract(detail_json, '$.filePath') END,
+                    CASE WHEN kind = 'import' AND source = 'import'
+                         THEN json_extract(detail_json, '$.filename') END
              FROM change_log ORDER BY id DESC",
         )
         .map_err(|e| e.to_string())?;
@@ -334,6 +342,8 @@ fn list_change_entries(conn: &Connection) -> Result<Vec<ChangeEntry>, String> {
                 accounts_affected: row.get(6)?,
                 reverts_id: row.get(7)?,
                 reverted_by: row.get(8)?,
+                source_path: row.get(9)?,
+                filename: row.get(10)?,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -548,12 +558,13 @@ fn map_history_error(e: AppError) -> AppError {
     }
 }
 
-// ── Last-import pointer (feeds `reimport_last`) ──────────────────────────────
+// ── Last-import pointer (feeds the re-import flow) ───────────────────────────
 
 /// Newest GnuCash import's `(file_path, filename)` from the uniform
 /// `change_log`. CSV commits also use `kind = 'import'` but their source is
-/// `"csv"` — they must not feed the GnuCash re-run.
-pub(crate) fn last_import_source(conn: &Connection) -> Result<(String, String), String> {
+/// `"csv"` — they must not feed the GnuCash re-run. `None` when this book has
+/// never had a GnuCash import.
+pub(crate) fn last_import_source(conn: &Connection) -> Result<Option<(String, String)>, String> {
     let row: Option<(Option<String>, Option<String>)> = conn
         .query_row(
             "SELECT json_extract(detail_json, '$.filePath'),
@@ -565,8 +576,8 @@ pub(crate) fn last_import_source(conn: &Connection) -> Result<(String, String), 
         .optional()
         .map_err(|e| e.to_string())?;
     match row {
-        Some((Some(path), Some(filename))) if !path.is_empty() => Ok((path, filename)),
-        _ => Err("No previous import to reimport".to_string()),
+        Some((Some(path), Some(filename))) if !path.is_empty() => Ok(Some((path, filename))),
+        _ => Ok(None),
     }
 }
 
@@ -911,7 +922,7 @@ mod tests {
 
         assert_eq!(
             last_import_source(&conn).unwrap(),
-            ("/tmp/a.gnucash".to_string(), "book.gnucash".to_string())
+            Some(("/tmp/a.gnucash".to_string(), "book.gnucash".to_string()))
         );
     }
 }

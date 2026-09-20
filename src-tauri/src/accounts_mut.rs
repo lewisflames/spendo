@@ -360,6 +360,20 @@ fn delete_account_inner(conn: &Connection, guid: &str) -> Result<(), AppError> {
     if budgets > 0 {
         return Err(AppError::Validation("Cannot delete — budgets reference it. Remove the budgets first.".to_string()));
     }
+    // Import rules are book config outside undo; the FK cascade would drop them
+    // silently, so guard like budgets.
+    let rules: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM import_rules WHERE account_guid = ?1",
+            params![guid],
+            |row| row.get(0),
+        )
+        ?;
+    if rules > 0 {
+        return Err(AppError::Validation(
+            "Cannot delete — import rules reference it. Remove the rules first.".to_string(),
+        ));
+    }
     // Schedule templates embed account GUIDs in JSON (no FK), so deleting would
     // leave them failing at posting time.
     let schedules: i64 = conn

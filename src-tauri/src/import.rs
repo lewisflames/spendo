@@ -1,5 +1,5 @@
 use rusqlite::Connection;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -508,7 +508,7 @@ fn count_orphaned(
         .map_err(AppError::from)
 }
 
-fn delete_orphans(
+fn delete_orphans_rows(
     conn: &Connection,
     table: &str,
     src_table: &str,
@@ -586,6 +586,147 @@ fn protected_default_roots(conn: &Connection, src: &SourceData) -> Result<Vec<St
             }
         }
     }
+    Ok(protected)
+}
+
+// ── Plan / preview ───────────────────────────────────────────────────────────
+
+/// Read-only tally of what an import would add, update and delete. Mirrors the
+/// merge exactly (`process_entities` + orphan sweep) so the confirmation dialog
+/// and the applied `ImportResult` agree; a test pins the two together.
+fn plan_import(src: &SourceData, existing: &ExistingData, protected: &HashSet<String>) -> MergeCounts {
+    fn tally<T: Importable>(
+        src: &[T],
+        existing: &HashMap<String, T>,
+        skip: &HashSet<String>,
+        added: &mut i64,
+        updated: &mut i64,
+        orphaned: &mut i64,
+    ) {
+        let mut src_guids: HashSet<&str> = HashSet::new();
+        for r in src {
+            src_guids.insert(r.guid());
+            match existing.get(r.guid()) {
+                None => *added += 1,
+                Some(ex) if r.has_changes(ex) => *updated += 1,
+                _ => {}
+            }
+        }
+        *orphaned = existing
+            .keys()
+            .filter(|g| !src_guids.contains(g.as_str()) && !skip.contains(g.as_str()))
+            .count() as i64;
+    }
+
+    let mut counts = MergeCounts::default();
+    let no_skip = HashSet::new();
+    tally(
+        &src.commodities,
+        &existing.commodities,
+        &no_skip,
+        &mut counts.commodities_added,
+        &mut counts.commodities_updated,
+        &mut counts.commodities_orphaned,
+    );
+    tally(
+        &src.accounts,
+        &existing.accounts,
+        protected,
+        &mut counts.accounts_added,
+        &mut counts.accounts_updated,
+        &mut counts.accounts_orphaned,
+    );
+    tally(
+        &src.transactions,
+        &existing.transactions,
+        &no_skip,
+        &mut counts.transactions_added,
+        &mut counts.transactions_updated,
+        &mut counts.transactions_orphaned,
+    );
+    tally(
+        &src.splits,
+        &existing.splits,
+        &no_skip,
+        &mut counts.splits_added,
+        &mut counts.splits_updated,
+        &mut counts.splits_orphaned,
+    );
+    counts
+}
+
+/// Names of existing accounts the sweep would delete, sorted and capped for
+/// display in the confirmation dialog.
+fn orphan_account_names(
+    src: &SourceData,
+    existing: &ExistingData,
+    protected: &HashSet<String>,
+    limit: usize,
+) -> Vec<String> {
+    let src_guids: HashSet<&str> = src.accounts.iter().map(|a| a.guid.as_str()).collect();
+    let mut names: Vec<String> = existing
+        .accounts
+        .iter()
+        .filter(|(g, _)| !src_guids.contains(g.as_str()) && !protected.contains(*g))
+        .map(|(_, a)| a.name.clone())
+        .collect();
+    names.sort();
+    names.truncate(limit);
+    names
+}
+
+/// Wire shape of the pre-import confirmation: exact counts plus the source
+/// identity needed to run the verified import afterwards.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GnuCashPreview {
+    pub path: String,
+    pub filename: String,
+    pub sha256: String,
+    pub accounts_added: i64,
+    pub accounts_updated: i64,
+    pub accounts_orphaned: i64,
+    pub transactions_added: i64,
+    pub transactions_updated: i64,
+    pub transactions_orphaned: i64,
+    pub splits_added: i64,
+    pub splits_updated: i64,
+    pub splits_orphaned: i64,
+    pub commodities_added: i64,
+    pub commodities_updated: i64,
+    pub commodities_orphaned: i64,
+    /// Sample of local account names the sweep would remove.
+    pub orphan_account_names: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GnuCashImportInput {
+    pub path: String,
+    pub filename: String,
+    /// Hash returned by `preview_gnucash_import`; the merge refuses to run when
+    /// the file changed after the confirmation.
+    pub sha256: String,
+    /// When false, rows absent from the source survive (no orphan sweep).
+    pub delete_orphans: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LastImportSource {
+    pub path: String,
+    pub filename: String,
+}
+
+/// Accounts the orphan sweep must keep: canonical roots for categories the
+/// source doesn't cover, accounts carrying budgets (the FK cascade would
+/// destroy budgets, which are outside undo snapshots), and accounts referenced
+/// by import rules (same cascade problem).
+fn protected_accounts(conn: &Connection, src: &SourceData) -> Result<HashSet<String>, AppError> {
+    let mut protected: HashSet<String> =
+        protected_default_roots(conn, src)?.into_iter().collect();
+    protected.extend(accounts_with_budgets(conn)?);
+    protected.extend(crate::import_rules::rule_account_guids(conn)?);
     Ok(protected)
 }
 
@@ -719,33 +860,38 @@ fn capture_orphaned<T: Importable>(
 }
 
 /// Capture before-images for every row the merge is about to touch so the
-/// single history row can revert this import.
+/// single history row can revert this import. With `delete_orphans` off the
+/// sweep doesn't run, so there are no orphan deletes to snapshot.
 fn capture_import_snapshots(
     conn: &Connection,
     src: &SourceData,
     existing: &ExistingData,
     protected: &HashSet<String>,
+    delete_orphans: bool,
 ) -> Result<Vec<history::Snapshot<'static>>, AppError> {
     let mut snapshots = Vec::new();
     capture_changed(conn, "commodities", &src.commodities, &existing.commodities, &mut snapshots)?;
     capture_changed(conn, "accounts", &src.accounts, &existing.accounts, &mut snapshots)?;
     capture_changed(conn, "transactions", &src.transactions, &existing.transactions, &mut snapshots)?;
     capture_changed(conn, "splits", &src.splits, &existing.splits, &mut snapshots)?;
-    capture_orphaned(conn, "commodities", &src.commodities, &existing.commodities, &HashSet::new(), &mut snapshots)?;
-    capture_orphaned(conn, "accounts", &src.accounts, &existing.accounts, protected, &mut snapshots)?;
-    capture_orphaned(conn, "transactions", &src.transactions, &existing.transactions, &HashSet::new(), &mut snapshots)?;
-    capture_orphaned(conn, "splits", &src.splits, &existing.splits, &HashSet::new(), &mut snapshots)?;
+    if delete_orphans {
+        capture_orphaned(conn, "commodities", &src.commodities, &existing.commodities, &HashSet::new(), &mut snapshots)?;
+        capture_orphaned(conn, "accounts", &src.accounts, &existing.accounts, protected, &mut snapshots)?;
+        capture_orphaned(conn, "transactions", &src.transactions, &existing.transactions, &HashSet::new(), &mut snapshots)?;
+        capture_orphaned(conn, "splits", &src.splits, &existing.splits, &HashSet::new(), &mut snapshots)?;
+    }
     Ok(snapshots)
 }
 
 /// Upsert source rows over the destination, then delete orphans (protected
-/// default roots excepted).
+/// default roots excepted). `delete_orphans: false` keeps local-only rows.
 fn apply_merge(
     conn: &Connection,
     src: &SourceData,
     existing: &ExistingData,
     counts: &mut MergeCounts,
     accounts_excluded: Option<&str>,
+    delete_orphans: bool,
 ) -> Result<(), AppError> {
     (counts.commodities_added, counts.commodities_updated) =
         process_entities(conn, &src.commodities, &existing.commodities)?;
@@ -756,10 +902,12 @@ fn apply_merge(
     (counts.splits_added, counts.splits_updated) =
         process_entities(conn, &src.splits, &existing.splits)?;
 
-    delete_orphans(conn, "splits", "tmp_src_splits", None)?;
-    delete_orphans(conn, "transactions", "tmp_src_transactions", None)?;
-    delete_orphans(conn, "accounts", "tmp_src_accounts", accounts_excluded)?;
-    delete_orphans(conn, "commodities", "tmp_src_commodities", None)?;
+    if delete_orphans {
+        delete_orphans_rows(conn, "splits", "tmp_src_splits", None)?;
+        delete_orphans_rows(conn, "transactions", "tmp_src_transactions", None)?;
+        delete_orphans_rows(conn, "accounts", "tmp_src_accounts", accounts_excluded)?;
+        delete_orphans_rows(conn, "commodities", "tmp_src_commodities", None)?;
+    }
     Ok(())
 }
 
@@ -770,6 +918,7 @@ fn import_gnucash_inner(
     source_path: &str,
     filename: &str,
     sha256: &str,
+    delete_orphans: bool,
 ) -> Result<ImportResult, AppError> {
     let source = connect_source_db(&std::path::PathBuf::from(source_path))
         .map_err(|e| format!("Failed to open source DB: {}", e))?;
@@ -797,14 +946,9 @@ fn import_gnucash_inner(
     populate_source_guids(dest_conn, "tmp_src_transactions", &tx_guids)?;
     populate_source_guids(dest_conn, "tmp_src_splits", &split_guids)?;
 
-    // Roots for categories the source book lacks stay put across re-imports:
-    // materialize their GUIDs before the transaction so the orphan sweep (and
-    // its revert snapshots) can skip them. Empty set = no exclusion needed.
-    // Budgeted accounts join them: `budgets` cascades on account delete and is
-    // not snapshotted, so the sweep would destroy budgets permanently.
-    let mut protected: HashSet<String> =
-        protected_default_roots(dest_conn, &src)?.into_iter().collect();
-    protected.extend(accounts_with_budgets(dest_conn)?);
+    // Materialize sweep-protected GUIDs before the transaction so the orphan
+    // sweep (and its revert snapshots) can skip them. Empty set = no exclusion.
+    let protected = protected_accounts(dest_conn, &src)?;
     let protected_guids: Vec<String> = protected.iter().cloned().collect();
     populate_source_guids(dest_conn, "tmp_protected_accounts", &protected_guids)?;
     let accounts_excluded = if protected.is_empty() {
@@ -820,17 +964,28 @@ fn import_gnucash_inner(
     // connection; drop them after the txn instead of letting them linger
     // until the next import recreates them.
     let tx_result: Result<(), AppError> = db::with_tx_err(dest_conn, || {
-        counts.commodities_orphaned =
-            count_orphaned(dest_conn, "commodities", "tmp_src_commodities", None)?;
-        counts.accounts_orphaned =
-            count_orphaned(dest_conn, "accounts", "tmp_src_accounts", accounts_excluded)?;
-        counts.transactions_orphaned =
-            count_orphaned(dest_conn, "transactions", "tmp_src_transactions", None)?;
-        counts.splits_orphaned = count_orphaned(dest_conn, "splits", "tmp_src_splits", None)?;
+        if delete_orphans {
+            counts.commodities_orphaned =
+                count_orphaned(dest_conn, "commodities", "tmp_src_commodities", None)?;
+            counts.accounts_orphaned =
+                count_orphaned(dest_conn, "accounts", "tmp_src_accounts", accounts_excluded)?;
+            counts.transactions_orphaned =
+                count_orphaned(dest_conn, "transactions", "tmp_src_transactions", None)?;
+            counts.splits_orphaned =
+                count_orphaned(dest_conn, "splits", "tmp_src_splits", None)?;
+        }
 
         let existing = ExistingData::load(dest_conn)?;
-        let mut snapshots = capture_import_snapshots(dest_conn, &src, &existing, &protected)?;
-        apply_merge(dest_conn, &src, &existing, &mut counts, accounts_excluded)?;
+        let mut snapshots =
+            capture_import_snapshots(dest_conn, &src, &existing, &protected, delete_orphans)?;
+        apply_merge(
+            dest_conn,
+            &src,
+            &existing,
+            &mut counts,
+            accounts_excluded,
+            delete_orphans,
+        )?;
 
         // Categories the source never covered: create the canonical root now
         // and record it as added, so reverting this import removes it again.
@@ -948,16 +1103,16 @@ async fn fetch_prices_best_effort(
 
 // ── Tauri commands ──────────────────────────────────────────────────────────
 
+/// Read-only dry run: same source read and protected-account logic as the
+/// merge, but nothing is written. The returned hash is echoed back to
+/// `import_gnucash` so a file changed after confirmation is rejected.
 #[tauri::command]
-pub async fn import_gnucash(
+pub async fn preview_gnucash_import(
     state: State<'_, AppState>,
     path: String,
     filename: String,
-) -> Result<ImportResult, String> {
-    // Capture the active book before any await: the merge must never land in a
-    // book the user switched to while the file was being hashed.
+) -> Result<GnuCashPreview, String> {
     let generation = state.book_generation.load(std::sync::atomic::Ordering::SeqCst);
-    // Validate + hash on a blocking thread, before the DB lock is touched.
     let hash_path = path.clone();
     let sha256 = db::run_io(move || {
         utils::validate_gnucash_path(&hash_path)?;
@@ -965,39 +1120,91 @@ pub async fn import_gnucash(
     })
     .await?;
     let generation_handle = state.book_generation.clone();
-    let mut result = db::run_blocking(state.db.clone(), move |conn| {
+    db::run_blocking(state.db.clone(), move |conn| {
         db::ensure_same_book(&generation_handle, generation)?;
-        import_gnucash_inner(conn, &path, &filename, &sha256).map_err(String::from)
+        preview_gnucash_inner(conn, &path, &filename, &sha256).map_err(String::from)
     })
-    .await?;
-    result.prices = fetch_prices_best_effort(
-        state.db.clone(),
-        state.book_generation.clone(),
-        generation,
-    )
-    .await;
-    Ok(result)
+    .await
+}
+
+fn preview_gnucash_inner(
+    dest_conn: &Connection,
+    source_path: &str,
+    filename: &str,
+    sha256: &str,
+) -> Result<GnuCashPreview, AppError> {
+    let source = connect_source_db(&std::path::PathBuf::from(source_path))
+        .map_err(|e| format!("Failed to open source DB: {}", e))?;
+    let src = read_source_data(&source)?;
+    if src.accounts.is_empty() {
+        return Err(AppError::Validation(
+            "Source book has no accounts — nothing to import".to_string(),
+        ));
+    }
+    let protected = protected_accounts(dest_conn, &src)?;
+    let existing = ExistingData::load(dest_conn)?;
+    let counts = plan_import(&src, &existing, &protected);
+    Ok(GnuCashPreview {
+        path: source_path.to_string(),
+        filename: filename.to_string(),
+        sha256: sha256.to_string(),
+        accounts_added: counts.accounts_added,
+        accounts_updated: counts.accounts_updated,
+        accounts_orphaned: counts.accounts_orphaned,
+        transactions_added: counts.transactions_added,
+        transactions_updated: counts.transactions_updated,
+        transactions_orphaned: counts.transactions_orphaned,
+        splits_added: counts.splits_added,
+        splits_updated: counts.splits_updated,
+        splits_orphaned: counts.splits_orphaned,
+        commodities_added: counts.commodities_added,
+        commodities_updated: counts.commodities_updated,
+        commodities_orphaned: counts.commodities_orphaned,
+        orphan_account_names: orphan_account_names(&src, &existing, &protected, 20),
+    })
+}
+
+/// The newest GnuCash import (path + filename) for the "Re-import last file"
+/// action; `None` when this book has never had one.
+#[tauri::command]
+pub async fn fetch_last_import_source(
+    state: State<'_, AppState>,
+) -> Result<Option<LastImportSource>, String> {
+    db::run_blocking(state.db.clone(), |conn| {
+        Ok(history::last_import_source(conn)?
+            .map(|(path, filename)| LastImportSource { path, filename }))
+    })
+    .await
 }
 
 #[tauri::command]
-pub async fn reimport_last(state: State<'_, AppState>) -> Result<ImportResult, String> {
-    // Look up the last import outside the blocking closure, then hash + merge.
-    let (file_path, filename) =
-        db::run_blocking(state.db.clone(), history::last_import_source).await?;
-    // Capture the book the pointer was read from, then refuse to merge if the
-    // user switches books while the file is hashed.
+pub async fn import_gnucash(
+    state: State<'_, AppState>,
+    input: GnuCashImportInput,
+) -> Result<ImportResult, String> {
+    // Capture the active book before any await: the merge must never land in a
+    // book the user switched to while the file was being hashed.
     let generation = state.book_generation.load(std::sync::atomic::Ordering::SeqCst);
-    let hash_path = file_path.clone();
-    let sha256 = db::run_io(move || {
+    // Validate + hash on a blocking thread, before the DB lock is touched.
+    let hash_path = input.path.clone();
+    let current_sha = db::run_io(move || {
         utils::validate_gnucash_path(&hash_path)?;
         file_sha256(&hash_path)
     })
     .await?;
+    if current_sha != input.sha256 {
+        return Err("Source file changed since the preview — run the import again".to_string());
+    }
     let generation_handle = state.book_generation.clone();
-
+    let GnuCashImportInput {
+        path,
+        filename,
+        sha256,
+        delete_orphans,
+    } = input;
     let mut result = db::run_blocking(state.db.clone(), move |conn| {
         db::ensure_same_book(&generation_handle, generation)?;
-        import_gnucash_inner(conn, &file_path, &filename, &sha256).map_err(String::from)
+        import_gnucash_inner(conn, &path, &filename, &sha256, delete_orphans).map_err(String::from)
     })
     .await?;
     result.prices = fetch_prices_best_effort(
@@ -1092,7 +1299,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = import_gnucash_inner(&dest, &src_str, "book.gnucash", "deadbeef").unwrap();
+        let result = import_gnucash_inner(&dest, &src_str, "book.gnucash", "deadbeef", true).unwrap();
         assert_eq!(result.commodities_added, 1);
         assert_eq!(result.commodities_orphaned, 1);
         assert_eq!(result.accounts_added, 2);
@@ -1132,11 +1339,11 @@ mod tests {
         // The reimport pointer survives the rewrite via detail_json.
         assert_eq!(
             history::last_import_source(&dest).unwrap(),
-            (src_str.clone(), "book.gnucash".to_string())
+            Some((src_str.clone(), "book.gnucash".to_string()))
         );
 
         // Identical reimport is a no-op and logs nothing new.
-        let again = import_gnucash_inner(&dest, &src_str, "book.gnucash", "deadbeef").unwrap();
+        let again = import_gnucash_inner(&dest, &src_str, "book.gnucash", "deadbeef", true).unwrap();
         assert_eq!(again.transactions_added, 0);
         assert_eq!(again.transactions_orphaned, 0);
         assert_eq!(
@@ -1197,7 +1404,7 @@ mod tests {
         init_db(&dest).unwrap();
         init::seed_empty_book(&dest, "EUR").unwrap();
 
-        let result = import_gnucash_inner(&dest, &src_str, "book.gnucash", "cafe").unwrap();
+        let result = import_gnucash_inner(&dest, &src_str, "book.gnucash", "cafe", true).unwrap();
         // Seeded ROOT + five roots are all absent from the source: the ROOT is
         // replaced wholesale, the uncovered categories are recreated after.
         assert_eq!(result.accounts_orphaned, 6);
@@ -1226,7 +1433,7 @@ mod tests {
 
         // Re-import: the recreated roots are protected, so nothing changes and
         // their GUIDs stay stable.
-        let again = import_gnucash_inner(&dest, &src_str, "book.gnucash", "cafe").unwrap();
+        let again = import_gnucash_inner(&dest, &src_str, "book.gnucash", "cafe", true).unwrap();
         assert_eq!(again.accounts_orphaned, 0);
         assert_eq!(roots(&dest), after_first);
         assert_eq!(
@@ -1296,7 +1503,7 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM accounts", [], |r| r.get(0))
             .unwrap();
 
-        let err = import_gnucash_inner(&dest, &src_str, "book.gnucash", "deadbeef").unwrap_err();
+        let err = import_gnucash_inner(&dest, &src_str, "book.gnucash", "deadbeef", true).unwrap_err();
         assert!(err.to_string().contains("no accounts"), "unexpected: {err}");
 
         let accounts_after: i64 = dest
@@ -1330,7 +1537,7 @@ mod tests {
 
         let dest = Connection::open_in_memory().unwrap();
         init_db(&dest).unwrap();
-        let result = import_gnucash_inner(&dest, &src_str, "book.gnucash", "beef").unwrap();
+        let result = import_gnucash_inner(&dest, &src_str, "book.gnucash", "beef", true).unwrap();
 
         // Referenced UUID-named account + ROOT import; the unreferenced one is filtered.
         assert_eq!(result.accounts_added, 2);
@@ -1378,7 +1585,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = import_gnucash_inner(&dest, &src_str, "book.gnucash", "beef").unwrap();
+        let result = import_gnucash_inner(&dest, &src_str, "book.gnucash", "beef", true).unwrap();
 
         // The budgeted account survived the sweep (only the 6 seeded rows are
         // counted as orphaned) and its budget escaped the FK cascade.
@@ -1395,6 +1602,119 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM budgets", [], |r| r.get(0))
             .unwrap();
         assert_eq!(budgets, 1);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    fn count(conn: &Connection, table: &str) -> i64 {
+        conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+            .unwrap()
+    }
+
+    /// The preview must be a pure read and its counts must match what the
+    /// import actually applies (the confirmation dialog depends on both).
+    #[test]
+    fn preview_matches_import_and_does_not_mutate() {
+        let (dir, src_str) = tmp_source(
+            "preview",
+            "INSERT INTO commodities (guid, mnemonic, namespace) VALUES ('c-eur', 'EUR', 'CURRENCY');
+             INSERT INTO accounts (guid, name, account_type, parent_guid, placeholder, commodity_guid)
+               VALUES ('root', 'Root Account', 'ROOT', NULL, 0, 'c-eur'),
+                      ('checking', 'Checking', 'BANK', 'root', 0, 'c-eur');
+             INSERT INTO transactions (guid, post_date, description) VALUES ('t1', '2024-01-15', 'Groceries');
+             INSERT INTO splits (guid, tx_guid, account_guid, value_num, value_denom, quantity_num, quantity_denom)
+               VALUES ('s1', 't1', 'checking', 5000, 100, 5000, 100);",
+        );
+
+        let dest = Connection::open_in_memory().unwrap();
+        init_db(&dest).unwrap();
+        // Local-only rows the sweep would remove.
+        dest.execute_batch(
+            "INSERT INTO accounts (guid, name, account_type, parent_guid, placeholder, commodity_guid)
+               VALUES ('local', 'Local Only', 'ASSET', NULL, 0, NULL);
+             INSERT INTO transactions (guid, post_date, description) VALUES ('t-local', '2024-02-01', 'Local');
+             INSERT INTO splits (guid, tx_guid, account_guid, value_num, value_denom, quantity_num, quantity_denom)
+               VALUES ('s-local', 't-local', 'local', 100, 100, 100, 100);",
+        )
+        .unwrap();
+        let before = (
+            count(&dest, "accounts"),
+            count(&dest, "transactions"),
+            count(&dest, "splits"),
+            count(&dest, "commodities"),
+        );
+
+        let preview = preview_gnucash_inner(&dest, &src_str, "book.gnucash", "hash").unwrap();
+        assert_eq!(preview.sha256, "hash");
+        assert_eq!(preview.filename, "book.gnucash");
+        assert_eq!(preview.commodities_added, 1);
+        assert_eq!(preview.accounts_added, 2);
+        assert_eq!(preview.accounts_orphaned, 1);
+        assert_eq!(preview.transactions_added, 1);
+        assert_eq!(preview.transactions_orphaned, 1);
+        assert_eq!(preview.splits_added, 1);
+        assert_eq!(preview.splits_orphaned, 1);
+        assert_eq!(preview.orphan_account_names, vec!["Local Only".to_string()]);
+        assert_eq!(
+            before,
+            (
+                count(&dest, "accounts"),
+                count(&dest, "transactions"),
+                count(&dest, "splits"),
+                count(&dest, "commodities"),
+            )
+        );
+
+        let result = import_gnucash_inner(&dest, &src_str, "book.gnucash", "hash", true).unwrap();
+        assert_eq!(result.commodities_added, preview.commodities_added);
+        assert_eq!(result.accounts_added, preview.accounts_added);
+        assert_eq!(result.accounts_orphaned, preview.accounts_orphaned);
+        assert_eq!(result.transactions_added, preview.transactions_added);
+        assert_eq!(result.transactions_orphaned, preview.transactions_orphaned);
+        assert_eq!(result.splits_added, preview.splits_added);
+        assert_eq!(result.splits_orphaned, preview.splits_orphaned);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Opting out of the sweep keeps rows the source doesn't cover.
+    #[test]
+    fn import_without_sweep_keeps_local_rows() {
+        let (dir, src_str) = tmp_source(
+            "no-sweep",
+            "INSERT INTO commodities (guid, mnemonic, namespace) VALUES ('c-eur', 'EUR', 'CURRENCY');
+             INSERT INTO accounts (guid, name, account_type, parent_guid, placeholder, commodity_guid)
+               VALUES ('root', 'Root Account', 'ROOT', NULL, 0, 'c-eur'),
+                      ('checking', 'Checking', 'BANK', 'root', 0, 'c-eur');",
+        );
+
+        let dest = Connection::open_in_memory().unwrap();
+        init_db(&dest).unwrap();
+        dest.execute_batch(
+            "INSERT INTO accounts (guid, name, account_type, parent_guid, placeholder, commodity_guid)
+               VALUES ('local', 'Local Only', 'ASSET', NULL, 0, NULL);
+             INSERT INTO transactions (guid, post_date, description) VALUES ('t-local', '2024-02-01', 'Local');
+             INSERT INTO splits (guid, tx_guid, account_guid, value_num, value_denom, quantity_num, quantity_denom)
+               VALUES ('s-local', 't-local', 'local', 100, 100, 100, 100);",
+        )
+        .unwrap();
+
+        let result = import_gnucash_inner(&dest, &src_str, "book.gnucash", "beef", false).unwrap();
+        assert_eq!(result.accounts_orphaned, 0);
+        assert_eq!(result.transactions_orphaned, 0);
+        assert_eq!(result.splits_orphaned, 0);
+        assert_eq!(result.commodities_orphaned, 0);
+        assert_eq!(result.accounts_added, 2);
+        // local + source root/checking + the four uncovered canonical roots
+        // `ensure_default_roots` always heals in.
+        assert_eq!(count(&dest, "accounts"), 7);
+        assert_eq!(count(&dest, "transactions"), 1);
+        assert_eq!(
+            dest.query_row("SELECT description FROM transactions WHERE guid = 't-local'", [], |r| r
+                .get::<_, String>(0))
+                .unwrap(),
+            "Local"
+        );
 
         std::fs::remove_dir_all(&dir).ok();
     }

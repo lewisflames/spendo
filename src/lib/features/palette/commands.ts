@@ -193,7 +193,7 @@ export const PALETTE_COMMANDS: PaletteCommand[] = [
     title: 'Export transactions CSV…',
     group: 'Actions',
     icon: FileDown,
-    keywords: ['export', 'csv', 'transactions', 'download', 'backup'],
+    keywords: ['export', 'csv', 'transactions', 'download', 'interchange'],
     when: () => dbSession.value !== null,
     run: () => {
       void exportTransactionsCsvViaDialog();
@@ -204,7 +204,7 @@ export const PALETTE_COMMANDS: PaletteCommand[] = [
     title: 'Export accounts CSV…',
     group: 'Actions',
     icon: FileDown,
-    keywords: ['export', 'csv', 'accounts', 'download', 'backup'],
+    keywords: ['export', 'csv', 'accounts', 'download', 'interchange'],
     when: () => dbSession.value !== null,
     run: () => {
       void exportAccountsCsvViaDialog();

@@ -4,6 +4,7 @@
   import BookCard from '$lib/features/settings/book-card.svelte';
   import DangerZoneCard from '$lib/features/settings/danger-zone-card.svelte';
   import ImportExportCard from '$lib/features/settings/import-export-card.svelte';
+  import ImportRulesCard from '$lib/features/settings/import-rules-card.svelte';
   import DisplayCard from '$lib/features/settings/display-card.svelte';
   import ReportingCard from '$lib/features/settings/reporting-card.svelte';
   import { appSettings, resetSettings } from '$lib/stores/settings.svelte';
@@ -56,6 +57,8 @@
   <ReportingCard error={bookSettingsError} onRetry={() => void refreshBookSettings()} />
 
   <ImportExportCard error={bookSettingsError} onRetry={() => void refreshBookSettings()} />
+
+  <ImportRulesCard />
 
   <DangerZoneCard onResetPreferences={handleResetPreferences} />
 </div>

@@ -1,11 +1,13 @@
 <script lang="ts">
   import { Badge } from '$lib/components/ui/badge';
+  import { Button } from '$lib/components/ui/button';
   import { Skeleton } from '$lib/components/ui/skeleton';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
   import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
-  import { History } from '@lucide/svelte';
+  import { History, RefreshCw } from '@lucide/svelte';
   import type { ChangeEntry } from '$lib/tauri';
+  import { reimportGnucashPath } from '$lib/features/book/import-export-actions';
   import { formatDate, formatRelativeTime, parseLocalDate } from '$lib/utils/format.svelte';
   import { changeHistory, refreshChangeHistory } from './history.svelte';
   import { groupHistoryEntries } from './date-groups';
@@ -24,6 +26,16 @@
 
   function relativeTime(entry: ChangeEntry): string {
     return formatRelativeTime(parseLocalDate(entry.occurredAt).getTime() / 1000);
+  }
+
+  /** GnuCash imports can be re-run from their recorded source file, unless undone. */
+  function canReimport(entry: ChangeEntry): boolean {
+    return (
+      entry.kind === 'import' &&
+      entry.source === 'import' &&
+      entry.sourcePath !== null &&
+      entry.revertedBy === null
+    );
   }
 
   const groups = $derived(groupHistoryEntries(changeHistory.value.entries));
@@ -78,6 +90,22 @@
                   </Badge>
                   {#if entry.revertedBy}
                     <span class="text-xs text-muted-foreground">undone</span>
+                  {/if}
+                  {#if canReimport(entry)}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      class="h-6 gap-1 px-1.5 text-xs text-muted-foreground"
+                      title="Re-run this import"
+                      onclick={() =>
+                        void reimportGnucashPath(
+                          entry.sourcePath!,
+                          entry.filename ?? 'book.gnucash'
+                        )}
+                    >
+                      <RefreshCw aria-hidden="true" class="size-3" />
+                      Re-run import
+                    </Button>
                   {/if}
                 </div>
               </div>

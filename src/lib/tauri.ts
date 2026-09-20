@@ -43,6 +43,9 @@ export interface ChangeEntry {
   accountsAffected: number;
   revertsId: number | null;
   revertedBy: number | null;
+  /** GnuCash imports only: source path + filename for the re-run action. */
+  sourcePath: string | null;
+  filename: string | null;
 }
 
 interface ChangeHistory {
@@ -288,10 +291,6 @@ export const fetchNavBadges = (): Promise<NavBadges> => invoke<NavBadges>('fetch
 
 export const clearAppDb = (): Promise<void> => invoke<void>('clear_app_db');
 
-/** Writes text (e.g. a CSV export) to a user-chosen path. */
-export const writeTextFile = (path: string, contents: string): Promise<void> =>
-  invoke<void>('write_text_file', { path, contents });
-
 // ── Books (document model: one active `.spendo` file opened in place) ──
 
 /** Active book path, or `null` while book-less (fresh install). */
@@ -348,14 +347,51 @@ export const undoHistoryEntry = (id: number): Promise<DataSummary> =>
 export const redoHistoryEntry = (id: number): Promise<DataSummary> =>
   invoke<DataSummary>('redo_history_entry', { id });
 
-export const importGnucash = (path: string, filename: string): Promise<ImportResult> =>
-  invoke<ImportResult>('import_gnucash', { path, filename });
+export interface GnuCashPreview {
+  path: string;
+  filename: string;
+  sha256: string;
+  accountsAdded: number;
+  accountsUpdated: number;
+  accountsOrphaned: number;
+  transactionsAdded: number;
+  transactionsUpdated: number;
+  transactionsOrphaned: number;
+  splitsAdded: number;
+  splitsUpdated: number;
+  splitsOrphaned: number;
+  commoditiesAdded: number;
+  commoditiesUpdated: number;
+  commoditiesOrphaned: number;
+  orphanAccountNames: string[];
+}
 
-export const reimportLast = (): Promise<ImportResult> => invoke<ImportResult>('reimport_last');
+export interface GnuCashImportInput {
+  path: string;
+  filename: string;
+  /** Hash returned by `previewGnucashImport`; the merge refuses stale files. */
+  sha256: string;
+  /** When false, rows absent from the source survive (no orphan sweep). */
+  deleteOrphans: boolean;
+}
+
+export interface LastImportSource {
+  path: string;
+  filename: string;
+}
+
+export const previewGnucashImport = (path: string, filename: string): Promise<GnuCashPreview> =>
+  invoke<GnuCashPreview>('preview_gnucash_import', { path, filename });
+
+export const importGnucash = (input: GnuCashImportInput): Promise<ImportResult> =>
+  invoke<ImportResult>('import_gnucash', { input });
+
+export const fetchLastImportSource = (): Promise<LastImportSource | null> =>
+  invoke<LastImportSource | null>('fetch_last_import_source');
 
 // ── CSV import (bank-statement wizard: detect → map → preview → commit) ──
 
-interface CsvMapping {
+export interface CsvMapping {
   dateCol: number;
   descCol: number;
   amountCol?: number | null;
@@ -367,6 +403,8 @@ interface CsvMapping {
 
 interface CsvPreviewInput {
   path: string;
+  /** SHA-256 from `csvDetect`; preview/commit reject changed files. */
+  fileSha256: string;
   encoding?: string | null;
   delimiter?: string | null;
   hasHeader?: boolean | null;
@@ -374,6 +412,19 @@ interface CsvPreviewInput {
   targetAccountGuid: string;
   offsetAccountGuid: string;
   datePreference?: string | null;
+}
+
+/** Saved mapping for one bank-statement header layout. */
+export interface CsvPreset {
+  signature: string;
+  name: string;
+  encoding: string | null;
+  delimiter: string;
+  hasHeader: boolean;
+  datePreference: string;
+  mapping: CsvMapping;
+  targetAccountGuid: string;
+  offsetAccountGuid: string;
 }
 
 export interface CsvDetectResult {
@@ -385,6 +436,11 @@ export interface CsvDetectResult {
   rowCount: number;
   sampleRows: string[][];
   filename: string;
+  sha256: string;
+  /** Header-row signature (`null` for headerless files). */
+  signature: string | null;
+  /** Saved mapping for this layout, when the book has one. */
+  preset: CsvPreset | null;
 }
 
 interface CsvPreviewRow {
@@ -395,6 +451,10 @@ interface CsvPreviewRow {
   amount: number | null;
   valid: boolean;
   duplicate: boolean;
+  /** Category the row will post against (rule match or fallback account). */
+  offsetAccountName: string;
+  /** True when an import rule picked the category. */
+  ruleMatched: boolean;
   error: string | null;
 }
 
@@ -423,8 +483,41 @@ export const csvPreview = (input: CsvPreviewInput): Promise<CsvPreviewResult> =>
   invoke<CsvPreviewResult>('csv_preview', { input });
 
 export const csvCommit = (
-  input: CsvPreviewInput & { selectedKeys: number[] }
+  input: CsvPreviewInput & { selectedKeys: number[]; rememberMapping: boolean }
 ): Promise<CsvCommitResult> => invoke<CsvCommitResult>('csv_commit', { input });
+
+export const deleteCsvPreset = (signature: string): Promise<void> =>
+  invoke<void>('delete_csv_preset', { signature });
+
+// ── Import rules (CSV row description → category) ──
+
+export interface ImportRule {
+  id: number;
+  priority: number;
+  matchType: 'contains' | 'equals';
+  pattern: string;
+  accountGuid: string;
+  accountName: string;
+}
+
+export interface ImportRuleInput {
+  priority: number;
+  matchType: 'contains' | 'equals';
+  pattern: string;
+  accountGuid: string;
+}
+
+export const fetchImportRules = (): Promise<ImportRule[]> =>
+  invoke<ImportRule[]>('fetch_import_rules');
+
+export const createImportRule = (input: ImportRuleInput): Promise<ImportRule> =>
+  invoke<ImportRule>('create_import_rule', { input });
+
+export const updateImportRule = (id: number, input: ImportRuleInput): Promise<ImportRule> =>
+  invoke<ImportRule>('update_import_rule', { id, input });
+
+export const deleteImportRule = (id: number): Promise<void> =>
+  invoke<void>('delete_import_rule', { id });
 
 export const setBaseCurrency = (currency: string): Promise<EmptyBookResult> =>
   invoke<EmptyBookResult>('set_base_currency', { currency });
@@ -621,43 +714,27 @@ export const postScheduleOccurrence = (guid: string): Promise<string> =>
 export const skipScheduleOccurrence = (guid: string): Promise<string | null> =>
   invoke<string | null>('skip_schedule_occurrence', { guid });
 
-/** One row per split for the settings CSV export (GnuCash multi-split shape). */
-export interface ExportSplitRow {
-  txGuid: string;
-  splitGuid: string;
-  /** YYYY-MM-DD */
-  postDate: string;
-  description: string | null;
-  num?: string | null;
-  notes?: string | null;
-  commodity?: string | null;
-  memo?: string | null;
-  fullAccountName: string;
-  accountName: string;
-  amount: number;
-  reconcileState?: string | null;
-  price: number;
+/** Full-book transactions CSV written straight to the chosen path. */
+export interface TransactionsExportInput {
+  path: string;
+  delimiter: ',' | ';';
+  /** `iso` keeps `YYYY-MM-DD`; `locale` uses the probe-derived parts. */
+  dateFormat: 'iso' | 'locale';
+  dateParts?: 'dmy' | 'mdy' | 'ymd' | null;
+  dateSeparator?: string | null;
 }
 
-/** One row per account in parent-before-child order for the settings CSV export. */
-export interface ExportAccountRow {
-  guid: string;
-  parentGuid: string | null;
-  accountType: string;
-  fullName: string;
-  name: string;
-  code: string | null;
-  description: string | null;
-  commodity: string | null;
-  commodityNamespace: string | null;
-  placeholder: boolean;
+/** Full account-tree CSV written straight to the chosen path. */
+export interface AccountsExportInput {
+  path: string;
+  delimiter: ',' | ';';
 }
 
-export const fetchExportTransactions = (): Promise<ExportSplitRow[]> =>
-  invoke<ExportSplitRow[]>('fetch_export_transactions');
+export const exportTransactionsCsv = (input: TransactionsExportInput): Promise<void> =>
+  invoke<void>('export_transactions_csv', { input });
 
-export const fetchExportAccounts = (): Promise<ExportAccountRow[]> =>
-  invoke<ExportAccountRow[]>('fetch_export_accounts');
+export const exportAccountsCsv = (input: AccountsExportInput): Promise<void> =>
+  invoke<void>('export_accounts_csv', { input });
 
 export const refreshPrices = (): Promise<PricesResult> => invoke<PricesResult>('refresh_prices');
 
@@ -1064,6 +1141,7 @@ export type MockPayloads = {
   close_book: EmptyBookResult;
   create_account: string;
   create_book_at: EmptyBookResult;
+  create_import_rule: ImportRule;
   create_schedule: Schedule;
   create_transaction: string;
   csv_commit: CsvCommitResult;
@@ -1072,10 +1150,14 @@ export type MockPayloads = {
   delete_account: void;
   delete_attachment: void;
   delete_budget_year: void;
+  delete_csv_preset: void;
+  delete_import_rule: void;
   delete_schedule: void;
   delete_symbol_override: void;
   delete_transaction: void;
+  export_accounts_csv: void;
   export_attachment: void;
+  export_transactions_csv: void;
   fetch_account_balance_trend: AccountBalancePoint[];
   fetch_account_detail: AccountDetailResult;
   fetch_accounts: AccountsResult;
@@ -1088,10 +1170,10 @@ export type MockPayloads = {
   fetch_budget_vs_actual: BudgetActualRow[];
   fetch_budget_years: number[];
   fetch_change_history: ChangeHistory;
-  fetch_export_accounts: ExportAccountRow[];
-  fetch_export_transactions: ExportSplitRow[];
   fetch_holding_detail: HoldingDetail;
   fetch_home_data: HomeDataResult;
+  fetch_import_rules: ImportRule[];
+  fetch_last_import_source: LastImportSource | null;
   fetch_nav_badges: NavBadges;
   fetch_nav_roots: NavRoot[];
   fetch_pnl_report: ProfitLossReport;
@@ -1111,9 +1193,9 @@ export type MockPayloads = {
   open_attachment: void;
   open_book: EmptyBookResult;
   post_schedule_occurrence: string;
+  preview_gnucash_import: GnuCashPreview;
   redo_history_entry: DataSummary;
   refresh_prices: PricesResult;
-  reimport_last: ImportResult;
   save_book_as: EmptyBookResult;
   search_global: GlobalSearchResult;
   set_base_currency: EmptyBookResult;
@@ -1124,7 +1206,7 @@ export type MockPayloads = {
   skip_schedule_occurrence: string | null;
   undo_history_entry: DataSummary;
   update_account: void;
+  update_import_rule: ImportRule;
   update_schedule: Schedule;
   update_transaction: void;
-  write_text_file: void;
 };

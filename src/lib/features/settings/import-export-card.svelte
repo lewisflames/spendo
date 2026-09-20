@@ -45,7 +45,7 @@
 <Card.Root>
   <IconCardHeader
     title="Import &amp; export"
-    description="CSV formatting for exports. Import and export run from the book menu or command palette."
+    description="CSV formatting for exports. Import and export run from the book menu or command palette — CSV exports are for interchange; use Save as… for a full backup."
   >
     {#snippet icon()}
       <ArrowLeftRight aria-hidden="true" class="size-4 text-muted-foreground" />
