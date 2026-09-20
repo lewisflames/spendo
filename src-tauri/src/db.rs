@@ -78,6 +78,17 @@ where
     Ok(out)
 }
 
+/// Abort a background operation whose active book changed while it was
+/// preparing (file hashing, CSV parsing, network fetch). Call this **inside**
+/// the `run_blocking` closure that performs the write: connection swaps also
+/// take the DB lock, so the check is authoritative once the lock is held.
+pub(crate) fn ensure_same_book(book_generation: &AtomicU64, expected: u64) -> Result<(), String> {
+    if book_generation.load(std::sync::atomic::Ordering::SeqCst) != expected {
+        return Err("Book changed while the operation was preparing — try again".to_string());
+    }
+    Ok(())
+}
+
 /// Typed backend error for gradual migration off `Result<T, String>`.
 /// Commands keep `Result<T, String>` at the `#[tauri::command]` boundary (so
 /// the frontend contract is unchanged — `From<AppError> for String` keeps
@@ -617,5 +628,13 @@ mod tests {
         assert_eq!(read_last_book(&dir), None);
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn ensure_same_book_rejects_stale_generation() {
+        let generation = AtomicU64::new(7);
+        assert!(ensure_same_book(&generation, 7).is_ok());
+        generation.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        assert!(ensure_same_book(&generation, 7).is_err());
     }
 }

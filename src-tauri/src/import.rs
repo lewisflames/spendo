@@ -101,7 +101,12 @@ fn read_source_data(source: &Connection) -> Result<SourceData, String> {
     let mut accounts = read_account(source)?;
     let mut splits = read_split(source)?;
 
-    accounts.retain(|a| !is_uuid(&a.name));
+    // GnuCash can carry internal accounts named after their GUID (import
+    // leftovers). Drop those only when no split references them — filtering a
+    // referenced account would silently drop its splits and unbalance the
+    // owning transactions.
+    let referenced: HashSet<&str> = splits.iter().map(|s| s.account_guid.as_str()).collect();
+    accounts.retain(|a| !is_uuid(&a.name) || referenced.contains(a.guid.as_str()));
     let valid_account_guids: HashSet<String> = accounts.iter().map(|a| a.guid.clone()).collect();
     splits.retain(|s| valid_account_guids.contains(&s.account_guid));
 
@@ -516,6 +521,18 @@ fn delete_orphans(
         .map_err(AppError::from)
 }
 
+/// Every account that has at least one budget row. The sweep must not delete
+/// these: `budgets.account_guid` cascades and budgets are outside the history
+/// snapshots, so the delete would be permanent. Mirrors the manual-delete
+/// guard in `accounts_mut.rs`.
+fn accounts_with_budgets(conn: &Connection) -> Result<Vec<String>, AppError> {
+    let mut stmt = conn.prepare("SELECT DISTINCT account_guid FROM budgets")?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
 /// Canonical default roots the source book doesn't cover, as local GUIDs.
 /// These survive the orphan sweep (and its revert snapshots) so re-imports
 /// stay no-ops and their GUIDs stay stable; source-provided roots of the same
@@ -758,6 +775,15 @@ fn import_gnucash_inner(
 
     let src = read_source_data(&source)?;
 
+    // The orphan sweep treats the source as authoritative and deletes rows it
+    // doesn't cover, so an empty source set (`NOT IN (empty)`) would wipe the
+    // whole book. Abort instead — there is nothing to import.
+    if src.accounts.is_empty() {
+        return Err(AppError::Validation(
+            "Source book has no accounts — nothing to import".to_string(),
+        ));
+    }
+
     let commodity_guids: Vec<String> = src.commodities.iter().map(|r| r.guid.clone()).collect();
     let account_guids: Vec<String> = src.accounts.iter().map(|r| r.guid.clone()).collect();
     let tx_guids: Vec<String> = src.transactions.iter().map(|r| r.guid.clone()).collect();
@@ -771,7 +797,11 @@ fn import_gnucash_inner(
     // Roots for categories the source book lacks stay put across re-imports:
     // materialize their GUIDs before the transaction so the orphan sweep (and
     // its revert snapshots) can skip them. Empty set = no exclusion needed.
-    let protected: HashSet<String> = protected_default_roots(dest_conn, &src)?.into_iter().collect();
+    // Budgeted accounts join them: `budgets` cascades on account delete and is
+    // not snapshotted, so the sweep would destroy budgets permanently.
+    let mut protected: HashSet<String> =
+        protected_default_roots(dest_conn, &src)?.into_iter().collect();
+    protected.extend(accounts_with_budgets(dest_conn)?);
     let protected_guids: Vec<String> = protected.iter().cloned().collect();
     populate_source_guids(dest_conn, "tmp_protected_accounts", &protected_guids)?;
     let accounts_excluded = if protected.is_empty() {
@@ -921,6 +951,9 @@ pub async fn import_gnucash(
     path: String,
     filename: String,
 ) -> Result<ImportResult, String> {
+    // Capture the active book before any await: the merge must never land in a
+    // book the user switched to while the file was being hashed.
+    let generation = state.book_generation.load(std::sync::atomic::Ordering::SeqCst);
     // Validate + hash on a blocking thread, before the DB lock is touched.
     let hash_path = path.clone();
     let sha256 = db::run_io(move || {
@@ -928,10 +961,9 @@ pub async fn import_gnucash(
         file_sha256(&hash_path)
     })
     .await?;
-    // Capture the active book before merging: if the user switches books while
-    // the import (or its price fetch) is in flight, the price write is dropped.
-    let generation = state.book_generation.load(std::sync::atomic::Ordering::SeqCst);
+    let generation_handle = state.book_generation.clone();
     let mut result = db::run_blocking(state.db.clone(), move |conn| {
+        db::ensure_same_book(&generation_handle, generation)?;
         import_gnucash_inner(conn, &path, &filename, &sha256).map_err(String::from)
     })
     .await?;
@@ -949,15 +981,19 @@ pub async fn reimport_last(state: State<'_, AppState>) -> Result<ImportResult, S
     // Look up the last import outside the blocking closure, then hash + merge.
     let (file_path, filename) =
         db::run_blocking(state.db.clone(), history::last_import_source).await?;
+    // Capture the book the pointer was read from, then refuse to merge if the
+    // user switches books while the file is hashed.
+    let generation = state.book_generation.load(std::sync::atomic::Ordering::SeqCst);
     let hash_path = file_path.clone();
     let sha256 = db::run_io(move || {
         utils::validate_gnucash_path(&hash_path)?;
         file_sha256(&hash_path)
     })
     .await?;
-    let generation = state.book_generation.load(std::sync::atomic::Ordering::SeqCst);
+    let generation_handle = state.book_generation.clone();
 
     let mut result = db::run_blocking(state.db.clone(), move |conn| {
+        db::ensure_same_book(&generation_handle, generation)?;
         import_gnucash_inner(conn, &file_path, &filename, &sha256).map_err(String::from)
     })
     .await?;
@@ -1211,6 +1247,148 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM accounts", [], |row| row.get(0))
             .unwrap();
         assert_eq!(total, 6);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Minimal GnuCash-shaped source DB: the tables `read_source_data` touches.
+    fn write_source_db(path: &std::path::Path, extra_sql: &str) {
+        let src = Connection::open(path).unwrap();
+        src.execute_batch(&format!(
+            "CREATE TABLE commodities (guid TEXT PRIMARY KEY, mnemonic TEXT, namespace TEXT, fullname TEXT);
+             CREATE TABLE accounts (guid TEXT PRIMARY KEY, name TEXT, account_type TEXT, parent_guid TEXT, code TEXT, description TEXT, placeholder INTEGER, commodity_guid TEXT);
+             CREATE TABLE transactions (guid TEXT PRIMARY KEY, post_date TEXT, description TEXT, num TEXT);
+             CREATE TABLE splits (guid TEXT PRIMARY KEY, tx_guid TEXT, account_guid TEXT, value_num INTEGER, value_denom INTEGER, quantity_num INTEGER, quantity_denom INTEGER, reconcile_state TEXT, memo TEXT);
+             CREATE TABLE slots (obj_guid TEXT, name TEXT, string_val TEXT);
+             {extra_sql}"
+        ))
+        .unwrap();
+    }
+
+    fn tmp_source(tag: &str, extra_sql: &str) -> (std::path::PathBuf, String) {
+        let dir = std::env::temp_dir().join(format!("spendo-import-{tag}-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("book.gnucash");
+        write_source_db(&path, extra_sql);
+        let path_str = path.to_string_lossy().to_string();
+        (dir, path_str)
+    }
+
+    /// Regression: an empty source produced empty `tmp_src_*` tables, and
+    /// `NOT IN (empty set)` made the orphan sweep delete the whole book.
+    #[test]
+    fn import_aborts_when_source_has_no_accounts() {
+        let (dir, src_str) = tmp_source(
+            "empty",
+            "INSERT INTO commodities (guid, mnemonic, namespace) VALUES ('c-eur', 'EUR', 'CURRENCY');",
+        );
+
+        let dest = Connection::open_in_memory().unwrap();
+        init_db(&dest).unwrap();
+        init::seed_empty_book(&dest, "EUR").unwrap();
+        let accounts_before: i64 = dest
+            .query_row("SELECT COUNT(*) FROM accounts", [], |r| r.get(0))
+            .unwrap();
+
+        let err = import_gnucash_inner(&dest, &src_str, "book.gnucash", "deadbeef").unwrap_err();
+        assert!(err.to_string().contains("no accounts"), "unexpected: {err}");
+
+        let accounts_after: i64 = dest
+            .query_row("SELECT COUNT(*) FROM accounts", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(accounts_after, accounts_before);
+        assert!(history::fetch_change_history_inner(&dest)
+            .unwrap()
+            .entries
+            .is_empty());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Regression: UUID-named accounts referenced by splits used to be filtered
+    /// out, silently dropping their splits and unbalancing the transaction.
+    #[test]
+    fn import_keeps_uuid_named_accounts_referenced_by_splits() {
+        let (dir, src_str) = tmp_source(
+            "uuid",
+            "INSERT INTO commodities (guid, mnemonic, namespace) VALUES ('c-eur', 'EUR', 'CURRENCY');
+             INSERT INTO accounts (guid, name, account_type, parent_guid, placeholder, commodity_guid)
+               VALUES ('root', 'Root Account', 'ROOT', NULL, 0, 'c-eur'),
+                      ('uuid-acct', '01234567-89ab-cdef-0123-456789abcdef', 'BANK', 'root', 0, 'c-eur'),
+                      ('unused-uuid', 'deadbeefdeadbeefdeadbeefdeadbeef', 'BANK', 'root', 0, 'c-eur');
+             INSERT INTO transactions (guid, post_date, description)
+               VALUES ('t1', '2024-01-15', 'Groceries');
+             INSERT INTO splits (guid, tx_guid, account_guid, value_num, value_denom, quantity_num, quantity_denom)
+               VALUES ('s1', 't1', 'uuid-acct', 5000, 100, 5000, 100);",
+        );
+
+        let dest = Connection::open_in_memory().unwrap();
+        init_db(&dest).unwrap();
+        let result = import_gnucash_inner(&dest, &src_str, "book.gnucash", "beef").unwrap();
+
+        // Referenced UUID-named account + ROOT import; the unreferenced one is filtered.
+        assert_eq!(result.accounts_added, 2);
+        assert_eq!(result.splits_added, 1);
+        let split_account: String = dest
+            .query_row("SELECT account_guid FROM splits WHERE guid = 's1'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(split_account, "uuid-acct");
+        let unused: i64 = dest
+            .query_row(
+                "SELECT COUNT(*) FROM accounts WHERE guid = 'unused-uuid'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(unused, 0);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Regression: sweeping a budgeted account cascades the budget rows away
+    /// (budgets are outside undo snapshots), so the sweep must skip them.
+    #[test]
+    fn import_preserves_budgets_on_orphaned_accounts() {
+        let (dir, src_str) = tmp_source(
+            "budget",
+            "INSERT INTO commodities (guid, mnemonic, namespace) VALUES ('c-eur', 'EUR', 'CURRENCY');
+             INSERT INTO accounts (guid, name, account_type, parent_guid, placeholder, commodity_guid)
+               VALUES ('root', 'Root Account', 'ROOT', NULL, 0, 'c-eur'),
+                      ('checking', 'Checking', 'BANK', 'root', 0, 'c-eur');",
+        );
+
+        let dest = Connection::open_in_memory().unwrap();
+        init_db(&dest).unwrap();
+        init::seed_empty_book(&dest, "EUR").unwrap();
+        // Local-only account with a budget, absent from the source.
+        dest.execute_batch(
+            "INSERT INTO accounts (guid, name, account_type, parent_guid, placeholder, commodity_guid)
+               SELECT 'budgeted', 'Local Savings', 'ASSET', guid, 0, commodity_guid
+               FROM accounts WHERE account_type = 'ROOT';
+             INSERT INTO budgets (guid, account_guid, year, amount, created_at)
+               VALUES ('b1', 'budgeted', 2024, 1200.0, '2024-01-01T00:00:00Z');",
+        )
+        .unwrap();
+
+        let result = import_gnucash_inner(&dest, &src_str, "book.gnucash", "beef").unwrap();
+
+        // The budgeted account survived the sweep (only the 6 seeded rows are
+        // counted as orphaned) and its budget escaped the FK cascade.
+        assert_eq!(result.accounts_orphaned, 6);
+        let budgeted: i64 = dest
+            .query_row(
+                "SELECT COUNT(*) FROM accounts WHERE guid = 'budgeted'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(budgeted, 1);
+        let budgets: i64 = dest
+            .query_row("SELECT COUNT(*) FROM budgets", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(budgets, 1);
 
         std::fs::remove_dir_all(&dir).ok();
     }
