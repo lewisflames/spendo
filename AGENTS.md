@@ -80,7 +80,7 @@ No `preview` script (no `vite preview` wrapper). Frontend unit tests are pure-he
 
 - **Navigation**: row-click navigation goes through `$lib/utils/navigation.ts` (`handleRowClick(e, go)` + `openTransaction`, `openAccount`, `openHolding`, `openBudget`) — never copy per-table click guards; keep real `<a>` elements for keyboard/middle-click.
 - **Sidebar / palette nav**: sidebar groups, labels, icons, chords and palette `Go to` commands come from `$lib/features/nav/nav-items.ts`; account-root targets resolve at runtime from `$lib/stores/nav.svelte.ts` (`refreshNav` runs from the layout effect). Add a page by extending `NAV_GROUPS`, not the sidebar template.
-- **Book actions**: every book switch (open/new/save-as/close, copy path) goes through `$lib/features/book/book-actions.ts` — the sidebar book menu, Settings and the command palette all call these; never re-implement the dialogs or session-store updates.
+- **Book actions**: every book switch (open/new/save-as/close, copy path) goes through `$lib/features/book/book-actions.ts` — the sidebar book menu, Settings and the command palette all call these; never re-implement the dialogs or session-store updates. Book-scoped transfers (GnuCash import, CSV wizard link, full-book CSV exports) follow the same rule via `$lib/features/book/import-export-actions.ts`; Settings only holds the CSV format preferences.
 - **Sorting**: table sort state uses `useTableSort<K>(defaults, descFirst)` from `$lib/hooks/`.
 - **URL state**: compose specs from the factories in `use-url-params.svelte.ts` (`pageParam`, `debouncedSearchParam`, `dateParam`, `yearParam`); free-form specs only when no factory fits.
 - **Search inputs**: always debounce through `useDebouncedSearch`.

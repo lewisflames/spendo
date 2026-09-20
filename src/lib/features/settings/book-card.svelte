@@ -71,7 +71,7 @@
 <Card.Root>
   <IconCardHeader
     title="Book"
-    description="Your book is a portable .spendo file. Open, create or close books from the menu at the bottom of the sidebar."
+    description="Your book is a portable .spendo file. Open, create, import into or export from it via the menu at the bottom of the sidebar."
   >
     {#snippet icon()}
       <HardDrive aria-hidden="true" class="size-4 text-muted-foreground" />
