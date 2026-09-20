@@ -2005,10 +2005,6 @@ const handlers: HandlerMap = {
     commoditiesOrphaned: 0,
     orphanAccountNames: ['Local Savings', 'Holiday Fund']
   }),
-  fetch_last_import_source: () => ({
-    path: '/home/demo/Books/demo.gnucash',
-    filename: 'demo.gnucash'
-  }),
   import_gnucash: () => importResult()
 };
 

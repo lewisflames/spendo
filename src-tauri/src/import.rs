@@ -711,13 +711,6 @@ pub struct GnuCashImportInput {
     pub delete_orphans: bool,
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LastImportSource {
-    pub path: String,
-    pub filename: String,
-}
-
 /// Accounts the orphan sweep must keep: canonical roots for categories the
 /// source doesn't cover, accounts carrying budgets (the FK cascade would
 /// destroy budgets, which are outside undo snapshots), and accounts referenced
@@ -1164,19 +1157,6 @@ fn preview_gnucash_inner(
     })
 }
 
-/// The newest GnuCash import (path + filename) for the "Re-import last file"
-/// action; `None` when this book has never had one.
-#[tauri::command]
-pub async fn fetch_last_import_source(
-    state: State<'_, AppState>,
-) -> Result<Option<LastImportSource>, String> {
-    db::run_blocking(state.db.clone(), |conn| {
-        Ok(history::last_import_source(conn)?
-            .map(|(path, filename)| LastImportSource { path, filename }))
-    })
-    .await
-}
-
 #[tauri::command]
 pub async fn import_gnucash(
     state: State<'_, AppState>,
@@ -1334,12 +1314,6 @@ mod tests {
             )
             .unwrap(),
             "Groceries"
-        );
-
-        // The reimport pointer survives the rewrite via detail_json.
-        assert_eq!(
-            history::last_import_source(&dest).unwrap(),
-            Some((src_str.clone(), "book.gnucash".to_string()))
         );
 
         // Identical reimport is a no-op and logs nothing new.

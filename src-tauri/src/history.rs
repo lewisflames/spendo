@@ -558,29 +558,6 @@ fn map_history_error(e: AppError) -> AppError {
     }
 }
 
-// ── Last-import pointer (feeds the re-import flow) ───────────────────────────
-
-/// Newest GnuCash import's `(file_path, filename)` from the uniform
-/// `change_log`. CSV commits also use `kind = 'import'` but their source is
-/// `"csv"` — they must not feed the GnuCash re-run. `None` when this book has
-/// never had a GnuCash import.
-pub(crate) fn last_import_source(conn: &Connection) -> Result<Option<(String, String)>, String> {
-    let row: Option<(Option<String>, Option<String>)> = conn
-        .query_row(
-            "SELECT json_extract(detail_json, '$.filePath'),
-                    json_extract(detail_json, '$.filename')
-             FROM change_log WHERE kind = 'import' AND source = 'import' ORDER BY id DESC LIMIT 1",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .optional()
-        .map_err(|e| e.to_string())?;
-    match row {
-        Some((Some(path), Some(filename))) if !path.is_empty() => Ok(Some((path, filename))),
-        _ => Ok(None),
-    }
-}
-
 // ── Tauri commands ───────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -890,39 +867,5 @@ mod tests {
             .unwrap();
         assert_eq!(name, "Checking");
         assert_eq!(count(&conn, "budgets"), 1);
-    }
-
-    /// Regression: CSV commits share `kind = 'import'`; the re-run button must
-    /// keep pointing at the newest GnuCash import.
-    #[test]
-    fn last_import_source_skips_csv_imports() {
-        let conn = setup();
-        insert_change_entry(
-            &conn,
-            "import",
-            "Imported book.gnucash",
-            "import",
-            0,
-            0,
-            Some(r#"{"filePath":"/tmp/a.gnucash","filename":"book.gnucash"}"#),
-            &[],
-        )
-        .unwrap();
-        insert_change_entry(
-            &conn,
-            "import",
-            "CSV import statement.csv (2 transactions)",
-            "csv",
-            0,
-            0,
-            Some(r#"{"filePath":"/tmp/statement.csv","filename":"statement.csv"}"#),
-            &[],
-        )
-        .unwrap();
-
-        assert_eq!(
-            last_import_source(&conn).unwrap(),
-            Some(("/tmp/a.gnucash".to_string(), "book.gnucash".to_string()))
-        );
     }
 }

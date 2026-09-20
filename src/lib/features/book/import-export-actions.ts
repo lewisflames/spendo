@@ -10,10 +10,8 @@ import { appSettings } from '$lib/stores/settings.svelte';
 import {
   exportAccountsCsv,
   exportTransactionsCsv,
-  fetchLastImportSource,
   importGnucash,
-  previewGnucashImport,
-  type LastImportSource
+  previewGnucashImport
 } from '$lib/tauri';
 import { ensureCsvExtension } from '$lib/utils/book';
 import { todayStr } from '$lib/utils/date-utils.svelte';
@@ -79,23 +77,6 @@ export async function importGnucashViaDialog(): Promise<boolean> {
     toast.error(errMsg(e, 'Import preview failed'));
     return false;
   }
-}
-
-/** Preview the newest GnuCash source (menu's "Re-import last file"). */
-export async function reimportLastGnucash(): Promise<boolean> {
-  if (busy || !dbSession.value) return false;
-  let last: LastImportSource | null;
-  try {
-    last = await fetchLastImportSource();
-  } catch (e: unknown) {
-    toast.error(errMsg(e, 'Could not read the last import'));
-    return false;
-  }
-  if (!last) {
-    toast.warning('No previous GnuCash import in this book');
-    return false;
-  }
-  return previewOrLocate(last.path, last.filename);
 }
 
 /** Preview a specific source (history "Re-run import"). */

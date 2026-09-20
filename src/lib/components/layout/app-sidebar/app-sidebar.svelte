@@ -14,7 +14,6 @@
     Info,
     LogOut,
     Plus,
-    RefreshCw,
     Save,
     Settings,
     SunMoon,
@@ -33,8 +32,7 @@
     exportAccountsCsvViaDialog,
     exportTransactionsCsvViaDialog,
     importGnucashViaDialog,
-    openCsvImport,
-    reimportLastGnucash
+    openCsvImport
   } from '$lib/features/book/import-export-actions';
   import { NAV_GROUPS, navHref, navItemActive } from '$lib/features/nav/nav-items';
   import { activeBookPath, dbSession } from '$lib/stores/db.svelte';
@@ -202,10 +200,6 @@
                 <DropdownMenu.Item onclick={() => openCsvImport()}>
                   <FileSpreadsheet aria-hidden="true" />
                   Bank CSV…
-                </DropdownMenu.Item>
-                <DropdownMenu.Item onclick={() => void reimportLastGnucash()}>
-                  <RefreshCw aria-hidden="true" />
-                  Re-import last file
                 </DropdownMenu.Item>
               </DropdownMenu.SubContent>
             </DropdownMenu.Sub>
