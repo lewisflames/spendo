@@ -328,24 +328,24 @@ fn tx_detail_json(post_date: &str) -> String {
 
 /// Shared transaction-list WHERE builder. `param_offset` reserves leading
 /// placeholder indices already used by the surrounding query. Date window and
-/// search come from `sql::push_tx_date_search`.
+/// search come from `sql::push_tx_date_search`; date bounds are validated so a
+/// malformed value can't silently NULL out the comparison.
 fn build_filter_conditions(
     filters: &Option<Filters>,
     param_offset: usize,
-) -> sql::WhereBuilder {
+) -> Result<sql::WhereBuilder, AppError> {
     let mut w = sql::WhereBuilder::new(param_offset);
     w.push_raw(utils::VISIBLE_TX_FILTER);
 
     if let Some(ref f) = filters {
-        sql::push_tx_date_search(
-            &mut w,
-            f.date_from.as_deref(),
-            f.date_to.as_deref(),
-            f.search.as_deref(),
-        );
+        let from = utils::validate_optional_iso_date(f.date_from.as_deref())
+            .map_err(AppError::Validation)?;
+        let to = utils::validate_optional_iso_date(f.date_to.as_deref())
+            .map_err(AppError::Validation)?;
+        sql::push_tx_date_search(&mut w, from.as_deref(), to.as_deref(), f.search.as_deref());
     }
 
-    w
+    Ok(w)
 }
 
 /// Per-transaction split rows plus the FX-converted transaction total.
@@ -483,7 +483,7 @@ fn fetch_transactions_inner(
     sort_by: Option<&str>,
     sort_dir: Option<&str>,
 ) -> Result<TransactionsResult, String> {
-    let w = build_filter_conditions(&filters, 0);
+    let w = build_filter_conditions(&filters, 0)?;
     let where_clause = w.where_clause();
 
     let count_sql = format!("SELECT COUNT(*) as cnt FROM transactions t{where_clause}");
@@ -602,7 +602,7 @@ fn fetch_transaction_heatmap_inner(
     conn: &Connection,
     filters: Option<Filters>,
 ) -> Result<Vec<HeatmapPoint>, String> {
-    let w = build_filter_conditions(&filters, 0);
+    let w = build_filter_conditions(&filters, 0)?;
     let where_clause = w.where_clause();
 
     let sql = format!(
@@ -1287,6 +1287,38 @@ mod tests {
         assert_eq!(to_value_rational(-42.1).unwrap(), (-421_000, VALUE_DENOM));
         // Near the upper bound, f64 error must not cause false rejections.
         assert!(to_value_rational(999_999_999.9999).is_ok());
+    }
+
+    /// Regression: malformed filter dates used to make `date(?, '+1 day')`
+    /// NULL and silently return zero rows instead of an error.
+    #[test]
+    fn list_rejects_malformed_date_filters() {
+        let conn = setup();
+        let err = fetch_transactions_inner(
+            &conn,
+            1,
+            50,
+            Some(Filters {
+                search: None,
+                date_from: Some("2024-1-5".to_string()),
+                date_to: None,
+            }),
+            None,
+            None,
+        )
+        .unwrap_err();
+        assert!(err.contains("Invalid date"), "unexpected: {err}");
+
+        let err = fetch_transaction_heatmap_inner(
+            &conn,
+            Some(Filters {
+                search: None,
+                date_from: None,
+                date_to: Some("01/02/2024".to_string()),
+            }),
+        )
+        .unwrap_err();
+        assert!(err.contains("Invalid date"), "unexpected: {err}");
     }
 
     #[test]
