@@ -349,6 +349,15 @@ CREATE TABLE IF NOT EXISTS import_rules (
 
 CREATE INDEX IF NOT EXISTS idx_import_rules_priority ON import_rules(priority, id);
 
+-- Target allocation per commodity for the portfolio rebalance calculator.
+-- Book-scoped user config: deliberately outside `DATA_TABLES` (not part of
+-- linear undo) like `import_rules`. A target dies with its commodity through
+-- the FK cascade, e.g. when the GnuCash orphan sweep drops one.
+CREATE TABLE IF NOT EXISTS allocation_targets (
+	commodity_guid TEXT PRIMARY KEY REFERENCES commodities(guid) ON DELETE CASCADE,
+	target_pct REAL NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS app_settings (
 	key TEXT PRIMARY KEY,
 	value TEXT NOT NULL
@@ -448,6 +457,7 @@ pub fn clear_db(conn: &Connection) -> Result<()> {
     let drops = conn.execute_batch(
         "PRAGMA foreign_keys = OFF;
           DROP TABLE IF EXISTS attachments;
+          DROP TABLE IF EXISTS allocation_targets;
           DROP TABLE IF EXISTS budgets;
           DROP TABLE IF EXISTS csv_import_presets;
           DROP TABLE IF EXISTS import_rules;
@@ -565,6 +575,7 @@ mod tests {
         let tables = table_names(&conn);
         for expected in [
             "accounts",
+            "allocation_targets",
             "app_settings",
             "attachments",
             "budgets",
@@ -608,6 +619,14 @@ mod tests {
              VALUES ('a-reset', 't-reset', 'receipt.png', 'image/png', 1, X'00', '2024-01-01T00:00:00Z');",
         )
         .unwrap();
+        // Book-scoped config (allocation targets) must not survive a reset
+        // either, or a later import could resurrect the old GUID and apply a
+        // target the user already cleared.
+        conn.execute(
+            "INSERT INTO allocation_targets (commodity_guid, target_pct) VALUES ('c-eur', 50)",
+            [],
+        )
+        .unwrap();
 
         clear_db(&conn).unwrap();
 
@@ -619,6 +638,10 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM attachments", [], |r| r.get(0))
             .unwrap();
         assert_eq!(attachments, 0);
+        let targets: i64 = conn
+            .query_row("SELECT COUNT(*) FROM allocation_targets", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(targets, 0);
         // Foreign-key enforcement must survive the reset on every path.
         let fk_on: i64 = conn
             .query_row("PRAGMA foreign_keys", [], |r| r.get(0))

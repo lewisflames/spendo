@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { Briefcase, TrendingUp, TrendingDown, RefreshCw } from '@lucide/svelte';
-  import { dbBootstrapping, dbSession } from '$lib/stores/db.svelte';
-  import { fetchPortfolioData } from '$lib/tauri';
+  import { Briefcase, TrendingUp, TrendingDown, RefreshCw, Pencil } from '@lucide/svelte';
+  import { SvelteMap } from 'svelte/reactivity';
+  import { dbBootstrapping, dbSession, activeBookPath } from '$lib/stores/db.svelte';
+  import { fetchPortfolioData, fetchAllocationTargets } from '$lib/tauri';
   import {
     signColor,
     sessionCurrency,
@@ -21,6 +22,7 @@
   import { Button } from '$lib/components/ui/button';
   import PortfolioChart from '$lib/features/portfolio/portfolio-chart.svelte';
   import HoldingsTable from '$lib/features/portfolio/holdings-table.svelte';
+  import RebalanceTargetsDialog from '$lib/features/portfolio/rebalance-targets-dialog.svelte';
   import AllocationPie from '$lib/features/accounts/allocation-pie.svelte';
   import { holdingLabel } from '$lib/features/portfolio/price-utils';
   import { createPriceRefresh } from '$lib/features/portfolio/use-price-refresh.svelte';
@@ -33,6 +35,37 @@
     fetch: fetchPortfolioData,
     label: 'Failed to load portfolio'
   });
+
+  /** Saved allocation targets; the single source of truth for the rebalance columns. */
+  const savedTargets = new SvelteMap<string, number>();
+  let targetsOpen = $state(false);
+
+  const targetsRes = useAsyncData({
+    enabled: () => !!dbSession.value,
+    fetch: () => {
+      // Read the active book path so a book switch refetches targets instead
+      // of showing the previous book's allocation.
+      void activeBookPath.value;
+      return fetchAllocationTargets();
+    },
+    label: 'Failed to load allocation targets',
+    onSuccess: (rows) => {
+      savedTargets.clear();
+      for (const row of rows) savedTargets.set(row.commodityGuid, row.targetPct);
+    }
+  });
+
+  let eligibleHoldings = $derived(
+    (res.data?.holdings ?? []).filter(
+      (h) => h.accounts.length > 0 && h.price !== null && h.price > 0
+    )
+  );
+
+  // Saving targets replaces the whole set, so never open the dialog before
+  // the saved targets are known (a failed load would otherwise wipe them).
+  let canEditTargets = $derived(
+    !res.loading && !targetsRes.loading && !targetsRes.error && eligibleHoldings.length > 0
+  );
 
   let currency = $derived(sessionCurrency());
 
@@ -115,6 +148,17 @@
       {#if dbSession.value}
         <div class="flex items-center gap-2">
           <Button
+            variant="outline"
+            onclick={() => (targetsOpen = true)}
+            disabled={!canEditTargets}
+            title={eligibleHoldings.length === 0
+              ? 'No priced investment holdings to rebalance'
+              : undefined}
+          >
+            <Pencil aria-hidden="true" class="size-3.5" />
+            Edit targets
+          </Button>
+          <Button
             onclick={() => void priceRefresh.refresh()}
             disabled={res.loading || priceRefresh.refreshing}
           >
@@ -128,9 +172,24 @@
       {/if}
     </PageHeader>
 
+    {#if targetsRes.error}
+      <ErrorCard message={targetsRes.error} onRetry={() => targetsRes.reload()} />
+    {/if}
+
+    <RebalanceTargetsDialog
+      bind:open={targetsOpen}
+      holdings={res.data?.holdings ?? []}
+      {currency}
+      targets={savedTargets}
+      onSaved={(next) => {
+        savedTargets.clear();
+        for (const [commodityGuid, targetPct] of next) savedTargets.set(commodityGuid, targetPct);
+      }}
+    />
+
     {#if dbBootstrapping.value || (res.loading && !res.data)}
       <PageSkeleton variant="portfolio" />
-      <HoldingsTable loading {currency} holdings={[]} />
+      <HoldingsTable loading {currency} holdings={[]} targets={savedTargets} />
     {:else if res.data}
       {@const d = res.data}
       {@const guidByMnemonic = new Map(d.holdings.map((h) => [h.mnemonic, h.commodityGuid]))}
@@ -189,7 +248,7 @@
           </div>
         {/if}
 
-        <HoldingsTable holdings={d.holdings} {currency} />
+        <HoldingsTable holdings={d.holdings} {currency} targets={savedTargets} />
       </DimWrapper>
     {:else if res.error}
       <ErrorCard message={res.error} onRetry={() => res.reload()} />

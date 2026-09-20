@@ -17,6 +17,7 @@
   import { useDebouncedSearch } from '$lib/hooks/use-debounced-search.svelte';
   import { useTableSort } from '$lib/hooks/use-table-sort.svelte';
   import { useColumnVisibility } from '$lib/hooks/use-column-visibility.svelte';
+  import { computeRebalance, TRADE_DUST } from './rebalance';
   import {
     formatCurrency,
     formatDate,
@@ -29,7 +30,16 @@
   } from '$lib/utils/format.svelte';
 
   type SortKey =
-    'name' | 'shares' | 'avgCost' | 'price' | 'marketValue' | 'costBasis' | 'gainLoss' | 'alloc';
+    | 'name'
+    | 'shares'
+    | 'avgCost'
+    | 'price'
+    | 'marketValue'
+    | 'costBasis'
+    | 'gainLoss'
+    | 'alloc'
+    | 'target'
+    | 'buy';
 
   type ColumnId = Exclude<SortKey, 'name'>;
 
@@ -40,18 +50,30 @@
     { id: 'marketValue', label: 'Market Value' },
     { id: 'costBasis', label: 'Cost Basis' },
     { id: 'gainLoss', label: 'Gain / Loss' },
-    { id: 'alloc', label: 'Alloc' }
+    { id: 'alloc', label: 'Alloc' },
+    { id: 'target', label: 'Target' },
+    { id: 'buy', label: 'Buy' }
   ];
 
-  const DEFAULT_COLUMNS: ColumnId[] = ['shares', 'price', 'marketValue', 'gainLoss', 'alloc'];
+  const DEFAULT_COLUMNS: ColumnId[] = [
+    'shares',
+    'price',
+    'marketValue',
+    'gainLoss',
+    'alloc',
+    'target',
+    'buy'
+  ];
 
   let {
     holdings = [] as PortfolioHolding[],
     currency,
+    targets,
     loading = false
   }: {
     holdings: PortfolioHolding[];
     currency: string;
+    targets: ReadonlyMap<string, number>;
     loading?: boolean;
   } = $props();
 
@@ -62,7 +84,9 @@
     'marketValue',
     'costBasis',
     'gainLoss',
-    'alloc'
+    'alloc',
+    'target',
+    'buy'
   ]);
   let sortBy = $derived(sort.sortBy);
   let sortDir = $derived(sort.sortDir);
@@ -80,6 +104,9 @@
       (h) => (h.fullName ?? '').toLowerCase().includes(q) || h.mnemonic.toLowerCase().includes(q)
     );
   });
+
+  let result = $derived(computeRebalance(holdings, targets));
+  let rebalanceByGuid = $derived(new Map(result.rows.map((r) => [r.commodityGuid, r])));
 
   let skeletonCols = $derived(visibleColumns.length + 1);
 
@@ -120,9 +147,50 @@
         case 'alloc':
           cmp = a.allocationPct - b.allocationPct;
           break;
+        case 'target': {
+          const ra = rebalanceByGuid.get(a.commodityGuid)?.targetPct ?? null;
+          const rb = rebalanceByGuid.get(b.commodityGuid)?.targetPct ?? null;
+          cmp = nullCmp(ra, rb) || (ra ?? 0) - (rb ?? 0);
+          break;
+        }
+        case 'buy': {
+          const ra = rebalanceByGuid.get(a.commodityGuid)?.buyAmount ?? null;
+          const rb = rebalanceByGuid.get(b.commodityGuid)?.buyAmount ?? null;
+          cmp = nullCmp(ra, rb) || (ra ?? 0) - (rb ?? 0);
+          break;
+        }
       }
       return cmp * dir;
     });
+  });
+
+  let totals = $derived.by(() => {
+    let marketValue = 0;
+    let costBasis = 0;
+    let gainLoss = 0;
+    let alloc = 0;
+    let targetPct = 0;
+    let buyAmount = 0;
+    for (const h of filteredHoldings) {
+      marketValue += h.marketValue;
+      costBasis += h.costBasis;
+      gainLoss += h.gainLoss;
+      alloc += h.allocationPct;
+      const row = rebalanceByGuid.get(h.commodityGuid);
+      if (row) {
+        targetPct += row.targetPct;
+        buyAmount += row.buyAmount;
+      }
+    }
+    return {
+      marketValue,
+      costBasis,
+      gainLoss,
+      gainLossPct: costBasis > 0 ? (gainLoss / costBasis) * 100 : null,
+      alloc,
+      targetPct,
+      buyAmount
+    };
   });
 
   function fmt(n: number): string {
@@ -188,6 +256,7 @@
           {#each sortedHoldings as h (h.commodityGuid)}
             {@const isClosed = h.shares === 0 && h.accounts.length > 0}
             {@const isWatchOnly = h.shares === 0 && h.accounts.length === 0}
+            {@const rebalance = rebalanceByGuid.get(h.commodityGuid)}
             <NavRow
               onNavigate={() => openHolding(h.commodityGuid)}
               class={isClosed || isWatchOnly ? 'text-muted-foreground' : ''}
@@ -261,10 +330,60 @@
                   {formatAllocPct(h.allocationPct)}
                 </Table.Cell>
               {/if}
+              {#if cols.isVisible('target')}
+                <Table.Cell class="py-2.5 text-right tabular-nums">
+                  {rebalance && rebalance.targetPct > 0
+                    ? formatAllocPct(rebalance.targetPct)
+                    : EMPTY_DASH}
+                </Table.Cell>
+              {/if}
+              {#if cols.isVisible('buy')}
+                <Table.Cell class="py-2.5 text-right tabular-nums">
+                  {#if rebalance && rebalance.buyAmount >= TRADE_DUST}
+                    <span class="font-medium">{fmt(rebalance.buyAmount)}</span>
+                    {#if rebalance.buyShares !== null}
+                      <span class="block text-xs text-muted-foreground"
+                        >≈ {formatShares(rebalance.buyShares)} shares</span
+                      >
+                    {/if}
+                  {:else}
+                    <span class="text-muted-foreground">{EMPTY_DASH}</span>
+                  {/if}
+                </Table.Cell>
+              {/if}
             </NavRow>
           {/each}
         {/if}
       </Table.Body>
+      <Table.Footer>
+        <Table.Row class="border-t bg-muted/50 hover:bg-muted/50">
+          <Table.Cell class="px-4 py-2.5 text-muted-foreground">Total</Table.Cell>
+          {#each COLUMNS as col (col.id)}
+            {#if cols.isVisible(col.id)}
+              <Table.Cell class="px-4 py-2.5 text-right font-medium tabular-nums">
+                {#if col.id === 'marketValue'}
+                  {fmt(totals.marketValue)}
+                {:else if col.id === 'costBasis'}
+                  {fmt(totals.costBasis)}
+                {:else if col.id === 'gainLoss'}
+                  <span class={signColor(totals.gainLoss)}>
+                    {formatSignedCurrency(totals.gainLoss, currency)}
+                    {#if totals.gainLossPct !== null}
+                      <span class="text-xs">({fmtPct(totals.gainLossPct)})</span>
+                    {/if}
+                  </span>
+                {:else if col.id === 'alloc'}
+                  {formatAllocPct(totals.alloc)}
+                {:else if col.id === 'target'}
+                  {totals.targetPct > 0 ? formatAllocPct(totals.targetPct) : EMPTY_DASH}
+                {:else if col.id === 'buy'}
+                  {totals.targetPct > 0 ? fmt(totals.buyAmount) : EMPTY_DASH}
+                {/if}
+              </Table.Cell>
+            {/if}
+          {/each}
+        </Table.Row>
+      </Table.Footer>
     </TableShell>
   </div>
 {/if}
