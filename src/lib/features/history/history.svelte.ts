@@ -40,7 +40,11 @@ function patch(partial: Partial<HistoryState>) {
 
 let requestSeq = 0;
 
-/** Fetch the full log; stale responses from earlier requests are dropped. */
+/**
+ * Fetch the full log; stale responses from earlier requests are dropped.
+ * State is invalidated up front, so undo/redo IDs from the previous book can
+ * never be used while a refresh is in flight.
+ */
 export async function refreshChangeHistory(): Promise<void> {
   if (!dbSession.value) {
     requestSeq++;
@@ -48,7 +52,7 @@ export async function refreshChangeHistory(): Promise<void> {
     return;
   }
   const seq = ++requestSeq;
-  patch({ loading: true, error: null });
+  patch({ entries: [], undoableId: null, redoableId: null, loading: true, error: null });
   try {
     const data = await fetchChangeHistory();
     if (seq !== requestSeq) return;
@@ -60,7 +64,12 @@ export async function refreshChangeHistory(): Promise<void> {
     });
   } catch (e: unknown) {
     if (seq !== requestSeq) return;
-    patch({ loading: false, error: errMsg(e, 'Failed to load changes history') });
+    patch({
+      undoableId: null,
+      redoableId: null,
+      loading: false,
+      error: errMsg(e, 'Failed to load changes history')
+    });
   }
 }
 
