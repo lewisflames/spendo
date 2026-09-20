@@ -190,8 +190,10 @@ fn filter_clauses(
 }
 
 /// Income/expense totals across transactions in the subtree as of `as_of`
-/// that match `search`. Positive/negative signed effects bucketed per
-/// transaction after conversion to the report currency.
+/// that match `search`. Effects are converted to the report currency and
+/// bucketed by the split account's category: EXPENSE is debit-normal, so
+/// spending (a positive signed effect) counts as an expense there, while
+/// balance-sheet/income accounts keep the sign heuristic (inflow = income).
 fn compute_summary(
     conn: &Connection,
     ctx: &FxCtx,
@@ -215,7 +217,7 @@ fn compute_summary(
     let sum_extra_sql = w.and_clause("AND");
 
     let summary_sql = format!(
-        "SELECT t.guid, c.mnemonic, SUM({}) as effect
+        "SELECT t.guid, c.mnemonic, a.account_type, SUM({}) as effect
          FROM transactions t
          JOIN splits s ON s.tx_guid = t.guid
          JOIN accounts a ON a.guid = s.account_guid
@@ -223,7 +225,7 @@ fn compute_summary(
          WHERE s.account_guid IN ({})
          AND {}
          {}
-         GROUP BY t.guid, c.mnemonic",
+         GROUP BY t.guid, c.mnemonic, a.account_type",
         utils::signed_amount_expr(utils::RAW_AMOUNT, "a.account_type"),
         in_list,
         utils::VISIBLE_TX_FILTER,
@@ -237,9 +239,9 @@ fn compute_summary(
         .chain(w.params.iter().map(|p| p.as_ref()))
         .collect();
 
-    let summary_rows: Vec<(String, String, f64)> = summary_stmt
+    let summary_rows: Vec<(String, String, String, f64)> = summary_stmt
         .query_map(summary_params.as_slice(), |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
         })
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
@@ -249,12 +251,19 @@ fn compute_summary(
     let mut pos_effect = 0.0;
     let mut neg_effect = 0.0;
     let mut seen: HashSet<String> = HashSet::new();
-    for (tx_guid, mnemonic, effect) in &summary_rows {
+    for (tx_guid, mnemonic, account_type, effect) in &summary_rows {
         if seen.insert(tx_guid.clone()) {
             total_txns += 1;
         }
         let converted = fx::convert(*effect, mnemonic, &ctx.report_currency, &ctx.fx_map);
-        if converted > 0.0 {
+        if utils::category_for_type(account_type) == "EXPENSE" {
+            // Debit-normal: a spend increases the expense, a refund reverses it.
+            if converted >= 0.0 {
+                neg_effect += converted;
+            } else {
+                pos_effect += -converted;
+            }
+        } else if converted >= 0.0 {
             pos_effect += converted;
         } else {
             neg_effect += -converted;
@@ -1036,6 +1045,41 @@ mod tests {
             params![format!("s-{tag}"), tag, account, value_num],
         )
         .unwrap();
+    }
+
+    /// Regression: EXPENSE is debit-normal, so a spend's signed effect is
+    /// positive — it must count as an expense, not as income.
+    #[test]
+    fn expense_accounts_bucket_spending_as_expenses() {
+        let conn = setup();
+        conn.execute(
+            "INSERT INTO accounts (guid, name, account_type, parent_guid, placeholder, commodity_guid)
+             VALUES ('groceries', 'Groceries', 'EXPENSE', 'root', 0, 'c-eur')",
+            [],
+        )
+        .unwrap();
+        add_split(&conn, "e1", "2024-03-01", "groceries", 4_210);
+        add_split(&conn, "e2", "2024-03-02", "groceries", -500);
+
+        let result = fetch_account_detail_inner(
+            &conn,
+            "groceries",
+            TxQuery {
+                page: 1,
+                page_size: 50,
+                date_from: None,
+                date_to: None,
+                search: None,
+                sort_by: None,
+                sort_dir: None,
+                as_of: None,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(result.summary.total_transactions, 2);
+        assert!((result.summary.total_expenses - 42.10).abs() < 1e-9);
+        assert!((result.summary.total_income - 5.0).abs() < 1e-9);
     }
 
     #[test]
