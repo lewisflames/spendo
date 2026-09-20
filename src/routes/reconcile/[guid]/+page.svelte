@@ -6,7 +6,7 @@
   import { ArrowLeft, CalendarDays, CircleCheck } from '@lucide/svelte';
   import { toast } from '$lib/components/ui/sonner';
   import { Button } from '$lib/components/ui/button';
-  import { dbSession } from '$lib/stores/db.svelte';
+  import { dbSession, refreshSession } from '$lib/stores/db.svelte';
   import { setBreadcrumb } from '$lib/stores/breadcrumb.svelte';
   import {
     fetchReconcileInfo,
@@ -179,6 +179,9 @@
     saving = true;
     try {
       await markReconcileSplits(g, updates);
+      // Saving progress logs a change without moving the summary counters;
+      // refresh the session so the history panel (and Ctrl+Z head) updates.
+      refreshSession();
       toast.success('Progress saved');
       res.reload();
     } catch (e) {

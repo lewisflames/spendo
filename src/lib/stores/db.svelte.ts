@@ -75,6 +75,16 @@ export function clearSession() {
   // The (empty) book stays open — welcome offers New/Open from here.
 }
 
+/**
+ * Fire-and-forget session refresh after a logged mutation that returns no
+ * summary (account edits, reconcile saves). The refreshed `historyRevision`
+ * makes the layout effect reload the changes-history panel; a failure is
+ * ignored because the next navigation retries.
+ */
+export function refreshSession() {
+  void ensureDbSessionLoaded(true).catch(() => {});
+}
+
 /** Refresh `activeBookPath` from the backend. Failures keep the previous
  * value; pages that need the path surface their own errors. */
 export async function loadActiveBook(): Promise<void> {

@@ -15,9 +15,11 @@ import {
   LogOut,
   PanelLeft,
   Plus,
+  Redo2,
   Save,
   Settings,
   SunMoon,
+  Undo2,
   Upload
 } from '@lucide/svelte';
 import { NAV_GROUPS, navHref } from '$lib/features/nav/nav-items';
@@ -38,6 +40,11 @@ import {
   openCsvImport
 } from '$lib/features/book/import-export-actions';
 import { goBack, goForward } from '$lib/stores/nav-history.svelte';
+import {
+  changeHistory,
+  redoLatestChange,
+  undoLatestChange
+} from '$lib/features/history/history.svelte';
 
 type PaletteGroup = 'Go to' | 'Actions';
 
@@ -125,6 +132,24 @@ export const PALETTE_COMMANDS: PaletteCommand[] = [
     run: () => {
       saveSettings({ sidebarCollapsed: !appSettings.value.sidebarCollapsed });
     }
+  },
+  {
+    id: 'undo-last-change',
+    title: 'Undo last change',
+    group: 'Actions',
+    icon: Undo2,
+    keywords: ['undo', 'revert', 'history', 'change'],
+    when: () => changeHistory.value.undoableId !== null,
+    run: () => void undoLatestChange()
+  },
+  {
+    id: 'redo-last-change',
+    title: 'Redo last change',
+    group: 'Actions',
+    icon: Redo2,
+    keywords: ['redo', 'history', 'change'],
+    when: () => changeHistory.value.redoableId !== null,
+    run: () => void redoLatestChange()
   },
   {
     id: 'toggle-history',

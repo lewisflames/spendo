@@ -11,6 +11,9 @@
  */
 import type {
   AccountNode,
+  ChangeEntryDetail,
+  ChangeKind,
+  ChangeSource,
   CsvPreset,
   DataSummary,
   Schedule,
@@ -60,9 +63,9 @@ interface Snapshot {
 interface HistoryRecord {
   id: number;
   occurredAt: string;
-  kind: string;
+  kind: ChangeKind;
   label: string;
-  source: string;
+  source: ChangeSource;
   transactionsAffected: number;
   accountsAffected: number;
   /** State before this change, restored by undo. */
@@ -293,7 +296,8 @@ function dataSummary(): DataSummary {
     totalTransactions: txs.length,
     earliestDate: dates[0] ?? null,
     latestDate: dates.at(-1) ?? null,
-    netWorth: nodeBalance('assets') - nodeBalance('liabilities')
+    netWorth: nodeBalance('assets') - nodeBalance('liabilities'),
+    historyRevision: state.nextHistoryId - 1
   };
 }
 
@@ -313,9 +317,9 @@ function snapshot(): Snapshot {
 }
 
 function recordHistory(
-  kind: string,
+  kind: ChangeKind,
   label: string,
-  source: string,
+  source: ChangeSource,
   impact: { transactionsAffected?: number; accountsAffected?: number } = {},
   before: Snapshot = snapshot()
 ): void {
@@ -698,7 +702,7 @@ function createTransaction(input: TxInputLike): string {
       };
     })
   });
-  recordHistory('manual', `Created "${input.description?.trim() || 'transaction'}"`, 'manual', {
+  recordHistory('tx_create', `Created "${input.description?.trim() || 'transaction'}"`, 'manual', {
     transactionsAffected: 1
   });
   return guid;
@@ -722,7 +726,7 @@ function updateTransaction(args: Record<string, unknown>): void {
       quantity: split.quantity ?? null
     };
   });
-  recordHistory('manual', `Updated "${tx.description || 'transaction'}"`, 'manual', {
+  recordHistory('tx_update', `Updated "${tx.description || 'transaction'}"`, 'manual', {
     transactionsAffected: 1
   });
 }
@@ -732,7 +736,7 @@ function deleteTransaction(guid: string): void {
   if (index === -1) throw new Error(`[mock] Unknown transaction ${guid}`);
   const [removed] = state.transactions.splice(index, 1);
   state.attachments = state.attachments.filter((a) => a.txGuid !== guid);
-  recordHistory('manual', `Deleted "${removed.description || 'transaction'}"`, 'manual', {
+  recordHistory('tx_delete', `Deleted "${removed.description || 'transaction'}"`, 'manual', {
     transactionsAffected: 1
   });
 }
@@ -1372,7 +1376,9 @@ const handlers: HandlerMap = {
       commodity: commodity?.mnemonic ?? null,
       commodityGuid: commodity?.guid ?? null
     });
-    recordHistory('manual', `Created account "${input.name}"`, 'manual', { accountsAffected: 1 });
+    recordHistory('account_create', `Created account "${input.name}"`, 'manual', {
+      accountsAffected: 1
+    });
     return guid;
   },
   update_account: (args) => {
@@ -1391,7 +1397,9 @@ const handlers: HandlerMap = {
       commodity: commodity?.mnemonic ?? null,
       commodityGuid: commodity?.guid ?? null
     });
-    recordHistory('manual', `Updated account "${input.name}"`, 'manual', { accountsAffected: 1 });
+    recordHistory('account_update', `Updated account "${input.name}"`, 'manual', {
+      accountsAffected: 1
+    });
   },
   delete_account: (args) => {
     const guid = String(args.guid);
@@ -1402,7 +1410,7 @@ const handlers: HandlerMap = {
     state.transactions = state.transactions.filter(
       (tx) => !tx.splits.some((s) => removed.has(s.accountGuid))
     );
-    recordHistory('manual', `Deleted account "${acc.name}"`, 'manual', {
+    recordHistory('account_delete', `Deleted account "${acc.name}"`, 'manual', {
       accountsAffected: removed.size
     });
   },
@@ -1416,8 +1424,15 @@ const handlers: HandlerMap = {
   delete_transaction: (args) => deleteTransaction(String(args.guid)),
 
   // History
-  fetch_change_history: () => {
-    const entries = [...state.history].reverse().map((entry) => ({
+  fetch_change_history: (args) => {
+    const pageSize = Math.max(1, Math.min(500, Number(args.pageSize) || 100));
+    const beforeId =
+      args.beforeId === null || args.beforeId === undefined ? null : Number(args.beforeId);
+    const all = [...state.history].reverse();
+    const start = beforeId === null ? 0 : all.findIndex((e) => e.id < beforeId);
+    const page = start === -1 ? [] : all.slice(start, start + pageSize + 1);
+    const hasMore = page.length > pageSize;
+    const entries = page.slice(0, pageSize).map((entry) => ({
       id: entry.id,
       occurredAt: entry.occurredAt,
       kind: entry.kind,
@@ -1435,7 +1450,18 @@ const handlers: HandlerMap = {
       [...state.history]
         .reverse()
         .find((e) => e.revertedBy !== null && state.redoSnapshots.has(e.id))?.id ?? null;
-    return { entries, undoableId: undoable, redoableId: redoable };
+    return { entries, undoableId: undoable, redoableId: redoable, hasMore, total: all.length };
+  },
+  fetch_change_entry: (args): ChangeEntryDetail => {
+    const entryId = Number(args.id);
+    const entry = state.history.find((e) => e.id === entryId);
+    if (!entry) throw new Error(`[mock] Unknown history entry ${entryId}`);
+    return { detail: null, tables: [] };
+  },
+  clear_change_history: () => {
+    state.history = [];
+    state.redoSnapshots.clear();
+    return dataSummary();
   },
   undo_history_entry: (args) => {
     const entryId = Number(args.id);

@@ -4,6 +4,7 @@ use tauri::State;
 
 use crate::db::{run_blocking, validate_data_table, with_tx_err, AppError, AppState};
 use crate::home::{get_summary, DataSummary};
+use crate::sql;
 use crate::utils;
 
 // ── Wire structs ─────────────────────────────────────────────────────────────
@@ -36,7 +37,36 @@ pub struct ChangeHistory {
     /// Most recently undone change still eligible for redo (LIFO). `None` once
     /// a newer change invalidates the redo stack or everything is redone.
     pub redoable_id: Option<i64>,
+    /// True when older entries exist beyond this page; pass the last entry's
+    /// id as `beforeId` to fetch them.
+    pub has_more: bool,
+    /// Total entries in the log (all pages).
+    pub total: i64,
 }
+
+/// One table's share of the rows a change touched. `changed` = the row still
+/// exists (restore overwrites it), `removed` = it is gone (restore re-inserts).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangeEntryTable {
+    pub table_name: String,
+    pub added: i64,
+    pub changed: i64,
+    pub removed: i64,
+}
+
+/// Detail for one change: parsed `detail_json` plus the per-table impact
+/// breakdown. Never includes raw `before_json` (payload size).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangeEntryDetail {
+    pub detail: Option<serde_json::Value>,
+    pub tables: Vec<ChangeEntryTable>,
+}
+
+/// Default page size for the history panel; the UI appends older pages on
+/// demand so a long-lived book never ships its whole log over IPC.
+const DEFAULT_HISTORY_PAGE: i64 = 100;
 
 // ── Snapshots ────────────────────────────────────────────────────────────────
 
@@ -379,7 +409,12 @@ fn insert_snapshot_rows(
 
 // ── Fetch ────────────────────────────────────────────────────────────────────
 
-fn list_change_entries(conn: &Connection) -> Result<Vec<ChangeEntry>, String> {
+fn list_change_entries(
+    conn: &Connection,
+    before_id: Option<i64>,
+    page_size: i64,
+) -> Result<(Vec<ChangeEntry>, bool), String> {
+    let page_size = utils::clamp_page_size(page_size);
     let mut stmt = conn
         .prepare(
             "SELECT id, occurred_at, kind, label, source,
@@ -388,11 +423,13 @@ fn list_change_entries(conn: &Connection) -> Result<Vec<ChangeEntry>, String> {
                          THEN json_extract(detail_json, '$.filePath') END,
                     CASE WHEN kind = 'import' AND source = 'import'
                          THEN json_extract(detail_json, '$.filename') END
-             FROM change_log ORDER BY id DESC",
+             FROM change_log
+             WHERE (?1 IS NULL OR id < ?1)
+             ORDER BY id DESC LIMIT ?2",
         )
         .map_err(|e| e.to_string())?;
     let mapped = stmt
-        .query_map([], |row| {
+        .query_map(params![before_id, page_size + 1], |row| {
             Ok(ChangeEntry {
                 id: row.get(0)?,
                 occurred_at: row.get(1)?,
@@ -408,9 +445,15 @@ fn list_change_entries(conn: &Connection) -> Result<Vec<ChangeEntry>, String> {
             })
         })
         .map_err(|e| e.to_string())?;
-    mapped
+    let mut entries = mapped
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    // One extra row proves older entries exist; it is not part of the page.
+    let has_more = entries.len() as i64 > page_size;
+    if has_more {
+        entries.truncate(page_size as usize);
+    }
+    Ok((entries, has_more))
 }
 
 /// Newest change eligible for undo (still active and the head of the log).
@@ -452,20 +495,209 @@ fn redoable_entry_id(conn: &Connection) -> Result<Option<i64>, String> {
     .map_err(|e| e.to_string())
 }
 
-/// Full change log, newest first.
-pub(crate) fn fetch_change_history_inner(conn: &Connection) -> Result<ChangeHistory, String> {
+/// One page of the change log, newest first, plus the global undo/redo heads.
+pub(crate) fn fetch_change_history_page_inner(
+    conn: &Connection,
+    before_id: Option<i64>,
+    page_size: Option<i64>,
+) -> Result<ChangeHistory, String> {
+    let page_size = utils::clamp_page_size(page_size.unwrap_or(DEFAULT_HISTORY_PAGE));
+    let (entries, has_more) = list_change_entries(conn, before_id, page_size)?;
+    let total: i64 = conn
+        .query_row("SELECT COUNT(*) FROM change_log", [], |row| row.get(0))
+        .map_err(|e| e.to_string())?;
     Ok(ChangeHistory {
-        entries: list_change_entries(conn)?,
+        entries,
         undoable_id: undoable_entry_id(conn)?,
         redoable_id: redoable_entry_id(conn)?,
+        has_more,
+        total,
     })
+}
+
+/// First page of the change log, newest first. Kept for callers that don't
+/// paginate (import/csv tests, one-shot reads).
+pub(crate) fn fetch_change_history_inner(conn: &Connection) -> Result<ChangeHistory, String> {
+    fetch_change_history_page_inner(conn, None, None)
+}
+
+/// Parsed `detail_json` plus the per-table impact of one change.
+fn fetch_change_entry_detail_inner(
+    conn: &Connection,
+    id: i64,
+) -> Result<ChangeEntryDetail, AppError> {
+    let detail_json: Option<String> = conn
+        .query_row(
+            "SELECT detail_json FROM change_log WHERE id = ?1",
+            [id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .ok_or_else(|| {
+            AppError::NotFound("Change not found — it may have been cleared".to_string())
+        })?;
+    let detail = match detail_json {
+        Some(text) => Some(
+            serde_json::from_str(&text)
+                .map_err(|e| AppError::from(format!("Corrupt history detail: {e}")))?,
+        ),
+        None => None,
+    };
+
+    let mut tables = Vec::new();
+    for table in crate::db::DATA_TABLES {
+        validate_data_table(table)?;
+        let added: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM change_snapshots
+             WHERE entry_id = ?1 AND table_name = ?2 AND before_json IS NULL",
+            params![id, table],
+            |row| row.get(0),
+        )?;
+        let befores: Vec<String> = {
+            let mut stmt = conn.prepare(
+                "SELECT row_guid FROM change_snapshots
+                 WHERE entry_id = ?1 AND table_name = ?2 AND before_json IS NOT NULL",
+            )?;
+            let mapped = stmt.query_map(params![id, table], |row| row.get(0))?;
+            mapped.collect::<Result<Vec<String>, _>>()?
+        };
+        if added == 0 && befores.is_empty() {
+            continue;
+        }
+        // Rows with a before-image still in the live table were changed;
+        // missing ones were removed by the change.
+        let changed = count_referencing(conn, table, "guid", &befores)?;
+        tables.push(ChangeEntryTable {
+            table_name: table.to_string(),
+            added,
+            changed,
+            removed: befores.len() as i64 - changed,
+        });
+    }
+    Ok(ChangeEntryDetail { detail, tables })
+}
+
+/// Drop the whole log and its snapshots, then compact the book file. The book
+/// data is untouched; undo/redo stop working until new changes are recorded.
+pub(crate) fn clear_change_history_inner(conn: &Connection) -> Result<(), AppError> {
+    with_tx_err(conn, || -> Result<(), AppError> {
+        conn.execute("DELETE FROM change_snapshots", [])?;
+        conn.execute("DELETE FROM change_log", [])?;
+        Ok(())
+    })?;
+    // VACUUM cannot run inside a transaction; reclaim the freed pages so the
+    // `.spendo` file actually shrinks.
+    crate::db::checkpoint(conn);
+    conn.execute_batch("VACUUM;").map_err(AppError::from)
 }
 
 // ── Undo / redo (linear history toggle) ──────────────────────────────────────
 
+/// GUIDs an entry would delete: rows recorded as absent before the change
+/// (`before_json IS NULL`) and therefore removed when it is restored.
+fn deleted_row_guids(
+    conn: &Connection,
+    entry_id: i64,
+    table: &str,
+) -> Result<Vec<String>, AppError> {
+    validate_data_table(table)?;
+    let mut stmt = conn.prepare(
+        "SELECT row_guid FROM change_snapshots
+         WHERE entry_id = ?1 AND table_name = ?2 AND before_json IS NULL",
+    )?;
+    let guids = stmt
+        .query_map(params![entry_id, table], |row| row.get(0))?
+        .collect::<Result<Vec<String>, _>>()?;
+    Ok(guids)
+}
+
+/// Count rows in `table`.`column` referencing any of `guids`, chunked to stay
+/// under SQLite's bound-parameter cap. `table`/`column` come from call-site
+/// literals only — never user input.
+fn count_referencing(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    guids: &[String],
+) -> Result<i64, AppError> {
+    let mut total = 0;
+    for chunk in guids.chunks(sql::MAX_IN_PARAMS) {
+        let text = format!(
+            "SELECT COUNT(*) FROM {table} WHERE {column} IN ({})",
+            sql::in_clause(chunk.len())
+        );
+        let mut stmt = conn.prepare(&text)?;
+        total += stmt.query_row(sql::string_param_refs(chunk).as_slice(), |row| {
+            row.get::<_, i64>(0)
+        })?;
+    }
+    Ok(total)
+}
+
+/// Schedules store their split accounts inside `template_json` (no FK), so a
+/// deleted account would leave a schedule that fails at posting time. Rows the
+/// same restore deletes are not survivors.
+fn count_schedules_referencing(
+    conn: &Connection,
+    account_guids: &[String],
+    deleted_schedule_guids: &[String],
+) -> Result<i64, AppError> {
+    let mut stmt = conn
+        .prepare("SELECT guid FROM recurring_schedules WHERE instr(template_json, ?1) > 0")?;
+    let mut surviving: Vec<String> = Vec::new();
+    for guid in account_guids {
+        let rows = stmt.query_map([guid], |row| row.get::<_, String>(0))?;
+        for row in rows {
+            let schedule_guid = row?;
+            if !deleted_schedule_guids.contains(&schedule_guid)
+                && !surviving.contains(&schedule_guid)
+            {
+                surviving.push(schedule_guid);
+            }
+        }
+    }
+    Ok(surviving.len() as i64)
+}
+
+/// Undo/redo deletes rows a change added. FK cascades would silently destroy
+/// data the log does not own (receipts, budgets, import rules), so refuse
+/// instead of deleting something that cannot be restored.
+fn guard_restore_deletes(conn: &Connection, entry_id: i64) -> Result<(), AppError> {
+    let tx_guids = deleted_row_guids(conn, entry_id, "transactions")?;
+    if !tx_guids.is_empty() {
+        let receipts = count_referencing(conn, "attachments", "tx_guid", &tx_guids)?;
+        if receipts > 0 {
+            return Err(AppError::Validation(if receipts == 1 {
+                "1 receipt is attached to a transaction this change added — remove it first"
+                    .to_string()
+            } else {
+                format!(
+                    "{receipts} receipts are attached to transactions this change added — remove them first"
+                )
+            }));
+        }
+    }
+    let account_guids = deleted_row_guids(conn, entry_id, "accounts")?;
+    if !account_guids.is_empty() {
+        let budgets = count_referencing(conn, "budgets", "account_guid", &account_guids)?;
+        let rules = count_referencing(conn, "import_rules", "account_guid", &account_guids)?;
+        let schedule_guids = deleted_row_guids(conn, entry_id, "recurring_schedules")?;
+        let schedules =
+            count_schedules_referencing(conn, &account_guids, &schedule_guids)?;
+        if budgets + rules + schedules > 0 {
+            return Err(AppError::Validation(
+                "Budgets, import rules or schedules depend on accounts this change added — remove them first"
+                    .to_string(),
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Apply an entry's snapshots: delete rows it added (children first), then
 /// restore rows it changed or removed (parents first so references resolve).
-fn restore_entry_snapshots(conn: &Connection, entry_id: i64) -> Result<(), String> {
+fn restore_entry_snapshots(conn: &Connection, entry_id: i64) -> Result<(), AppError> {
+    guard_restore_deletes(conn, entry_id)?;
     for table in ["splits", "transactions", "accounts", "commodities", "recurring_schedules"] {
         validate_data_table(table)?;
         let sql = format!(
@@ -622,8 +854,35 @@ fn map_history_error(e: AppError) -> AppError {
 // ── Tauri commands ───────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub async fn fetch_change_history(state: State<'_, AppState>) -> Result<ChangeHistory, String> {
-    run_blocking(state.db.clone(), move |conn| fetch_change_history_inner(conn)).await
+pub async fn fetch_change_history(
+    state: State<'_, AppState>,
+    before_id: Option<i64>,
+    page_size: Option<i64>,
+) -> Result<ChangeHistory, String> {
+    run_blocking(state.db.clone(), move |conn| {
+        fetch_change_history_page_inner(conn, before_id, page_size)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn fetch_change_entry(
+    state: State<'_, AppState>,
+    id: i64,
+) -> Result<ChangeEntryDetail, String> {
+    run_blocking(state.db.clone(), move |conn| {
+        fetch_change_entry_detail_inner(conn, id).map_err(String::from)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn clear_change_history(state: State<'_, AppState>) -> Result<DataSummary, String> {
+    run_blocking(state.db.clone(), move |conn| {
+        clear_change_history_inner(conn)?;
+        get_summary(conn)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -928,5 +1187,267 @@ mod tests {
             .unwrap();
         assert_eq!(name, "Checking");
         assert_eq!(count(&conn, "budgets"), 1);
+    }
+
+    /// Attachments live outside the snapshots and cascade on transaction
+    /// delete: undoing the create would destroy the receipt bytes forever.
+    #[test]
+    fn undo_blocks_when_attachment_depends_on_added_tx() {
+        let conn = setup();
+        let id = log_snapshots(&conn, &[("transactions", "t1"), ("splits", "s-t1")]);
+        seed_tx(&conn, "t1", "2024-01-10", "Groceries", 5_000);
+        conn.execute(
+            "INSERT INTO attachments (guid, tx_guid, filename, mime_type, byte_size, data, created_at)
+             VALUES ('a1', 't1', 'receipt.png', 'image/png', 1, X'00', '2024-01-10T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+
+        let err = undo_history_entry_inner(&conn, id).unwrap_err();
+        assert!(err.to_string().contains("receipt"), "unexpected: {err:?}");
+        // Nothing was deleted: the transaction and its receipt survive.
+        assert_eq!(count(&conn, "transactions"), 1);
+        assert_eq!(count(&conn, "attachments"), 1);
+        assert_eq!(count(&conn, "splits"), 1);
+    }
+
+    /// Same guard on the redo path: an attachment added after the undo would be
+    /// cascaded away when redo deletes the restored transaction.
+    #[test]
+    fn redo_blocks_when_attachment_was_added_after_undo() {
+        let conn = setup();
+        seed_tx(&conn, "t1", "2024-01-10", "Groceries", 5_000);
+        let id = log_snapshots(&conn, &[("transactions", "t1"), ("splits", "s-t1")]);
+        conn.execute("DELETE FROM splits WHERE guid = 's-t1'", [])
+            .unwrap();
+        conn.execute("DELETE FROM transactions WHERE guid = 't1'", [])
+            .unwrap();
+
+        undo_history_entry_inner(&conn, id).unwrap();
+        conn.execute(
+            "INSERT INTO attachments (guid, tx_guid, filename, mime_type, byte_size, data, created_at)
+             VALUES ('a1', 't1', 'receipt.png', 'image/png', 1, X'00', '2024-01-10T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+
+        let err = redo_history_entry_inner(&conn, id).unwrap_err();
+        assert!(err.to_string().contains("receipt"), "unexpected: {err:?}");
+        assert_eq!(count(&conn, "transactions"), 1);
+        assert_eq!(count(&conn, "attachments"), 1);
+    }
+
+    /// Budgets, import rules and schedule templates are outside the snapshots,
+    /// so deleting an added account would drop them (cascade or dangling refs).
+    #[test]
+    fn undo_blocks_when_unlogged_config_depends_on_added_account() {
+        let conn = setup();
+        let id = log_snapshots(&conn, &[("accounts", "new-acct")]);
+        conn.execute(
+            "INSERT INTO accounts (guid, name, account_type, parent_guid, placeholder, commodity_guid)
+             VALUES ('new-acct', 'New', 'BANK', 'root', 0, 'c-eur')",
+            [],
+        )
+        .unwrap();
+
+        // No dependents yet: undo goes through.
+        undo_history_entry_inner(&conn, id).unwrap();
+        assert_eq!(count(&conn, "accounts"), 2);
+        redo_history_entry_inner(&conn, id).unwrap();
+
+        for (setup_sql, expected) in [
+            (
+                "INSERT INTO budgets (guid, account_guid, year, amount, created_at)
+                 VALUES ('b1', 'new-acct', 2024, 250.0, '2024-01-01T00:00:00Z')",
+                "budget",
+            ),
+            (
+                "INSERT INTO import_rules (priority, match_type, pattern, account_guid, created_at)
+                 VALUES (1, 'contains', 'shop', 'new-acct', '2024-01-01T00:00:00Z')",
+                "rule",
+            ),
+            (
+                "INSERT INTO recurring_schedules
+                 (guid, name, frequency, start_date, template_json, created_at)
+                 VALUES ('sch1', 'Rent', 'monthly', '2024-01-01',
+                         '{\"splits\":[{\"account_guid\":\"new-acct\"}]}', '2024-01-01T00:00:00Z')",
+                "schedule",
+            ),
+        ] {
+            conn.execute(setup_sql, []).unwrap();
+            let err = undo_history_entry_inner(&conn, id).unwrap_err();
+            assert!(
+                err.to_string().contains("depend on accounts"),
+                "unexpected for {expected}: {err:?}"
+            );
+            assert_eq!(count(&conn, "accounts"), 3);
+        }
+    }
+
+    /// Undo of a scheduled post restores the pointer snapshot the caller logs,
+    /// so the occurrence can be posted again (schedule.rs supplies the row).
+    #[test]
+    fn undo_restores_schedule_pointer_snapshot() {
+        let conn = setup();
+        conn.execute(
+            "INSERT INTO recurring_schedules
+             (guid, name, frequency, start_date, occurrences_posted, next_due_date, active,
+              template_json, created_at)
+             VALUES ('sch1', 'Rent', 'monthly', '2024-01-01', 0, '2024-01-01', 1,
+                     '{\"splits\":[]}', '2024-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        // Post the first occurrence: snapshot the pointer + absent tx rows,
+        // add the tx, advance the pointer (mirrors schedules.rs).
+        let id = log_snapshots(
+            &conn,
+            &[
+                ("recurring_schedules", "sch1"),
+                ("transactions", "t1"),
+                ("splits", "s-t1"),
+            ],
+        );
+        seed_tx(&conn, "t1", "2024-01-01", "Rent", -50_000);
+        conn.execute(
+            "UPDATE recurring_schedules
+             SET occurrences_posted = 1, next_due_date = '2024-02-01' WHERE guid = 'sch1'",
+            [],
+        )
+        .unwrap();
+
+        undo_history_entry_inner(&conn, id).unwrap();
+        let (posted, next): (i64, Option<String>) = conn
+            .query_row(
+                "SELECT occurrences_posted, next_due_date FROM recurring_schedules WHERE guid = 'sch1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(posted, 0);
+        assert_eq!(next.as_deref(), Some("2024-01-01"));
+        assert_eq!(count(&conn, "transactions"), 0);
+
+        redo_history_entry_inner(&conn, id).unwrap();
+        let (posted, next): (i64, Option<String>) = conn
+            .query_row(
+                "SELECT occurrences_posted, next_due_date FROM recurring_schedules WHERE guid = 'sch1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(posted, 1);
+        assert_eq!(next.as_deref(), Some("2024-02-01"));
+        assert_eq!(count(&conn, "transactions"), 1);
+    }
+
+    #[test]
+    fn history_pages_newest_first_with_has_more() {
+        let conn = setup();
+        for i in 0..3 {
+            insert_change_entry(
+                &conn,
+                "test",
+                &format!("entry {i}"),
+                "manual",
+                0,
+                0,
+                None,
+                &[],
+            )
+            .unwrap();
+        }
+
+        let first = fetch_change_history_page_inner(&conn, None, Some(2)).unwrap();
+        assert_eq!(first.entries.len(), 2);
+        assert!(first.has_more);
+        assert_eq!(first.total, 3);
+        assert!(first.entries[0].id > first.entries[1].id);
+
+        let last_id = first.entries[1].id;
+        let second = fetch_change_history_page_inner(&conn, Some(last_id), Some(2)).unwrap();
+        assert_eq!(second.entries.len(), 1);
+        assert!(!second.has_more);
+        assert_eq!(second.total, 3);
+        assert!(second.entries[0].id < last_id);
+    }
+
+    #[test]
+    fn clear_history_drops_log_and_snapshots_but_keeps_data() {
+        let conn = setup();
+        log_snapshots(&conn, &[("transactions", "t1"), ("splits", "s-t1")]);
+        seed_tx(&conn, "t1", "2024-01-10", "Groceries", 5_000);
+        assert_eq!(count(&conn, "change_snapshots"), 2);
+
+        clear_change_history_inner(&conn).unwrap();
+
+        assert_eq!(count(&conn, "change_log"), 0);
+        assert_eq!(count(&conn, "change_snapshots"), 0);
+        // Book data is untouched.
+        assert_eq!(count(&conn, "transactions"), 1);
+        let history = fetch_change_history_inner(&conn).unwrap();
+        assert_eq!(history.undoable_id, None);
+        assert_eq!(history.redoable_id, None);
+        assert_eq!(history.total, 0);
+
+        // New changes still log and undo after a clear.
+        let next = log_snapshots(&conn, &[("transactions", "t2"), ("splits", "s-t2")]);
+        seed_tx(&conn, "t2", "2024-02-01", "New", 1_000);
+        undo_history_entry_inner(&conn, next).unwrap();
+        assert_eq!(count(&conn, "transactions"), 1);
+    }
+
+    #[test]
+    fn entry_detail_reports_table_impact_and_parsed_detail() {
+        let conn = setup();
+        seed_tx(&conn, "t-changed", "2024-01-10", "Old", 100);
+        seed_tx(&conn, "t-removed", "2024-01-11", "Gone", 200);
+        let changed_before = snapshot_row(&conn, "transactions", "t-changed").unwrap();
+        let removed_before = snapshot_row(&conn, "transactions", "t-removed").unwrap();
+        conn.execute(
+            "UPDATE transactions SET description = 'New' WHERE guid = 't-changed'",
+            [],
+        )
+        .unwrap();
+        conn.execute("DELETE FROM transactions WHERE guid = 't-removed'", [])
+            .unwrap();
+        let id = insert_change_entry(
+            &conn,
+            "test",
+            "detail entry",
+            "manual",
+            1,
+            0,
+            Some(r#"{"foo":"bar","count":2}"#),
+            &[
+                Snapshot {
+                    table_name: "transactions",
+                    row_guid: "t-changed".to_string(),
+                    before_json: changed_before,
+                },
+                Snapshot {
+                    table_name: "transactions",
+                    row_guid: "t-removed".to_string(),
+                    before_json: removed_before,
+                },
+                Snapshot {
+                    table_name: "transactions",
+                    row_guid: "t-added".to_string(),
+                    before_json: None,
+                },
+            ],
+        )
+        .unwrap();
+
+        let detail = fetch_change_entry_detail_inner(&conn, id).unwrap();
+        assert_eq!(detail.detail.as_ref().unwrap()["foo"], "bar");
+        assert_eq!(detail.tables.len(), 1);
+        let table = &detail.tables[0];
+        assert_eq!(table.table_name, "transactions");
+        assert_eq!(table.added, 1);
+        assert_eq!(table.changed, 1);
+        assert_eq!(table.removed, 1);
+
+        assert!(fetch_change_entry_detail_inner(&conn, 9_999).is_err());
     }
 }

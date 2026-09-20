@@ -16,6 +16,10 @@ pub struct DataSummary {
     pub earliest_date: Option<String>,
     pub latest_date: Option<String>,
     pub net_worth: f64,
+    /// Newest `change_log` id. Monotonic while changes are recorded, so the
+    /// frontend can use it as a "something changed" revision to refresh the
+    /// changes-history panel (and the undo/redo head) deterministically.
+    pub history_revision: i64,
 }
 
 #[derive(serde::Serialize)]
@@ -100,6 +104,12 @@ pub fn get_summary(conn: &Connection) -> Result<DataSummary, String> {
         })
         .sum();
 
+    let history_revision: i64 = conn
+        .query_row("SELECT COALESCE(MAX(id), 0) FROM change_log", [], |row| {
+            row.get(0)
+        })
+        .map_err(|e| e.to_string())?;
+
     Ok(DataSummary {
         currency,
         total_accounts,
@@ -107,6 +117,7 @@ pub fn get_summary(conn: &Connection) -> Result<DataSummary, String> {
         earliest_date,
         latest_date,
         net_worth,
+        history_revision,
     })
 }
 
@@ -203,5 +214,29 @@ mod tests {
         assert_eq!(summary.total_transactions, 2);
         assert_eq!(summary.latest_date.as_deref(), Some("2024-02-05"));
         assert_eq!(summary.net_worth, 35.0);
+    }
+
+    /// The history revision tracks the newest change_log row so the frontend
+    /// can refresh the panel whenever a logged mutation lands.
+    #[test]
+    fn summary_history_revision_tracks_the_newest_change() {
+        let conn = setup();
+        assert_eq!(get_summary(&conn).unwrap().history_revision, 0);
+
+        conn.execute(
+            "INSERT INTO change_log (occurred_at, kind, label, source) VALUES ('2024-01-01T00:00:00Z', 'test', 'first', 'manual')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO change_log (occurred_at, kind, label, source) VALUES ('2024-01-02T00:00:00Z', 'test', 'second', 'manual')",
+            [],
+        )
+        .unwrap();
+        let summary = get_summary(&conn).unwrap();
+        let newest: i64 = conn
+            .query_row("SELECT MAX(id) FROM change_log", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(summary.history_revision, newest);
     }
 }

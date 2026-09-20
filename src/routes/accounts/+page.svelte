@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Landmark, PiggyBank, CreditCard, TrendingUp, Plus } from '@lucide/svelte';
-  import { dbBootstrapping, dbSession } from '$lib/stores/db.svelte';
+  import { dbBootstrapping, dbSession, refreshSession } from '$lib/stores/db.svelte';
   import { fetchAccounts } from '$lib/tauri';
   import { toast } from '$lib/components/ui/sonner';
   import { Button } from '$lib/components/ui/button';
@@ -110,6 +110,7 @@
       mode="create"
       onSaved={() => {
         res.reload();
+        refreshSession();
         toast.success('Account created');
       }}
       onError={(msg) => toast.error(msg)}
