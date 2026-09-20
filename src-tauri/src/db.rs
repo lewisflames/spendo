@@ -265,6 +265,23 @@ CREATE TABLE IF NOT EXISTS symbol_overrides (
 	symbol TEXT NOT NULL
 );
 
+-- Receipts/documents attached to a transaction. Bytes live in the book itself
+-- so the `.spendo` file stays portable (Save As copies them via VACUUM INTO).
+-- Deliberately outside `DATA_TABLES`: attachments are not part of linear undo,
+-- and deleting a transaction (manual delete or the GnuCash orphan sweep)
+-- removes its attachments through the FK cascade.
+CREATE TABLE IF NOT EXISTS attachments (
+	guid TEXT PRIMARY KEY,
+	tx_guid TEXT NOT NULL REFERENCES transactions(guid) ON DELETE CASCADE,
+	filename TEXT NOT NULL,
+	mime_type TEXT NOT NULL,
+	byte_size INTEGER NOT NULL,
+	data BLOB NOT NULL,
+	created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_attachments_tx_guid ON attachments(tx_guid);
+
 -- Recurring transaction schedules (Scheduled feature). Future intent lives
 -- here, never in `transactions`: rows there must stay within the visibility
 -- window (`VISIBLE_TX_FILTER`) and the manual future-date block. A schedule
@@ -374,6 +391,7 @@ pub fn clear_last_book(app_data_dir: &Path) {
 pub fn clear_db(conn: &Connection) -> Result<()> {
     let drops = conn.execute_batch(
         "PRAGMA foreign_keys = OFF;
+          DROP TABLE IF EXISTS attachments;
           DROP TABLE IF EXISTS budgets;
           DROP TABLE IF EXISTS prices;
           DROP TABLE IF EXISTS splits;
@@ -490,6 +508,7 @@ mod tests {
         for expected in [
             "accounts",
             "app_settings",
+            "attachments",
             "budgets",
             "change_log",
             "change_snapshots",
@@ -523,6 +542,14 @@ mod tests {
             [],
         )
         .unwrap();
+        // Attachment bytes must not survive a reset: their parent transaction
+        // is gone and the drop list must include the new table.
+        conn.execute_batch(
+            "INSERT INTO transactions (guid, post_date) VALUES ('t-reset', '2024-01-01');
+             INSERT INTO attachments (guid, tx_guid, filename, mime_type, byte_size, data, created_at)
+             VALUES ('a-reset', 't-reset', 'receipt.png', 'image/png', 1, X'00', '2024-01-01T00:00:00Z');",
+        )
+        .unwrap();
 
         clear_db(&conn).unwrap();
 
@@ -530,6 +557,10 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM commodities", [], |r| r.get(0))
             .unwrap();
         assert_eq!(count, 0);
+        let attachments: i64 = conn
+            .query_row("SELECT COUNT(*) FROM attachments", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(attachments, 0);
         // Foreign-key enforcement must survive the reset on every path.
         let fk_on: i64 = conn
             .query_row("PRAGMA foreign_keys", [], |r| r.get(0))

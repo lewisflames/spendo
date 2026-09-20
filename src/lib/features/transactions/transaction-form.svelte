@@ -25,6 +25,7 @@
   } from '$lib/tauri';
   import { errMsg } from '$lib/utils/error';
   import { isFutureDate, isIsoDate, todayStr } from '$lib/utils/date-utils.svelte';
+  import { plural } from '$lib/utils/format.svelte';
   import { flattenAccountsForPicker } from '$lib/features/accounts/account-picker-utils';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
 
@@ -108,6 +109,9 @@
   let errors = $derived(splitErrors(splits));
   let balance = $derived(splitBalance(splits));
   let balanced = $derived(isBalanced(balance));
+
+  // Receipts live outside the undo history, so deleting them is permanent.
+  let attachmentCount = $derived(initial?.attachmentCount ?? 0);
 
   let canSave = $derived(
     !saving && !deleting && !dateError && splits.length >= 2 && errors.every((e) => !e) && balanced
@@ -242,6 +246,9 @@
     >
       Delete this transaction? Its splits will be removed. This can be undone from the changes
       history panel (newest-first).
+      {#if attachmentCount > 0}
+        Its {plural(attachmentCount, 'attachment')} are deleted permanently and are not restored by undo.
+      {/if}
     </p>
   {/if}
 
