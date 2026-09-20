@@ -380,20 +380,23 @@ fn normalize_post_date(raw: &str) -> String {
     if digits.len() == 8 {
         return date;
     }
-    // Remaining pairs are HH, MM, SS… joined back with colons. An odd-length
-    // tail (e.g. 9 digits) would emit a 1-char component (`"2024-01-15 1"`)
-    // that sorts/compares wrong, so pass it through for the caller to handle.
+    // Remaining pairs are HH, MM, SS. Short tails (hour or hour+minute) are
+    // padded with `:00` so SQLite's date math parses them and lexicographic
+    // comparisons stay chronological; odd-length or over-long tails pass
+    // through for the caller to surface.
     let tail = &digits[8..];
-    if !tail.len().is_multiple_of(2) || tail.len() < 6 {
+    if !tail.len().is_multiple_of(2) || !(2..=6).contains(&tail.len()) {
         return clean.to_string();
     }
-    let time = tail
+    let mut parts: Vec<&str> = tail
         .as_bytes()
         .chunks(2)
         .map(|pair| std::str::from_utf8(pair).unwrap_or(""))
-        .collect::<Vec<_>>()
-        .join(":");
-    format!("{date} {time}")
+        .collect();
+    while parts.len() < 3 {
+        parts.push("00");
+    }
+    format!("{date} {}", parts.join(":"))
 }
 
 /// Source-book loader: joins GnuCash's `slots` table, where transaction notes
@@ -1031,6 +1034,9 @@ mod tests {
             "2024-01-15 10:30:00"
         );
         assert_eq!(normalize_post_date(" 20240115 "), "2024-01-15");
+        // Compact hour / hour+minute tails are padded so SQLite can parse them.
+        assert_eq!(normalize_post_date("2024011510"), "2024-01-15 10:00:00");
+        assert_eq!(normalize_post_date("202401151030"), "2024-01-15 10:30:00");
     }
 
     #[test]
@@ -1038,9 +1044,9 @@ mod tests {
         assert_eq!(normalize_post_date("not-a-date"), "not-a-date");
         assert_eq!(normalize_post_date(""), "");
         assert_eq!(normalize_post_date("2024-01"), "2024-01");
-        // Odd-length time tails would emit a 1-char component — pass through.
+        // Odd-length and over-long time tails pass through for the caller.
         assert_eq!(normalize_post_date("202401151"), "202401151");
-        assert_eq!(normalize_post_date("2024011510"), "2024011510");
+        assert_eq!(normalize_post_date("2024011510300012"), "2024011510300012");
     }
 
     /// End-to-end: import a minimal GnuCash source into a book with local-only
