@@ -23,7 +23,7 @@
     TRANSACTIONS_EXPORT_FILENAME,
     buildAccountsExport,
     buildTransactionsExport
-  } from './exporters';
+  } from '$lib/features/book/exporters';
 
   let exportingTransactions = $state(false);
   let exportingAccounts = $state(false);

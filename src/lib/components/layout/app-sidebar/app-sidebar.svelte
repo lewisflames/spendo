@@ -6,14 +6,19 @@
     ChevronsUpDown,
     CircleHelp,
     Database,
+    FileDown,
+    FileSpreadsheet,
+    FileUp,
     FolderOpen,
     FolderSearch,
     Info,
     LogOut,
     Plus,
+    RefreshCw,
     Save,
     Settings,
-    SunMoon
+    SunMoon,
+    Upload
   } from '@lucide/svelte';
   import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
   import * as Sidebar from '$lib/components/ui/sidebar/index.js';
@@ -24,6 +29,13 @@
     revealActiveBook,
     saveBookAsViaDialog
   } from '$lib/features/book/book-actions';
+  import {
+    exportAccountsCsvViaDialog,
+    exportTransactionsCsvViaDialog,
+    importGnucashViaDialog,
+    openCsvImport,
+    reimportLastGnucash
+  } from '$lib/features/book/import-export-actions';
   import { NAV_GROUPS, navHref, navItemActive } from '$lib/features/nav/nav-items';
   import { activeBookPath, dbSession } from '$lib/stores/db.svelte';
   import { navBadges, navRoots } from '$lib/stores/nav.svelte';
@@ -177,6 +189,42 @@
               <FolderSearch aria-hidden="true" />
               Show in folder
             </DropdownMenu.Item>
+            <DropdownMenu.Sub>
+              <DropdownMenu.SubTrigger>
+                <Upload aria-hidden="true" />
+                Import
+              </DropdownMenu.SubTrigger>
+              <DropdownMenu.SubContent>
+                <DropdownMenu.Item onclick={() => void importGnucashViaDialog()}>
+                  <FileUp aria-hidden="true" />
+                  GnuCash file…
+                </DropdownMenu.Item>
+                <DropdownMenu.Item onclick={() => openCsvImport()}>
+                  <FileSpreadsheet aria-hidden="true" />
+                  Bank CSV…
+                </DropdownMenu.Item>
+                <DropdownMenu.Item onclick={() => void reimportLastGnucash()}>
+                  <RefreshCw aria-hidden="true" />
+                  Re-import last file
+                </DropdownMenu.Item>
+              </DropdownMenu.SubContent>
+            </DropdownMenu.Sub>
+            <DropdownMenu.Sub>
+              <DropdownMenu.SubTrigger>
+                <FileDown aria-hidden="true" />
+                Export
+              </DropdownMenu.SubTrigger>
+              <DropdownMenu.SubContent>
+                <DropdownMenu.Item onclick={() => void exportTransactionsCsvViaDialog()}>
+                  <FileSpreadsheet aria-hidden="true" />
+                  Transactions CSV…
+                </DropdownMenu.Item>
+                <DropdownMenu.Item onclick={() => void exportAccountsCsvViaDialog()}>
+                  <FileSpreadsheet aria-hidden="true" />
+                  Accounts CSV…
+                </DropdownMenu.Item>
+              </DropdownMenu.SubContent>
+            </DropdownMenu.Sub>
             <DropdownMenu.Separator />
             <DropdownMenu.Item>
               {#snippet child({ props })}
