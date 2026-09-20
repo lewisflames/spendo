@@ -322,7 +322,9 @@ pub(crate) fn read_price_data(conn: &Connection) -> Result<PriceFetchPlan, Strin
 /// Parse a stored date (either "YYYY-MM-DD" or "YYYY-MM-DD HH:MM:SS") into a
 /// Unix timestamp for the Yahoo `period1` parameter.
 fn date_to_period1(d: &str) -> Option<i64> {
-    let day = if d.len() >= 10 { &d[..10] } else { d };
+    // Byte-safe prefix: `d` is a stored date string, but slicing must never
+    // panic if a hand-edited book holds multibyte junk.
+    let day = d.get(..10).unwrap_or(d);
     chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d")
         .ok()
         .and_then(|nd| nd.and_hms_opt(0, 0, 0))
