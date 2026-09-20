@@ -382,14 +382,26 @@ fn parse_csv_date(raw: &str, preference: &str) -> Result<String, AppError> {
 }
 
 /// Lenient amount parse: strips currency symbols/spaces, `(…)` negatives,
-/// and both thousand/decimal conventions (last separator wins when both `,`
-/// and `.` are present; lone `,` with 1–2 trailing digits is a decimal comma).
-fn parse_csv_amount(raw: &str) -> Result<f64, AppError> {
+/// normalizes typographic minus signs, and both thousand/decimal conventions
+/// (last separator wins when both `,` and `.` are present; lone `,` with 1–2
+/// trailing digits is a decimal comma). `dot_is_thousands` is the file-wide
+/// convention from [`detect_dot_thousands`]; it makes a lone dot with 3-digit
+/// groups a thousands separator (`1.234` → 1234). Zero is allowed so callers
+/// can treat `0.00` in an unused Debit/Credit column as absent.
+fn parse_csv_amount(raw: &str, dot_is_thousands: bool) -> Result<f64, AppError> {
     let s = raw.trim();
     if s.is_empty() {
         return Err(AppError::Validation("Amount is required".to_string()));
     }
-    let mut t = s.to_string();
+    // Typographic minus/dash variants would otherwise be dropped by the filter
+    // below, silently flipping a debit into a credit.
+    let mut t: String = s
+        .chars()
+        .map(|c| match c {
+            '\u{2212}' | '\u{2013}' | '\u{2014}' => '-',
+            other => other,
+        })
+        .collect();
     let negative_parens = t.starts_with('(') && t.ends_with(')');
     if negative_parens {
         t = t[1..t.len() - 1].to_string();
@@ -441,6 +453,13 @@ fn parse_csv_amount(raw: &str) -> Result<f64, AppError> {
                 normalized = normalized.replace(',', ".");
             }
         }
+    } else if has_dot && dot_is_thousands {
+        // Continental file (`1.234` means 1234). Only strip dots when every
+        // group after the first has exactly three digits, so `1.23` stays a
+        // (malformed but better-than-mangled) decimal.
+        if normalized.split('.').skip(1).all(|group| group.len() == 3) {
+            normalized = normalized.replace('.', "");
+        }
     }
     let mut value: f64 = normalized
         .parse()
@@ -454,10 +473,41 @@ fn parse_csv_amount(raw: &str) -> Result<f64, AppError> {
     if value.abs() > 1_000_000_000.0 {
         return Err(AppError::Validation("Split amount is too large".to_string()));
     }
-    if value == 0.0 {
-        return Err(AppError::Validation("Amount must not be zero".to_string()));
-    }
     Ok(value)
+}
+
+/// File-wide decimal convention: true when amounts use comma decimals
+/// (`1,23`, `1234,56`) and never dot decimals (`1.23`). A lone dot must then
+/// be a thousands separator, so `1.234` means 1234 (continental exports).
+/// Mixed files keep the dot-decimal default.
+fn detect_dot_thousands(data: &[Vec<String>], use_pair: bool, mapping: &CsvMapping) -> bool {
+    fn tail_is_decimal(raw: &str, sep: char) -> bool {
+        let t = raw.trim().trim_matches(|c: char| c == '(' || c == ')');
+        let Some(pos) = t.rfind(sep) else { return false };
+        let frac = &t[pos + 1..];
+        let digits = frac.chars().filter(char::is_ascii_digit).count();
+        (digits == 1 || digits == 2) && digits == frac.chars().count()
+    }
+
+    let mut comma_decimal = false;
+    let mut dot_decimal = false;
+    for cells in data {
+        let indexes: Vec<usize> = if use_pair {
+            [mapping.debit_col, mapping.credit_col]
+                .into_iter()
+                .flatten()
+                .collect()
+        } else {
+            mapping.amount_col.into_iter().collect()
+        };
+        for index in indexes {
+            if let Some(raw) = cells.get(index) {
+                comma_decimal |= tail_is_decimal(raw, ',');
+                dot_decimal |= tail_is_decimal(raw, '.');
+            }
+        }
+    }
+    comma_decimal && !dot_decimal
 }
 
 fn cell_at(cells: &[String], idx: Option<usize>) -> String {
@@ -656,6 +706,7 @@ fn parse_amount_cell(
     cells: &[String],
     use_pair: bool,
     mapping: &CsvMapping,
+    dot_is_thousands: bool,
 ) -> Result<f64, AppError> {
     if use_pair {
         let d_raw = cell_at(cells, mapping.debit_col);
@@ -670,13 +721,20 @@ fn parse_amount_cell(
         let d = if d_empty {
             0.0
         } else {
-            parse_csv_amount(&d_raw)?
+            parse_csv_amount(&d_raw, dot_is_thousands)?
         };
         let c = if c_empty {
             0.0
         } else {
-            parse_csv_amount(&c_raw)?
+            parse_csv_amount(&c_raw, dot_is_thousands)?
         };
+        // `0.00` in the unused column means "unused"; only nonzero in both
+        // columns is ambiguous, and an all-zero pair carries no amount.
+        if d == 0.0 && c == 0.0 {
+            return Err(AppError::Validation(
+                "Amount is required (debit or credit)".to_string(),
+            ));
+        }
         if d != 0.0 && c != 0.0 {
             return Err(AppError::Validation(
                 "Enter either debit or credit, not both".to_string(),
@@ -691,7 +749,11 @@ fn parse_amount_cell(
         }
     } else {
         let a_raw = cell_at(cells, mapping.amount_col);
-        parse_csv_amount(&a_raw)
+        let amount = parse_csv_amount(&a_raw, dot_is_thousands)?;
+        if amount == 0.0 {
+            return Err(AppError::Validation("Amount must not be zero".to_string()));
+        }
+        Ok(amount)
     }
 }
 
@@ -712,6 +774,10 @@ fn parse_file_rows(
     validate_accounts(conn, target_guid, offset_guid)?;
 
     let data: &[Vec<String>] = if has_header { records.get(1..).unwrap_or(&[]) } else { records };
+
+    // File-wide decimal convention, computed once: a lone dot is a thousands
+    // separator only when the file demonstrably uses comma decimals.
+    let dot_is_thousands = detect_dot_thousands(data, use_pair, mapping);
 
     let mut rows = Vec::with_capacity(data.len());
     for (i, cells) in data.iter().enumerate() {
@@ -735,7 +801,7 @@ fn parse_file_rows(
             }
         };
 
-        let amount = match parse_amount_cell(cells, use_pair, mapping) {
+        let amount = match parse_amount_cell(cells, use_pair, mapping, dot_is_thousands) {
             Ok(a) => a,
             Err(e) => {
                 rows.push(ParsedRow::invalid(
@@ -824,7 +890,6 @@ fn duplicate_flags(
     rows: &[ParsedRow],
     existing: &HashSet<String>,
 ) -> HashMap<i64, bool> {
-    let mut seen: HashSet<String> = HashSet::new();
     let mut flags: HashMap<i64, bool> = HashMap::new();
     for row in rows {
         if row.error.is_some() {
@@ -836,15 +901,17 @@ fn duplicate_flags(
             row.value_num.unwrap_or(0),
             row.description.as_deref().unwrap_or(""),
         );
-        // First occurrence wins: DB hits and later intra-file repeats flag.
-        let is_dup = existing.contains(&hash) || !seen.insert(hash);
-        flags.insert(row.key, is_dup);
+        // Only rows already in the book are duplicates: repeated rows inside
+        // one file are legitimate (two identical same-day charges) and stay
+        // importable; a second commit of the same file is caught by the DB
+        // hash on the next preview.
+        flags.insert(row.key, existing.contains(&hash));
     }
     flags
 }
 
 /// Duplicate flags for a parsed file, keyed by row key. The DB window spans
-/// the valid dates only; first occurrence wins (DB + intra-file).
+/// the valid dates only; rows already present in the target account flag.
 fn duplicate_flags_for_rows(
     conn: &Connection,
     target_guid: &str,
@@ -1246,17 +1313,90 @@ mod tests {
 
     #[test]
     fn parse_amount_handles_decimal_comma_and_thousands() {
-        assert!((parse_csv_amount("1.234,56").unwrap() - 1234.56).abs() < 1e-9);
-        assert!((parse_csv_amount("1,234.56").unwrap() - 1234.56).abs() < 1e-9);
-        assert!((parse_csv_amount("1234,56").unwrap() - 1234.56).abs() < 1e-9);
-        assert!((parse_csv_amount("(50.00)").unwrap() + 50.0).abs() < 1e-9);
-        assert!((parse_csv_amount("$1,234.00").unwrap() - 1234.0).abs() < 1e-9);
+        for raw in ["1.234,56", "1,234.56", "1234,56"] {
+            assert!(
+                (parse_csv_amount(raw, false).unwrap() - 1234.56).abs() < 1e-9,
+                "{raw}"
+            );
+        }
+        assert!((parse_csv_amount("(50.00)", false).unwrap() + 50.0).abs() < 1e-9);
+        assert!((parse_csv_amount("$1,234.00", false).unwrap() - 1234.0).abs() < 1e-9);
+        // Continental convention: lone dots group thousands.
+        assert!((parse_csv_amount("1.234", true).unwrap() - 1234.0).abs() < 1e-9);
+        assert!((parse_csv_amount("1.234.567", true).unwrap() - 1_234_567.0).abs() < 1e-9);
+        // Two-digit fractions are never thousands groups; default stays decimal.
+        assert!((parse_csv_amount("1.23", true).unwrap() - 1.23).abs() < 1e-9);
+        assert!((parse_csv_amount("1.234", false).unwrap() - 1.234).abs() < 1e-9);
     }
 
     #[test]
-    fn parse_amount_rejects_empty_and_zero() {
-        assert!(parse_csv_amount("").is_err());
-        assert!(parse_csv_amount("0.00").is_err());
+    fn parse_amount_normalizes_typographic_minus() {
+        // `−` (U+2212) used to be dropped, flipping a debit into a credit.
+        assert!((parse_csv_amount("\u{2212}50.00", false).unwrap() + 50.0).abs() < 1e-9);
+        assert!((parse_csv_amount("\u{2013}12,50", false).unwrap() + 12.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn parse_amount_rejects_empty_and_keeps_zero_for_callers() {
+        assert!(parse_csv_amount("", false).is_err());
+        assert_eq!(parse_csv_amount("0.00", false).unwrap(), 0.0);
+    }
+
+    #[test]
+    fn detect_dot_thousands_reads_the_file_convention() {
+        fn mapping() -> CsvMapping {
+            CsvMapping {
+                date_col: 0,
+                desc_col: 1,
+                amount_col: Some(2),
+                debit_col: None,
+                credit_col: None,
+                num_col: None,
+                notes_col: None,
+            }
+        }
+        let rows = |values: &[&str]| -> Vec<Vec<String>> {
+            values
+                .iter()
+                .map(|v| vec!["2024-01-01".to_string(), "x".to_string(), (*v).to_string()])
+                .collect()
+        };
+        assert!(detect_dot_thousands(&rows(&["1,23", "1.234"]), false, &mapping()));
+        assert!(!detect_dot_thousands(&rows(&["1,23", "1.23"]), false, &mapping()));
+        assert!(!detect_dot_thousands(&rows(&["1.23", "1.234"]), false, &mapping()));
+    }
+
+    #[test]
+    fn pair_mode_treats_zero_cells_as_unused() {
+        let mapping = CsvMapping {
+            date_col: 0,
+            desc_col: 1,
+            amount_col: None,
+            debit_col: Some(2),
+            credit_col: Some(3),
+            num_col: None,
+            notes_col: None,
+        };
+        let cells = |debit: &str, credit: &str| {
+            vec![
+                "2024-01-01".to_string(),
+                "x".to_string(),
+                debit.to_string(),
+                credit.to_string(),
+            ]
+        };
+        // Bank exports often write 0.00 in the unused column.
+        assert_eq!(
+            parse_amount_cell(&cells("0.00", "50.00"), true, &mapping, false).unwrap(),
+            50.0
+        );
+        assert_eq!(
+            parse_amount_cell(&cells("50.00", "0.00"), true, &mapping, false).unwrap(),
+            -50.0
+        );
+        // Both zero carries no amount; both nonzero stays ambiguous.
+        assert!(parse_amount_cell(&cells("0.00", "0.00"), true, &mapping, false).is_err());
+        assert!(parse_amount_cell(&cells("10.00", "20.00"), true, &mapping, false).is_err());
     }
 
     #[test]
@@ -1398,15 +1538,52 @@ mod tests {
         std::fs::remove_file(&path).ok();
     }
 
+    /// Regression: two identical same-day charges are legitimate and must both
+    /// be importable — only rows already in the book flag as duplicates.
     #[test]
-    fn intra_file_repeat_flags_second_occurrence() {
+    fn intra_file_repeats_are_both_importable() {
         let conn = csv_e2e_setup();
         let csv = "Date,Description,Amount\n2024-02-01,Shop,-5.00\n2024-02-01,Shop,-5.00\n";
         let path = write_temp_csv("intra-dup", csv);
         let bytes = read_file_bytes(&path).unwrap();
         let report = preview_inner(&conn, preview_input(&path), &bytes).expect("preview runs");
-        assert_eq!(report.valid_count, 1);
-        assert_eq!(report.duplicate_count, 1);
+        assert_eq!(report.valid_count, 2);
+        assert_eq!(report.duplicate_count, 0);
+
+        let commit = CsvCommitInput {
+            path: path.clone(),
+            encoding: None,
+            delimiter: None,
+            has_header: Some(true),
+            mapping: preview_input(&path).mapping,
+            target_account_guid: "checking".to_string(),
+            offset_account_guid: "groceries".to_string(),
+            date_preference: Some("dmy".to_string()),
+            selected_keys: vec![0, 1],
+        };
+        let result = commit_inner(&conn, commit, &bytes).expect("commit runs");
+        assert_eq!(result.created, 2);
+        assert_eq!(result.skipped_duplicates, 0);
+
+        // A second commit of the same file is still rejected by the DB hash.
+        let replay = commit_inner(
+            &conn,
+            CsvCommitInput {
+                path: path.clone(),
+                encoding: None,
+                delimiter: None,
+                has_header: Some(true),
+                mapping: preview_input(&path).mapping,
+                target_account_guid: "checking".to_string(),
+                offset_account_guid: "groceries".to_string(),
+                date_preference: Some("dmy".to_string()),
+                selected_keys: vec![0, 1],
+            },
+            &bytes,
+        )
+        .unwrap_err();
+        assert!(replay.to_string().contains("duplicates or errors"), "{replay}");
+
         std::fs::remove_file(&path).ok();
     }
 }
