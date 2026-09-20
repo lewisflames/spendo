@@ -96,7 +96,6 @@ pub fn run() {
             settings::get_book_settings,
             settings::set_book_setting,
             import::preview_gnucash_import,
-            import::fetch_last_import_source,
             import::import_gnucash,
             csv_import::csv_detect,
             csv_import::csv_preview,

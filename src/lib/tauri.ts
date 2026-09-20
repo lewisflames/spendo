@@ -375,19 +375,11 @@ export interface GnuCashImportInput {
   deleteOrphans: boolean;
 }
 
-export interface LastImportSource {
-  path: string;
-  filename: string;
-}
-
 export const previewGnucashImport = (path: string, filename: string): Promise<GnuCashPreview> =>
   invoke<GnuCashPreview>('preview_gnucash_import', { path, filename });
 
 export const importGnucash = (input: GnuCashImportInput): Promise<ImportResult> =>
   invoke<ImportResult>('import_gnucash', { input });
-
-export const fetchLastImportSource = (): Promise<LastImportSource | null> =>
-  invoke<LastImportSource | null>('fetch_last_import_source');
 
 // ── CSV import (bank-statement wizard: detect → map → preview → commit) ──
 
@@ -1171,7 +1163,6 @@ export type MockPayloads = {
   fetch_holding_detail: HoldingDetail;
   fetch_home_data: HomeDataResult;
   fetch_import_rules: ImportRule[];
-  fetch_last_import_source: LastImportSource | null;
   fetch_nav_badges: NavBadges;
   fetch_nav_roots: NavRoot[];
   fetch_pnl_report: ProfitLossReport;
