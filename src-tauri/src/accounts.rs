@@ -1,4 +1,4 @@
-use chrono::Utc;
+use chrono::Local;
 use rusqlite::{params, Connection};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -79,7 +79,7 @@ fn load_account_rows(conn: &Connection, as_of: Option<&str>) -> Result<Vec<Accou
     // future transactions (mirrors `reports.rs`).
     let date_expr: String = match as_of {
         Some(d) => utils::validate_iso_date(d)?,
-        None => Utc::now().format("%Y-%m-%d").to_string(),
+        None => Local::now().format("%Y-%m-%d").to_string(),
     };
 
     let sql = format!("SELECT a.guid, a.name, a.account_type, a.parent_guid, a.code, a.description, a.placeholder,

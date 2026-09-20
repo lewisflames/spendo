@@ -494,7 +494,7 @@ fn plan_symbols(pre: &PriceFetchPlan) -> Result<SymbolPlan, String> {
     };
 
     // period2 = tomorrow at 00:00 UTC (ensures today's data is included)
-    let today = chrono::Utc::now().date_naive();
+    let today = chrono::Local::now().date_naive();
     let tomorrow = today.succ_opt().unwrap_or(today);
     let period2 = tomorrow
         .and_hms_opt(0, 0, 0)
