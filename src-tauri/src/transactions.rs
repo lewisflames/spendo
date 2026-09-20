@@ -233,11 +233,48 @@ pub(crate) fn validate_tx_input(conn: &Connection, input: &TxInput) -> Result<St
     Ok(post_date)
 }
 
+/// The account facts split validation needs. Resolved through a lookup so the
+/// GnuCash schedule preview can validate template splits against a set of
+/// accounts that will exist only after the merge (source ∪ destination).
+#[derive(Debug, Clone)]
+pub(crate) struct SplitAccountInfo {
+    pub placeholder: i64,
+    pub account_type: String,
+}
+
+/// DB-backed account lookup for [`validate_tx_body_with`].
+pub(crate) fn account_info_lookup(
+    conn: &Connection,
+    guid: &str,
+) -> Result<Option<SplitAccountInfo>, AppError> {
+    conn.query_row(
+        "SELECT COALESCE(placeholder, 0), account_type FROM accounts WHERE guid = ?1",
+        params![guid],
+        |row| {
+            Ok(SplitAccountInfo {
+                placeholder: row.get(0)?,
+                account_type: row.get(1)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(AppError::from)
+}
+
 /// Body-only half of [`validate_tx_input`] (no post-date check): schedule
 /// templates reuse it because a template is future intent, not a posting.
 /// `pub(crate)` for `schedules.rs`; the post path re-validates with the full
 /// date-aware check at posting time.
 pub(crate) fn validate_tx_body(conn: &Connection, input: &TxInput) -> Result<(), AppError> {
+    validate_tx_body_with(input, &|guid| account_info_lookup(conn, guid))
+}
+
+/// [`validate_tx_body`] with the account lookup injected: identical rules,
+/// callable without a live destination row (import preview).
+pub(crate) fn validate_tx_body_with(
+    input: &TxInput,
+    lookup: &dyn Fn(&str) -> Result<Option<SplitAccountInfo>, AppError>,
+) -> Result<(), AppError> {
     if input.splits.len() < 2 {
         return Err(AppError::Validation("A transaction needs at least two splits".to_string()));
     }
@@ -250,14 +287,12 @@ pub(crate) fn validate_tx_body(conn: &Connection, input: &TxInput) -> Result<(),
         if s.account_guid.trim().is_empty() {
             return Err(AppError::Validation(format!("Split {n}: account is required")));
         }
-        let account: Option<(i64, String)> = conn
-            .query_row(
-                "SELECT COALESCE(placeholder, 0), account_type FROM accounts WHERE guid = ?1",
-                params![s.account_guid],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()?;
-        let Some((placeholder, account_type)) = account else {
+        let account = lookup(s.account_guid.trim())?;
+        let Some(SplitAccountInfo {
+            placeholder,
+            account_type,
+        }) = account
+        else {
             return Err(AppError::NotFound(format!("Split {n}: account not found")));
         };
         // The internal ROOT is not a real account: posting to it corrupts the

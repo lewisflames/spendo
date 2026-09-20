@@ -2003,7 +2003,10 @@ const handlers: HandlerMap = {
     commoditiesAdded: 0,
     commoditiesUpdated: 0,
     commoditiesOrphaned: 0,
-    orphanAccountNames: ['Local Savings', 'Holiday Fund']
+    schedulesAdded: 2,
+    schedulesUpdated: 0,
+    orphanAccountNames: ['Local Savings', 'Holiday Fund'],
+    skippedSchedules: [{ name: 'Twice a month', reason: 'more than one recurrence rule' }]
   }),
   import_gnucash: () => importResult()
 };
@@ -2033,6 +2036,9 @@ function importResult(): MockPayloads['import_gnucash'] {
     transactionsOrphaned: 0,
     splitsOrphaned: 0,
     commoditiesOrphaned: 0,
+    schedulesAdded: 2,
+    schedulesUpdated: 0,
+    schedulesSkipped: 1,
     totalAccounts: summary.totalAccounts,
     totalTransactions: summary.totalTransactions,
     summary,
