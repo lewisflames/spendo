@@ -20,10 +20,18 @@ export function makeSplitDraft(key: number): SplitDraft {
   };
 }
 
+/**
+ * Parse a raw split amount or quantity. Accepts an optional sign, digits and
+ * an optional single `.`/`,` decimal separator (`12.50`, `-3`, `1,5`); a `,`
+ * is treated as the decimal separator. Rejects blanks, hex (`0x10`),
+ * scientific notation (`1e3`) and malformed text so a mistyped amount can't
+ * silently parse as a different number. Returns `null` when empty/invalid.
+ */
 export function parseAmount(raw: string): number | null {
   const t = raw.trim();
   if (!t) return null;
-  const n = Number(t);
+  if (!/^[+-]?(\d+)(?:([.,])(\d+))?$/.test(t)) return null;
+  const n = Number(t.replace(',', '.'));
   return Number.isFinite(n) ? n : null;
 }
 
