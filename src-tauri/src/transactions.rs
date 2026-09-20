@@ -196,12 +196,18 @@ fn to_value_rational(amount: f64) -> Result<(i64, i64), AppError> {
     if amount.abs() > 1_000_000_000.0 {
         return Err(AppError::Validation("Split amount is too large".to_string()));
     }
-    let num = (amount * VALUE_DENOM as f64).round() as i64;
-    let drift = ((num as f64 / VALUE_DENOM as f64) - amount).abs();
-    if drift > 0.5 / VALUE_DENOM as f64 + 1e-9 {
-        return Err(AppError::Validation("Split amount cannot be represented".to_string()));
+    let scaled = amount * VALUE_DENOM as f64;
+    let rounded = scaled.round();
+    // Reject instead of silently rounding: the caller's balance check validates
+    // the doubles, so per-leg rounding could persist an unbalanced transaction.
+    // The tolerance covers f64 error at the 1e9 upper bound.
+    let tolerance = 1e-6 + scaled.abs() * f64::EPSILON * 4.0;
+    if (scaled - rounded).abs() > tolerance {
+        return Err(AppError::Validation(
+            "Split amount cannot be represented (max 4 decimal places)".to_string(),
+        ));
     }
-    Ok((num, VALUE_DENOM))
+    Ok((rounded as i64, VALUE_DENOM))
 }
 
 fn to_quantity_rational(qty: f64) -> Result<(i64, i64), AppError> {
@@ -767,11 +773,31 @@ pub(crate) fn insert_split_rows(
     tx_guid: &str,
     splits: &[SplitInput],
 ) -> Result<Vec<String>, AppError> {
+    // Convert every leg first and require the stored (scaled integer) values
+    // to sum to zero: rounding each leg independently could otherwise persist
+    // an unbalanced transaction that the double-based check accepted.
+    let converted: Vec<(i64, i64, i64, i64)> = splits
+        .iter()
+        .map(|s| {
+            let (value_num, value_denom) = to_value_rational(s.amount)?;
+            let qty = s.quantity.unwrap_or(s.amount);
+            let (quantity_num, quantity_denom) = to_quantity_rational(qty)?;
+            Ok((value_num, value_denom, quantity_num, quantity_denom))
+        })
+        .collect::<Result<Vec<_>, AppError>>()?;
+    if converted.len() > 1 {
+        let sum: i64 = converted.iter().map(|(num, _, _, _)| *num).sum();
+        if sum != 0 {
+            return Err(AppError::Validation(
+                "Splits are out of balance after rounding — adjust the amounts".to_string(),
+            ));
+        }
+    }
+
     let mut guids = Vec::with_capacity(splits.len());
-    for s in splits {
-        let (value_num, value_denom) = to_value_rational(s.amount)?;
-        let qty = s.quantity.unwrap_or(s.amount);
-        let (quantity_num, quantity_denom) = to_quantity_rational(qty)?;
+    for (s, (value_num, value_denom, quantity_num, quantity_denom)) in
+        splits.iter().zip(converted)
+    {
         let split_guid = uuid::Uuid::new_v4().to_string();
         conn.execute(
             "INSERT INTO splits
@@ -1250,6 +1276,17 @@ mod tests {
         let guid2 = create_transaction_inner(&conn, reversed).unwrap();
         let detail2 = fetch_transaction_inner(&conn, &guid2).unwrap().unwrap();
         assert!((detail2.transaction.total_amount + 42.10).abs() < 1e-6);
+    }
+
+    #[test]
+    fn value_rational_rejects_sub_minor_unit_amounts() {
+        // Regression: the old drift check could never fire, so `0.12345678`
+        // was silently stored as `0.1235`.
+        assert!(to_value_rational(0.12345678).is_err());
+        assert_eq!(to_value_rational(0.1234).unwrap(), (1234, VALUE_DENOM));
+        assert_eq!(to_value_rational(-42.1).unwrap(), (-421_000, VALUE_DENOM));
+        // Near the upper bound, f64 error must not cause false rejections.
+        assert!(to_value_rational(999_999_999.9999).is_ok());
     }
 
     #[test]
