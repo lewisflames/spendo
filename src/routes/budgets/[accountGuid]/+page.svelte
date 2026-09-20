@@ -3,19 +3,12 @@
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { Button } from '$lib/components/ui/button';
-  import * as Dialog from '$lib/components/ui/dialog';
   import { dbSession } from '$lib/stores/db.svelte';
   import { sessionCurrency } from '$lib/utils/format.svelte';
-  import {
-    fetchBudgetDetail,
-    fetchBudgetDateRange,
-    deleteBudgetYear,
-    fetchAccounts
-  } from '$lib/tauri';
+  import { fetchBudgetDetail, fetchBudgetDateRange, fetchAccounts } from '$lib/tauri';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import { useUrlParams, yearParam } from '$lib/hooks/use-url-params.svelte';
-  import { ArrowLeft, Pencil, Trash2 } from '@lucide/svelte';
-  import { errMsg } from '$lib/utils/error';
+  import { ArrowLeft, Pencil } from '@lucide/svelte';
   import { toast } from '$lib/components/ui/sonner';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
@@ -74,7 +67,6 @@
   let formError = $state<string | null>(null);
 
   let showEditDialog = $state(false);
-  let showDeleteConfirm = $state(false);
 
   let budget = $derived(detail?.budget ?? null);
   let summary = $derived(detail?.summary ?? null);
@@ -107,18 +99,11 @@
     toast.success(message);
   }
 
-  async function confirmDelete() {
-    if (!accountGuid) return;
-    try {
-      await deleteBudgetYear(accountGuid, by.year);
-      showDeleteConfirm = false;
-      toast.success('Budget deleted');
-      // The viewed year no longer has a budget — back to the list.
-      // eslint-disable-next-line svelte/no-navigation-without-resolve
-      goto(resolve('/budgets') + `?year=${by.year}`);
-    } catch (e: unknown) {
-      toast.error(errMsg(e, 'Failed to delete budget'));
-    }
+  function handleDeleteSuccess() {
+    toast.success('Budget deleted');
+    // The viewed year no longer has a budget — back to the list.
+    // eslint-disable-next-line svelte/no-navigation-without-resolve
+    void goto(resolve('/budgets') + `?year=${by.year}`);
   }
 </script>
 
@@ -154,11 +139,7 @@
           disabled={detail === null && res.loading}
         >
           <Pencil aria-hidden="true" />
-          Set target
-        </Button>
-        <Button variant="destructive" onclick={() => (showDeleteConfirm = true)} disabled={!detail}>
-          <Trash2 aria-hidden="true" />
-          Delete
+          {detail ? 'Edit budget' : 'Set budget'}
         </Button>
       </div>
     </PageHeader>
@@ -208,29 +189,10 @@
       amount={detail?.budget.amount ?? 0}
       exists={detail !== null}
       {currency}
+      {accountName}
       onSave={handleSaveSuccess}
+      onDelete={handleDeleteSuccess}
       onError={(msg) => (formError = msg)}
     />
   {/key}
 {/if}
-
-<Dialog.Root bind:open={showDeleteConfirm}>
-  <Dialog.Content showCloseButton={false}>
-    <Dialog.Header>
-      <Dialog.Title>Delete Budget</Dialog.Title>
-      <Dialog.Description>
-        Are you sure you want to delete the {by.year} budget for
-        <strong>{accountName}</strong>? Other years are kept. This action cannot be undone.
-      </Dialog.Description>
-    </Dialog.Header>
-    <Dialog.Footer>
-      <Button
-        variant="outline"
-        onclick={() => {
-          showDeleteConfirm = false;
-        }}>Cancel</Button
-      >
-      <Button variant="destructive" onclick={confirmDelete}>Delete</Button>
-    </Dialog.Footer>
-  </Dialog.Content>
-</Dialog.Root>

@@ -4,7 +4,7 @@
   import { useDialogReset } from '$lib/hooks/use-dialog-reset.svelte';
   import { Input } from '$lib/components/ui/input';
 
-  import { setBudgetYearAmount } from '$lib/tauri';
+  import { setBudgetYearAmount, deleteBudgetYear } from '$lib/tauri';
   import { errMsg } from '$lib/utils/error';
 
   let {
@@ -14,7 +14,9 @@
     amount: initialAmount,
     exists = true,
     currency = 'EUR',
+    accountName,
     onSave,
+    onDelete,
     onError
   }: {
     open: boolean;
@@ -23,13 +25,17 @@
     amount: number;
     exists?: boolean;
     currency?: string;
+    accountName?: string;
     onSave?: () => void;
+    onDelete?: () => void;
     onError?: (msg: string) => void;
   } = $props();
 
   let amount = $state(0);
 
   let loading = $state(false);
+  let deleting = $state(false);
+  let confirmDelete = $state(false);
   let formError = $state('');
   let showErrors = $state(false);
 
@@ -45,6 +51,8 @@
     formError = '';
     showErrors = false;
     loading = false;
+    deleting = false;
+    confirmDelete = false;
   }
 
   async function handleSave() {
@@ -67,12 +75,31 @@
       loading = false;
     }
   }
+
+  async function handleDelete() {
+    if (!exists || deleting) return;
+    if (!confirmDelete) {
+      confirmDelete = true;
+      return;
+    }
+    deleting = true;
+    formError = '';
+    try {
+      await deleteBudgetYear(accountGuid, year);
+      open = false;
+      onDelete?.();
+    } catch (e: unknown) {
+      formError = errMsg(e, 'Failed to delete budget');
+    } finally {
+      deleting = false;
+    }
+  }
 </script>
 
 <Dialog.Root bind:open>
   <Dialog.Content>
     <Dialog.Header>
-      <Dialog.Title>Set Budget</Dialog.Title>
+      <Dialog.Title>{exists ? 'Edit Budget' : 'Set Budget'}</Dialog.Title>
       <Dialog.Description>
         {exists
           ? 'Adjust the annual target for this year.'
@@ -113,16 +140,26 @@
           <p role="alert" class="text-sm text-destructive">{formError}</p>
         {/if}
       </div>
+
+      {#if exists && confirmDelete}
+        <p
+          role="alert"
+          class="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+        >
+          Delete the {year} budget for <strong>{accountName ?? 'this account'}</strong>? Other years
+          are kept. This action cannot be undone.
+        </p>
+      {/if}
     </div>
 
     <SaveFooter
-      mode="create"
+      mode={exists ? 'edit' : 'create'}
       saving={loading}
-      deleting={false}
-      confirmDelete={false}
+      {deleting}
+      {confirmDelete}
       saveLabel={exists ? 'Save' : 'Create budget'}
-      saveDisabled={loading}
-      onDelete={() => {}}
+      saveDisabled={loading || deleting}
+      onDelete={handleDelete}
       onSave={handleSave}
       onCancel={() => {
         open = false;
