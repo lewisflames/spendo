@@ -88,7 +88,7 @@ No `preview` script (no `vite preview` wrapper). Frontend unit tests are pure-he
 - **Sorting**: table sort state uses `useTableSort<K>(defaults, descFirst)` from `$lib/hooks/`.
 - **URL state**: compose specs from the factories in `use-url-params.svelte.ts` (`pageParam`, `debouncedSearchParam`, `dateParam`, `yearParam`); free-form specs only when no factory fits.
 - **Search inputs**: always debounce through `useDebouncedSearch`.
-- **Formatting**: dates parse through `parseLocalDate` (date-only strings are local, not UTC); counts use `plural(n, 'word')`; ranges use `formatDateRange`. Route titles come from `$lib/routes.ts` (`routeTitle`).
+- **Formatting**: dates parse through `parseLocalDate` (date-only strings are local, not UTC); counts use `plural(n, 'word')`; ranges use `formatDateRange`.
 - **Dialogs**: form reset goes through `useDialogReset(() => open, sync)` (bits-ui never fires `onOpenChange` for programmatic `bind:open`); create/edit footers use `<SaveFooter layout=…>` — never copy the reset effect or footer buttons.
 - **Barrels**: named exports only in `index.ts` re-export files (no default+named duplication).
 - **tauri.ts**: leaf payload types are module-private; only export types that other modules import.

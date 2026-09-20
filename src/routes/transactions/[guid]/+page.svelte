@@ -16,7 +16,6 @@
   } from '@lucide/svelte';
   import { toast } from '$lib/components/ui/sonner';
   import { dbBootstrapping, dbSession } from '$lib/stores/db.svelte';
-  import { setBreadcrumb } from '$lib/stores/breadcrumb.svelte';
   import { fetchTransaction } from '$lib/tauri';
   import type { SplitDetail } from '$lib/tauri';
   import {
@@ -62,16 +61,6 @@
   let currency = $derived(sessionCurrency());
 
   let reconciledCount = $derived(detail ? detail.splits.filter((s) => s.reconciled).length : 0);
-
-  $effect(() => {
-    // Track navigation explicitly so the crumb refreshes even when the
-    // payload is unchanged; title-bar falls back to the route title otherwise.
-    void page.url.pathname;
-    setBreadcrumb([
-      { name: 'Transactions', href: resolve('/transactions') },
-      { name: detail?.description || 'Transaction' }
-    ]);
-  });
 
   async function copyGuid() {
     if (!detail) return;

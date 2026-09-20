@@ -6,7 +6,6 @@
   import { toast } from '$lib/components/ui/sonner';
   import { Button } from '$lib/components/ui/button';
   import { dbBootstrapping, dbSession } from '$lib/stores/db.svelte';
-  import { setBreadcrumb } from '$lib/stores/breadcrumb.svelte';
   import { fetchSchedule, type Schedule } from '$lib/tauri';
   import ScheduleForm from '$lib/features/schedules/schedule-form.svelte';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
@@ -28,11 +27,6 @@
   });
 
   let schedule = $derived(res.data ?? null);
-
-  $effect(() => {
-    void page.url.pathname;
-    setBreadcrumb([{ name: 'Scheduled', href: resolve('/scheduled') }, { name: 'Edit schedule' }]);
-  });
 
   function goBack() {
     void goto(resolve('/scheduled'), { replaceState: true });

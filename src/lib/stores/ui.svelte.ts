@@ -1,6 +1,6 @@
 /** Store convention: `$state()` wrapped in `{ value }` like every other store. */
 
-/** Global command palette visibility (layout hotkeys + title-bar trigger). */
+/** Global command palette visibility (layout hotkeys + title-bar search bar). */
 export const commandPalette = $state({ value: false });
 
 /** Keyboard shortcuts dialog visibility (sidebar + palette command). */

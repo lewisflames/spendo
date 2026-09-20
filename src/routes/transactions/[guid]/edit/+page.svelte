@@ -6,7 +6,6 @@
   import { toast } from '$lib/components/ui/sonner';
   import { Button } from '$lib/components/ui/button';
   import { dbBootstrapping, dbSession } from '$lib/stores/db.svelte';
-  import { setBreadcrumb } from '$lib/stores/breadcrumb.svelte';
   import { fetchTransaction } from '$lib/tauri';
   import TransactionForm from '$lib/features/transactions/transaction-form.svelte';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
@@ -30,15 +29,6 @@
 
   let detail = $derived(res.data?.transaction ?? null);
   let detailPath = $derived(detail ? resolve('/transactions/[guid]', { guid: detail.guid }) : null);
-
-  $effect(() => {
-    void page.url.pathname;
-    setBreadcrumb([
-      { name: 'Transactions', href: resolve('/transactions') },
-      { name: detail?.description || 'Transaction', href: detailPath ?? undefined },
-      { name: 'Edit' }
-    ]);
-  });
 
   function goBack() {
     if (detail) {

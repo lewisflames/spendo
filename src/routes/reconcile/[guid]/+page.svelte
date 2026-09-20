@@ -7,7 +7,6 @@
   import { toast } from '$lib/components/ui/sonner';
   import { Button } from '$lib/components/ui/button';
   import { dbSession, refreshSession } from '$lib/stores/db.svelte';
-  import { setBreadcrumb } from '$lib/stores/breadcrumb.svelte';
   import {
     fetchReconcileInfo,
     finishReconciliation,
@@ -215,14 +214,6 @@
   function onSort(key: TxSortKey) {
     if (key === 'date' || key === 'description' || key === 'amount') sort.toggle(key);
   }
-
-  $effect(() => {
-    void page.url.pathname;
-    setBreadcrumb([
-      { name: 'Reconcile', href: resolve('/reconcile') },
-      { name: res.data?.accountName ?? 'Account' }
-    ]);
-  });
 </script>
 
 <svelte:head>

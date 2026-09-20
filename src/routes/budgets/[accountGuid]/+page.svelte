@@ -22,7 +22,6 @@
   import { accountNameMap } from '$lib/features/budgets/budget-utils';
   import { useBudgetYear } from '$lib/hooks/use-budget-year.svelte';
   import BookGate from '$lib/components/shared/book-gate.svelte';
-  import { setBreadcrumb } from '$lib/stores/breadcrumb.svelte';
 
   let accountGuid = $derived(page.params.accountGuid);
 
@@ -75,16 +74,6 @@
 
   // Account display name for years without a budget row (resolved via accounts).
   let accountNames = $derived(accountNameMap(accountsData?.trees));
-
-  $effect(() => {
-    // Track navigation explicitly so the crumb refreshes even when the
-    // payload is unchanged; title-bar falls back to the route title otherwise.
-    void page.url.pathname;
-    setBreadcrumb([
-      { name: 'Budgets', href: resolve('/budgets') },
-      { name: budget?.accountDescription ?? budget?.accountName ?? 'Budget' }
-    ]);
-  });
 
   let accountName = $derived(
     budget?.accountDescription ??
