@@ -98,7 +98,7 @@
       ? parseLocalDate(debouncedFilters.dateTo)
       : new Date(year, 11, 31);
     const end = new Date(lastDay.getFullYear(), lastDay.getMonth(), lastDay.getDate() + 1);
-    return { start, end, empty: start.getTime() >= lastDay.getTime() };
+    return { start, end, empty: start.getTime() > lastDay.getTime() };
   });
 
   // Intensity ramp from the accent chart color, tinted against the page

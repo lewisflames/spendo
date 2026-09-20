@@ -2,7 +2,7 @@
   import * as Card from '$lib/components/ui/card';
   import { Button } from '$lib/components/ui/button';
   import { Input } from '$lib/components/ui/input';
-  import { formatSessionCurrency as fmt, signColor } from '$lib/utils/format.svelte';
+  import { formatSessionCurrency as fmt, signColor, EMPTY_DASH } from '$lib/utils/format.svelte';
   import { plural } from '$lib/utils/format.svelte';
   import { todayStr } from '$lib/utils/date-utils.svelte';
 
@@ -39,6 +39,12 @@
     onSave: () => void;
     onFinish: () => void;
   } = $props();
+
+  // `difference` is NaN while the ending balance is empty or invalid; keep the
+  // color class off in that case so `signColor` never sees a non-finite value.
+  let differenceClass = $derived(
+    Number.isFinite(difference) ? (balanced ? 'text-success' : signColor(difference)) : ''
+  );
 </script>
 
 <Card.Root>
@@ -86,8 +92,8 @@
       </div>
       <div>
         <dt class="text-muted-foreground">Difference</dt>
-        <dd class="font-medium tabular-nums {balanced ? 'text-success' : signColor(difference)}">
-          {fmt(difference)}
+        <dd class="font-medium tabular-nums {differenceClass}">
+          {Number.isFinite(difference) ? fmt(difference) : EMPTY_DASH}
         </dd>
       </div>
     </dl>
