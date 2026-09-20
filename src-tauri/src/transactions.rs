@@ -127,6 +127,9 @@ pub struct TransactionDetail {
     pub notes: Option<String>,
     pub splits: Vec<SplitDetail>,
     pub total_amount: f64,
+    /// Number of attached receipts/documents. Cheap COUNT so the editor can
+    /// warn that deleting the transaction deletes them permanently.
+    pub attachment_count: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -714,6 +717,13 @@ fn fetch_transaction_inner(
 
     let guids = [base.guid.clone()];
     let (split_map, total_map) = fetch_splits_for_txns(conn, &guids)?;
+    let attachment_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM attachments WHERE tx_guid = ?1",
+            [&base.guid],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
 
     let transaction = TransactionDetail {
         guid: base.guid.clone(),
@@ -726,6 +736,7 @@ fn fetch_transaction_inner(
             .map(|v| v.iter().map(|d| d.to_detail()).collect())
             .unwrap_or_default(),
         total_amount: total_map.get(&base.guid).copied().unwrap_or(0.0),
+        attachment_count,
     };
 
     let prev_guid = neighbor_guid(conn, &base.post_date, &base.guid, true)?;

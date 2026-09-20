@@ -40,6 +40,7 @@
   import EmptyState from '$lib/components/shared/empty-state.svelte';
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import NavRow from '$lib/components/shared/nav-row.svelte';
+  import TransactionAttachments from '$lib/features/transactions/transaction-attachments.svelte';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import { openAccount, openTransaction } from '$lib/utils/navigation';
 
@@ -229,6 +230,11 @@
           </Table.Body>
         </TableShell>
       </DimWrapper>
+
+      <!-- Remount per transaction so the attachment list reloads on prev/next. -->
+      {#key d.guid}
+        <TransactionAttachments txGuid={d.guid} />
+      {/key}
     {:else if res.error}
       <ErrorCard message={res.error} onRetry={() => res.reload()} />
     {:else}

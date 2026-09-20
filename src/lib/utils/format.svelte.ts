@@ -188,6 +188,26 @@ export function formatInteger(n: number): string {
   return cachedNumberFormat(appSettings.value.locale, { maximumFractionDigits: 0 }).format(n);
 }
 
+/**
+ * Human-readable byte size in binary units, e.g. "512 B", "1.5 MB" (one
+ * decimal from KB up). Attachment lists only — never used for money.
+ */
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return EMPTY_DASH;
+  if (bytes < 1024) return `${formatInteger(bytes)} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let value = bytes;
+  let unit = -1;
+  do {
+    value /= 1024;
+    unit += 1;
+  } while (value >= 1024 && unit < units.length - 1);
+  const formatted = cachedNumberFormat(appSettings.value.locale, {
+    maximumFractionDigits: 1
+  }).format(value);
+  return `${formatted} ${units[unit]}`;
+}
+
 /** English pluralization for counts, e.g. `plural(3, 'account')` -> "3 accounts". */
 export function plural(n: number, word: string): string {
   return `${formatNumber(n)} ${n === 1 ? word : `${word}s`}`;

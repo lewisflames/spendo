@@ -148,6 +148,8 @@ export interface TransactionDetail {
   notes?: string | null;
   splits: SplitDetail[];
   totalAmount: number;
+  /** Attached receipts/documents; deleting the transaction deletes them for good. */
+  attachmentCount: number;
 }
 
 interface TransactionDetailResult {
@@ -488,6 +490,48 @@ export const fetchTransactionHeatmap = (filters?: Filters): Promise<HeatmapPoint
 /** `null` when no transaction with that GUID exists. */
 export const fetchTransaction = (guid: string): Promise<TransactionDetailResult | null> =>
   invoke<TransactionDetailResult | null>('fetch_transaction', { guid });
+
+// ── Attachments (receipts/documents stored inside the book) ──
+
+export interface AttachmentInfo {
+  guid: string;
+  filename: string;
+  mimeType: string;
+  byteSize: number;
+  createdAt: string;
+}
+
+/** Preview payload: bytes as a `data:` URL ready for an `<img src>`. */
+interface AttachmentData {
+  filename: string;
+  mimeType: string;
+  dataUrl: string;
+}
+
+interface AttachmentAddInput {
+  txGuid: string;
+  paths: string[];
+}
+
+export const fetchAttachments = (txGuid: string): Promise<AttachmentInfo[]> =>
+  invoke<AttachmentInfo[]>('fetch_attachments', { txGuid });
+
+/** One bad file fails the whole batch with its own message. */
+export const addAttachments = (input: AttachmentAddInput): Promise<AttachmentInfo[]> =>
+  invoke<AttachmentInfo[]>('add_attachments', { input });
+
+export const deleteAttachment = (guid: string): Promise<void> =>
+  invoke<void>('delete_attachment', { guid });
+
+export const fetchAttachmentData = (guid: string): Promise<AttachmentData> =>
+  invoke<AttachmentData>('fetch_attachment_data', { guid });
+
+export const exportAttachment = (guid: string, destPath: string): Promise<void> =>
+  invoke<void>('export_attachment', { guid, destPath });
+
+/** Writes to the app cache and opens the OS default app for the type. */
+export const openAttachment = (guid: string): Promise<void> =>
+  invoke<void>('open_attachment', { guid });
 
 // ── Recurring schedules (manual remind + post; in-app reminders only) ──
 

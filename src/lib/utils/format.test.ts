@@ -3,6 +3,7 @@ import {
   clampZero,
   EMPTY_DASH,
   fmtPct,
+  formatBytes,
   formatDateRange,
   formatRelativeTime,
   parseLocalDate,
@@ -47,6 +48,17 @@ describe('clampZero', () => {
   it('keeps real values', () => {
     expect(clampZero(0.005)).toBe(0.005);
     expect(clampZero(-3.5)).toBe(-3.5);
+  });
+});
+
+describe('formatBytes', () => {
+  it('formats binary units with a dash for invalid input', () => {
+    expect(formatBytes(0)).toBe('0 B');
+    expect(formatBytes(512)).toBe('512 B');
+    expect(formatBytes(1536)).toBe('1.5 KB');
+    expect(formatBytes(10 * 1024 * 1024)).toBe('10 MB');
+    expect(formatBytes(-1)).toBe(EMPTY_DASH);
+    expect(formatBytes(Number.NaN)).toBe(EMPTY_DASH);
   });
 });
 

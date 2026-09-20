@@ -1,6 +1,7 @@
 mod account_detail;
 mod accounts;
 mod accounts_mut;
+mod attachments;
 mod books;
 mod budgets;
 mod csv_import;
@@ -115,6 +116,12 @@ pub fn run() {
             transactions::create_transaction,
             transactions::update_transaction,
             transactions::delete_transaction,
+            attachments::fetch_attachments,
+            attachments::add_attachments,
+            attachments::delete_attachment,
+            attachments::fetch_attachment_data,
+            attachments::export_attachment,
+            attachments::open_attachment,
             reconcile::fetch_reconcile_info,
             reconcile::mark_reconcile_splits,
             reconcile::finish_reconciliation,
