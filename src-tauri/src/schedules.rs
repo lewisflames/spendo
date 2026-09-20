@@ -587,12 +587,7 @@ fn schedule_tx_label(template: &StoredTemplate, schedule_name: &str) -> String {
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .unwrap_or(schedule_name);
-    const MAX: usize = 80;
-    if base.len() > MAX {
-        format!("{}…", &base[..MAX])
-    } else {
-        base.to_string()
-    }
+    utils::truncate_chars(base, 80)
 }
 
 /// Materialize the due occurrence as a real transaction and advance the

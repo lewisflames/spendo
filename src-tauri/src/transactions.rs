@@ -309,14 +309,7 @@ pub(crate) fn validate_tx_body(conn: &Connection, input: &TxInput) -> Result<(),
 
 fn tx_label(input: &TxInput) -> String {
     match opt_text(&input.description) {
-        Some(d) => {
-            const MAX: usize = 80;
-            if d.len() > MAX {
-                format!("{}…", &d[..MAX])
-            } else {
-                d
-            }
-        }
+        Some(d) => utils::truncate_chars(&d, 80),
         None => "Manual transaction".to_string(),
     }
 }
@@ -996,10 +989,8 @@ fn delete_transaction_inner(conn: &Connection, guid: &str) -> Result<(), AppErro
             let t = d.trim();
             if t.is_empty() {
                 "Delete manual transaction".to_string()
-            } else if t.len() > 80 {
-                format!("Delete {}", &t[..80])
             } else {
-                format!("Delete {t}")
+                format!("Delete {}", utils::truncate_chars(t, 80))
             }
         })
         .unwrap_or_else(|| "Delete manual transaction".to_string());
@@ -1212,6 +1203,20 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn tx_label_truncates_multibyte_descriptions_safely() {
+        // Regression: `&s[..80]` used to panic (process abort in release) when
+        // byte 80 landed inside a multibyte character.
+        let mut input = balanced_input();
+        input.description = Some("漢".repeat(27));
+        let label = tx_label(&input);
+        assert_eq!(label, format!("{}…", "漢".repeat(26)));
+        // Descriptions at or under the cap pass through untouched.
+        let mut short = balanced_input();
+        short.description = Some("é".repeat(40));
+        assert_eq!(tx_label(&short), "é".repeat(40));
     }
 
     #[test]
