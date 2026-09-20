@@ -383,7 +383,10 @@ fn fetch_splits_for_txns(conn: &Connection, guids: &[String]) -> Result<SplitMap
              JOIN commodities c ON c.guid = a.commodity_guid
              JOIN transactions t ON t.guid = s.tx_guid
              WHERE s.tx_guid IN ({})
-             ORDER BY s.tx_guid, ABS(s.value_num) DESC",
+             ORDER BY s.tx_guid,
+                      ABS(CAST(s.value_num AS REAL) / CAST(s.value_denom AS REAL)) DESC,
+                      signed_amount ASC,
+                      s.guid ASC",
             utils::RAW_AMOUNT,
             utils::signed_amount_expr(utils::RAW_AMOUNT, "a.account_type"),
             utils::QUANTITY_AMOUNT,
@@ -421,9 +424,10 @@ fn fetch_splits_for_txns(conn: &Connection, guids: &[String]) -> Result<SplitMap
             .map_err(|e| e.to_string())?;
 
         for (tx_guid, split, signed_amount, post_date) in rows {
-            // Sorted by |raw amount| desc, so the first split per transaction is
-            // its largest-magnitude one. Its signed value is the transaction
-            // total, converted to the report currency at the transaction date's FX.
+            // Sorted by rational magnitude desc, then signed asc (outflow leg
+            // first), so the first split per transaction is deterministic: its
+            // signed value is the transaction total, converted to the report
+            // currency at the transaction date's FX.
             totals.entry(tx_guid.clone()).or_insert_with(|| {
                 let fx_at = fx_history.map_for_date(&post_date);
                 let currency = split.commodity.as_deref().unwrap_or(&report_currency);
@@ -1227,6 +1231,25 @@ mod tests {
         // not UTC, or users east of UTC cannot enter today's transactions.
         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
         assert_eq!(validate_post_date(&today).unwrap(), today);
+    }
+
+    /// Regression: the total used an unstable `ABS(value_num)` tie-break, so a
+    /// balanced purchase could total +42.10 (income-colored) depending on the
+    /// order its splits were inserted.
+    #[test]
+    fn transaction_total_is_deterministic_for_balanced_splits() {
+        let conn = setup_two_accounts();
+
+        let guid = create_transaction_inner(&conn, balanced_input()).unwrap();
+        let detail = fetch_transaction_inner(&conn, &guid).unwrap().unwrap();
+        assert!((detail.transaction.total_amount + 42.10).abs() < 1e-6);
+
+        // Same transaction, splits inserted in reverse order: same total sign.
+        let mut reversed = balanced_input();
+        reversed.splits.reverse();
+        let guid2 = create_transaction_inner(&conn, reversed).unwrap();
+        let detail2 = fetch_transaction_inner(&conn, &guid2).unwrap().unwrap();
+        assert!((detail2.transaction.total_amount + 42.10).abs() < 1e-6);
     }
 
     #[test]
