@@ -1,4 +1,18 @@
-import { invoke } from '@tauri-apps/api/core';
+import { invoke as tauriInvoke, isTauri } from '@tauri-apps/api/core';
+
+/**
+ * Dev-only fixture backend: when `bun run dev` is opened in a plain browser
+ * (no Tauri runtime) calls resolve against `$lib/dev/mock-invoke.ts` so
+ * frontend/UI work doesn't need the desktop shell. `import.meta.env.DEV` is a
+ * build-time constant, so the mock and its fixtures are dropped from production
+ * bundles.
+ */
+const invoke = <T>(cmd: string, args?: Record<string, unknown>): Promise<T> => {
+  if (import.meta.env.DEV && !isTauri()) {
+    return import('./dev/mock-invoke').then((mock) => mock.mockInvoke<T>(cmd, args));
+  }
+  return tauriInvoke<T>(cmd, args);
+};
 
 interface HomeDataResult {
   hasData: boolean;
@@ -1038,3 +1052,79 @@ interface GlobalSearchResult {
 
 export const searchGlobal = (query: string, limitPerGroup?: number): Promise<GlobalSearchResult> =>
   invoke<GlobalSearchResult>('search_global', { query, limitPerGroup: limitPerGroup ?? null });
+
+/**
+ * Payload types of every backend command, grouped for the dev fixture backend
+ * (`$lib/dev/mock-invoke.ts`). Keeping them in one map avoids exporting each
+ * private leaf type individually.
+ */
+export type MockPayloads = {
+  add_attachments: AttachmentInfo[];
+  clear_app_db: void;
+  close_book: EmptyBookResult;
+  create_account: string;
+  create_book_at: EmptyBookResult;
+  create_schedule: Schedule;
+  create_transaction: string;
+  csv_commit: CsvCommitResult;
+  csv_detect: CsvDetectResult;
+  csv_preview: CsvPreviewResult;
+  delete_account: void;
+  delete_attachment: void;
+  delete_budget_year: void;
+  delete_schedule: void;
+  delete_symbol_override: void;
+  delete_transaction: void;
+  export_attachment: void;
+  fetch_account_balance_trend: AccountBalancePoint[];
+  fetch_account_detail: AccountDetailResult;
+  fetch_accounts: AccountsResult;
+  fetch_active_book: ActiveBook;
+  fetch_attachment_data: AttachmentData;
+  fetch_attachments: AttachmentInfo[];
+  fetch_book_currencies: BookCurrency[];
+  fetch_budget_date_range: BudgetDateRange;
+  fetch_budget_detail: BudgetDetail;
+  fetch_budget_vs_actual: BudgetActualRow[];
+  fetch_budget_years: number[];
+  fetch_change_history: ChangeHistory;
+  fetch_export_accounts: ExportAccountRow[];
+  fetch_export_transactions: ExportSplitRow[];
+  fetch_holding_detail: HoldingDetail;
+  fetch_home_data: HomeDataResult;
+  fetch_nav_badges: NavBadges;
+  fetch_nav_roots: NavRoot[];
+  fetch_pnl_report: ProfitLossReport;
+  fetch_pnl_trend: PnlTrendPoint[];
+  fetch_portfolio_data: PortfolioData;
+  fetch_reconcile_info: ReconcileInfo;
+  fetch_schedule: Schedule;
+  fetch_schedules: Schedule[];
+  fetch_symbol_overrides: SymbolOverride[];
+  fetch_transaction: TransactionDetailResult | null;
+  fetch_transaction_heatmap: HeatmapPoint[];
+  fetch_transactions: TransactionsResult;
+  finish_reconciliation: FinishReconcileResult;
+  get_book_settings: BookSettings;
+  import_gnucash: ImportResult;
+  mark_reconcile_splits: MarkReconcileResult;
+  open_attachment: void;
+  open_book: EmptyBookResult;
+  post_schedule_occurrence: string;
+  redo_history_entry: DataSummary;
+  refresh_prices: PricesResult;
+  reimport_last: ImportResult;
+  save_book_as: EmptyBookResult;
+  search_global: GlobalSearchResult;
+  set_base_currency: EmptyBookResult;
+  set_book_setting: BookSettings;
+  set_budget_year_amount: Budget;
+  set_schedule_active: Schedule;
+  set_symbol_override: SymbolOverride;
+  skip_schedule_occurrence: string | null;
+  undo_history_entry: DataSummary;
+  update_account: void;
+  update_schedule: Schedule;
+  update_transaction: void;
+  write_text_file: void;
+};
