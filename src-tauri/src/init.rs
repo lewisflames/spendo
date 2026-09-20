@@ -8,9 +8,8 @@ use crate::utils;
 
 /// Canonical root accounts every book gets: (display name, category). The
 /// sidebar's ACCOUNTS group resolves one top-level account per category, and
-/// these rows are app-managed: they are never history-recorded and import
-/// protects them from the orphan sweep when the source book has no account of
-/// that category (see `import.rs`).
+/// these rows are app-managed: import protects them from the orphan sweep when
+/// the source book has no account of that category (see `import.rs`).
 pub(crate) const DEFAULT_ROOTS: [(&str, &str); 5] = [
     ("Assets", "ASSET"),
     ("Liabilities", "LIABILITY"),

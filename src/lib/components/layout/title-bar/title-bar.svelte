@@ -1,21 +1,18 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
-  import { ArrowLeft, ArrowRight, History, House } from '@lucide/svelte';
+  import { ArrowLeft, ArrowRight, House } from '@lucide/svelte';
   import { Button } from '$lib/components/ui/button';
   import { SidebarTrigger } from '$lib/components/ui/sidebar/index.js';
   import { goBack, goForward, navHistory } from '$lib/stores/nav-history.svelte';
-  import { historySidebar, toggleHistorySidebar } from '$lib/stores/ui.svelte';
   import { useWindowDrag } from '$lib/hooks/use-window-drag.svelte';
   import CommandPalette from './command-palette.svelte';
   import WindowControls from './window-controls.svelte';
 
   let {
     showSidebarTrigger = true,
-    showHistoryToggle = true,
     showHome = true
   }: {
     showSidebarTrigger?: boolean;
-    showHistoryToggle?: boolean;
     showHome?: boolean;
   } = $props();
 
@@ -84,23 +81,6 @@
 
   <div class="flex h-full min-w-0 flex-1 items-center justify-center px-3">
     <CommandPalette />
-  </div>
-
-  <div class="flex h-full shrink-0 items-center px-1">
-    {#if showHistoryToggle}
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        class="text-muted-foreground"
-        aria-label="Toggle changes history"
-        aria-controls="changes-history-panel"
-        aria-expanded={historySidebar.value}
-        title="Toggle changes history (Ctrl+H)"
-        onclick={toggleHistorySidebar}
-      >
-        <History class="size-4" />
-      </Button>
-    {/if}
   </div>
 
   <WindowControls />

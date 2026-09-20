@@ -178,8 +178,8 @@
     saving = true;
     try {
       await markReconcileSplits(g, updates);
-      // Saving progress logs a change without moving the summary counters;
-      // refresh the session so the history panel (and Ctrl+Z head) updates.
+      // Saving progress doesn't move the summary counters; refresh the session
+      // so nav roots and badges pick up any changes.
       refreshSession();
       toast.success('Progress saved');
       res.reload();

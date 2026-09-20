@@ -118,10 +118,6 @@ describe('mockInvoke', () => {
     );
     expect(created.transaction.description).toBe('Mock smoke test');
 
-    const history = await mockInvoke<{ entries: { id: number }[]; undoableId: number | null }>(
-      'fetch_change_history'
-    );
-    expect(history.undoableId).not.toBeNull();
     await mockInvoke('delete_transaction', { guid });
     const reverted = await mockInvoke<{ summary: { totalTransactions: number } }>(
       'fetch_home_data'

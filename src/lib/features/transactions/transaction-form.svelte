@@ -113,7 +113,7 @@
   let balance = $derived(splitBalance(splits));
   let balanced = $derived(isBalanced(balance));
 
-  // Receipts live outside the undo history, so deleting them is permanent.
+  // Receipts are deleted permanently with their transaction.
   let attachmentCount = $derived(initial?.attachmentCount ?? 0);
 
   let canSave = $derived(
@@ -247,10 +247,9 @@
       role="alert"
       class="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
     >
-      Delete this transaction? Its splits will be removed. This can be undone from the changes
-      history panel (newest-first).
+      Delete this transaction? Its splits will be removed permanently.
       {#if attachmentCount > 0}
-        Its {plural(attachmentCount, 'attachment')} are deleted permanently and are not restored by undo.
+        Its {plural(attachmentCount, 'attachment')} are deleted permanently too.
       {/if}
     </p>
   {/if}

@@ -8,7 +8,6 @@ mod csv_import;
 mod db;
 mod export;
 mod fx;
-mod history;
 mod home;
 mod import;
 mod import_rules;
@@ -105,11 +104,6 @@ pub fn run() {
             import_rules::create_import_rule,
             import_rules::update_import_rule,
             import_rules::delete_import_rule,
-            history::fetch_change_history,
-            history::fetch_change_entry,
-            history::clear_change_history,
-            history::undo_history_entry,
-            history::redo_history_entry,
             accounts::fetch_accounts,
             accounts::fetch_nav_roots,
             accounts::fetch_book_currencies,

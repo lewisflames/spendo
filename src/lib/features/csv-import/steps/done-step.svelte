@@ -28,8 +28,7 @@
       Created {plural(commitResult.created, 'transaction')} · skipped {plural(
         commitResult.skippedDuplicates,
         'duplicate'
-      )} · skipped {plural(commitResult.skippedErrors, 'error')}. Revert from the changes history
-      panel if needed.
+      )} · skipped {plural(commitResult.skippedErrors, 'error')}.
     </p>
     <div class="flex flex-wrap gap-2">
       <Button href={resolve('/transactions')}>

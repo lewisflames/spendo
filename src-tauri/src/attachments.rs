@@ -9,8 +9,7 @@ use crate::utils;
 
 /// Receipts/documents attached to a transaction. Bytes live in the `.spendo`
 /// book (see the `attachments` table comment in `db.rs`) so the file stays
-/// portable; changes are deliberately outside the undo/redo history — deleting
-/// a transaction removes its attachments permanently.
+/// portable; deleting a transaction removes its attachments permanently.
 pub const MAX_ATTACHMENT_BYTES: u64 = 10 * 1024 * 1024;
 pub const MAX_ATTACHMENTS_PER_TX: usize = 20;
 

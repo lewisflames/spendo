@@ -29,7 +29,7 @@ const CSV_FILTER = { name: 'CSV', extensions: ['csv'] };
 
 /**
  * Single frontend path for every book-scoped data transfer (sidebar book menu,
- * command palette, history panel). A module-level flag serializes the native
+ * command palette). A module-level flag serializes the native
  * dialogs; menu items don't render disabled state, so re-entry simply no-ops.
  */
 let busy = false;
@@ -51,16 +51,6 @@ async function openPreview(path: string, filename: string): Promise<boolean> {
   }
 }
 
-/** Re-run a remembered path; when it moved, let the user locate the file. */
-async function previewOrLocate(path: string, filename: string): Promise<boolean> {
-  try {
-    return await openPreview(path, filename);
-  } catch (e: unknown) {
-    toast.warning(errMsg(e, 'Source file not found — pick it again'));
-    return importGnucashViaDialog();
-  }
-}
-
 /** Pick a `.gnucash` file, preview it and open the confirmation dialog. */
 export async function importGnucashViaDialog(): Promise<boolean> {
   if (busy || !dbSession.value) return false;
@@ -78,12 +68,6 @@ export async function importGnucashViaDialog(): Promise<boolean> {
     toast.error(errMsg(e, 'Import preview failed'));
     return false;
   }
-}
-
-/** Preview a specific source (history "Re-run import"). */
-export async function reimportGnucashPath(path: string, filename: string): Promise<boolean> {
-  if (busy || !dbSession.value) return false;
-  return previewOrLocate(path, filename);
 }
 
 /** Runs the merge for the pending preview once the user confirms. */
