@@ -203,12 +203,12 @@
         {#if d.holdings.length > 0}
           <!-- KPI summary cards -->
           <div class="grid grid-cols-1 gap-6 sm:grid-cols-3">
-            <KpiCard title="Market Value" value={fmt(d.totalMarketValue)} valueClass="text-success">
+            <KpiCard title="Market Value" value={fmt(d.totalMarketValue)}>
               {#snippet icon()}
-                <TrendingUp aria-hidden="true" class="size-4 text-success" />
+                <TrendingUp aria-hidden="true" class="size-4 text-muted-foreground" />
               {/snippet}
             </KpiCard>
-            <KpiCard title="Cost Basis" value={fmt(d.totalCostBasis)} valueClass="text-warning">
+            <KpiCard title="Cost Basis" value={fmt(d.totalCostBasis)}>
               {#snippet icon()}
                 <Briefcase aria-hidden="true" class="size-4 text-muted-foreground" />
               {/snippet}

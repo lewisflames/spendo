@@ -45,7 +45,7 @@
   } from '$lib/utils/format.svelte';
   import NavRow from '$lib/components/shared/nav-row.svelte';
   import { openBudget } from '$lib/utils/navigation';
-  import { Plus, SearchX } from '@lucide/svelte';
+  import { PiggyBank, Plus, SearchX } from '@lucide/svelte';
   import { Button } from '$lib/components/ui/button';
   import type { BudgetActualRow } from '$lib/tauri';
   import type { ColumnVisibility } from '$lib/hooks/use-column-visibility.svelte';
@@ -58,7 +58,8 @@
     currency,
     year,
     cols,
-    onAddClick
+    onAddClick,
+    onClearSearch
   }: {
     rows: BudgetActualRow[] | null;
     hasBudgets: boolean;
@@ -66,6 +67,7 @@
     year: number;
     cols: ColumnVisibility<BudgetColumnId>;
     onAddClick?: () => void;
+    onClearSearch?: () => void;
   } = $props();
 
   let skeletonCols = $derived(cols.visibleColumns.length + 1);
@@ -84,14 +86,17 @@
 {:else if !hasBudgets}
   <EmptyState
     card
-    title="No budgets for {year} yet"
+    title="No budgets for {year}"
     description="Set a yearly spending target to get started. Years without a budget stay empty."
   >
+    {#snippet icon()}
+      <PiggyBank aria-hidden="true" class="text-muted-foreground" />
+    {/snippet}
     {#snippet action()}
       {#if onAddClick}
         <Button onclick={onAddClick}>
-          <Plus aria-hidden="true" />
-          Add Budget
+          <Plus aria-hidden="true" class="size-4" />
+          New budget
         </Button>
       {/if}
     {/snippet}
@@ -100,6 +105,11 @@
   <EmptyState card title="No matching budgets" description="Try adjusting your search.">
     {#snippet icon()}
       <SearchX aria-hidden="true" class="text-muted-foreground" />
+    {/snippet}
+    {#snippet action()}
+      {#if onClearSearch}
+        <Button variant="outline" onclick={onClearSearch}>Clear filters</Button>
+      {/if}
     {/snippet}
   </EmptyState>
 {:else}

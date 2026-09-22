@@ -10,7 +10,8 @@
   import NavRow from '$lib/components/shared/nav-row.svelte';
   import { ColumnsMenu } from '$lib/components/shared/columns-menu';
   import { SearchInput } from '$lib/components/shared/search-input';
-  import { TrendingUp } from '@lucide/svelte';
+  import { Button } from '$lib/components/ui/button';
+  import { TrendingUp, X } from '@lucide/svelte';
   import type { PortfolioHolding } from '$lib/tauri';
   import { STALE_PRICE_DAYS, priceStaleDays } from './price-utils';
   import { openHolding } from '$lib/utils/navigation';
@@ -213,15 +214,29 @@
 {:else}
   <!-- One wrapper so the page-level flex gap doesn't open up between toolbar and table. -->
   <div class="flex flex-col gap-4">
-    <div class="flex items-center justify-between gap-2">
+    <div class="flex flex-wrap items-end gap-2">
       <SearchInput
         id="holdings-search"
         label="Search holdings"
         placeholder="Search name or ticker…"
         bind:value={searchInput}
-        class="w-60"
+        class="grow basis-48"
       />
-      <ColumnsMenu columns={COLUMNS} {cols} onHide={handleHideColumn} />
+      {#if search.value}
+        <Button
+          variant="ghost"
+          onclick={() => {
+            searchInput = '';
+            search.set('');
+          }}
+        >
+          <X aria-hidden="true" class="mr-1 size-3" />
+          Clear
+        </Button>
+      {/if}
+      <div class="ml-auto">
+        <ColumnsMenu columns={COLUMNS} {cols} onHide={handleHideColumn} />
+      </div>
     </div>
     <TableShell>
       <Table.Header>
@@ -249,7 +264,19 @@
         {#if filteredHoldings.length === 0}
           <Table.Row>
             <Table.Cell class="h-24 text-center text-muted-foreground" colspan={skeletonCols}>
-              No holdings match “{searchInput.trim()}”.
+              <div class="flex flex-col items-center gap-2">
+                <span>No holdings match “{searchInput.trim()}”.</span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onclick={() => {
+                    searchInput = '';
+                    search.set('');
+                  }}
+                >
+                  Clear filters
+                </Button>
+              </div>
             </Table.Cell>
           </Table.Row>
         {:else}

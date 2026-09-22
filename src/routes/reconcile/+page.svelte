@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Scale } from '@lucide/svelte';
+  import { Scale, X } from '@lucide/svelte';
   import { dbSession } from '$lib/stores/db.svelte';
   import { fetchAccounts } from '$lib/tauri';
   import { plural } from '$lib/utils/format.svelte';
@@ -67,13 +67,26 @@
       {/snippet}
     </PageHeader>
 
-    <div class="max-w-md">
+    <div class="flex flex-wrap items-end gap-2">
       <SearchInput
         id="reconcile-account-search"
         label="Filter accounts"
         placeholder="Filter accounts…"
         bind:value={searchInput}
+        class="grow basis-48"
       />
+      {#if search.value}
+        <Button
+          variant="ghost"
+          onclick={() => {
+            searchInput = '';
+            search.set('');
+          }}
+        >
+          <X aria-hidden="true" class="mr-1 size-3" />
+          Clear
+        </Button>
+      {/if}
     </div>
 
     {#if res.loading && !res.data}
@@ -102,7 +115,7 @@
                   search.set('');
                 }}
               >
-                Clear search
+                Clear filters
               </Button>
             {/if}
           {/snippet}
