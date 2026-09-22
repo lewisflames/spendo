@@ -8,7 +8,7 @@
   import { fetchBudgetDetail, fetchBudgetDateRange, fetchAccounts } from '$lib/tauri';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import { useUrlParams, yearParam } from '$lib/hooks/use-url-params.svelte';
-  import { ArrowLeft, Pencil } from '@lucide/svelte';
+  import { ArrowLeft, Pencil, PiggyBank, Plus } from '@lucide/svelte';
   import { toast } from '$lib/components/ui/sonner';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
@@ -63,6 +63,12 @@
   );
   let dateRange = $derived(res.data?.range ?? null);
   let accountsData = $derived(res.data?.accounts ?? null);
+
+  // A missing budget row surfaces as a backend error ("No budget for this
+  // year" in Rust, "[mock] No budget for …" in the dev mock). Treat that as
+  // an empty state so a year without a target shows the consistent
+  // EmptyState instead of an ErrorCard; genuine failures still use ErrorCard.
+  let isMissing = $derived(detail === null && !!res.error && /No budget for/.test(res.error));
   let formError = $state<string | null>(null);
 
   let showEditDialog = $state(false);
@@ -143,18 +149,24 @@
       </DimWrapper>
     {:else if res.loading}
       <PageSkeleton variant="budget-detail" />
-    {:else if res.error && detail === null}
-      <ErrorCard message={res.error} onRetry={() => res.reload()} />
-    {:else if detail === null && !res.error}
+    {:else if isMissing || (detail === null && !res.error)}
       <EmptyState
         card
         title="No budget for {by.year}"
         description="This account has no budget for the selected year. Years without a budget stay empty."
       >
+        {#snippet icon()}
+          <PiggyBank aria-hidden="true" class="text-muted-foreground" />
+        {/snippet}
         {#snippet action()}
-          <Button onclick={() => (showEditDialog = true)}>Set budget</Button>
+          <Button onclick={() => (showEditDialog = true)}>
+            <Plus aria-hidden="true" class="size-4" />
+            Set budget
+          </Button>
         {/snippet}
       </EmptyState>
+    {:else if res.error}
+      <ErrorCard message={res.error} onRetry={() => res.reload()} />
     {:else}
       <!-- Year-mismatch window before the refetch starts; same placeholder. -->
       <PageSkeleton variant="budget-detail" />
