@@ -243,7 +243,7 @@
       {/snippet}
       {#snippet action()}
         <Button variant="outline" href={resolve('/portfolio')}>
-          <ArrowLeft aria-hidden="true" class="size-3" />
+          <ArrowLeft aria-hidden="true" class="size-4" />
           Back to portfolio
         </Button>
       {/snippet}

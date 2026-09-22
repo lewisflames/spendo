@@ -35,7 +35,7 @@
 
 {#if preview}
   <Dialog.Root bind:open={gnucashImportDialog.open}>
-    <Dialog.Content class="sm:max-w-lg">
+    <Dialog.Content class="max-h-[90vh] overflow-y-auto sm:max-w-lg">
       <Dialog.Header>
         <Dialog.Title>Import {preview.filename}?</Dialog.Title>
         <Dialog.Description>This merges the file into the active book.</Dialog.Description>

@@ -171,16 +171,16 @@
         {#if dbSession.value}
           {#if guid && res.data && isReconcilable(res.data.account.accountType, res.data.account.placeholder)}
             <Button variant="outline" href={resolve('/reconcile/[guid]', { guid })}>
-              <CircleCheck aria-hidden="true" class="size-3" />
+              <CircleCheck aria-hidden="true" class="size-4" />
               Reconcile
             </Button>
           {/if}
-          <Button variant="outline" onclick={() => (createOpen = true)}>
-            <Plus aria-hidden="true" class="size-3" />
+          <Button onclick={() => (createOpen = true)}>
+            <Plus aria-hidden="true" class="size-4" />
             Sub-account
           </Button>
           <Button variant="outline" onclick={() => (editOpen = true)}>
-            <Pencil aria-hidden="true" class="size-3" />
+            <Pencil aria-hidden="true" class="size-4" />
             Edit
           </Button>
         {/if}

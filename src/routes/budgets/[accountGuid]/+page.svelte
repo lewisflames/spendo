@@ -109,28 +109,26 @@
 <BookGate title="Budget">
   <div class="flex flex-col gap-6">
     <PageHeader title={accountName} description={headerDescription}>
-      <div class="flex flex-wrap items-center gap-2">
-        <Button variant="outline" href={resolve('/budgets')}>
-          <ArrowLeft aria-hidden="true" class="size-4" />
-          Budgets
-        </Button>
-        <BudgetYearStepper
-          bind:yearSel={by.yearSel}
-          yearOptions={by.yearOptions}
-          atMin={by.atMin}
-          atMax={by.atMax}
-          onPrev={() => by.shiftYear(-1)}
-          onNext={() => by.shiftYear(1)}
-        />
-        <Button
-          variant="outline"
-          onclick={() => (showEditDialog = true)}
-          disabled={detail === null && res.loading}
-        >
-          <Pencil aria-hidden="true" />
-          {detail ? 'Edit budget' : 'Set budget'}
-        </Button>
-      </div>
+      <Button variant="outline" href={resolve('/budgets')}>
+        <ArrowLeft aria-hidden="true" class="size-4" />
+        Budgets
+      </Button>
+      <BudgetYearStepper
+        bind:yearSel={by.yearSel}
+        yearOptions={by.yearOptions}
+        atMin={by.atMin}
+        atMax={by.atMax}
+        onPrev={() => by.shiftYear(-1)}
+        onNext={() => by.shiftYear(1)}
+      />
+      <Button
+        variant="outline"
+        onclick={() => (showEditDialog = true)}
+        disabled={detail === null && res.loading}
+      >
+        <Pencil aria-hidden="true" />
+        {detail ? 'Edit budget' : 'Set budget'}
+      </Button>
     </PageHeader>
 
     {#if formError}

@@ -25,9 +25,9 @@
 
 <!-- KPI summary cards -->
 <div class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
-  <KpiCard title="Market Value" valueClass="text-success">
+  <KpiCard title="Market Value">
     {#snippet icon()}
-      <TrendingUp aria-hidden="true" class="size-4 text-success" />
+      <TrendingUp aria-hidden="true" class="size-4 text-muted-foreground" />
     {/snippet}
     {#snippet value()}
       {fmt(h.marketValue)}

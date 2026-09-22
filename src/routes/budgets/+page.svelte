@@ -121,18 +121,14 @@
 <BookGate title="Budgets" description="Yearly spending targets">
   <div class="flex flex-col gap-6">
     <PageHeader title="Budgets" description="Yearly spending targets · carryover always applied">
-      <div class="flex flex-wrap items-center gap-2">
-        <div class="flex items-center gap-2">
-          <BudgetYearStepper
-            bind:yearSel={by.yearSel}
-            yearOptions={by.yearOptions}
-            atMin={by.atMin}
-            atMax={by.atMax}
-            onPrev={() => by.shiftYear(-1)}
-            onNext={() => by.shiftYear(1)}
-          />
-        </div>
-      </div>
+      <BudgetYearStepper
+        bind:yearSel={by.yearSel}
+        yearOptions={by.yearOptions}
+        atMin={by.atMin}
+        atMax={by.atMax}
+        onPrev={() => by.shiftYear(-1)}
+        onNext={() => by.shiftYear(1)}
+      />
     </PageHeader>
 
     {#if formError}
@@ -147,9 +143,9 @@
       <KpiCardRow />
     {:else if rows !== null}
       <DimWrapper active={yearLoading} class="grid grid-cols-1 gap-6 sm:grid-cols-3">
-        <KpiCard title="Effective budget" value={fmt(totalEffective)} valueClass="text-chart-1">
+        <KpiCard title="Effective budget" value={fmt(totalEffective)}>
           {#snippet icon()}
-            <Wallet aria-hidden="true" class="size-4 text-chart-1" />
+            <Wallet aria-hidden="true" class="size-4 text-muted-foreground" />
           {/snippet}
         </KpiCard>
         <KpiCard

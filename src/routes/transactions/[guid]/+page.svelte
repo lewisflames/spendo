@@ -105,42 +105,40 @@
         {#snippet description()}
           {d.notes ?? EMPTY_DASH}{#if d.num}&nbsp;&middot; #{d.num}{/if}
         {/snippet}
-        <div class="flex items-center gap-2">
-          <div class="flex items-center gap-1">
-            <Button
-              variant="outline"
-              size="icon"
-              disabled={!prevGuid || res.loading}
-              aria-label="Previous transaction"
-              title="Previous transaction"
-              onclick={() => {
-                if (prevGuid) void openTransaction(prevGuid);
-              }}
-            >
-              <ArrowLeft aria-hidden="true" />
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              disabled={!nextGuid || res.loading}
-              aria-label="Next transaction"
-              title="Next transaction"
-              onclick={() => {
-                if (nextGuid) void openTransaction(nextGuid);
-              }}
-            >
-              <ArrowRight aria-hidden="true" />
-            </Button>
-          </div>
-          <Button variant="outline" onclick={copyGuid}>
-            <Copy aria-hidden="true" class="size-3" />
-            Copy GUID
+        <div class="flex items-center gap-1">
+          <Button
+            variant="outline"
+            size="icon"
+            disabled={!prevGuid || res.loading}
+            aria-label="Previous transaction"
+            title="Previous transaction"
+            onclick={() => {
+              if (prevGuid) void openTransaction(prevGuid);
+            }}
+          >
+            <ArrowLeft aria-hidden="true" />
           </Button>
-          <Button href={resolve('/transactions/[guid]/edit', { guid: d.guid })}>
-            <Pencil aria-hidden="true" class="size-3" />
-            Edit
+          <Button
+            variant="outline"
+            size="icon"
+            disabled={!nextGuid || res.loading}
+            aria-label="Next transaction"
+            title="Next transaction"
+            onclick={() => {
+              if (nextGuid) void openTransaction(nextGuid);
+            }}
+          >
+            <ArrowRight aria-hidden="true" />
           </Button>
         </div>
+        <Button variant="outline" onclick={copyGuid}>
+          <Copy aria-hidden="true" class="size-4" />
+          Copy GUID
+        </Button>
+        <Button href={resolve('/transactions/[guid]/edit', { guid: d.guid })}>
+          <Pencil aria-hidden="true" class="size-4" />
+          Edit
+        </Button>
       </PageHeader>
 
       <div class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
@@ -237,7 +235,7 @@
         {/snippet}
         {#snippet action()}
           <Button variant="outline" href={resolve('/transactions')}>
-            <ArrowLeft aria-hidden="true" class="size-3" />
+            <ArrowLeft aria-hidden="true" class="size-4" />
             Back to transactions
           </Button>
         {/snippet}

@@ -146,29 +146,28 @@
   <div class="flex flex-col gap-6">
     <PageHeader title="Portfolio" description={headerDescription}>
       {#if dbSession.value}
-        <div class="flex items-center gap-2">
-          <Button
-            variant="outline"
-            onclick={() => (targetsOpen = true)}
-            disabled={!canEditTargets}
-            title={eligibleHoldings.length === 0
-              ? 'No priced investment holdings to rebalance'
-              : undefined}
-          >
-            <Pencil aria-hidden="true" class="size-3.5" />
-            Edit targets
-          </Button>
-          <Button
-            onclick={() => void priceRefresh.refresh()}
-            disabled={res.loading || priceRefresh.refreshing}
-          >
-            <RefreshCw
-              aria-hidden="true"
-              class="size-3.5 {priceRefresh.refreshing ? 'animate-spin' : ''}"
-            />
-            {priceRefresh.refreshing ? 'Refreshing...' : 'Refresh Prices'}
-          </Button>
-        </div>
+        <Button
+          variant="outline"
+          onclick={() => (targetsOpen = true)}
+          disabled={!canEditTargets}
+          title={eligibleHoldings.length === 0
+            ? 'No priced investment holdings to rebalance'
+            : undefined}
+        >
+          <Pencil aria-hidden="true" class="size-4" />
+          Edit targets
+        </Button>
+        <Button
+          variant="outline"
+          onclick={() => void priceRefresh.refresh()}
+          disabled={res.loading || priceRefresh.refreshing}
+        >
+          <RefreshCw
+            aria-hidden="true"
+            class="size-4 {priceRefresh.refreshing ? 'animate-spin' : ''}"
+          />
+          {priceRefresh.refreshing ? 'Refreshing...' : 'Refresh Prices'}
+        </Button>
       {/if}
     </PageHeader>
 

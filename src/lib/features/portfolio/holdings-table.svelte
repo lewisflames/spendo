@@ -11,7 +11,7 @@
   import { ColumnsMenu } from '$lib/components/shared/columns-menu';
   import { SearchInput } from '$lib/components/shared/search-input';
   import { Button } from '$lib/components/ui/button';
-  import { TrendingUp, X } from '@lucide/svelte';
+  import { TrendingUp, SearchX, X } from '@lucide/svelte';
   import type { PortfolioHolding } from '$lib/tauri';
   import { STALE_PRICE_DAYS, priceStaleDays } from './price-utils';
   import { openHolding } from '$lib/utils/navigation';
@@ -206,9 +206,16 @@
     <TableSkeleton cols={skeletonCols} rows={4} />
   </div>
 {:else if holdings.length === 0}
-  <EmptyState card title="No holdings" description="No securities found in this book.">
+  <EmptyState
+    card
+    title="No holdings"
+    description="Securities appear here once your book holds investments — for example after a GnuCash import."
+  >
     {#snippet icon()}
       <TrendingUp aria-hidden="true" class="text-muted-foreground" />
+    {/snippet}
+    {#snippet action()}
+      <Button variant="outline" href={resolve('/accounts')}>Go to accounts</Button>
     {/snippet}
   </EmptyState>
 {:else}
@@ -238,48 +245,47 @@
         <ColumnsMenu columns={COLUMNS} {cols} onHide={handleHideColumn} />
       </div>
     </div>
-    <TableShell>
-      <Table.Header>
-        <Table.Row class="bg-muted/75">
-          <SortHead
-            label="Holding"
-            active={sortBy === 'name'}
-            dir={sortDir}
-            onclick={() => sort.toggle('name')}
-          />
-          {#each COLUMNS as col (col.id)}
-            {#if cols.isVisible(col.id)}
-              <SortHead
-                label={col.label}
-                active={sortBy === col.id}
-                dir={sortDir}
-                onclick={() => sort.toggle(col.id)}
-                class="text-right"
-              />
-            {/if}
-          {/each}
-        </Table.Row>
-      </Table.Header>
-      <Table.Body>
-        {#if filteredHoldings.length === 0}
-          <Table.Row>
-            <Table.Cell class="h-24 text-center text-muted-foreground" colspan={skeletonCols}>
-              <div class="flex flex-col items-center gap-2">
-                <span>No holdings match “{searchInput.trim()}”.</span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onclick={() => {
-                    searchInput = '';
-                    search.set('');
-                  }}
-                >
-                  Clear filters
-                </Button>
-              </div>
-            </Table.Cell>
+    {#if filteredHoldings.length === 0}
+      <EmptyState card title="No matching holdings" description="Try adjusting your search.">
+        {#snippet icon()}
+          <SearchX aria-hidden="true" class="text-muted-foreground" />
+        {/snippet}
+        {#snippet action()}
+          <Button
+            variant="outline"
+            onclick={() => {
+              searchInput = '';
+              search.set('');
+            }}
+          >
+            Clear filters
+          </Button>
+        {/snippet}
+      </EmptyState>
+    {:else}
+      <TableShell>
+        <Table.Header>
+          <Table.Row class="bg-muted/75">
+            <SortHead
+              label="Holding"
+              active={sortBy === 'name'}
+              dir={sortDir}
+              onclick={() => sort.toggle('name')}
+            />
+            {#each COLUMNS as col (col.id)}
+              {#if cols.isVisible(col.id)}
+                <SortHead
+                  label={col.label}
+                  active={sortBy === col.id}
+                  dir={sortDir}
+                  onclick={() => sort.toggle(col.id)}
+                  class="text-right"
+                />
+              {/if}
+            {/each}
           </Table.Row>
-        {:else}
+        </Table.Header>
+        <Table.Body>
           {#each sortedHoldings as h (h.commodityGuid)}
             {@const isClosed = h.shares === 0 && h.accounts.length > 0}
             {@const isWatchOnly = h.shares === 0 && h.accounts.length === 0}
@@ -380,37 +386,37 @@
               {/if}
             </NavRow>
           {/each}
-        {/if}
-      </Table.Body>
-      <Table.Footer>
-        <Table.Row class="border-t bg-muted/50 hover:bg-muted/50">
-          <Table.Cell class="px-4 py-2.5 text-muted-foreground">Total</Table.Cell>
-          {#each COLUMNS as col (col.id)}
-            {#if cols.isVisible(col.id)}
-              <Table.Cell class="px-4 py-2.5 text-right font-medium tabular-nums">
-                {#if col.id === 'marketValue'}
-                  {fmt(totals.marketValue)}
-                {:else if col.id === 'costBasis'}
-                  {fmt(totals.costBasis)}
-                {:else if col.id === 'gainLoss'}
-                  <span class={signColor(totals.gainLoss)}>
-                    {formatSignedCurrency(totals.gainLoss, currency)}
-                    {#if totals.gainLossPct !== null}
-                      <span class="text-xs">({fmtPct(totals.gainLossPct)})</span>
-                    {/if}
-                  </span>
-                {:else if col.id === 'alloc'}
-                  {formatAllocPct(totals.alloc)}
-                {:else if col.id === 'target'}
-                  {totals.targetPct > 0 ? formatAllocPct(totals.targetPct) : EMPTY_DASH}
-                {:else if col.id === 'buy'}
-                  {totals.targetPct > 0 ? fmt(totals.buyAmount) : EMPTY_DASH}
-                {/if}
-              </Table.Cell>
-            {/if}
-          {/each}
-        </Table.Row>
-      </Table.Footer>
-    </TableShell>
+        </Table.Body>
+        <Table.Footer>
+          <Table.Row class="border-t bg-muted/50 hover:bg-muted/50">
+            <Table.Cell class="px-4 py-2.5 text-muted-foreground">Total</Table.Cell>
+            {#each COLUMNS as col (col.id)}
+              {#if cols.isVisible(col.id)}
+                <Table.Cell class="px-4 py-2.5 text-right font-medium tabular-nums">
+                  {#if col.id === 'marketValue'}
+                    {fmt(totals.marketValue)}
+                  {:else if col.id === 'costBasis'}
+                    {fmt(totals.costBasis)}
+                  {:else if col.id === 'gainLoss'}
+                    <span class={signColor(totals.gainLoss)}>
+                      {formatSignedCurrency(totals.gainLoss, currency)}
+                      {#if totals.gainLossPct !== null}
+                        <span class="text-xs">({fmtPct(totals.gainLossPct)})</span>
+                      {/if}
+                    </span>
+                  {:else if col.id === 'alloc'}
+                    {formatAllocPct(totals.alloc)}
+                  {:else if col.id === 'target'}
+                    {totals.targetPct > 0 ? formatAllocPct(totals.targetPct) : EMPTY_DASH}
+                  {:else if col.id === 'buy'}
+                    {totals.targetPct > 0 ? fmt(totals.buyAmount) : EMPTY_DASH}
+                  {/if}
+                </Table.Cell>
+              {/if}
+            {/each}
+          </Table.Row>
+        </Table.Footer>
+      </TableShell>
+    {/if}
   </div>
 {/if}

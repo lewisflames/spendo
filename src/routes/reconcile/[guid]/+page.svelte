@@ -228,7 +228,7 @@
         Check off cleared transactions until the difference is zero, then finish.
       {/snippet}
       <Button variant="outline" href={resolve('/reconcile')}>
-        <ArrowLeft aria-hidden="true" class="size-3" />
+        <ArrowLeft aria-hidden="true" class="size-4" />
         All accounts
       </Button>
     </PageHeader>
@@ -287,7 +287,7 @@
                     search.set('');
                   }}
                 >
-                  Clear search
+                  Clear filters
                 </Button>
               {/if}
             {/snippet}

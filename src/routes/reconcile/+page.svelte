@@ -2,6 +2,7 @@
   import { Scale, X } from '@lucide/svelte';
   import { dbSession } from '$lib/stores/db.svelte';
   import { fetchAccounts } from '$lib/tauri';
+  import { resolve } from '$app/paths';
   import { plural } from '$lib/utils/format.svelte';
   import BookGate from '$lib/components/shared/book-gate.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
@@ -117,6 +118,8 @@
               >
                 Clear filters
               </Button>
+            {:else}
+              <Button variant="outline" href={resolve('/accounts')}>Go to accounts</Button>
             {/if}
           {/snippet}
         </EmptyState>

@@ -35,23 +35,23 @@
         {page.error?.message ?? 'An unexpected error occurred.'}
       </p>
       <Button variant="outline" onclick={() => location.reload()}>
-        <RefreshCw aria-hidden="true" class="mr-1.5 size-3.5" />
+        <RefreshCw aria-hidden="true" class="size-4" />
         Try again
       </Button>
     {/if}
     <div class="flex items-center gap-2">
       <Button onclick={goBack} variant="outline">
-        <ArrowLeft aria-hidden="true" class="mr-1.5 size-3.5" />
+        <ArrowLeft aria-hidden="true" class="size-4" />
         Go back
       </Button>
       {#if dbSession.value}
         <Button onclick={() => goto(resolve('/transactions'))} variant="outline">
-          <ArrowRight aria-hidden="true" class="mr-1.5 size-3.5" />
+          <ArrowRight aria-hidden="true" class="size-4" />
           Go to Transactions
         </Button>
       {:else}
         <Button onclick={() => goto(resolve('/'))} variant="outline">
-          <ArrowRight aria-hidden="true" class="mr-1.5 size-3.5" />
+          <ArrowRight aria-hidden="true" class="size-4" />
           Go to Welcome
         </Button>
       {/if}

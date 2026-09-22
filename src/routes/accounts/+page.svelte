@@ -87,14 +87,12 @@
         ? `Chart of accounts · ${plural(res.data.totalAccounts, 'account')}`
         : ''}
     >
-      <div class="flex items-center gap-3">
-        {#if dbSession.value}
-          <Button onclick={() => (dialogOpen = true)}>
-            <Plus aria-hidden="true" class="size-4" />
-            New account
-          </Button>
-        {/if}
-      </div>
+      {#if dbSession.value}
+        <Button onclick={() => (dialogOpen = true)}>
+          <Plus aria-hidden="true" class="size-4" />
+          New account
+        </Button>
+      {/if}
     </PageHeader>
 
     <AccountDialog

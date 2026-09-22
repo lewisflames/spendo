@@ -97,7 +97,7 @@
 </script>
 
 <Dialog.Root bind:open>
-  <Dialog.Content>
+  <Dialog.Content class="max-h-[90vh] overflow-y-auto sm:max-w-lg">
     <Dialog.Header>
       <Dialog.Title>{exists ? 'Edit Budget' : 'Set Budget'}</Dialog.Title>
       <Dialog.Description>

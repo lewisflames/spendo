@@ -94,7 +94,7 @@
         {/snippet}
         {#snippet action()}
           <Button variant="outline" href={resolve('/transactions')}>
-            <ArrowLeft aria-hidden="true" class="size-3" />
+            <ArrowLeft aria-hidden="true" class="size-4" />
             Back to transactions
           </Button>
         {/snippet}
