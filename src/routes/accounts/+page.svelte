@@ -33,12 +33,6 @@
     LIABILITY: CreditCard
   };
 
-  const KPI_COLORS: Record<Category, string> = {
-    ASSET: 'text-success',
-    EQUITY: 'text-warning',
-    LIABILITY: 'text-destructive'
-  };
-
   let dialogOpen = $state(false);
 
   const res = useAsyncData({
@@ -68,9 +62,7 @@
       key: cat,
       title: CATEGORY_LABEL[cat],
       value: categoryTotal(cat),
-      icon: KPI_ICONS[cat],
-      iconClass: KPI_COLORS[cat],
-      valueClass: KPI_COLORS[cat]
+      icon: KPI_ICONS[cat]
     }));
   });
 
@@ -125,10 +117,10 @@
       <!-- Summary cards by account category -->
       <DimWrapper active={res.loading} class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
         {#each kpiCards as card (card.key)}
-          <KpiCard title={card.title} value={displayValue(card.value)} valueClass={card.valueClass}>
+          <KpiCard title={card.title} value={displayValue(card.value)}>
             {#snippet icon()}
               {@const Icon = card.icon}
-              <Icon aria-hidden="true" class="size-4 {card.iconClass}" />
+              <Icon aria-hidden="true" class="size-4 text-muted-foreground" />
             {/snippet}
           </KpiCard>
         {/each}
@@ -153,9 +145,15 @@
       <BalanceTree data={res.data?.trees ?? []} loading={res.loading} />
 
       {#if accounts.length === 0}
-        <EmptyState card title="No accounts found" description="No top-level accounts exist yet.">
+        <EmptyState card title="No accounts" description="No top-level accounts exist yet.">
           {#snippet icon()}
             <Landmark aria-hidden="true" class="text-muted-foreground" />
+          {/snippet}
+          {#snippet action()}
+            <Button onclick={() => (dialogOpen = true)}>
+              <Plus aria-hidden="true" class="size-4" />
+              New account
+            </Button>
           {/snippet}
         </EmptyState>
       {:else}

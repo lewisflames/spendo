@@ -176,6 +176,26 @@
           {#snippet icon()}
             <ArrowLeftRight aria-hidden="true" class="text-muted-foreground" />
           {/snippet}
+          {#snippet action()}
+            {#if search.value || dateFrom || dateTo}
+              <Button
+                variant="outline"
+                onclick={() => {
+                  searchInput = '';
+                  search.set('');
+                  dateFrom = '';
+                  dateTo = '';
+                }}
+              >
+                Clear filters
+              </Button>
+            {:else}
+              <Button href={resolve('/transactions/new')}>
+                <Plus aria-hidden="true" class="size-4" />
+                New transaction
+              </Button>
+            {/if}
+          {/snippet}
         </EmptyState>
       {:else}
         <!-- Keep the previous table visible (dimmed) during refetches so the

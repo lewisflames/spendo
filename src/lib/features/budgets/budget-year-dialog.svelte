@@ -193,7 +193,7 @@
 <Dialog.Root bind:open>
   <Dialog.Content>
     <Dialog.Header>
-      <Dialog.Title>Add Budget</Dialog.Title>
+      <Dialog.Title>New budget</Dialog.Title>
       <Dialog.Description>
         Set the annual target for an expense account for a single year. Years that already have a
         budget are disabled.
@@ -316,7 +316,7 @@
       saving={loading}
       deleting={false}
       confirmDelete={false}
-      saveLabel="Add budget"
+      saveLabel="Create budget"
       {saveDisabled}
       onDelete={() => {}}
       onSave={handleSave}
