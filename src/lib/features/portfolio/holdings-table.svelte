@@ -39,6 +39,7 @@
     | 'marketValue'
     | 'costBasis'
     | 'gainLoss'
+    | 'xirr'
     | 'alloc'
     | 'target'
     | 'buy';
@@ -52,6 +53,7 @@
     { id: 'marketValue', label: 'Market Value' },
     { id: 'costBasis', label: 'Cost Basis' },
     { id: 'gainLoss', label: 'Gain / Loss' },
+    { id: 'xirr', label: 'XIRR' },
     { id: 'alloc', label: 'Alloc' },
     { id: 'target', label: 'Target' },
     { id: 'buy', label: 'Buy' }
@@ -86,6 +88,7 @@
     'marketValue',
     'costBasis',
     'gainLoss',
+    'xirr',
     'alloc',
     'target',
     'buy'
@@ -157,6 +160,9 @@
         case 'gainLoss':
           cmp = a.gainLoss - b.gainLoss;
           break;
+        case 'xirr':
+          cmp = nullCmp(a.xirr, b.xirr) || (a.xirr ?? 0) - (b.xirr ?? 0);
+          break;
         case 'alloc':
           cmp = a.allocationPct - b.allocationPct;
           break;
@@ -199,7 +205,6 @@
       marketValue,
       costBasis,
       gainLoss,
-      gainLossPct: costBasis > 0 ? (gainLoss / costBasis) * 100 : null,
       alloc,
       targetPct,
       buyAmount
@@ -367,7 +372,11 @@
               {#if cols.isVisible('gainLoss')}
                 <Table.Cell class="py-2.5 text-right tabular-nums {signColor(h.gainLoss)}">
                   {formatSignedCurrency(h.gainLoss, currency)}
-                  <span class="text-xs"> ({fmtPct(h.gainLossPct)})</span>
+                </Table.Cell>
+              {/if}
+              {#if cols.isVisible('xirr')}
+                <Table.Cell class="py-2.5 text-right tabular-nums {signColor(h.xirr ?? 0)}">
+                  {fmtPct(h.xirr)}
                 </Table.Cell>
               {/if}
               {#if cols.isVisible('alloc')}
@@ -414,10 +423,10 @@
                   {:else if col.id === 'gainLoss'}
                     <span class={signColor(totals.gainLoss)}>
                       {formatSignedCurrency(totals.gainLoss, currency)}
-                      {#if totals.gainLossPct !== null}
-                        <span class="text-xs">({fmtPct(totals.gainLossPct)})</span>
-                      {/if}
                     </span>
+                  {:else if col.id === 'xirr'}
+                    <!-- Rates don't sum: the portfolio XIRR lives on the KPI card. -->
+                    {EMPTY_DASH}
                   {:else if col.id === 'alloc'}
                     {formatAllocPct(totals.alloc)}
                   {:else if col.id === 'target'}

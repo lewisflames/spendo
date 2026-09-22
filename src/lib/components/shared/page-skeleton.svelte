@@ -79,7 +79,7 @@
   <TableSkeleton cols={6} rows={6} />
 {:else if variant === 'portfolio'}
   <!-- The holdings table renders its own skeleton via HoldingsTable loading. -->
-  <KpiCardRow />
+  <KpiCardRow count={4} />
   <!-- Matches the loaded performance + allocation layout. -->
   <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
     <ChartSkeleton class="lg:col-span-2" withFilters />

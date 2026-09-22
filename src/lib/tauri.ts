@@ -930,7 +930,7 @@ export interface PortfolioHolding {
   marketValue: number;
   avgCostPerShare: number;
   gainLoss: number;
-  gainLossPct: number;
+  xirr: number | null;
   allocationPct: number;
   price: number | null;
   prevPrice: number | null;
@@ -948,7 +948,7 @@ interface PortfolioData {
   totalMarketValue: number;
   totalCostBasis: number;
   totalGainLoss: number;
-  totalGainLossPct: number;
+  totalXirr: number | null;
   lastRefreshed: string | null;
   holdings: PortfolioHolding[];
   valueTrend: PortfolioValuePoint[];

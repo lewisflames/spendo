@@ -201,7 +201,7 @@
       <DimWrapper active={res.loading} class="flex flex-col gap-6">
         {#if d.holdings.length > 0}
           <!-- KPI summary cards -->
-          <div class="grid grid-cols-1 gap-6 sm:grid-cols-3">
+          <div class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
             <KpiCard title="Market Value" value={fmt(d.totalMarketValue)}>
               {#snippet icon()}
                 <TrendingUp aria-hidden="true" class="size-4 text-muted-foreground" />
@@ -222,7 +222,18 @@
               {/snippet}
               {#snippet value()}
                 {formatSignedCurrency(d.totalGainLoss, currency)}
-                <span class="text-sm font-normal">({fmtPct(d.totalGainLossPct)})</span>
+              {/snippet}
+            </KpiCard>
+            <KpiCard title="XIRR" valueClass={signColor(d.totalXirr ?? 0)}>
+              {#snippet icon()}
+                {#if (d.totalXirr ?? 0) >= 0}
+                  <TrendingUp aria-hidden="true" class="size-4 text-success" />
+                {:else}
+                  <TrendingDown aria-hidden="true" class="size-4 text-destructive" />
+                {/if}
+              {/snippet}
+              {#snippet value()}
+                {fmtPct(d.totalXirr)}
               {/snippet}
             </KpiCard>
           </div>

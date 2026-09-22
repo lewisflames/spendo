@@ -17,7 +17,7 @@ function holding(
     marketValue,
     avgCostPerShare: 10,
     gainLoss: 0,
-    gainLossPct: 0,
+    xirr: null,
     allocationPct: 0,
     price: 10,
     prevPrice: null,

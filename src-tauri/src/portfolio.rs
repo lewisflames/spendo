@@ -38,7 +38,7 @@ pub struct PortfolioHolding {
     pub market_value: f64,
     pub avg_cost_per_share: f64,
     pub gain_loss: f64,
-    pub gain_loss_pct: f64,
+    pub xirr: Option<f64>,
     pub allocation_pct: f64,
     pub price: Option<f64>,
     pub prev_price: Option<f64>,
@@ -60,7 +60,7 @@ pub struct PortfolioData {
     pub total_market_value: f64,
     pub total_cost_basis: f64,
     pub total_gain_loss: f64,
-    pub total_gain_loss_pct: f64,
+    pub total_xirr: Option<f64>,
     pub last_refreshed: Option<String>,
     pub holdings: Vec<PortfolioHolding>,
     pub value_trend: Vec<PortfolioValuePoint>,
@@ -384,11 +384,6 @@ fn value_commodity_groups(
                 0.0
             };
             let gain_loss = market_value - group.total_cost;
-            let gain_loss_pct = if group.total_cost != 0.0 {
-                (gain_loss / group.total_cost) * 100.0
-            } else {
-                0.0
-            };
 
             PortfolioHolding {
                 commodity_guid: guid,
@@ -400,7 +395,8 @@ fn value_commodity_groups(
                 market_value,
                 avg_cost_per_share: avg_cost,
                 gain_loss,
-                gain_loss_pct,
+                // Filled by `attach_xirr` once dated cash flows are loaded.
+                xirr: None,
                 allocation_pct: 0.0,
                 price,
                 prev_price,
@@ -676,17 +672,334 @@ fn accumulate_trend(
     Ok(trend)
 }
 
-fn finalize_totals(
-    mut holdings: Vec<PortfolioHolding>,
-) -> (f64, f64, f64, f64, Vec<PortfolioHolding>) {
+/// Dust below which cash flows and terminal values are ignored for XIRR
+/// (matches the display-level zero snap in `format.svelte.ts`).
+const XIRR_DUST: f64 = 0.005;
+
+/// Dated cash-flow inputs for XIRR: investment splits plus the maps to value
+/// them in the report currency at each flow's own date.
+struct XirrInputs {
+    events: Vec<SplitEvent>,
+    fx_history: fx::FxHistory,
+    report_currency: String,
+    guid_to_quote: HashMap<String, String>,
+}
+
+/// Investment split events plus contemporary FX (optionally one commodity).
+/// Lighter than `load_trend_inputs` (no price history) for the XIRR pass.
+fn load_xirr_inputs(conn: &Connection, filter: Option<&str>) -> Result<XirrInputs, String> {
+    let mut events_sql = format!(
+        "SELECT a.commodity_guid, t.post_date,
+				{} AS shares_delta,
+				{} AS cost_delta
+		 FROM splits s
+		 JOIN accounts a ON a.guid = s.account_guid
+		 JOIN transactions t ON t.guid = s.tx_guid
+		 WHERE a.account_type IN ({})
+		   AND a.placeholder = 0
+		   AND {}",
+        utils::QUANTITY_AMOUNT,
+        utils::RAW_AMOUNT,
+        utils::investment_types_sql(),
+        utils::VISIBLE_TX_FILTER
+    );
+    let mut event_params: Vec<Box<dyn rusqlite::ToSql>> = vec![];
+    if let Some(g) = filter {
+        events_sql.push_str(" AND a.commodity_guid = ?1");
+        event_params.push(Box::new(g.to_string()));
+    }
+    events_sql.push_str(" ORDER BY t.post_date ASC");
+
+    let mut stmt = conn.prepare(&events_sql).map_err(|e| e.to_string())?;
+    let events: Vec<SplitEvent> = stmt
+        .query_map(sql::param_refs(&event_params).as_slice(), |row| {
+            Ok(SplitEvent {
+                commodity_guid: row.get(0)?,
+                post_date: row.get(1)?,
+                shares_delta: row.get(2)?,
+                cost_delta: row.get(3)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+
+    let report_currency = fx::get_report_currency_mnemonic(conn)?.unwrap_or_default();
+    let fx_history = fx::FxHistory::load(conn)?;
+
+    // Cost-basis currency per commodity: its latest price quote currency.
+    let mut guid_sql = format!(
+        "SELECT DISTINCT a.commodity_guid
+		 FROM accounts a
+		 WHERE a.account_type IN ({}) AND a.placeholder = 0",
+        utils::investment_types_sql()
+    );
+    let mut guid_params: Vec<Box<dyn rusqlite::ToSql>> = vec![];
+    if let Some(g) = filter {
+        guid_sql.push_str(" AND a.commodity_guid = ?1");
+        guid_params.push(Box::new(g.to_string()));
+    }
+    let mut guid_stmt = conn.prepare(&guid_sql).map_err(|e| e.to_string())?;
+    let guids: Vec<String> = guid_stmt
+        .query_map(sql::param_refs(&guid_params).as_slice(), |row| row.get(0))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+
+    let quote_currencies = latest_quote_currencies(conn)?;
+    let mut guid_to_quote: HashMap<String, String> = HashMap::new();
+    for guid in guids {
+        let quote = quote_currencies
+            .get(&guid)
+            .cloned()
+            .unwrap_or_else(|| report_currency.clone());
+        guid_to_quote.insert(guid, quote);
+    }
+
+    Ok(XirrInputs {
+        events,
+        fx_history,
+        report_currency,
+        guid_to_quote,
+    })
+}
+
+/// Annualized money-weighted return, percent scale (like `fmtPct`), for
+/// irregular dated cash flows. `None` when undefined: fewer than two flows,
+/// no sign change, all flows on one date, or no convergence.
+fn xirr_percent(flows: &[(NaiveDate, f64)]) -> Option<f64> {
+    if flows.len() < 2 {
+        return None;
+    }
+    let mut sorted: Vec<(NaiveDate, f64)> = flows.to_vec();
+    sorted.sort_by(|a, b| a.0.cmp(&b.0));
+    if !sorted.iter().any(|(_, a)| *a > 0.0) || !sorted.iter().any(|(_, a)| *a < 0.0) {
+        return None;
+    }
+    let d0 = sorted[0].0;
+    if sorted.iter().all(|(d, _)| *d == d0) {
+        return None;
+    }
+    let years: Vec<f64> = sorted
+        .iter()
+        .map(|(d, _)| (*d - d0).num_days() as f64 / 365.0)
+        .collect();
+    let amounts: Vec<f64> = sorted.iter().map(|(_, a)| *a).collect();
+    let scale: f64 = amounts.iter().map(|a| a.abs()).sum();
+    let tol = 1e-9 * scale.max(1.0);
+
+    let npv = |r: f64| -> f64 {
+        let base = 1.0 + r;
+        if base <= 0.0 {
+            return f64::NAN;
+        }
+        let mut sum = 0.0;
+        for (t, cf) in years.iter().zip(amounts.iter()) {
+            let disc = base.powf(*t);
+            if !disc.is_finite() || disc == 0.0 {
+                return f64::NAN;
+            }
+            sum += cf / disc;
+        }
+        sum
+    };
+
+    // Newton–Raphson from 10%; only accept a verified root.
+    let mut r: f64 = 0.1;
+    for _ in 0..100 {
+        let base = 1.0 + r;
+        if base <= 0.0 {
+            break;
+        }
+        let mut pv = 0.0;
+        let mut deriv = 0.0;
+        let mut ok = true;
+        for (t, cf) in years.iter().zip(amounts.iter()) {
+            let disc = base.powf(*t);
+            if !disc.is_finite() || disc == 0.0 {
+                ok = false;
+                break;
+            }
+            pv += cf / disc;
+            deriv += -t * cf / (disc * base);
+        }
+        if !ok || !pv.is_finite() || !deriv.is_finite() {
+            break;
+        }
+        if pv.abs() <= tol {
+            return Some(r * 100.0);
+        }
+        if deriv.abs() < 1e-12 {
+            break;
+        }
+        let next = (r - pv / deriv).clamp(-0.999_999, 1e6);
+        if !next.is_finite() {
+            break;
+        }
+        if (next - r).abs() < 1e-12 {
+            r = next;
+            if npv(r).abs() <= tol * 10.0 {
+                return Some(r * 100.0);
+            }
+            break;
+        }
+        r = next;
+    }
+    if npv(r).abs() <= tol {
+        return Some(r * 100.0);
+    }
+
+    // Bisection fallback: investor outflows precede inflows, so NPV runs from
+    // +inf near -100% down to the (negative) early flows at high rates.
+    let mut lo = -0.9999;
+    let mut hi = 10.0;
+    let mut npv_lo = npv(lo);
+    let mut npv_hi = npv(hi);
+    for _ in 0..50 {
+        if !npv_lo.is_finite() || !npv_hi.is_finite() {
+            return None;
+        }
+        if npv_lo == 0.0 {
+            return Some(lo * 100.0);
+        }
+        if npv_hi == 0.0 {
+            return Some(hi * 100.0);
+        }
+        if npv_lo.signum() != npv_hi.signum() {
+            break;
+        }
+        hi = hi * 2.0 + 1.0;
+        if hi > 1e6 {
+            return None;
+        }
+        npv_hi = npv(hi);
+    }
+    if !npv_lo.is_finite() || !npv_hi.is_finite() || npv_lo.signum() == npv_hi.signum() {
+        return None;
+    }
+    for _ in 0..200 {
+        let mid = 0.5 * (lo + hi);
+        let v = npv(mid);
+        if !v.is_finite() {
+            return None;
+        }
+        if v.abs() <= tol || (hi - lo) < 1e-12 {
+            return Some(mid * 100.0);
+        }
+        if v.signum() == npv_lo.signum() {
+            lo = mid;
+            npv_lo = v;
+        } else {
+            hi = mid;
+        }
+    }
+    Some(0.5 * (lo + hi) * 100.0)
+}
+
+/// Investor-signed cash flows in the report currency: buys (positive cost)
+/// are outflows, sells are inflows. Converted at each flow's own date.
+fn cash_flows_from_events(
+    events: &[SplitEvent],
+    guid_to_quote: &HashMap<String, String>,
+    fx_history: &fx::FxHistory,
+    report_currency: &str,
+    filter_guid: Option<&str>,
+) -> Vec<(NaiveDate, f64)> {
+    let mut flows = Vec::new();
+    for e in events {
+        if let Some(g) = filter_guid {
+            if e.commodity_guid != g {
+                continue;
+            }
+        }
+        if e.cost_delta.abs() < XIRR_DUST {
+            continue;
+        }
+        let date_str = e.post_date.get(..10).unwrap_or("");
+        let Ok(date) = NaiveDate::parse_from_str(date_str, "%Y-%m-%d") else {
+            continue;
+        };
+        let quote = guid_to_quote
+            .get(&e.commodity_guid)
+            .map(|s| s.as_str())
+            .unwrap_or(report_currency);
+        let rate = if quote == report_currency {
+            1.0
+        } else {
+            fx_history
+                .map_for_date(date_str)
+                .get(quote)
+                .copied()
+                .unwrap_or(1.0)
+        };
+        let flow = -e.cost_delta * rate;
+        if flow.abs() < XIRR_DUST {
+            continue;
+        }
+        flows.push((date, flow));
+    }
+    flows
+}
+
+/// Per-holding XIRR: flows plus terminal market value today. Unpriced open
+/// positions would show a realized-only return, so they report `None`;
+/// closed positions solve from realized flows alone.
+fn holding_xirr(
+    events: &[SplitEvent],
+    guid_to_quote: &HashMap<String, String>,
+    fx_history: &fx::FxHistory,
+    report_currency: &str,
+    holding: &PortfolioHolding,
+    end_date: NaiveDate,
+) -> Option<f64> {
+    if holding.price.is_none() && holding.shares != 0.0 {
+        return None;
+    }
+    let mut flows = cash_flows_from_events(
+        events,
+        guid_to_quote,
+        fx_history,
+        report_currency,
+        Some(&holding.commodity_guid),
+    );
+    if flows.is_empty() {
+        return None;
+    }
+    if holding.shares == 0.0 {
+        return xirr_percent(&flows);
+    }
+    if holding.market_value.abs() < XIRR_DUST {
+        return None;
+    }
+    flows.push((end_date, holding.market_value));
+    xirr_percent(&flows)
+}
+
+/// Portfolio-level XIRR over all flows plus total market value. Keeps the
+/// conservative "unpriced = 0" convention inherited from gain/loss; unpriced
+/// open rows still show a dash individually.
+fn total_xirr(
+    events: &[SplitEvent],
+    guid_to_quote: &HashMap<String, String>,
+    fx_history: &fx::FxHistory,
+    report_currency: &str,
+    total_market_value: f64,
+    end_date: NaiveDate,
+) -> Option<f64> {
+    let mut flows = cash_flows_from_events(events, guid_to_quote, fx_history, report_currency, None);
+    if flows.is_empty() {
+        return None;
+    }
+    if total_market_value.abs() >= XIRR_DUST {
+        flows.push((end_date, total_market_value));
+    }
+    xirr_percent(&flows)
+}
+
+fn finalize_totals(mut holdings: Vec<PortfolioHolding>) -> (f64, f64, f64, Vec<PortfolioHolding>) {
     let total_market_value: f64 = holdings.iter().map(|h| h.market_value).sum();
     let total_cost_basis: f64 = holdings.iter().map(|h| h.cost_basis).sum();
     let total_gain_loss = total_market_value - total_cost_basis;
-    let total_gain_loss_pct = if total_cost_basis != 0.0 {
-        (total_gain_loss / total_cost_basis) * 100.0
-    } else {
-        0.0
-    };
 
     for h in &mut holdings {
         h.allocation_pct = if total_market_value != 0.0 {
@@ -708,15 +1021,34 @@ fn finalize_totals(
         total_market_value,
         total_cost_basis,
         total_gain_loss,
-        total_gain_loss_pct,
         holdings,
     )
 }
 
 fn fetch_portfolio_data_inner(conn: &Connection) -> Result<PortfolioData, String> {
-    let holdings = build_holdings(conn, None)?;
-    let (total_market_value, total_cost_basis, total_gain_loss, total_gain_loss_pct, holdings) =
+    let mut holdings = build_holdings(conn, None)?;
+    let xirr_inputs = load_xirr_inputs(conn, None)?;
+    let end_date = Utc::now().date_naive();
+    for h in holdings.iter_mut() {
+        h.xirr = holding_xirr(
+            &xirr_inputs.events,
+            &xirr_inputs.guid_to_quote,
+            &xirr_inputs.fx_history,
+            &xirr_inputs.report_currency,
+            h,
+            end_date,
+        );
+    }
+    let (total_market_value, total_cost_basis, total_gain_loss, holdings) =
         finalize_totals(holdings);
+    let total_xirr = total_xirr(
+        &xirr_inputs.events,
+        &xirr_inputs.guid_to_quote,
+        &xirr_inputs.fx_history,
+        &xirr_inputs.report_currency,
+        total_market_value,
+        end_date,
+    );
     let value_trend = build_value_trend(conn, None)?;
     let last_refreshed = get_last_refresh_timestamp(conn)?;
 
@@ -724,7 +1056,7 @@ fn fetch_portfolio_data_inner(conn: &Connection) -> Result<PortfolioData, String
         total_market_value,
         total_cost_basis,
         total_gain_loss,
-        total_gain_loss_pct,
+        total_xirr,
         last_refreshed,
         holdings,
         value_trend,
@@ -999,6 +1331,18 @@ fn fetch_holding_detail_inner(
     } else {
         0.0
     };
+    // Same money-weighted return as the overview table (dated splits plus
+    // terminal market value, not the simple gain/loss ratio).
+    let xirr_inputs = load_xirr_inputs(conn, Some(commodity_guid))?;
+    let end_date = Utc::now().date_naive();
+    holding.xirr = holding_xirr(
+        &xirr_inputs.events,
+        &xirr_inputs.guid_to_quote,
+        &xirr_inputs.fx_history,
+        &xirr_inputs.report_currency,
+        &holding,
+        end_date,
+    );
 
     let price_history = get_price_history(conn, commodity_guid)?;
     let value_trend = build_value_trend(conn, Some(commodity_guid))?;
@@ -1232,7 +1576,8 @@ mod tests {
         assert_eq!(aapl.cost_basis, 1000.0);
         assert_eq!(aapl.market_value, 1500.0);
         assert_eq!(aapl.gain_loss, 500.0);
-        assert_eq!(aapl.gain_loss_pct, 50.0);
+        // Single buy plus terminal value: a defined money-weighted return.
+        assert!(aapl.xirr.is_some());
         assert_eq!(aapl.price, Some(150.0));
         assert_eq!(aapl.prev_price, Some(140.0));
         assert_eq!(aapl.price_date.as_deref(), Some("2024-03-01"));
@@ -1245,12 +1590,61 @@ mod tests {
         assert_eq!(xyz.market_value, 0.0);
         assert_eq!(xyz.gain_loss, -700.0);
         assert_eq!(xyz.price, None);
+        // Unpriced open positions hide XIRR instead of showing realized-only.
+        assert_eq!(xyz.xirr, None);
         assert_eq!(xyz.allocation_pct, 0.0);
 
         assert_eq!(data.total_market_value, 1500.0);
         assert_eq!(data.total_cost_basis, 1700.0);
         assert_eq!(data.total_gain_loss, -200.0);
-        assert!((data.total_gain_loss_pct - (-200.0 / 1700.0) * 100.0).abs() < 1e-9);
+        assert!(data.total_xirr.is_some());
+    }
+
+    fn date(ymd: &str) -> NaiveDate {
+        NaiveDate::parse_from_str(ymd, "%Y-%m-%d").unwrap()
+    }
+
+    fn flow(ymd: &str, amount: f64) -> (NaiveDate, f64) {
+        (date(ymd), amount)
+    }
+
+    #[test]
+    fn xirr_matches_exact_whole_year_returns() {
+        // -1000 then +1100 exactly one (non-leap) year later is exactly 10%.
+        let flows = vec![flow("2019-01-01", -1000.0), flow("2020-01-01", 1100.0)];
+        let r = xirr_percent(&flows).unwrap();
+        assert!((r - 10.0).abs() < 1e-6, "got {r}");
+
+        // Doubling in one year is exactly 100%.
+        let flows = vec![flow("2019-01-01", -1000.0), flow("2020-01-01", 2000.0)];
+        let r = xirr_percent(&flows).unwrap();
+        assert!((r - 100.0).abs() < 1e-6, "got {r}");
+
+        // A 10% loss over one year is exactly -10%.
+        let flows = vec![flow("2019-01-01", -1000.0), flow("2020-01-01", 900.0)];
+        let r = xirr_percent(&flows).unwrap();
+        assert!((r + 10.0).abs() < 1e-6, "got {r}");
+
+        // Flat flows solve to 0% regardless of dates.
+        let flows = vec![flow("2019-01-01", -1000.0), flow("2020-06-15", 1000.0)];
+        let r = xirr_percent(&flows).unwrap();
+        assert!(r.abs() < 1e-6, "got {r}");
+    }
+
+    #[test]
+    fn xirr_returns_none_when_undefined() {
+        assert_eq!(xirr_percent(&[]), None);
+        assert_eq!(xirr_percent(&[flow("2019-01-01", -1000.0)]), None);
+        // No sign change.
+        assert_eq!(
+            xirr_percent(&[flow("2019-01-01", -1000.0), flow("2020-01-01", -500.0)]),
+            None
+        );
+        // All flows on one date: annualization is undefined.
+        assert_eq!(
+            xirr_percent(&[flow("2019-01-01", -1000.0), flow("2019-01-01", 1100.0)]),
+            None
+        );
     }
 
     fn target(commodity_guid: &str, target_pct: f64) -> AllocationTargetInput {

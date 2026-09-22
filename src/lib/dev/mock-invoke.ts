@@ -957,7 +957,7 @@ function holdingFor(acc: FixtureAccount) {
     marketValue: round2(marketValue),
     avgCostPerShare: shares ? round2(cost / shares) : 0,
     gainLoss: round2(marketValue - cost),
-    gainLossPct: cost ? round2(((marketValue - cost) / cost) * 100) : 0,
+    xirr: null,
     allocationPct: 0,
     price,
     prevPrice: market?.prevPrice ?? null,
@@ -991,9 +991,7 @@ function portfolioData(): MockPayloads['fetch_portfolio_data'] {
     totalMarketValue: round2(totalMarketValue),
     totalCostBasis: round2(totalCostBasis),
     totalGainLoss: round2(totalMarketValue - totalCostBasis),
-    totalGainLossPct: totalCostBasis
-      ? round2(((totalMarketValue - totalCostBasis) / totalCostBasis) * 100)
-      : 0,
+    totalXirr: null,
     lastRefreshed: nowIso(),
     holdings,
     valueTrend: valueTrend(totalCostBasis, totalMarketValue)
