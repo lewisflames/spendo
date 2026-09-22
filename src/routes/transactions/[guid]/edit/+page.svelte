@@ -67,7 +67,7 @@
       <PageHeader title="Edit transaction" description={detail.description || 'Transaction'}>
         <Button variant="outline" href={detailPath ?? resolve('/transactions')}>
           <ArrowLeft aria-hidden="true" class="size-4" />
-          Back
+          Transaction
         </Button>
       </PageHeader>
       {#key detail.guid}
@@ -95,7 +95,7 @@
         {#snippet action()}
           <Button variant="outline" href={resolve('/transactions')}>
             <ArrowLeft aria-hidden="true" class="size-4" />
-            Back to transactions
+            Transactions
           </Button>
         {/snippet}
       </EmptyState>

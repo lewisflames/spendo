@@ -2,9 +2,9 @@
   import * as Card from '$lib/components/ui/card';
   import { Button } from '$lib/components/ui/button';
   import { Input } from '$lib/components/ui/input';
+  import DatePicker from '$lib/components/shared/date-picker/date-picker.svelte';
   import { formatSessionCurrency as fmt, signColor, EMPTY_DASH } from '$lib/utils/format.svelte';
   import { plural } from '$lib/utils/format.svelte';
-  import { todayStr } from '$lib/utils/date-utils.svelte';
 
   let {
     statementDate = $bindable(),
@@ -59,11 +59,10 @@
     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
       <div class="flex flex-col gap-1.5">
         <label for="reconcile-statement-date" class="text-sm font-medium">Statement date</label>
-        <Input
+        <DatePicker
           id="reconcile-statement-date"
-          type="date"
           bind:value={statementDate}
-          max={todayStr()}
+          placeholder="Pick a date"
         />
       </div>
       <div class="flex flex-col gap-1.5">

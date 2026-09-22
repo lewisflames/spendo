@@ -31,7 +31,7 @@
   import { useResetPageOnChange } from '$lib/hooks/use-page-reset.svelte';
   import { useTableSort } from '$lib/hooks/use-table-sort.svelte';
   import { plural, sessionCurrency } from '$lib/utils/format.svelte';
-  import { ArrowLeftRight, CalendarClock } from '@lucide/svelte';
+  import { ArrowLeftRight, CalendarClock, SearchX } from '@lucide/svelte';
   import type { TransactionColumnId } from '$lib/features/transactions/transaction-table.svelte';
 
   let pageSize = $derived(appSettings.value.pageSize);
@@ -174,15 +174,18 @@
         <ErrorCard message={res.error} onRetry={() => res.reload()} />
       {/if}
       {#if res.data.transactions.length === 0}
+        {@const isFiltered = !!(search.value || dateFrom || dateTo)}
         <EmptyState
           card
           title="No transactions"
-          description="No transactions found{search.value || dateFrom || dateTo
-            ? ' matching the current filters'
-            : ''}."
+          description="No transactions found{isFiltered ? ' matching the current filters' : ''}."
         >
           {#snippet icon()}
-            <ArrowLeftRight aria-hidden="true" class="text-muted-foreground" />
+            {#if isFiltered}
+              <SearchX aria-hidden="true" class="text-muted-foreground" />
+            {:else}
+              <ArrowLeftRight aria-hidden="true" class="text-muted-foreground" />
+            {/if}
           {/snippet}
           {#snippet action()}
             {#if search.value || dateFrom || dateTo}

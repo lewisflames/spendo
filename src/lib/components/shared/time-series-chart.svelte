@@ -126,15 +126,16 @@
         {/if}
       </div>
       {#if showRangeFilter}
-        <div class="flex flex-wrap gap-1">
+        <div class="flex flex-wrap gap-1" role="group" aria-label="Chart date range">
           {#each rangeOptions as opt (opt.value)}
             <button
               type="button"
-              class="rounded-md px-2 py-1 text-xs font-medium transition-colors {dateRange ===
+              class="rounded-md px-2 py-1 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-ring {dateRange ===
               opt.value
                 ? 'bg-primary text-primary-foreground'
                 : 'text-muted-foreground hover:bg-muted'}"
               aria-pressed={dateRange === opt.value}
+              aria-label={opt.value === 'All' ? 'Show all dates' : `Show last ${opt.value}`}
               onclick={() => (dateRange = opt.value)}
             >
               {opt.label}

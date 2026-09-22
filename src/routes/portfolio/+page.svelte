@@ -166,7 +166,7 @@
             aria-hidden="true"
             class="size-4 {priceRefresh.refreshing ? 'animate-spin' : ''}"
           />
-          {priceRefresh.refreshing ? 'Refreshing...' : 'Refresh Prices'}
+          {priceRefresh.refreshing ? 'Refreshing…' : 'Refresh prices'}
         </Button>
       {/if}
     </PageHeader>

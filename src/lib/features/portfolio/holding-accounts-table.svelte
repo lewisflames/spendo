@@ -46,7 +46,7 @@
           <Table.Cell class="py-2.5">
             <a
               href={resolve('/accounts/[guid]', { guid: acct.accountGuid })}
-              class="font-medium"
+              class="font-medium focus-visible:outline-2 focus-visible:outline-ring"
               title={acct.accountName}
             >
               {acct.accountDescription || acct.accountName}

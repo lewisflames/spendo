@@ -145,7 +145,12 @@
         refreshing={priceRefresh.refreshing}
         onRefresh={() => void priceRefresh.refresh()}
         onEditSymbol={() => (symbolDialogOpen = true)}
-      />
+      >
+        <Button variant="outline" href={resolve('/portfolio')}>
+          <ArrowLeft aria-hidden="true" class="size-4" />
+          Portfolio
+        </Button>
+      </HoldingDetailHeader>
 
       <!-- KPI summary cards -->
       <HoldingKpiCards {holding} {priceCurrency} />
@@ -197,7 +202,7 @@
       <HoldingAccountsTable {holding} {currency} />
 
       <!-- Activity / prices (tabbed to overlap; one toolbar row for both) -->
-      <Tabs.Root bind:value={tab} class="flex flex-col gap-3">
+      <Tabs.Root bind:value={tab} class="flex flex-col gap-4">
         <div class="flex items-center justify-between gap-2">
           <Tabs.List aria-label="Holding data">
             <Tabs.Trigger value="activity">Activity</Tabs.Trigger>
@@ -244,7 +249,7 @@
       {#snippet action()}
         <Button variant="outline" href={resolve('/portfolio')}>
           <ArrowLeft aria-hidden="true" class="size-4" />
-          Back to portfolio
+          Portfolio
         </Button>
       {/snippet}
     </EmptyState>

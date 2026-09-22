@@ -71,7 +71,7 @@
               Cancel
             </Button>
             <Button variant="destructive" onclick={handleClearDb} disabled={clearing}>
-              {clearing ? 'Clearing...' : 'Yes, clear everything'}
+              {clearing ? 'Clearing…' : 'Yes, clear everything'}
             </Button>
           </Dialog.Footer>
         </Dialog.Content>

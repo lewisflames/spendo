@@ -18,6 +18,7 @@
   import { useDebouncedSearch } from '$lib/hooks/use-debounced-search.svelte';
   import { useTableSort } from '$lib/hooks/use-table-sort.svelte';
   import { useColumnVisibility } from '$lib/hooks/use-column-visibility.svelte';
+  import { useUrlParams, debouncedSearchParam } from '$lib/hooks/use-url-params.svelte';
   import { computeRebalance, TRADE_DUST } from './rebalance';
   import {
     formatCurrency,
@@ -97,6 +98,17 @@
 
   let searchInput = $state('');
   let search = useDebouncedSearch(() => searchInput);
+
+  useUrlParams([
+    debouncedSearchParam(
+      'q',
+      () => search.value || null,
+      (v) => {
+        searchInput = v;
+        search.set(v);
+      }
+    )
+  ]);
 
   let filteredHoldings = $derived.by(() => {
     const q = search.value.trim().toLowerCase();

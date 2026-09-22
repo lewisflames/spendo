@@ -85,7 +85,7 @@
       <TableShell>
         <Table.Header>
           <Table.Row class="bg-muted/75">
-            <Table.Head class="w-10">
+            <Table.Head class="w-10 text-muted-foreground">
               <Checkbox
                 checked={allImportableSelected}
                 indeterminate={!allImportableSelected && selected.size > 0}
@@ -96,11 +96,11 @@
                 onCheckedChange={(v) => toggleAll(v === true)}
               />
             </Table.Head>
-            <Table.Head>Date</Table.Head>
-            <Table.Head>Description</Table.Head>
-            <Table.Head>Category</Table.Head>
-            <Table.Head class="text-right">Amount</Table.Head>
-            <Table.Head>Status</Table.Head>
+            <Table.Head class="text-muted-foreground">Date</Table.Head>
+            <Table.Head class="text-muted-foreground">Description</Table.Head>
+            <Table.Head class="text-muted-foreground">Category</Table.Head>
+            <Table.Head class="text-right text-muted-foreground tabular-nums">Amount</Table.Head>
+            <Table.Head class="text-muted-foreground">Status</Table.Head>
           </Table.Row>
         </Table.Header>
         <Table.Body>
@@ -108,7 +108,7 @@
             {@const checked = selected.has(row.key)}
             {@const disabled = !row.valid || row.duplicate}
             <Table.Row data-checked={checked}>
-              <Table.Cell>
+              <Table.Cell class="py-2.5">
                 <Checkbox
                   {checked}
                   {disabled}
@@ -116,14 +116,17 @@
                   onCheckedChange={(v) => toggleRow(row.key, v === true)}
                 />
               </Table.Cell>
-              <Table.Cell class="whitespace-nowrap">
+              <Table.Cell class="py-2.5 whitespace-nowrap">
                 {row.postDate ? formatDate(row.postDate) : EMPTY_DASH}
               </Table.Cell>
-              <Table.Cell class="max-w-md truncate font-medium" title={row.description ?? ''}>
+              <Table.Cell
+                class="max-w-md truncate py-2.5 font-medium"
+                title={row.description ?? ''}
+              >
                 {row.description || EMPTY_DASH}
               </Table.Cell>
               <Table.Cell
-                class="max-w-40 truncate text-muted-foreground"
+                class="max-w-40 truncate py-2.5 text-muted-foreground"
                 title={row.ruleMatched ? 'Matched an import rule' : 'Fallback category'}
               >
                 <span class="flex items-center gap-1">
@@ -136,10 +139,10 @@
                   {row.offsetAccountName}
                 </span>
               </Table.Cell>
-              <Table.Cell class="text-right">
+              <Table.Cell class="py-2.5 text-right tabular-nums">
                 {row.amount !== null ? formatCurrency(row.amount, currency) : EMPTY_DASH}
               </Table.Cell>
-              <Table.Cell>
+              <Table.Cell class="py-2.5">
                 {#if !row.valid}
                   <Badge variant="destructive" title={row.error ?? ''}>Error</Badge>
                 {:else if row.duplicate}
