@@ -1476,7 +1476,7 @@ fn apply_merge(
 
 // ── Import ──────────────────────────────────────────────────────────────────
 
-fn import_gnucash_inner(
+pub(crate) fn import_gnucash_inner(
     dest_conn: &Connection,
     source_path: &str,
     _filename: &str,

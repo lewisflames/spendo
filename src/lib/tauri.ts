@@ -702,6 +702,23 @@ export const exportTransactionsCsv = (input: TransactionsExportInput): Promise<v
 export const exportAccountsCsv = (input: AccountsExportInput): Promise<void> =>
   invoke<void>('export_accounts_csv', { input });
 
+/** Full-book GnuCash SQLite export written straight to the chosen path. */
+export interface GnuCashExportResult {
+  accounts: number;
+  transactions: number;
+  splits: number;
+  prices: number;
+  budgets: number;
+  schedules: number;
+  futureDated: number;
+  attachmentsSkipped: number;
+  /** Splits with more decimals than GnuCash's smallest unit (it rounds them). */
+  roundedAmounts: number;
+}
+
+export const exportGnuCash = (path: string): Promise<GnuCashExportResult> =>
+  invoke<GnuCashExportResult>('export_gnucash', { input: { path } });
+
 export const refreshPrices = (): Promise<PricesResult> => invoke<PricesResult>('refresh_prices');
 
 export const fetchAccountDetail = (
@@ -1133,6 +1150,7 @@ export type MockPayloads = {
   delete_transaction: void;
   export_accounts_csv: void;
   export_attachment: void;
+  export_gnucash: GnuCashExportResult;
   export_transactions_csv: void;
   fetch_account_balance_trend: AccountBalancePoint[];
   fetch_account_detail: AccountDetailResult;

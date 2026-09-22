@@ -8,7 +8,6 @@
     Database,
     FileDown,
     FileSpreadsheet,
-    FileUp,
     FolderOpen,
     FolderSearch,
     Info,
@@ -30,6 +29,7 @@
   } from '$lib/features/book/book-actions';
   import {
     exportAccountsCsvViaDialog,
+    exportGnuCashViaDialog,
     exportTransactionsCsvViaDialog,
     importGnucashViaDialog,
     openCsvImport
@@ -194,12 +194,12 @@
               </DropdownMenu.SubTrigger>
               <DropdownMenu.SubContent>
                 <DropdownMenu.Item onclick={() => void importGnucashViaDialog()}>
-                  <FileUp aria-hidden="true" />
-                  GnuCash file…
+                  <Database aria-hidden="true" />
+                  GnuCash SQLite
                 </DropdownMenu.Item>
                 <DropdownMenu.Item onclick={() => openCsvImport()}>
                   <FileSpreadsheet aria-hidden="true" />
-                  Bank CSV…
+                  Bank CSV
                 </DropdownMenu.Item>
               </DropdownMenu.SubContent>
             </DropdownMenu.Sub>
@@ -211,11 +211,15 @@
               <DropdownMenu.SubContent>
                 <DropdownMenu.Item onclick={() => void exportTransactionsCsvViaDialog()}>
                   <FileSpreadsheet aria-hidden="true" />
-                  Transactions CSV…
+                  Transactions CSV
                 </DropdownMenu.Item>
                 <DropdownMenu.Item onclick={() => void exportAccountsCsvViaDialog()}>
                   <FileSpreadsheet aria-hidden="true" />
-                  Accounts CSV…
+                  Accounts CSV
+                </DropdownMenu.Item>
+                <DropdownMenu.Item onclick={() => void exportGnuCashViaDialog()}>
+                  <Database aria-hidden="true" />
+                  GnuCash SQLite
                 </DropdownMenu.Item>
               </DropdownMenu.SubContent>
             </DropdownMenu.Sub>

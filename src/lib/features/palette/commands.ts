@@ -6,6 +6,7 @@ import {
   ArrowRight,
   CalendarPlus,
   CircleHelp,
+  Database,
   FileDown,
   FileSpreadsheet,
   FolderOpen,
@@ -32,6 +33,7 @@ import {
 } from '$lib/features/book/book-actions';
 import {
   exportAccountsCsvViaDialog,
+  exportGnuCashViaDialog,
   exportTransactionsCsvViaDialog,
   importGnucashViaDialog,
   openCsvImport
@@ -196,6 +198,17 @@ export const PALETTE_COMMANDS: PaletteCommand[] = [
     when: () => dbSession.value !== null,
     run: () => {
       void exportAccountsCsvViaDialog();
+    }
+  },
+  {
+    id: 'export-gnucash',
+    title: 'Export GnuCash file…',
+    group: 'Actions',
+    icon: Database,
+    keywords: ['export', 'gnucash', 'sqlite', 'book', 'interchange'],
+    when: () => dbSession.value !== null,
+    run: () => {
+      void exportGnuCashViaDialog();
     }
   },
   {
