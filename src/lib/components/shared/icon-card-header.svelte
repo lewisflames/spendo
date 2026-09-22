@@ -5,11 +5,13 @@
   let {
     icon,
     title,
-    description
+    description,
+    action
   }: {
     icon: Snippet;
     title: string;
     description?: string;
+    action?: Snippet;
   } = $props();
 </script>
 
@@ -18,6 +20,14 @@
     {@render icon()}
     <Card.Title>{title}</Card.Title>
   </div>
+  {#if action}
+    <div
+      data-slot="card-action"
+      class="col-start-2 row-span-2 row-start-1 self-start justify-self-end"
+    >
+      {@render action()}
+    </div>
+  {/if}
   {#if description}
     <Card.Description>{description}</Card.Description>
   {/if}

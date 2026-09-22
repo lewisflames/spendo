@@ -1613,28 +1613,35 @@ const handlers: HandlerMap = {
       })),
   add_attachments: (args) => {
     const input = args.input as { txGuid: string; paths: string[] };
-    const records = input.paths.map((path) => {
-      const filename = path.split('/').pop() ?? path;
-      const mimeType = mimeFor(filename);
-      const record: AttachmentRecord = {
-        guid: id('att'),
-        txGuid: input.txGuid,
-        filename,
-        mimeType,
-        byteSize: 48_000 + filename.length * 137,
-        createdAt: nowIso(),
-        isImage: mimeType.startsWith('image/')
-      };
-      state.attachments.push(record);
-      return record;
-    });
-    return records.map(({ guid, filename, mimeType, byteSize, createdAt }) => ({
-      guid,
+    if (input.paths.length !== 1) {
+      throw new Error('Only a single PDF attachment is allowed');
+    }
+    const filename = input.paths[0].split('/').pop() ?? input.paths[0];
+    const ext = filename.split('.').pop()?.toLowerCase() ?? '';
+    if (ext !== 'pdf') {
+      throw new Error(`Unsupported file type: .${ext || 'unknown'}`);
+    }
+    const mimeType = mimeFor(filename);
+    state.attachments = state.attachments.filter((a) => a.txGuid !== input.txGuid);
+    const record: AttachmentRecord = {
+      guid: id('att'),
+      txGuid: input.txGuid,
       filename,
       mimeType,
-      byteSize,
-      createdAt
-    }));
+      byteSize: 48_000 + filename.length * 137,
+      createdAt: nowIso(),
+      isImage: false
+    };
+    state.attachments.push(record);
+    return [
+      {
+        guid: record.guid,
+        filename: record.filename,
+        mimeType: record.mimeType,
+        byteSize: record.byteSize,
+        createdAt: record.createdAt
+      }
+    ];
   },
   delete_attachment: (args) => {
     state.attachments = state.attachments.filter((a) => a.guid !== args.guid);

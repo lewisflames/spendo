@@ -254,13 +254,14 @@ CREATE TABLE IF NOT EXISTS symbol_overrides (
 	symbol TEXT NOT NULL
 );
 
--- Receipts/documents attached to a transaction. Bytes live in the book itself
+-- Single PDF receipt attached to a transaction. Bytes live in the book itself
 -- so the `.spendo` file stays portable (Save As copies them via VACUUM INTO).
--- Deleting a transaction (manual delete or the GnuCash orphan sweep) removes
--- its attachments through the FK cascade.
+-- At most one row per transaction (`UNIQUE(tx_guid)`); adding a file replaces
+-- the current one. Deleting a transaction (manual delete or the GnuCash orphan
+-- sweep) removes its attachment through the FK cascade.
 CREATE TABLE IF NOT EXISTS attachments (
 	guid TEXT PRIMARY KEY,
-	tx_guid TEXT NOT NULL REFERENCES transactions(guid) ON DELETE CASCADE,
+	tx_guid TEXT NOT NULL UNIQUE REFERENCES transactions(guid) ON DELETE CASCADE,
 	filename TEXT NOT NULL,
 	mime_type TEXT NOT NULL,
 	byte_size INTEGER NOT NULL,
@@ -586,7 +587,7 @@ mod tests {
         conn.execute_batch(
             "INSERT INTO transactions (guid, post_date) VALUES ('t-reset', '2024-01-01');
              INSERT INTO attachments (guid, tx_guid, filename, mime_type, byte_size, data, created_at)
-             VALUES ('a-reset', 't-reset', 'receipt.png', 'image/png', 1, X'00', '2024-01-01T00:00:00Z');",
+             VALUES ('a-reset', 't-reset', 'receipt.pdf', 'application/pdf', 1, X'00', '2024-01-01T00:00:00Z');",
         )
         .unwrap();
         // Book-scoped config (allocation targets) must not survive a reset

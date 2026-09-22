@@ -7,22 +7,16 @@ use tauri::{AppHandle, Manager, State};
 use crate::db::{run_blocking, run_io, with_tx_err, AppError, AppState};
 use crate::utils;
 
-/// Receipts/documents attached to a transaction. Bytes live in the `.spendo`
+/// PDF receipt attached to a transaction. At most one PDF per transaction;
+/// adding a new file replaces the existing one. Bytes live in the `.spendo`
 /// book (see the `attachments` table comment in `db.rs`) so the file stays
-/// portable; deleting a transaction removes its attachments permanently.
+/// portable; deleting a transaction removes its attachment permanently.
 pub const MAX_ATTACHMENT_BYTES: u64 = 10 * 1024 * 1024;
-pub const MAX_ATTACHMENTS_PER_TX: usize = 20;
+pub const MAX_ATTACHMENTS_PER_TX: usize = 1;
 
 /// Extension → MIME allowlist. The frontend file-dialog filter mirrors this,
 /// but the backend is the source of truth — never trust the caller.
-const ALLOWED_TYPES: [(&str, &str); 6] = [
-    ("png", "image/png"),
-    ("jpg", "image/jpeg"),
-    ("jpeg", "image/jpeg"),
-    ("webp", "image/webp"),
-    ("gif", "image/gif"),
-    ("pdf", "application/pdf"),
-];
+const ALLOWED_TYPES: [(&str, &str); 1] = [("pdf", "application/pdf")];
 
 #[derive(Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -164,8 +158,9 @@ fn list_attachments(conn: &Connection, tx_guid: &str) -> Result<Vec<AttachmentIn
     Ok(rows)
 }
 
-/// Insert a validated batch for one transaction: existence + per-transaction
-/// cap checks run inside the same transaction as the inserts.
+/// Insert the single validated PDF for one transaction: existence checks run
+/// inside the same transaction as the replace (existing rows for the
+/// transaction are deleted first, so adding a file replaces the current one).
 fn insert_attachments(
     conn: &Connection,
     tx_guid: &str,
@@ -173,6 +168,11 @@ fn insert_attachments(
 ) -> Result<Vec<AttachmentInfo>, AppError> {
     if prepared.is_empty() {
         return Err(AppError::Validation("No files selected".to_string()));
+    }
+    if prepared.len() > MAX_ATTACHMENTS_PER_TX {
+        return Err(AppError::Validation(
+            "Only a single PDF attachment is allowed".to_string(),
+        ));
     }
     with_tx_err(conn, || {
         let exists = conn
@@ -188,16 +188,11 @@ fn insert_attachments(
                 "Transaction not found — it may have been removed".to_string(),
             ));
         }
-        let existing: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM attachments WHERE tx_guid = ?1",
+
+        conn.execute(
+            "DELETE FROM attachments WHERE tx_guid = ?1",
             params![tx_guid],
-            |row| row.get(0),
         )?;
-        if existing as usize + prepared.len() > MAX_ATTACHMENTS_PER_TX {
-            return Err(AppError::Validation(format!(
-                "A transaction can have at most {MAX_ATTACHMENTS_PER_TX} attachments"
-            )));
-        }
 
         let mut infos = Vec::with_capacity(prepared.len());
         for attachment in prepared {
@@ -280,8 +275,8 @@ pub async fn add_attachments(
     input: AttachmentAddInput,
 ) -> Result<Vec<AttachmentInfo>, String> {
     let tx_guid = input.tx_guid;
-    // Disk I/O first (house rule): read + validate every file before touching
-    // the DB lock; one bad file fails the whole batch with its own message.
+    // Disk I/O first (house rule): read + validate the file before touching
+    // the DB lock; a bad file fails with its own message.
     let prepared = run_io(move || {
         input
             .paths
@@ -401,12 +396,12 @@ mod tests {
     fn add_list_fetch_and_delete_round_trip() {
         let conn = setup();
         let dir = tmp_dir("roundtrip");
-        let path = write_file(&dir, "receipt.png", b"fake-png-bytes");
+        let path = write_file(&dir, "receipt.pdf", b"fake-pdf-bytes");
 
         let infos = insert_attachments(&conn, "t1", vec![prepared(&path)]).unwrap();
         assert_eq!(infos.len(), 1);
-        assert_eq!(infos[0].filename, "receipt.png");
-        assert_eq!(infos[0].mime_type, "image/png");
+        assert_eq!(infos[0].filename, "receipt.pdf");
+        assert_eq!(infos[0].mime_type, "application/pdf");
         assert_eq!(infos[0].byte_size, 14);
 
         let listed = list_attachments(&conn, "t1").unwrap();
@@ -414,12 +409,12 @@ mod tests {
         assert_eq!(listed[0], infos[0]);
 
         let data = attachment_data_inner(&conn, &infos[0].guid).unwrap();
-        assert_eq!(data.filename, "receipt.png");
+        assert_eq!(data.filename, "receipt.pdf");
         assert_eq!(
             data.data_url,
             format!(
-                "data:image/png;base64,{}",
-                base64::engine::general_purpose::STANDARD.encode(b"fake-png-bytes")
+                "data:application/pdf;base64,{}",
+                base64::engine::general_purpose::STANDARD.encode(b"fake-pdf-bytes")
             )
         );
 
@@ -434,19 +429,23 @@ mod tests {
     #[test]
     fn prepare_rejects_unsupported_empty_missing_and_oversized() {
         let dir = tmp_dir("reject");
-        // Unsupported extension.
+        // Unsupported extensions (images and text are no longer accepted).
         let txt = write_file(&dir, "notes.txt", b"hi");
         assert!(prepare_attachment(&txt)
+            .unwrap_err()
+            .contains("Unsupported"));
+        let png = write_file(&dir, "photo.png", b"hi");
+        assert!(prepare_attachment(&png)
             .unwrap_err()
             .contains("Unsupported"));
         // Empty file.
         let empty = write_file(&dir, "empty.pdf", b"");
         assert!(prepare_attachment(&empty).unwrap_err().contains("empty"));
         // Missing file.
-        let missing = dir.join("nope.png");
+        let missing = dir.join("nope.pdf");
         assert!(prepare_attachment(&missing.to_string_lossy()).is_err());
         // Oversized file: sparse on disk, no need to materialize 10 MB.
-        let big = dir.join("big.jpg");
+        let big = dir.join("big.pdf");
         std::fs::File::create(&big)
             .unwrap()
             .set_len(MAX_ATTACHMENT_BYTES + 1)
@@ -459,25 +458,36 @@ mod tests {
     }
 
     #[test]
-    fn add_enforces_tx_existence_and_per_tx_cap() {
+    fn add_enforces_tx_existence_single_pdf_and_replace() {
         let conn = setup();
-        let dir = tmp_dir("cap");
-        let path = write_file(&dir, "a.png", b"x");
+        let dir = tmp_dir("replace");
+        let first = write_file(&dir, "a.pdf", b"x");
+        let second = write_file(&dir, "b.pdf", b"yy");
 
-        let err = insert_attachments(&conn, "nope", vec![prepared(&path)]).unwrap_err();
+        let err = insert_attachments(&conn, "nope", vec![prepared(&first)]).unwrap_err();
         assert!(err.to_string().contains("not found"), "unexpected: {err}");
 
-        for i in 0..MAX_ATTACHMENTS_PER_TX {
-            conn.execute(
-                "INSERT INTO attachments
-                 (guid, tx_guid, filename, mime_type, byte_size, data, created_at)
-                 VALUES (?1, 't1', 'f.png', 'image/png', 1, X'00', ?2)",
-                params![format!("a-{i}"), utils::iso_now()],
-            )
-            .unwrap();
-        }
-        let err = insert_attachments(&conn, "t1", vec![prepared(&path)]).unwrap_err();
-        assert!(err.to_string().contains("at most"), "unexpected: {err}");
+        // More than one file in a single call is rejected.
+        let err = insert_attachments(
+            &conn,
+            "t1",
+            vec![prepared(&first), prepared(&second)],
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("single PDF"),
+            "unexpected: {err}"
+        );
+
+        // Adding a new PDF replaces the existing one.
+        let infos = insert_attachments(&conn, "t1", vec![prepared(&first)]).unwrap();
+        assert_eq!(infos.len(), 1);
+        let replaced = insert_attachments(&conn, "t1", vec![prepared(&second)]).unwrap();
+        assert_eq!(replaced.len(), 1);
+        assert_eq!(replaced[0].filename, "b.pdf");
+        let listed = list_attachments(&conn, "t1").unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0], replaced[0]);
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -486,7 +496,7 @@ mod tests {
     fn deleting_transaction_cascades_to_attachments() {
         let conn = setup();
         let dir = tmp_dir("cascade");
-        let path = write_file(&dir, "a.png", b"x");
+        let path = write_file(&dir, "a.pdf", b"x");
         insert_attachments(&conn, "t1", vec![prepared(&path)]).unwrap();
 
         conn.execute("DELETE FROM transactions WHERE guid = 't1'", [])
@@ -498,8 +508,8 @@ mod tests {
 
     #[test]
     fn sanitize_file_name_never_yields_path_parts() {
-        assert_eq!(sanitize_file_name("receipt.png"), "receipt.png");
-        for name in ["../../etc/passwd", "..", "a/b\\c:d.png", "", "   ", "..."] {
+        assert_eq!(sanitize_file_name("receipt.pdf"), "receipt.pdf");
+        for name in ["../../etc/passwd", "..", "a/b\\c:d.pdf", "", "   ", "..."] {
             let out = sanitize_file_name(name);
             assert!(!out.is_empty(), "empty sanitized name for {name:?}");
             assert!(
