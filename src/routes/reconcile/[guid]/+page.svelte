@@ -3,7 +3,7 @@
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { SvelteSet } from 'svelte/reactivity';
-  import { ArrowLeft, CalendarDays, CircleCheck } from '@lucide/svelte';
+  import { ArrowLeft, CalendarDays, CircleCheck, X } from '@lucide/svelte';
   import { toast } from '$lib/components/ui/sonner';
   import { Button } from '$lib/components/ui/button';
   import { dbSession, refreshSession } from '$lib/stores/db.svelte';
@@ -229,7 +229,7 @@
       {/snippet}
       <Button variant="outline" href={resolve('/reconcile')}>
         <ArrowLeft aria-hidden="true" class="size-4" />
-        All accounts
+        Reconcile
       </Button>
     </PageHeader>
 
@@ -258,13 +258,26 @@
           onFinish={finish}
         />
 
-        <div class="max-w-md">
+        <div class="flex flex-wrap items-end gap-2">
           <SearchInput
             id="reconcile-search"
-            label="Filter by description, number, memo"
-            placeholder="Filter by description, number, memo…"
+            label="Search description, number, memo"
+            placeholder="Search description, number, memo…"
             bind:value={searchInput}
+            class="grow basis-48"
           />
+          {#if search.value}
+            <Button
+              variant="ghost"
+              onclick={() => {
+                searchInput = '';
+                search.set('');
+              }}
+            >
+              <X aria-hidden="true" class="mr-1 size-3.5" />
+              Clear
+            </Button>
+          {/if}
         </div>
 
         {#if filtered.length === 0}
@@ -272,7 +285,7 @@
             card
             title="Nothing to reconcile"
             description={search.value
-              ? 'No candidates match the current filter.'
+              ? 'No candidates match the current filters.'
               : 'No unreconciled transactions at or before the statement date.'}
           >
             {#snippet icon()}

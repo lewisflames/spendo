@@ -14,7 +14,7 @@
 
 <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
   <div class="flex min-w-0 flex-1 flex-col gap-1">
-    <h2 class="text-3xl font-bold tracking-tight break-words">{title}</h2>
+    <h1 class="text-3xl font-bold tracking-tight break-words">{title}</h1>
     {#if description !== undefined}
       {#if typeof description === 'function'}
         <!-- min-h-5 reserves the text-sm line height so an empty description

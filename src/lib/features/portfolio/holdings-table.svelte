@@ -237,7 +237,7 @@
             search.set('');
           }}
         >
-          <X aria-hidden="true" class="mr-1 size-3" />
+          <X aria-hidden="true" class="mr-1 size-3.5" />
           Clear
         </Button>
       {/if}
@@ -388,11 +388,13 @@
           {/each}
         </Table.Body>
         <Table.Footer>
-          <Table.Row class="border-t bg-muted/50 hover:bg-muted/50">
-            <Table.Cell class="px-4 py-2.5 text-muted-foreground">Total</Table.Cell>
+          <Table.Row class="border-t bg-muted/50 font-semibold">
+            <Table.Cell class="py-2.5 text-xs font-semibold tracking-wider uppercase"
+              >Total</Table.Cell
+            >
             {#each COLUMNS as col (col.id)}
               {#if cols.isVisible(col.id)}
-                <Table.Cell class="px-4 py-2.5 text-right font-medium tabular-nums">
+                <Table.Cell class="py-2.5 text-right font-medium tabular-nums">
                   {#if col.id === 'marketValue'}
                     {fmt(totals.marketValue)}
                   {:else if col.id === 'costBasis'}

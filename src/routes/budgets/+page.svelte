@@ -197,20 +197,18 @@
               search.set('');
             }}
           >
-            <X aria-hidden="true" class="mr-1 size-3" />
+            <X aria-hidden="true" class="mr-1 size-3.5" />
             Clear
           </Button>
         {/if}
 
         <div class="ml-auto flex items-center gap-2">
           <Button
-            variant="outline"
-            size="sm"
             onclick={() => {
               showAddDialog = true;
             }}
           >
-            <Plus aria-hidden="true" class="size-3.5" />
+            <Plus aria-hidden="true" class="size-4" />
             New budget
           </Button>
           <ColumnsMenu columns={BUDGET_COLUMNS} cols={budgetCols} />

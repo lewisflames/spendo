@@ -100,7 +100,7 @@
           <a
             href={resolve('/transactions/[guid]', { guid: row.txGuid })}
             title="Open transaction"
-            class="block truncate underline-offset-2 hover:underline"
+            class="block truncate underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-ring"
           >
             {#if row.num}<span class="mr-1 text-muted-foreground">#{row.num}</span>{/if}
             {row.description || EMPTY_DASH}

@@ -16,7 +16,7 @@
 <div class="flex flex-col gap-6">
   <PageHeader title="About Spendo" description="What is Spendo and how it works">
     {#if !dbSession.value}
-      <Button variant="outline" href={resolve('/')}>Back to welcome</Button>
+      <Button variant="outline" href={resolve('/')}>Welcome</Button>
     {/if}
   </PageHeader>
 

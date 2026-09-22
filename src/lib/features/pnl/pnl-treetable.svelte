@@ -64,23 +64,24 @@
     {@const variance = row.currentAmount - row.previousAmount}
     {@const isZeroVariance = variance === 0}
     {@const isZeroPct = row.changePct === null || row.changePct === 0}
-    <NavRow onNavigate={() => openAccount(row.accountGuid)} class="hover:bg-muted/50">
+    <NavRow
+      onNavigate={() => openAccount(row.accountGuid)}
+      class="cursor-pointer hover:bg-muted/50"
+    >
       <ReportAccountCell
         depth={item.depth}
         guid={row.accountGuid}
         name={row.accountName}
         description={row.accountDescription}
       />
-      <Table.Cell class="py-2.5 text-right text-sm font-medium whitespace-nowrap tabular-nums">
+      <Table.Cell class="py-2.5 text-right font-medium whitespace-nowrap tabular-nums">
         {fmt(row.currentAmount)}
       </Table.Cell>
-      <Table.Cell
-        class="py-2.5 text-right text-sm whitespace-nowrap text-muted-foreground tabular-nums"
-      >
+      <Table.Cell class="py-2.5 text-right whitespace-nowrap text-muted-foreground tabular-nums">
         {fmt(row.previousAmount)}
       </Table.Cell>
       <Table.Cell
-        class={'py-2.5 text-right text-sm whitespace-nowrap tabular-nums ' +
+        class={'py-2.5 text-right whitespace-nowrap tabular-nums ' +
           (!isZeroVariance ? signColor(variance, positiveGood) : 'text-muted-foreground')}
       >
         {#if isZeroVariance}
@@ -90,7 +91,7 @@
         {/if}
       </Table.Cell>
       <Table.Cell
-        class={'py-2.5 text-right text-sm whitespace-nowrap tabular-nums ' +
+        class={'py-2.5 text-right whitespace-nowrap tabular-nums ' +
           (!isZeroPct && row.changePct !== null
             ? signColor(row.changePct, positiveGood)
             : 'text-muted-foreground')}
@@ -121,11 +122,11 @@
     onNavigate={guid !== null ? () => openAccount(guid) : null}
     class={footer
       ? guid !== null
-        ? 'border-t-2 bg-muted/50 font-semibold hover:bg-muted/50'
-        : 'border-t-2 bg-muted/50 font-semibold'
+        ? 'cursor-pointer border-t bg-muted/50 font-semibold hover:bg-muted/50'
+        : 'border-t bg-muted/50 font-semibold'
       : guid !== null
-        ? 'border-t border-b bg-muted/50 font-semibold hover:bg-muted/50'
-        : 'border-t-2 bg-muted/50 font-semibold'}
+        ? 'cursor-pointer border-t border-b bg-muted/50 font-semibold hover:bg-muted/50'
+        : 'border-t bg-muted/50 font-semibold'}
   >
     <Table.Cell class="py-2.5 text-xs font-semibold tracking-wider uppercase">
       {#if guid !== null}
@@ -137,16 +138,12 @@
         {label}
       {/if}
     </Table.Cell>
-    <Table.Cell class="py-2.5 text-right text-sm whitespace-nowrap tabular-nums"
-      >{fmt(current)}</Table.Cell
-    >
-    <Table.Cell
-      class="py-2.5 text-right text-sm whitespace-nowrap text-muted-foreground tabular-nums"
-    >
+    <Table.Cell class="py-2.5 text-right whitespace-nowrap tabular-nums">{fmt(current)}</Table.Cell>
+    <Table.Cell class="py-2.5 text-right whitespace-nowrap text-muted-foreground tabular-nums">
       {fmt(previous)}
     </Table.Cell>
     <Table.Cell
-      class={'py-2.5 text-right text-sm whitespace-nowrap tabular-nums ' +
+      class={'py-2.5 text-right whitespace-nowrap tabular-nums ' +
         (!isZeroVariance ? signColor(variance, positiveGood) : 'text-muted-foreground')}
     >
       {#if isZeroVariance}
@@ -156,7 +153,7 @@
       {/if}
     </Table.Cell>
     <Table.Cell
-      class={'py-2.5 text-right text-sm whitespace-nowrap tabular-nums ' +
+      class={'py-2.5 text-right whitespace-nowrap tabular-nums ' +
         (!isZeroPct && pct !== null ? signColor(pct, positiveGood) : 'text-muted-foreground')}
     >
       {#if isZeroPct}

@@ -6,7 +6,7 @@
 </script>
 
 <div
-  class="overflow-auto rounded-lg border bg-muted/25 [&_tbody_td]:px-4 [&_thead_th]:px-4 [&_thead_th]:py-3"
+  class="overflow-auto rounded-lg border bg-muted/25 [&_tbody_td]:px-4 [&_tfoot_td]:px-4 [&_thead_th]:px-4 [&_thead_th]:py-3"
 >
   <Table.Root class="border-collapse">{@render children()}</Table.Root>
 </div>

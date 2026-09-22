@@ -177,14 +177,13 @@
                 <Pencil aria-hidden="true" class="size-4" />
               </Button>
               {#if confirmDeleteId === rule.id}
-                <span class="text-xs text-destructive">Delete?</span>
                 <Button
                   variant="destructive"
                   size="sm"
                   onclick={() => void handleDelete(rule)}
                   disabled={deletingId !== null}
                 >
-                  {deletingId === rule.id ? 'Deleting…' : 'Delete'}
+                  {deletingId === rule.id ? 'Deleting…' : 'Confirm delete'}
                 </Button>
                 <Button
                   variant="ghost"
@@ -217,7 +216,7 @@
         description="Add a rule to route CSV rows whose description matches to a category."
       >
         {#snippet icon()}
-          <ListFilter aria-hidden="true" />
+          <ListFilter aria-hidden="true" class="text-muted-foreground" />
         {/snippet}
       </EmptyState>
     {/if}
