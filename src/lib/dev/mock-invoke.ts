@@ -1833,9 +1833,22 @@ const handlers: HandlerMap = {
     return undefined;
   },
 
-  // Exports (written straight to disk by the backend; the mock is a no-op)
+  // Exports (written straight to disk by the backend). CSV files are no-ops in
+  // the browser mock; the GnuCash export reports fixture counts so its toast
+  // reads like the real one.
   export_transactions_csv: () => undefined,
   export_accounts_csv: () => undefined,
+  export_gnucash: () => ({
+    accounts: state.accounts.length,
+    transactions: state.transactions.length,
+    splits: state.transactions.reduce((total, tx) => total + tx.splits.length, 0),
+    prices: Object.keys(MARKET_PRICES).length,
+    budgets: state.budgets.length,
+    schedules: state.schedules.length,
+    futureDated: 0,
+    attachmentsSkipped: state.attachments.length,
+    roundedAmounts: 0
+  }),
 
   // Global search
   search_global: (args) => {

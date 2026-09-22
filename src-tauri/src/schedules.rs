@@ -80,20 +80,20 @@ pub struct Schedule {
 /// the IPC shapes so the editor can round-trip it).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct StoredSplit {
-    account_guid: String,
-    amount: f64,
-    quantity: Option<f64>,
-    memo: Option<String>,
+pub(crate) struct StoredSplit {
+    pub(crate) account_guid: String,
+    pub(crate) amount: f64,
+    pub(crate) quantity: Option<f64>,
+    pub(crate) memo: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct StoredTemplate {
-    description: Option<String>,
-    num: Option<String>,
-    notes: Option<String>,
-    splits: Vec<StoredSplit>,
+pub(crate) struct StoredTemplate {
+    pub(crate) description: Option<String>,
+    pub(crate) num: Option<String>,
+    pub(crate) notes: Option<String>,
+    pub(crate) splits: Vec<StoredSplit>,
 }
 
 struct ScheduleRow {
@@ -443,7 +443,7 @@ fn account_names(
     Ok(map)
 }
 
-fn parse_template(template_json: &str) -> Result<StoredTemplate, AppError> {
+pub(crate) fn parse_template(template_json: &str) -> Result<StoredTemplate, AppError> {
     serde_json::from_str(template_json)
         .map_err(|e| AppError::Validation(format!("Corrupt schedule data: {e}")))
 }
