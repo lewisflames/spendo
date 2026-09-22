@@ -12,10 +12,10 @@
     Download,
     ExternalLink,
     FileText,
+    Image,
     LoaderCircle,
     Paperclip,
     Plus,
-    RefreshCw,
     Trash2
   } from '@lucide/svelte';
   import {
@@ -32,7 +32,8 @@
   let { txGuid }: { txGuid: string } = $props();
 
   /** Mirrors `ALLOWED_TYPES` in `src-tauri/src/attachments.rs`; the backend re-validates. */
-  const ATTACHMENT_EXTENSIONS = ['pdf'];
+  const ATTACHMENT_EXTENSIONS = ['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp'];
+  const MAX_ATTACHMENTS = 10;
 
   const res = useAsyncData({
     enabled: () => !!txGuid,
@@ -52,17 +53,17 @@
   });
 
   let files = $derived(res.data ?? []);
-  let attachment = $derived(
-    files.length === 1 && files[0].mimeType === 'application/pdf' ? files[0] : null
-  );
-  let isLegacy = $derived(files.length > 0 && !attachment);
+
+  function isImage(item: AttachmentInfo): boolean {
+    return item.mimeType.startsWith('image/');
+  }
 
   async function pickFiles() {
     let selected: string | string[] | null;
     try {
       selected = await open({
-        multiple: false,
-        filters: [{ name: 'PDF documents', extensions: ATTACHMENT_EXTENSIONS }]
+        multiple: true,
+        filters: [{ name: 'Documents', extensions: ATTACHMENT_EXTENSIONS }]
       });
     } catch (e: unknown) {
       toast.error(errMsg(e, 'Failed to open file dialog'));
@@ -74,16 +75,11 @@
 
   async function addPaths(paths: string[]) {
     if (!paths.length || adding) return;
-    if (paths.length > 1) {
-      toast.error('Only a single PDF attachment is allowed');
-      return;
-    }
     adding = true;
     try {
-      const replacing = files.length > 0;
-      await addAttachments({ txGuid, paths });
+      const added = await addAttachments({ txGuid, paths });
       res.reload();
-      toast.success(replacing ? 'PDF replaced' : 'PDF attached');
+      toast.success(added.length === 1 ? 'File attached' : `${added.length} files attached`);
     } catch (e: unknown) {
       toast.error(errMsg(e, 'Failed to add attachment'));
     } finally {
@@ -145,7 +141,10 @@
 </script>
 
 <Card.Root class="relative overflow-hidden">
-  <IconCardHeader title="Attachments" description="Single PDF receipt stored inside this book.">
+  <IconCardHeader
+    title="Attachments"
+    description="PDF or image files stored inside this book (up to {MAX_ATTACHMENTS})."
+  >
     {#snippet icon()}
       <Paperclip aria-hidden="true" class="size-4 text-muted-foreground" />
     {/snippet}
@@ -154,12 +153,9 @@
         {#if adding}
           <LoaderCircle aria-hidden="true" class="size-4 animate-spin" />
           Adding…
-        {:else if files.length > 0}
-          <RefreshCw aria-hidden="true" class="size-4" />
-          Replace PDF
         {:else}
           <Plus aria-hidden="true" class="size-4" />
-          Add PDF
+          Add files
         {/if}
       </Button>
     {/snippet}
@@ -169,83 +165,16 @@
       <p class="py-2 text-sm text-muted-foreground">Loading attachments…</p>
     {:else if res.error}
       <ErrorCard message={res.error} onRetry={() => res.reload()} />
-    {:else if attachment}
-      {@const item = attachment}
-      <ul class="flex flex-col gap-1.5">
-        <li class="flex items-center gap-2 rounded-lg border px-3 py-2">
-          <span class="flex min-w-0 flex-1 items-center gap-2">
-            <FileText aria-hidden="true" class="size-4 shrink-0 text-muted-foreground" />
-            <span class="min-w-0">
-              <span class="block truncate text-sm font-medium">{item.filename}</span>
-              <span class="block text-xs text-muted-foreground">
-                {formatBytes(item.byteSize)} &middot; {formatDate(item.createdAt)}
-              </span>
-            </span>
-          </span>
-          {#if confirmDeleteGuid === item.guid}
-            <span class="text-xs text-destructive">Delete?</span>
-            <Button
-              variant="destructive"
-              size="sm"
-              onclick={() => handleDelete(item)}
-              disabled={deleting}
-            >
-              Delete
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onclick={() => (confirmDeleteGuid = null)}
-              disabled={deleting}
-            >
-              Cancel
-            </Button>
-          {:else}
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Open PDF"
-              title="Open PDF"
-              onclick={() => handleOpen(item)}
-              disabled={openBusy || saveBusy || deleting}
-            >
-              <ExternalLink aria-hidden="true" class="size-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Save PDF"
-              title="Save PDF"
-              onclick={() => handleDownload(item)}
-              disabled={openBusy || saveBusy || deleting}
-            >
-              <Download aria-hidden="true" class="size-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Delete attachment"
-              title="Delete attachment"
-              onclick={() => handleDelete(item)}
-              disabled={openBusy || saveBusy || deleting}
-            >
-              <Trash2 aria-hidden="true" class="size-4" />
-            </Button>
-          {/if}
-        </li>
-      </ul>
-    {:else if isLegacy}
-      <div class="rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2">
-        <p class="text-xs text-muted-foreground">
-          Only a single PDF is supported now. These existing files are kept until you delete them or
-          replace them with one PDF.
-        </p>
-      </div>
+    {:else if files.length > 0}
       <ul class="flex flex-col gap-1.5">
         {#each files as item (item.guid)}
           <li class="flex items-center gap-2 rounded-lg border px-3 py-2">
             <span class="flex min-w-0 flex-1 items-center gap-2">
-              <FileText aria-hidden="true" class="size-4 shrink-0 text-muted-foreground" />
+              {#if isImage(item)}
+                <Image aria-hidden="true" class="size-4 shrink-0 text-muted-foreground" />
+              {:else}
+                <FileText aria-hidden="true" class="size-4 shrink-0 text-muted-foreground" />
+              {/if}
               <span class="min-w-0">
                 <span class="block truncate text-sm font-medium">{item.filename}</span>
                 <span class="block text-xs text-muted-foreground">
@@ -309,7 +238,7 @@
     {:else}
       <div class="rounded-lg border border-dashed px-4 py-6 text-center">
         <p class="text-sm text-muted-foreground">
-          Drop a PDF here, or use Add PDF (PDF only, max 10 MB).
+          Drop files here, or use Add files (PDF or images, max 10 MB each, up to {MAX_ATTACHMENTS}).
         </p>
       </div>
     {/if}
@@ -319,7 +248,7 @@
     <div
       class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-xl border-2 border-dashed border-primary bg-background/85"
     >
-      <p class="text-sm font-medium">Drop PDF to attach</p>
+      <p class="text-sm font-medium">Drop files to attach</p>
     </div>
   {/if}
 </Card.Root>

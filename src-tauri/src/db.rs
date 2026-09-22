@@ -254,14 +254,15 @@ CREATE TABLE IF NOT EXISTS symbol_overrides (
 	symbol TEXT NOT NULL
 );
 
--- Single PDF receipt attached to a transaction. Bytes live in the book itself
+-- Files attached to a transaction. Bytes live in the book itself
 -- so the `.spendo` file stays portable (Save As copies them via VACUUM INTO).
--- At most one row per transaction (`UNIQUE(tx_guid)`); adding a file replaces
--- the current one. Deleting a transaction (manual delete or the GnuCash orphan
--- sweep) removes its attachment through the FK cascade.
+-- Up to one `MAX_ATTACHMENTS_PER_TX` rows per transaction (enforced in
+-- `attachments.rs`, not by schema); adding files accumulates. Deleting a
+-- transaction (manual delete or the GnuCash orphan
+-- sweep) removes its attachments through the FK cascade.
 CREATE TABLE IF NOT EXISTS attachments (
 	guid TEXT PRIMARY KEY,
-	tx_guid TEXT NOT NULL UNIQUE REFERENCES transactions(guid) ON DELETE CASCADE,
+	tx_guid TEXT NOT NULL REFERENCES transactions(guid) ON DELETE CASCADE,
 	filename TEXT NOT NULL,
 	mime_type TEXT NOT NULL,
 	byte_size INTEGER NOT NULL,

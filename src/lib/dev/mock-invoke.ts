@@ -1613,35 +1613,41 @@ const handlers: HandlerMap = {
       })),
   add_attachments: (args) => {
     const input = args.input as { txGuid: string; paths: string[] };
-    if (input.paths.length !== 1) {
-      throw new Error('Only a single PDF attachment is allowed');
+    const MAX_MOCK_ATTACHMENTS = 10;
+    const ALLOWED_EXTS = new Set(['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp']);
+    if (input.paths.length === 0) {
+      throw new Error('No files selected');
     }
-    const filename = input.paths[0].split('/').pop() ?? input.paths[0];
-    const ext = filename.split('.').pop()?.toLowerCase() ?? '';
-    if (ext !== 'pdf') {
-      throw new Error(`Unsupported file type: .${ext || 'unknown'}`);
+    const existing = state.attachments.filter((a) => a.txGuid === input.txGuid).length;
+    if (existing + input.paths.length > MAX_MOCK_ATTACHMENTS) {
+      throw new Error(`A transaction can have at most ${MAX_MOCK_ATTACHMENTS} attachments`);
     }
-    const mimeType = mimeFor(filename);
-    state.attachments = state.attachments.filter((a) => a.txGuid !== input.txGuid);
-    const record: AttachmentRecord = {
-      guid: id('att'),
-      txGuid: input.txGuid,
-      filename,
-      mimeType,
-      byteSize: 48_000 + filename.length * 137,
-      createdAt: nowIso(),
-      isImage: false
-    };
-    state.attachments.push(record);
-    return [
-      {
+    const added = input.paths.map((path) => {
+      const filename = path.split('/').pop() ?? path;
+      const ext = filename.split('.').pop()?.toLowerCase() ?? '';
+      if (!ALLOWED_EXTS.has(ext)) {
+        throw new Error(`Unsupported file type: .${ext || 'unknown'}`);
+      }
+      const mimeType = mimeFor(filename);
+      const record: AttachmentRecord = {
+        guid: id('att'),
+        txGuid: input.txGuid,
+        filename,
+        mimeType,
+        byteSize: 48_000 + filename.length * 137,
+        createdAt: nowIso(),
+        isImage: mimeType.startsWith('image/')
+      };
+      state.attachments.push(record);
+      return {
         guid: record.guid,
         filename: record.filename,
         mimeType: record.mimeType,
         byteSize: record.byteSize,
         createdAt: record.createdAt
-      }
-    ];
+      };
+    });
+    return added;
   },
   delete_attachment: (args) => {
     state.attachments = state.attachments.filter((a) => a.guid !== args.guid);
