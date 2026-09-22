@@ -71,8 +71,8 @@
     <div class="flex flex-wrap items-end gap-2">
       <SearchInput
         id="reconcile-account-search"
-        label="Filter accounts"
-        placeholder="Filter accounts…"
+        label="Search accounts"
+        placeholder="Search accounts…"
         bind:value={searchInput}
         class="grow basis-48"
       />
@@ -84,7 +84,7 @@
             search.set('');
           }}
         >
-          <X aria-hidden="true" class="mr-1 size-3" />
+          <X aria-hidden="true" class="mr-1 size-3.5" />
           Clear
         </Button>
       {/if}

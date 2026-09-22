@@ -19,7 +19,7 @@
   {@render children()}
 {:else}
   <div class="flex flex-col gap-6">
-    <PageHeader {title} description={description ?? ''} />
+    <PageHeader {title} {description} />
     <EmptyBookPrompt />
   </div>
 {/if}

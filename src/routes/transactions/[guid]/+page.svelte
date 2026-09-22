@@ -156,13 +156,7 @@
             <ArrowLeftRight aria-hidden="true" class="size-4 text-muted-foreground" />
           {/snippet}
         </KpiCard>
-        <KpiCard
-          title="Reconciled"
-          value="{reconciledCount}/{d.splits.length}"
-          valueClass={d.splits.length > 0 && reconciledCount === d.splits.length
-            ? 'text-success'
-            : ''}
-        >
+        <KpiCard title="Reconciled" value="{reconciledCount}/{d.splits.length}">
           {#snippet icon()}
             <CircleCheck aria-hidden="true" class="size-4 text-muted-foreground" />
           {/snippet}
@@ -189,7 +183,7 @@
                 <Table.Cell class="py-2.5 font-medium">
                   <a
                     href={resolve('/accounts/[guid]', { guid: split.accountGuid })}
-                    class="underline-offset-2"
+                    class="focus-visible:outline-2 focus-visible:outline-ring"
                     title={split.accountName}
                   >
                     {split.accountDescription || split.accountName}
@@ -236,7 +230,7 @@
         {#snippet action()}
           <Button variant="outline" href={resolve('/transactions')}>
             <ArrowLeft aria-hidden="true" class="size-4" />
-            Back to transactions
+            Transactions
           </Button>
         {/snippet}
       </EmptyState>
