@@ -126,7 +126,7 @@
 </script>
 
 <Dialog.Root bind:open>
-  <Dialog.Content class="sm:max-w-2xl">
+  <Dialog.Content class="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
     <Dialog.Header>
       <Dialog.Title class="truncate">{attachment?.filename ?? 'Attachment'}</Dialog.Title>
       <Dialog.Description>

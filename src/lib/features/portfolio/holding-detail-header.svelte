@@ -27,19 +27,17 @@
   {#snippet description()}
     {holding.mnemonic} · {holding.namespace}{#if positionLabel}· {positionLabel}{/if}{#if holding.priceDate}{/if}
   {/snippet}
-  <div class="flex items-center gap-2">
-    <Button onclick={onRefresh} disabled={refreshing}>
-      <RefreshCw aria-hidden="true" class="size-3.5 {refreshing ? 'animate-spin' : ''}" />
-      {refreshing ? 'Refreshing...' : 'Refresh Prices'}
-    </Button>
-    <Button
-      variant="outline"
-      onclick={onEditSymbol}
-      aria-label="Edit Yahoo symbol"
-      title="Edit Yahoo symbol"
-    >
-      <Pencil aria-hidden="true" />
-      Edit Symbol
-    </Button>
-  </div>
+  <Button variant="outline" onclick={onRefresh} disabled={refreshing}>
+    <RefreshCw aria-hidden="true" class="size-4 {refreshing ? 'animate-spin' : ''}" />
+    {refreshing ? 'Refreshing...' : 'Refresh Prices'}
+  </Button>
+  <Button
+    variant="outline"
+    onclick={onEditSymbol}
+    aria-label="Edit Yahoo symbol"
+    title="Edit Yahoo symbol"
+  >
+    <Pencil aria-hidden="true" />
+    Edit Symbol
+  </Button>
 </PageHeader>

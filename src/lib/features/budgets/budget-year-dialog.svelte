@@ -191,7 +191,7 @@
 </script>
 
 <Dialog.Root bind:open>
-  <Dialog.Content>
+  <Dialog.Content class="max-h-[90vh] overflow-y-auto sm:max-w-lg">
     <Dialog.Header>
       <Dialog.Title>New budget</Dialog.Title>
       <Dialog.Description>

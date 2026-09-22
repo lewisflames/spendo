@@ -61,7 +61,7 @@
       onclick={addSplit}
       disabled={splits.length >= 50}
     >
-      <Plus aria-hidden="true" class="size-3" />
+      <Plus aria-hidden="true" class="size-3.5" />
       {addLabel}
     </Button>
   </div>

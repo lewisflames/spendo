@@ -22,7 +22,7 @@
     </span>
     {#if onRetry}
       <Button variant="outline" size="sm" onclick={onRetry}>
-        <RefreshCw aria-hidden="true" class="size-3" />
+        <RefreshCw aria-hidden="true" class="size-3.5" />
         Retry
       </Button>
     {/if}

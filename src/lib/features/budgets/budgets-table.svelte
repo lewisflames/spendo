@@ -226,7 +226,9 @@
           {/if}
         </NavRow>
       {/each}
-      <NavRow onNavigate={null} class="border-t-2 bg-muted/50 font-semibold">
+    </Table.Body>
+    <Table.Footer>
+      <Table.Row class="border-t bg-muted/50 font-semibold">
         <Table.Cell class="py-2.5 text-xs font-semibold tracking-wider uppercase">Total</Table.Cell>
         {#if cols.isVisible('budget')}
           <Table.Cell class="py-2.5 text-right tabular-nums">
@@ -293,7 +295,7 @@
             {fmtSigned(totals.remaining)}
           </Table.Cell>
         {/if}
-      </NavRow>
-    </Table.Body>
+      </Table.Row>
+    </Table.Footer>
   </TableShell>
 {/if}

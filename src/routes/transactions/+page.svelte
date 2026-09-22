@@ -50,6 +50,14 @@
 
   let search = useDebouncedSearch(() => searchInput);
 
+  /** Mirrors TransactionFilters' internal clear so both buttons stay in sync. */
+  function clearFilters() {
+    searchInput = '';
+    search.set('');
+    dateFrom = '';
+    dateTo = '';
+  }
+
   const cols = useColumnVisibility<TransactionColumnId>(
     TRANSACTION_DEFAULT_COLUMNS,
     'cols:transactions'
@@ -178,17 +186,7 @@
           {/snippet}
           {#snippet action()}
             {#if search.value || dateFrom || dateTo}
-              <Button
-                variant="outline"
-                onclick={() => {
-                  searchInput = '';
-                  search.set('');
-                  dateFrom = '';
-                  dateTo = '';
-                }}
-              >
-                Clear filters
-              </Button>
+              <Button variant="outline" onclick={clearFilters}>Clear filters</Button>
             {:else}
               <Button href={resolve('/transactions/new')}>
                 <Plus aria-hidden="true" class="size-4" />

@@ -12,9 +12,9 @@
   } = $props();
 </script>
 
-<div class="flex items-center justify-between gap-4">
-  <div class="flex flex-1 flex-col gap-1">
-    <h2 class="text-3xl font-bold tracking-tight">{title}</h2>
+<div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+  <div class="flex min-w-0 flex-1 flex-col gap-1">
+    <h2 class="text-3xl font-bold tracking-tight break-words">{title}</h2>
     {#if description !== undefined}
       {#if typeof description === 'function'}
         <!-- min-h-5 reserves the text-sm line height so an empty description
@@ -26,6 +26,8 @@
     {/if}
   </div>
   {#if children}
-    {@render children()}
+    <div class="flex shrink-0 flex-wrap items-center gap-2">
+      {@render children()}
+    </div>
   {/if}
 </div>
