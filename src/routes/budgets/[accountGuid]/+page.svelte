@@ -97,18 +97,13 @@
 </script>
 
 <svelte:head>
-  <title>{accountName} — Budgets — Spendo</title>
+  <title>{accountName} — Spendo</title>
+  <meta name="description" content="Yearly budget for this account." />
 </svelte:head>
 
-{#snippet headerDescription()}
-  <span class="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-    Yearly budget for this account
-  </span>
-{/snippet}
-
-<BookGate title="Budget">
+<BookGate title={accountName} description="Yearly budget for this account">
   <div class="flex flex-col gap-6">
-    <PageHeader title={accountName} description={headerDescription}>
+    <PageHeader title={accountName} description="Yearly budget for this account">
       <Button variant="outline" href={resolve('/budgets')}>
         <ArrowLeft aria-hidden="true" class="size-4" />
         Budgets
@@ -126,7 +121,7 @@
         onclick={() => (showEditDialog = true)}
         disabled={detail === null && res.loading}
       >
-        <Pencil aria-hidden="true" />
+        <Pencil aria-hidden="true" class="size-4" />
         {detail ? 'Edit budget' : 'Set budget'}
       </Button>
     </PageHeader>

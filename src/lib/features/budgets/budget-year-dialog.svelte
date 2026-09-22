@@ -259,14 +259,13 @@
       </div>
 
       <div class="flex flex-col gap-2">
-        <label id="budget-year-label" for="year" class="text-sm font-medium">Year</label>
+        <label for="year" class="text-sm font-medium">Year</label>
         <Select.Root type="single" bind:value={by.yearSel} items={yearOptions}>
           <Select.Trigger
             id="year"
             class="min-w-20 justify-center"
             aria-invalid={showErrors && !!yearError}
             aria-describedby={showErrors && yearError ? 'year-error' : undefined}
-            aria-labelledby="budget-year-label"
           >
             <SelectPrimitive.Value />
           </Select.Trigger>
@@ -318,7 +317,6 @@
       confirmDelete={false}
       saveLabel="Create budget"
       {saveDisabled}
-      onDelete={() => {}}
       onSave={handleSave}
       onCancel={() => {
         open = false;

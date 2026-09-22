@@ -27,14 +27,14 @@
     confirmDelete: boolean;
     saveLabel: string;
     saveDisabled: boolean;
-    onDelete: () => void;
+    onDelete?: () => void;
     onSave: () => void;
     onCancel: () => void;
   } = $props();
 </script>
 
 {#snippet buttons()}
-  {#if mode === 'edit'}
+  {#if mode === 'edit' && onDelete}
     <Button
       type="button"
       variant={confirmDelete ? 'destructive' : 'outline'}

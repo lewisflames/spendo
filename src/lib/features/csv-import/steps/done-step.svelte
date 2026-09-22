@@ -18,7 +18,7 @@
 <Card.Root>
   <Card.Header>
     <Card.Title class="flex items-center gap-2">
-      <CheckCircle2 aria-hidden="true" class="size-5 text-green-600" />
+      <CheckCircle2 aria-hidden="true" class="size-5 text-success" />
       Import complete
     </Card.Title>
     <Card.Description>{commitResult.label}</Card.Description>

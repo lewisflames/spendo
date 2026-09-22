@@ -101,7 +101,7 @@
           card
           title="No reconcilable accounts"
           description={search.value
-            ? 'No reconcilable accounts match the current filter.'
+            ? 'No reconcilable accounts match the current filters.'
             : 'Cash, bank and credit accounts show up here once your book has accounts.'}
         >
           {#snippet icon()}

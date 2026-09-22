@@ -46,7 +46,7 @@
           <!-- Accessible link target for keyboard/middle-click; the row click
                is a convenience shortcut. -->
           <a
-            class="block min-w-0 px-2 py-2.5"
+            class="block min-w-0 px-2 py-2.5 focus-visible:outline-2 focus-visible:outline-ring"
             href={resolve('/accounts/[guid]', { guid: node.guid })}
             title={node.description ?? undefined}
           >

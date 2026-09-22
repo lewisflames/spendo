@@ -154,9 +154,11 @@
         {/if}
       </p>
       {#if hasBadValues}
-        <p class="text-destructive" role="alert">Every target must be between 0 and 100%.</p>
+        <p class="text-xs text-destructive" role="alert">
+          Every target must be between 0 and 100%.
+        </p>
       {:else if !sumValid}
-        <p class="text-destructive" role="alert">
+        <p class="text-xs text-destructive" role="alert">
           Targets add up to {formatAllocPct(result.targetSumPct)} — they must total 100%.
         </p>
       {/if}
@@ -171,18 +173,17 @@
         </p>
       {/if}
       {#if formError}
-        <p class="text-destructive" role="alert">{formError}</p>
+        <p class="text-sm text-destructive" role="alert">{formError}</p>
       {/if}
     </div>
 
     <SaveFooter
-      mode="create"
+      mode={targets.size > 0 ? 'edit' : 'create'}
       {saving}
       deleting={false}
       confirmDelete={false}
       saveLabel="Save targets"
       saveDisabled={saving || !canSave}
-      onDelete={() => {}}
       onSave={handleSave}
       onCancel={() => (open = false)}
     />

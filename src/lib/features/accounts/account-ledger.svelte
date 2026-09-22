@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { Receipt } from '@lucide/svelte';
+  import { Receipt, SearchX } from '@lucide/svelte';
+  import { Button } from '$lib/components/ui/button';
   import { ColumnsMenu } from '$lib/components/shared/columns-menu';
   import { PaginationNav } from '$lib/components/shared/pagination-nav';
   import { appSettings } from '$lib/stores/settings.svelte';
@@ -83,15 +84,32 @@
   {/if}
 
   {#if ledger.transactions.length === 0}
+    {@const isFiltered = !!(searchText || dateFrom || dateTo)}
     <EmptyState
       card
       title="No transactions"
-      description="No transactions found{searchText || dateFrom || dateTo
-        ? ' matching the current filters'
-        : ''}."
+      description="No transactions found{isFiltered ? ' matching the current filters' : ''}."
     >
       {#snippet icon()}
-        <Receipt aria-hidden="true" class="text-muted-foreground" />
+        {#if isFiltered}
+          <SearchX aria-hidden="true" class="text-muted-foreground" />
+        {:else}
+          <Receipt aria-hidden="true" class="text-muted-foreground" />
+        {/if}
+      {/snippet}
+      {#snippet action()}
+        {#if isFiltered}
+          <Button
+            variant="outline"
+            onclick={() => {
+              searchInput = '';
+              dateFrom = '';
+              dateTo = '';
+            }}
+          >
+            Clear filters
+          </Button>
+        {/if}
       {/snippet}
     </EmptyState>
   {:else}

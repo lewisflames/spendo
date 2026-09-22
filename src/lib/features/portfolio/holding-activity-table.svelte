@@ -118,7 +118,7 @@
                      is a convenience shortcut. Its event must keep bubbling so
                      SvelteKit's router can intercept it. -->
               <a
-                class="block truncate"
+                class="block truncate focus-visible:outline-2 focus-visible:outline-ring"
                 href={resolve('/transactions/[guid]', { guid: t.guid })}
                 title={t.description ?? undefined}
               >

@@ -117,7 +117,10 @@
         <p role="alert" class="text-sm text-destructive">{formError}</p>
       {/if}
       {#if confirmReset}
-        <p role="alert" class="text-sm text-destructive">
+        <p
+          role="alert"
+          class="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+        >
           Resetting removes the override and returns to automatic detection. Click reset again to
           confirm.
         </p>
@@ -132,7 +135,7 @@
       <div>
         {#if currentSymbol}
           <Button
-            variant={confirmReset ? 'destructive' : 'ghost'}
+            variant={confirmReset ? 'destructive' : 'outline'}
             onclick={handleReset}
             disabled={loading || resetting}
           >

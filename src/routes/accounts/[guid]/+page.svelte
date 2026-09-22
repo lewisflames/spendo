@@ -2,7 +2,7 @@
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
-  import { Pencil, Plus, CircleCheck } from '@lucide/svelte';
+  import { Pencil, Plus, CircleCheck, ArrowLeft } from '@lucide/svelte';
   import { toast } from '$lib/components/ui/sonner';
   import { Button } from '$lib/components/ui/button';
   import AccountDialog, { type AccountInitial } from '$lib/features/accounts/account-dialog.svelte';
@@ -158,30 +158,38 @@
 </script>
 
 <svelte:head>
-  <title>{res.data ? `${res.data.account.name} — Spendo` : 'Account — Spendo'}</title>
+  <title
+    >{res.data
+      ? `${res.data.account.description ?? res.data.account.name} — Spendo`
+      : 'Account — Spendo'}</title
+  >
   <meta name="description" content="Account transactions and balance." />
 </svelte:head>
 
-<BookGate title="Account">
+<BookGate title={res.data ? (res.data.account.description ?? res.data.account.name) : 'Account'}>
   <div class="flex flex-col gap-6">
     {#if (res.loading || dbBootstrapping.value) && !res.data}
       <PageHeaderSkeleton />
     {:else if res.data}
       <AccountDetailHeader account={res.data.account} summary={res.data.summary}>
         {#if dbSession.value}
+          <Button variant="outline" href={resolve('/accounts')}>
+            <ArrowLeft aria-hidden="true" class="size-4" />
+            Accounts
+          </Button>
           {#if guid && res.data && isReconcilable(res.data.account.accountType, res.data.account.placeholder)}
             <Button variant="outline" href={resolve('/reconcile/[guid]', { guid })}>
               <CircleCheck aria-hidden="true" class="size-4" />
               Reconcile
             </Button>
           {/if}
-          <Button onclick={() => (createOpen = true)}>
-            <Plus aria-hidden="true" class="size-4" />
-            Sub-account
-          </Button>
           <Button variant="outline" onclick={() => (editOpen = true)}>
             <Pencil aria-hidden="true" class="size-4" />
             Edit
+          </Button>
+          <Button onclick={() => (createOpen = true)}>
+            <Plus aria-hidden="true" class="size-4" />
+            Sub-account
           </Button>
         {/if}
       </AccountDetailHeader>

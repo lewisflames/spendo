@@ -244,7 +244,7 @@
                     frequency = v as ScheduleFrequency;
                 }}
               >
-                <Select.Trigger id="sched-freq">
+                <Select.Trigger id="sched-freq" class="w-full">
                   <SelectPrimitive.Value placeholder="Select frequency" />
                 </Select.Trigger>
                 <Select.Content>
@@ -284,16 +284,30 @@
             </div>
             <div class="flex flex-col gap-1.5">
               <label for="sched-start" class="text-sm font-medium">First due date</label>
-              <DatePicker id="sched-start" bind:value={startDate} placeholder="Pick a date" />
+              <DatePicker
+                id="sched-start"
+                bind:value={startDate}
+                placeholder="Pick a date"
+                invalid={!!startError}
+                describedBy={startError ? 'sched-start-error' : undefined}
+              />
               {#if startError}
-                <p role="alert" class="text-xs text-destructive">{startError}</p>
+                <p id="sched-start-error" role="alert" class="text-xs text-destructive">
+                  {startError}
+                </p>
               {/if}
             </div>
             <div class="flex flex-col gap-1.5">
               <label for="sched-end" class="text-sm font-medium">End date (optional)</label>
-              <DatePicker id="sched-end" bind:value={endDate} placeholder="No end date" />
+              <DatePicker
+                id="sched-end"
+                bind:value={endDate}
+                placeholder="No end date"
+                invalid={!!endError}
+                describedBy={endError ? 'sched-end-error' : undefined}
+              />
               {#if endError}
-                <p role="alert" class="text-xs text-destructive">{endError}</p>
+                <p id="sched-end-error" role="alert" class="text-xs text-destructive">{endError}</p>
               {/if}
             </div>
             <div class="flex flex-col gap-1.5">

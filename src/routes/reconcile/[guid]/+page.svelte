@@ -3,7 +3,7 @@
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { SvelteSet } from 'svelte/reactivity';
-  import { ArrowLeft, CalendarDays, CircleCheck, X } from '@lucide/svelte';
+  import { ArrowLeft, CalendarDays, CircleCheck, SearchX, X } from '@lucide/svelte';
   import { toast } from '$lib/components/ui/sonner';
   import { Button } from '$lib/components/ui/button';
   import { dbSession, refreshSession } from '$lib/stores/db.svelte';
@@ -221,7 +221,7 @@
   <meta name="description" content="Reconcile an account against a bank statement." />
 </svelte:head>
 
-<BookGate title="Reconcile">
+<BookGate title={res.data ? `Reconcile ${res.data.accountName}` : 'Reconcile'}>
   <div class="flex flex-col gap-6">
     <PageHeader title={res.data ? `Reconcile ${res.data.accountName}` : 'Reconcile'}>
       {#snippet description()}
@@ -289,7 +289,11 @@
               : 'No unreconciled transactions at or before the statement date.'}
           >
             {#snippet icon()}
-              <CircleCheck aria-hidden="true" class="text-muted-foreground" />
+              {#if search.value}
+                <SearchX aria-hidden="true" class="text-muted-foreground" />
+              {:else}
+                <CircleCheck aria-hidden="true" class="text-muted-foreground" />
+              {/if}
             {/snippet}
             {#snippet action()}
               {#if search.value}

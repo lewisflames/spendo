@@ -151,7 +151,7 @@
         Cancel
       </Button>
       <Button onclick={confirmCurrencyChange} disabled={savingCurrency || !pendingCurrency}>
-        {savingCurrency ? 'Saving...' : `Change to ${pendingCurrency ?? ''}`}
+        {savingCurrency ? 'Saving…' : `Change to ${pendingCurrency ?? ''}`}
       </Button>
     </Dialog.Footer>
   </Dialog.Content>

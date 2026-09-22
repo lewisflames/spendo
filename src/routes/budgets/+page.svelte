@@ -1,9 +1,13 @@
 <script lang="ts">
   import { Button } from '$lib/components/ui/button';
   import { SearchInput } from '$lib/components/shared/search-input';
-  import { cn } from '$lib/utils';
   import { dbSession } from '$lib/stores/db.svelte';
-  import { sessionCurrency, formatSessionCurrency } from '$lib/utils/format.svelte';
+  import {
+    sessionCurrency,
+    formatSessionCurrency,
+    clampZero,
+    signColor
+  } from '$lib/utils/format.svelte';
   import { fetchBudgetVsActual, fetchAccounts, fetchBudgetDateRange } from '$lib/tauri';
   import { openBudget } from '$lib/utils/navigation';
   import { useUrlParams, yearParam, debouncedSearchParam } from '$lib/hooks/use-url-params.svelte';
@@ -143,36 +147,30 @@
       <KpiCardRow />
     {:else if rows !== null}
       <DimWrapper active={yearLoading} class="grid grid-cols-1 gap-6 sm:grid-cols-3">
-        <KpiCard title="Effective budget" value={fmt(totalEffective)}>
+        <KpiCard title="Effective budget" value={fmt(clampZero(totalEffective))}>
           {#snippet icon()}
             <Wallet aria-hidden="true" class="size-4 text-muted-foreground" />
           {/snippet}
         </KpiCard>
         <KpiCard
           title="Spent"
-          value={fmt(totalSpent)}
-          valueClass={cn(totalSpent > totalEffective ? 'text-destructive' : 'text-success')}
+          value={fmt(clampZero(totalSpent))}
+          valueClass={signColor(clampZero(totalEffective - totalSpent))}
         >
           {#snippet icon()}
             <TrendingDown
               aria-hidden="true"
-              class={cn(
-                'size-4',
-                totalSpent > totalEffective ? 'text-destructive' : 'text-success'
-              )}
+              class="size-4 {signColor(clampZero(totalEffective - totalSpent))}"
             />
           {/snippet}
         </KpiCard>
         <KpiCard
           title="Remaining"
-          value={fmt(totalRemaining)}
-          valueClass={cn(totalRemaining < 0 ? 'text-destructive' : 'text-success')}
+          value={fmt(clampZero(totalRemaining))}
+          valueClass={signColor(clampZero(totalRemaining))}
         >
           {#snippet icon()}
-            <PiggyBank
-              aria-hidden="true"
-              class={cn('size-4', totalRemaining < 0 ? 'text-destructive' : 'text-success')}
-            />
+            <PiggyBank aria-hidden="true" class="size-4 {signColor(clampZero(totalRemaining))}" />
           {/snippet}
         </KpiCard>
       </DimWrapper>

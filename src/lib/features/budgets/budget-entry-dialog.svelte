@@ -99,7 +99,7 @@
 <Dialog.Root bind:open>
   <Dialog.Content class="max-h-[90vh] overflow-y-auto sm:max-w-lg">
     <Dialog.Header>
-      <Dialog.Title>{exists ? 'Edit Budget' : 'Set Budget'}</Dialog.Title>
+      <Dialog.Title>{exists ? 'Edit budget' : 'Set budget'}</Dialog.Title>
       <Dialog.Description>
         {exists
           ? 'Adjust the annual target for this year.'
@@ -157,7 +157,7 @@
       saving={loading}
       {deleting}
       {confirmDelete}
-      saveLabel={exists ? 'Save' : 'Create budget'}
+      saveLabel={exists ? 'Save changes' : 'Create budget'}
       saveDisabled={loading || deleting}
       onDelete={handleDelete}
       onSave={handleSave}

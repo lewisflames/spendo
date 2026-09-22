@@ -105,6 +105,10 @@
         {#snippet description()}
           {d.notes ?? EMPTY_DASH}{#if d.num}&nbsp;&middot; #{d.num}{/if}
         {/snippet}
+        <Button variant="outline" href={resolve('/transactions')}>
+          <ArrowLeft aria-hidden="true" class="size-4" />
+          Transactions
+        </Button>
         <div class="flex items-center gap-1">
           <Button
             variant="outline"
@@ -116,7 +120,7 @@
               if (prevGuid) void openTransaction(prevGuid);
             }}
           >
-            <ArrowLeft aria-hidden="true" />
+            <ArrowLeft aria-hidden="true" class="size-4" />
           </Button>
           <Button
             variant="outline"
@@ -128,7 +132,7 @@
               if (nextGuid) void openTransaction(nextGuid);
             }}
           >
-            <ArrowRight aria-hidden="true" />
+            <ArrowRight aria-hidden="true" class="size-4" />
           </Button>
         </div>
         <Button variant="outline" onclick={copyGuid}>

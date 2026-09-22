@@ -151,7 +151,7 @@
             <!-- Accessible link target for keyboard/middle-click; the row click
                  is a convenience shortcut. -->
             <a
-              class="block min-w-0 font-medium"
+              class="block min-w-0 font-medium focus-visible:outline-2 focus-visible:outline-ring"
               href="{resolve('/budgets/[accountGuid]', {
                 accountGuid: item.accountGuid
               })}?year={year}"

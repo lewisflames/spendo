@@ -9,7 +9,7 @@
 </script>
 
 <svelte:head>
-  <title>About — Spendo</title>
+  <title>About Spendo — Spendo</title>
   <meta name="description" content="About Spendo" />
 </svelte:head>
 
