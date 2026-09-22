@@ -7,16 +7,24 @@ use tauri::{AppHandle, Manager, State};
 use crate::db::{run_blocking, run_io, with_tx_err, AppError, AppState};
 use crate::utils;
 
-/// PDF receipt attached to a transaction. At most one PDF per transaction;
-/// adding a new file replaces the existing one. Bytes live in the `.spendo`
+/// Files attached to a transaction. Up to `MAX_ATTACHMENTS_PER_TX` files per
+/// transaction (PDF or images); files accumulate — adding never replaces or
+/// clears existing ones. Bytes live in the `.spendo`
 /// book (see the `attachments` table comment in `db.rs`) so the file stays
-/// portable; deleting a transaction removes its attachment permanently.
+/// portable; deleting a transaction removes its attachments permanently.
 pub const MAX_ATTACHMENT_BYTES: u64 = 10 * 1024 * 1024;
-pub const MAX_ATTACHMENTS_PER_TX: usize = 1;
+pub const MAX_ATTACHMENTS_PER_TX: usize = 10;
 
 /// Extension → MIME allowlist. The frontend file-dialog filter mirrors this,
 /// but the backend is the source of truth — never trust the caller.
-const ALLOWED_TYPES: [(&str, &str); 1] = [("pdf", "application/pdf")];
+const ALLOWED_TYPES: [(&str, &str); 6] = [
+    ("pdf", "application/pdf"),
+    ("png", "image/png"),
+    ("jpg", "image/jpeg"),
+    ("jpeg", "image/jpeg"),
+    ("gif", "image/gif"),
+    ("webp", "image/webp"),
+];
 
 #[derive(Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -158,9 +166,10 @@ fn list_attachments(conn: &Connection, tx_guid: &str) -> Result<Vec<AttachmentIn
     Ok(rows)
 }
 
-/// Insert the single validated PDF for one transaction: existence checks run
-/// inside the same transaction as the replace (existing rows for the
-/// transaction are deleted first, so adding a file replaces the current one).
+/// Insert validated files for one transaction: existence and per-transaction
+/// count checks run inside the same transaction as the inserts, so a batch
+/// that would exceed the limit fails atomically. Files accumulate — existing
+/// rows are never deleted here.
 fn insert_attachments(
     conn: &Connection,
     tx_guid: &str,
@@ -170,9 +179,9 @@ fn insert_attachments(
         return Err(AppError::Validation("No files selected".to_string()));
     }
     if prepared.len() > MAX_ATTACHMENTS_PER_TX {
-        return Err(AppError::Validation(
-            "Only a single PDF attachment is allowed".to_string(),
-        ));
+        return Err(AppError::Validation(format!(
+            "A transaction can have at most {MAX_ATTACHMENTS_PER_TX} attachments"
+        )));
     }
     with_tx_err(conn, || {
         let exists = conn
@@ -189,17 +198,23 @@ fn insert_attachments(
             ));
         }
 
-        conn.execute(
-            "DELETE FROM attachments WHERE tx_guid = ?1",
+        let existing: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM attachments WHERE tx_guid = ?1",
             params![tx_guid],
+            |row| row.get(0),
         )?;
+        if existing as usize + prepared.len() > MAX_ATTACHMENTS_PER_TX {
+            return Err(AppError::Validation(format!(
+                "A transaction can have at most {MAX_ATTACHMENTS_PER_TX} attachments"
+            )));
+        }
 
         let mut infos = Vec::with_capacity(prepared.len());
         for attachment in prepared {
             let guid = uuid::Uuid::new_v4().to_string();
             let byte_size = attachment.data.len() as i64;
             let created_at = utils::iso_now();
-            conn.execute(
+            let insert = conn.execute(
                 "INSERT INTO attachments
                  (guid, tx_guid, filename, mime_type, byte_size, data, created_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -212,7 +227,23 @@ fn insert_attachments(
                     attachment.data,
                     &created_at,
                 ],
-            )?;
+            );
+            if let Err(e) = insert {
+                // Books created before the multi-attachment schema still carry
+                // `UNIQUE(tx_guid)` (no migrations by design). Surface that as
+                // guidance instead of a raw constraint message.
+                let extended_code = match &e {
+                    rusqlite::Error::SqliteFailure(err, _) => Some(err.extended_code),
+                    _ => None,
+                };
+                if extended_code == Some(rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE) {
+                    return Err(AppError::Validation(
+                        "This book stores one attachment per transaction — clear all data or create a new book to use multiple attachments"
+                            .to_string(),
+                    ));
+                }
+                return Err(AppError::from(e));
+            }
             infos.push(AttachmentInfo {
                 guid,
                 filename: attachment.filename,
@@ -429,15 +460,17 @@ mod tests {
     #[test]
     fn prepare_rejects_unsupported_empty_missing_and_oversized() {
         let dir = tmp_dir("reject");
-        // Unsupported extensions (images and text are no longer accepted).
+        // Unsupported extensions (text is not accepted; PDF + images are).
         let txt = write_file(&dir, "notes.txt", b"hi");
         assert!(prepare_attachment(&txt)
             .unwrap_err()
             .contains("Unsupported"));
-        let png = write_file(&dir, "photo.png", b"hi");
-        assert!(prepare_attachment(&png)
-            .unwrap_err()
-            .contains("Unsupported"));
+        // Accepted image types prepare fine.
+        for name in ["photo.png", "photo.jpg", "photo.jpeg", "anim.gif", "img.webp"] {
+            let path = write_file(&dir, name, b"hi");
+            let ok = prepared(&path);
+            assert!(!ok.filename.is_empty(), "unexpected empty name for {name}");
+        }
         // Empty file.
         let empty = write_file(&dir, "empty.pdf", b"");
         assert!(prepare_attachment(&empty).unwrap_err().contains("empty"));
@@ -458,36 +491,46 @@ mod tests {
     }
 
     #[test]
-    fn add_enforces_tx_existence_single_pdf_and_replace() {
+    fn add_enforces_tx_existence_limit_and_appends() {
         let conn = setup();
-        let dir = tmp_dir("replace");
+        let dir = tmp_dir("append");
         let first = write_file(&dir, "a.pdf", b"x");
-        let second = write_file(&dir, "b.pdf", b"yy");
+        let second = write_file(&dir, "b.png", b"yy");
 
         let err = insert_attachments(&conn, "nope", vec![prepared(&first)]).unwrap_err();
         assert!(err.to_string().contains("not found"), "unexpected: {err}");
 
-        // More than one file in a single call is rejected.
-        let err = insert_attachments(
-            &conn,
-            "t1",
-            vec![prepared(&first), prepared(&second)],
-        )
-        .unwrap_err();
+        // More than the per-transaction limit in a single call is rejected.
+        let too_many: Vec<PreparedAttachment> = (0..MAX_ATTACHMENTS_PER_TX + 1)
+            .map(|_| prepared(&first))
+            .collect();
+        let err = insert_attachments(&conn, "t1", too_many).unwrap_err();
         assert!(
-            err.to_string().contains("single PDF"),
+            err.to_string().contains("at most"),
             "unexpected: {err}"
         );
 
-        // Adding a new PDF replaces the existing one.
+        // Adding files accumulates instead of replacing.
         let infos = insert_attachments(&conn, "t1", vec![prepared(&first)]).unwrap();
         assert_eq!(infos.len(), 1);
-        let replaced = insert_attachments(&conn, "t1", vec![prepared(&second)]).unwrap();
-        assert_eq!(replaced.len(), 1);
-        assert_eq!(replaced[0].filename, "b.pdf");
+        let more = insert_attachments(&conn, "t1", vec![prepared(&second)]).unwrap();
+        assert_eq!(more.len(), 1);
+        assert_eq!(more[0].filename, "b.png");
+        assert_eq!(more[0].mime_type, "image/png");
         let listed = list_attachments(&conn, "t1").unwrap();
-        assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0], replaced[0]);
+        assert_eq!(listed.len(), 2);
+
+        // Filling up to the limit works; one more is rejected.
+        for i in 2..MAX_ATTACHMENTS_PER_TX {
+            let path = write_file(&dir, &format!("f{i}.pdf"), b"z");
+            insert_attachments(&conn, "t1", vec![prepared(&path)]).unwrap();
+        }
+        assert_eq!(list_attachments(&conn, "t1").unwrap().len(), MAX_ATTACHMENTS_PER_TX);
+        let err = insert_attachments(&conn, "t1", vec![prepared(&first)]).unwrap_err();
+        assert!(
+            err.to_string().contains("at most"),
+            "unexpected: {err}"
+        );
 
         std::fs::remove_dir_all(&dir).ok();
     }
