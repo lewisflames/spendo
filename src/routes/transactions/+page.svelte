@@ -179,7 +179,11 @@
         {#if isFiltered}
           <FilteredEmptyState title="No matching transactions" onClear={clearFilters} />
         {:else}
-          <EmptyState card title="No transactions" description="No transactions found.">
+          <EmptyState
+            card
+            title="No transactions"
+            description="Create your first transaction to get started."
+          >
             {#snippet icon()}
               <ArrowLeftRight aria-hidden="true" class="text-muted-foreground" />
             {/snippet}

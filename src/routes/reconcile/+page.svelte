@@ -59,13 +59,13 @@
   <meta name="description" content="Pick an account to reconcile against a bank statement." />
 </svelte:head>
 
-<BookGate title="Reconcile" description="Pick an account to reconcile against a bank statement.">
+<BookGate title="Reconcile" description="Pick an account to reconcile against a bank statement">
   <div class="flex flex-col gap-6">
     <PageHeader
       title="Reconcile"
       description={res.data
         ? plural(filtered.length, 'reconcilable account')
-        : 'Pick an account to reconcile against a bank statement.'}
+        : 'Pick an account to reconcile against a bank statement'}
     ></PageHeader>
 
     <FilterBar>
@@ -111,7 +111,7 @@
               <Scale aria-hidden="true" class="text-muted-foreground" />
             {/snippet}
             {#snippet action()}
-              <Button variant="outline" href={resolve('/accounts')}>Go to accounts</Button>
+              <Button variant="outline" href={resolve('/accounts')}>Accounts</Button>
             {/snippet}
           </EmptyState>
         {/if}

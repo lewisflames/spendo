@@ -7,11 +7,12 @@
   import { Checkbox } from '$lib/components/ui/checkbox';
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
+  import EmptyValue from '$lib/components/shared/empty-value.svelte';
   import { AccountPicker } from '$lib/components/shared/account-picker';
   import { ArrowLeft, ArrowRight, LoaderCircle } from '@lucide/svelte';
   import type { AccountsResult, CsvDetectResult } from '$lib/tauri';
   import { flattenAccountsForPicker } from '$lib/features/accounts/account-picker-utils';
-  import { plural, EMPTY_DASH } from '$lib/utils/format.svelte';
+  import { plural } from '$lib/utils/format.svelte';
 
   let {
     detect,
@@ -325,9 +326,13 @@
           {#each detect.sampleRows as row, i (i)}
             <Table.Row>
               {#each row as cell, j (j)}
-                <Table.Cell class="max-w-56 truncate py-2" title={cell}
-                  >{cell || EMPTY_DASH}</Table.Cell
-                >
+                <Table.Cell class="max-w-56 truncate py-2" title={cell}>
+                  {#if cell}
+                    {cell}
+                  {:else}
+                    <EmptyValue />
+                  {/if}
+                </Table.Cell>
               {/each}
             </Table.Row>
           {/each}

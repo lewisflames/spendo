@@ -47,12 +47,12 @@
       {#if dbSession.value}
         <Button onclick={() => goto(resolve('/transactions'))} variant="outline">
           <ArrowRight aria-hidden="true" class="size-4" />
-          Go to Transactions
+          Transactions
         </Button>
       {:else}
         <Button onclick={() => goto(resolve('/'))} variant="outline">
           <ArrowRight aria-hidden="true" class="size-4" />
-          Go to Welcome
+          Welcome
         </Button>
       {/if}
     </div>

@@ -146,7 +146,6 @@
         <KpiCard
           title="Previous Period"
           value={pnlData && prevNetIncome !== null ? fmt(prevNetIncome) : EMPTY_DASH}
-          valueClass={pnlData ? 'text-muted-foreground' : ''}
           loading={!pnlData && (res.loading || dbBootstrapping.value)}
         >
           {#snippet icon()}

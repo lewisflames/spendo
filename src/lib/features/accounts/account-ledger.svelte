@@ -95,7 +95,11 @@
         }}
       />
     {:else}
-      <EmptyState card title="No transactions" description="No transactions found.">
+      <EmptyState
+        card
+        title="No transactions"
+        description="Transactions for this account will appear here."
+      >
         {#snippet icon()}
           <Receipt aria-hidden="true" class="text-muted-foreground" />
         {/snippet}

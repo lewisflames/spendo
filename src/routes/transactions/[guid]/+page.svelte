@@ -32,6 +32,7 @@
   import { statusFor } from '$lib/utils/reconcile';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
   import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
+  import EmptyValue from '$lib/components/shared/empty-value.svelte';
   import BookGate from '$lib/components/shared/book-gate.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import PageSkeleton from '$lib/components/shared/page-skeleton.svelte';
@@ -202,7 +203,11 @@
                   </Badge>
                 </Table.Cell>
                 <Table.Cell class="max-w-xs truncate py-2.5 text-muted-foreground">
-                  {split.memo || EMPTY_DASH}
+                  {#if split.memo}
+                    {split.memo}
+                  {:else}
+                    <EmptyValue />
+                  {/if}
                 </Table.Cell>
                 <Table.Cell class="py-2.5">
                   <Badge variant={status.variant}>{status.label}</Badge>
