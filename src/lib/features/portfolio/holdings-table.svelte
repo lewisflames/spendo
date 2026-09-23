@@ -6,12 +6,15 @@
   import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
   import ToolbarSkeleton from '$lib/components/shared/toolbar-skeleton.svelte';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
+  import FilteredEmptyState from '$lib/components/shared/filtered-empty-state.svelte';
   import SortHead from '$lib/components/shared/sort-head.svelte';
   import NavRow from '$lib/components/shared/nav-row.svelte';
   import { ColumnsMenu } from '$lib/components/shared/columns-menu';
   import { SearchInput } from '$lib/components/shared/search-input';
+  import FilterBar from '$lib/components/shared/filter-bar.svelte';
+  import FilterClearButton from '$lib/components/shared/filter-clear-button.svelte';
   import { Button } from '$lib/components/ui/button';
-  import { TrendingUp, SearchX, X } from '@lucide/svelte';
+  import { TrendingUp } from '@lucide/svelte';
   import type { PortfolioHolding } from '$lib/tauri';
   import { STALE_PRICE_DAYS, priceStaleDays } from './price-utils';
   import { openHolding } from '$lib/utils/navigation';
@@ -20,6 +23,7 @@
   import { useColumnVisibility } from '$lib/hooks/use-column-visibility.svelte';
   import { useUrlParams, debouncedSearchParam } from '$lib/hooks/use-url-params.svelte';
   import { computeRebalance, TRADE_DUST } from './rebalance';
+  import EmptyValue from '$lib/components/shared/empty-value.svelte';
   import {
     formatCurrency,
     formatDate,
@@ -27,8 +31,7 @@
     fmtPct,
     formatSignedCurrency,
     formatShares,
-    formatAllocPct,
-    EMPTY_DASH
+    formatAllocPct
   } from '$lib/utils/format.svelte';
 
   type SortKey =
@@ -238,7 +241,10 @@
 {:else}
   <!-- One wrapper so the page-level flex gap doesn't open up between toolbar and table. -->
   <div class="flex flex-col gap-4">
-    <div class="flex flex-wrap items-end gap-2">
+    <FilterBar>
+      {#snippet extra()}
+        <ColumnsMenu columns={COLUMNS} {cols} onHide={handleHideColumn} />
+      {/snippet}
       <SearchInput
         id="holdings-search"
         label="Search holdings"
@@ -247,38 +253,22 @@
         class="grow basis-48"
       />
       {#if search.value}
-        <Button
-          variant="ghost"
+        <FilterClearButton
           onclick={() => {
             searchInput = '';
             search.set('');
           }}
-        >
-          <X aria-hidden="true" class="mr-1 size-3.5" />
-          Clear filters
-        </Button>
+        />
       {/if}
-      <div class="ml-auto">
-        <ColumnsMenu columns={COLUMNS} {cols} onHide={handleHideColumn} />
-      </div>
-    </div>
+    </FilterBar>
     {#if filteredHoldings.length === 0}
-      <EmptyState card title="No matching holdings" description="Try adjusting your search.">
-        {#snippet icon()}
-          <SearchX aria-hidden="true" class="text-muted-foreground" />
-        {/snippet}
-        {#snippet action()}
-          <Button
-            variant="outline"
-            onclick={() => {
-              searchInput = '';
-              search.set('');
-            }}
-          >
-            Clear filters
-          </Button>
-        {/snippet}
-      </EmptyState>
+      <FilteredEmptyState
+        title="No matching holdings"
+        onClear={() => {
+          searchInput = '';
+          search.set('');
+        }}
+      />
     {:else}
       <TableShell>
         <Table.Header>
@@ -296,7 +286,7 @@
                   active={sortBy === col.id}
                   dir={sortDir}
                   onclick={() => sort.toggle(col.id)}
-                  class="text-right"
+                  align="right"
                 />
               {/if}
             {/each}
@@ -342,7 +332,7 @@
               {/if}
               {#if cols.isVisible('avgCost')}
                 <Table.Cell class="py-2.5 text-right tabular-nums">
-                  {h.shares > 0 ? fmt(h.avgCostPerShare) : EMPTY_DASH}
+                  {#if h.shares > 0}{fmt(h.avgCostPerShare)}{:else}<EmptyValue />{/if}
                 </Table.Cell>
               {/if}
               {#if cols.isVisible('price')}
@@ -357,7 +347,7 @@
                       {fmt(h.price)}
                     </span>
                   {:else}
-                    {EMPTY_DASH}
+                    <EmptyValue />
                   {/if}
                 </Table.Cell>
               {/if}
@@ -388,9 +378,11 @@
               {/if}
               {#if cols.isVisible('target')}
                 <Table.Cell class="py-2.5 text-right tabular-nums">
-                  {rebalance && rebalance.targetPct > 0
-                    ? formatAllocPct(rebalance.targetPct)
-                    : EMPTY_DASH}
+                  {#if rebalance && rebalance.targetPct > 0}
+                    {formatAllocPct(rebalance.targetPct)}
+                  {:else}
+                    <EmptyValue />
+                  {/if}
                 </Table.Cell>
               {/if}
               {#if cols.isVisible('buy')}
@@ -403,7 +395,7 @@
                       >
                     {/if}
                   {:else}
-                    <span class="text-muted-foreground">{EMPTY_DASH}</span>
+                    <EmptyValue />
                   {/if}
                 </Table.Cell>
               {/if}
@@ -428,13 +420,21 @@
                     </span>
                   {:else if col.id === 'xirr'}
                     <!-- Rates don't sum: the portfolio XIRR lives on the KPI card. -->
-                    {EMPTY_DASH}
+                    <EmptyValue />
                   {:else if col.id === 'alloc'}
                     {formatAllocPct(totals.alloc)}
                   {:else if col.id === 'target'}
-                    {totals.targetPct > 0 ? formatAllocPct(totals.targetPct) : EMPTY_DASH}
+                    {#if totals.targetPct > 0}
+                      {formatAllocPct(totals.targetPct)}
+                    {:else}
+                      <EmptyValue />
+                    {/if}
                   {:else if col.id === 'buy'}
-                    {totals.targetPct > 0 ? fmt(totals.buyAmount) : EMPTY_DASH}
+                    {#if totals.targetPct > 0}
+                      {fmt(totals.buyAmount)}
+                    {:else}
+                      <EmptyValue />
+                    {/if}
                   {/if}
                 </Table.Cell>
               {/if}

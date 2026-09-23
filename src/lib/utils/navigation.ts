@@ -29,6 +29,11 @@ export function openReconcile(guid: string): Promise<void> {
   return goto(resolve('/reconcile/[guid]', { guid }));
 }
 
+/** Navigate to a schedule edit page. */
+export function openSchedule(guid: string): Promise<void> {
+  return goto(resolve('/scheduled/[guid]/edit', { guid }));
+}
+
 /**
  * Row-click navigation guard shared by every clickable table row. Ignores
  * clicks with modifier keys (open in new tab etc.) and clicks on interactive

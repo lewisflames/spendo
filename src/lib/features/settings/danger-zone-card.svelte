@@ -58,7 +58,7 @@
         >
           Clear all data
         </Button>
-        <Dialog.Content>
+        <Dialog.Content class="max-h-[90vh] overflow-y-auto sm:max-w-lg">
           <Dialog.Header>
             <Dialog.Title>Clear all data?</Dialog.Title>
             <Dialog.Description>
@@ -90,7 +90,7 @@
           <RotateCcw aria-hidden="true" class="size-4" />
           Reset to defaults
         </Button>
-        <Dialog.Content>
+        <Dialog.Content class="max-h-[90vh] overflow-y-auto sm:max-w-lg">
           <Dialog.Header>
             <Dialog.Title>Reset preferences?</Dialog.Title>
             <Dialog.Description>

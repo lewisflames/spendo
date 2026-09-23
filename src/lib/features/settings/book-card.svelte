@@ -131,7 +131,7 @@
 </Card.Root>
 
 <Dialog.Root bind:open={currencyDialogOpen}>
-  <Dialog.Content>
+  <Dialog.Content class="max-h-[90vh] overflow-y-auto sm:max-w-lg">
     <Dialog.Header>
       <Dialog.Title>Change base currency?</Dialog.Title>
       <Dialog.Description>

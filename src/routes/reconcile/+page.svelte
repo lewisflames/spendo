@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Scale, X } from '@lucide/svelte';
+  import { Scale } from '@lucide/svelte';
   import { dbSession } from '$lib/stores/db.svelte';
   import { fetchAccounts } from '$lib/tauri';
   import { resolve } from '$app/paths';
@@ -10,8 +10,11 @@
   import ErrorCard from '$lib/components/shared/error-card.svelte';
   import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
+  import FilteredEmptyState from '$lib/components/shared/filtered-empty-state.svelte';
   import { Button } from '$lib/components/ui/button';
   import { SearchInput } from '$lib/components/shared/search-input';
+  import FilterBar from '$lib/components/shared/filter-bar.svelte';
+  import FilterClearButton from '$lib/components/shared/filter-clear-button.svelte';
   import { useDebouncedSearch } from '$lib/hooks/use-debounced-search.svelte';
   import { useUrlParams, debouncedSearchParam } from '$lib/hooks/use-url-params.svelte';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
@@ -56,19 +59,16 @@
   <meta name="description" content="Pick an account to reconcile against a bank statement." />
 </svelte:head>
 
-<BookGate title="Reconcile">
+<BookGate title="Reconcile" description="Pick an account to reconcile against a bank statement.">
   <div class="flex flex-col gap-6">
-    <PageHeader title="Reconcile">
-      {#snippet description()}
-        {#if res.data}
-          {plural(filtered.length, 'reconcilable account')}
-        {:else}
-          Pick an account to reconcile against a bank statement.
-        {/if}
-      {/snippet}
-    </PageHeader>
+    <PageHeader
+      title="Reconcile"
+      description={res.data
+        ? plural(filtered.length, 'reconcilable account')
+        : 'Pick an account to reconcile against a bank statement.'}
+    ></PageHeader>
 
-    <div class="flex flex-wrap items-end gap-2">
+    <FilterBar>
       <SearchInput
         id="reconcile-account-search"
         label="Search accounts"
@@ -77,18 +77,14 @@
         class="grow basis-48"
       />
       {#if search.value}
-        <Button
-          variant="ghost"
+        <FilterClearButton
           onclick={() => {
             searchInput = '';
             search.set('');
           }}
-        >
-          <X aria-hidden="true" class="mr-1 size-3.5" />
-          Clear filters
-        </Button>
+        />
       {/if}
-    </div>
+    </FilterBar>
 
     {#if res.loading && !res.data}
       <PageSkeleton variant="reconcile" />
@@ -97,32 +93,28 @@
         <ErrorCard message={res.error} onRetry={() => res.reload()} />
       {/if}
       {#if filtered.length === 0}
-        <EmptyState
-          card
-          title="No reconcilable accounts"
-          description={search.value
-            ? 'No reconcilable accounts match the current filters.'
-            : 'Cash, bank and credit accounts show up here once your book has accounts.'}
-        >
-          {#snippet icon()}
-            <Scale aria-hidden="true" class="text-muted-foreground" />
-          {/snippet}
-          {#snippet action()}
-            {#if search.value}
-              <Button
-                variant="outline"
-                onclick={() => {
-                  searchInput = '';
-                  search.set('');
-                }}
-              >
-                Clear filters
-              </Button>
-            {:else}
+        {#if search.value}
+          <FilteredEmptyState
+            title="No matching accounts"
+            onClear={() => {
+              searchInput = '';
+              search.set('');
+            }}
+          />
+        {:else}
+          <EmptyState
+            card
+            title="No reconcilable accounts"
+            description="Cash, bank and credit accounts show up here once your book has accounts."
+          >
+            {#snippet icon()}
+              <Scale aria-hidden="true" class="text-muted-foreground" />
+            {/snippet}
+            {#snippet action()}
               <Button variant="outline" href={resolve('/accounts')}>Go to accounts</Button>
-            {/if}
-          {/snippet}
-        </EmptyState>
+            {/snippet}
+          </EmptyState>
+        {/if}
       {:else}
         <DimWrapper active={res.loading}>
           <ReconcileAccountTable rows={filtered} />

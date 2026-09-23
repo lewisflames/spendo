@@ -115,7 +115,7 @@
       </Dialog.Description>
     </Dialog.Header>
 
-    <div class="flex flex-col gap-3 py-2">
+    <div class="flex flex-col gap-3 py-4">
       {#each result.rows as row (row.commodityGuid)}
         <label class="flex items-center justify-between gap-4">
           <span class="min-w-0">

@@ -3,7 +3,7 @@
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { SvelteSet } from 'svelte/reactivity';
-  import { ArrowLeft, CalendarDays, CircleCheck, SearchX, X } from '@lucide/svelte';
+  import { ArrowLeft, CalendarDays, CircleCheck } from '@lucide/svelte';
   import { toast } from '$lib/components/ui/sonner';
   import { Button } from '$lib/components/ui/button';
   import { dbSession, refreshSession } from '$lib/stores/db.svelte';
@@ -21,8 +21,11 @@
   import ErrorCard from '$lib/components/shared/error-card.svelte';
   import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
+  import FilteredEmptyState from '$lib/components/shared/filtered-empty-state.svelte';
   import PageSkeleton from '$lib/components/shared/page-skeleton.svelte';
   import { SearchInput } from '$lib/components/shared/search-input';
+  import FilterBar from '$lib/components/shared/filter-bar.svelte';
+  import FilterClearButton from '$lib/components/shared/filter-clear-button.svelte';
   import { useDebouncedSearch } from '$lib/hooks/use-debounced-search.svelte';
   import { useUrlParams, dateParam, debouncedSearchParam } from '$lib/hooks/use-url-params.svelte';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
@@ -221,12 +224,15 @@
   <meta name="description" content="Reconcile an account against a bank statement." />
 </svelte:head>
 
-<BookGate title={res.data ? `Reconcile ${res.data.accountName}` : 'Reconcile'}>
+<BookGate
+  title={res.data ? `Reconcile ${res.data.accountName}` : 'Reconcile'}
+  description="Check off cleared transactions until the difference is zero, then finish."
+>
   <div class="flex flex-col gap-6">
-    <PageHeader title={res.data ? `Reconcile ${res.data.accountName}` : 'Reconcile'}>
-      {#snippet description()}
-        Check off cleared transactions until the difference is zero, then finish.
-      {/snippet}
+    <PageHeader
+      title={res.data ? `Reconcile ${res.data.accountName}` : 'Reconcile'}
+      description="Check off cleared transactions until the difference is zero, then finish."
+    >
       <Button variant="outline" href={resolve('/reconcile')}>
         <ArrowLeft aria-hidden="true" class="size-4" />
         Reconcile
@@ -259,7 +265,7 @@
         />
 
         <div class="flex flex-col gap-4">
-          <div class="flex flex-wrap items-end gap-2">
+          <FilterBar>
             <SearchInput
               id="reconcile-search"
               label="Search description, number, memo"
@@ -268,48 +274,35 @@
               class="grow basis-48"
             />
             {#if search.value}
-              <Button
-                variant="ghost"
+              <FilterClearButton
                 onclick={() => {
                   searchInput = '';
                   search.set('');
                 }}
-              >
-                <X aria-hidden="true" class="mr-1 size-3.5" />
-                Clear filters
-              </Button>
+              />
             {/if}
-          </div>
+          </FilterBar>
 
           {#if filtered.length === 0}
-            <EmptyState
-              card
-              title="Nothing to reconcile"
-              description={search.value
-                ? 'No candidates match the current filters.'
-                : 'No unreconciled transactions at or before the statement date.'}
-            >
-              {#snippet icon()}
-                {#if search.value}
-                  <SearchX aria-hidden="true" class="text-muted-foreground" />
-                {:else}
+            {#if search.value}
+              <FilteredEmptyState
+                title="No matching transactions"
+                onClear={() => {
+                  searchInput = '';
+                  search.set('');
+                }}
+              />
+            {:else}
+              <EmptyState
+                card
+                title="Nothing to reconcile"
+                description="No unreconciled transactions at or before the statement date."
+              >
+                {#snippet icon()}
                   <CircleCheck aria-hidden="true" class="text-muted-foreground" />
-                {/if}
-              {/snippet}
-              {#snippet action()}
-                {#if search.value}
-                  <Button
-                    variant="outline"
-                    onclick={() => {
-                      searchInput = '';
-                      search.set('');
-                    }}
-                  >
-                    Clear filters
-                  </Button>
-                {/if}
-              {/snippet}
-            </EmptyState>
+                {/snippet}
+              </EmptyState>
+            {/if}
           {:else}
             <ReconcileTable
               rows={filtered}

@@ -2,12 +2,12 @@
   import * as Table from '$lib/components/ui/table';
   import { cn } from '$lib/utils';
   import TableShell from '$lib/components/shared/table-shell.svelte';
+  import EmptyValue from '$lib/components/shared/empty-value.svelte';
   import PacingBar from './pacing-bar.svelte';
   import {
     formatSessionCurrency as fmt,
     formatSignedCurrency,
-    signColor,
-    EMPTY_DASH
+    signColor
   } from '$lib/utils/format.svelte';
   import { monthName } from '$lib/utils/date-utils.svelte';
   import { appSettings } from '$lib/stores/settings.svelte';
@@ -45,14 +45,14 @@
         </Table.Cell>
         <Table.Cell class="py-2.5 text-right tabular-nums">
           {#if isFuture}
-            <span class="text-xs text-muted-foreground">{EMPTY_DASH}</span>
+            <EmptyValue />
           {:else}
             {fmt(e.actualAmount)}
           {/if}
         </Table.Cell>
         <Table.Cell class="py-2.5 text-right tabular-nums">
           {#if isFuture}
-            <span class="text-xs text-muted-foreground">{EMPTY_DASH}</span>
+            <EmptyValue />
           {:else}
             {fmt(e.cumulativeActual)}
           {/if}
@@ -62,14 +62,14 @@
         </Table.Cell>
         <Table.Cell class={cn('py-2.5 text-right tabular-nums', !isFuture && signColor(e.delta))}>
           {#if isFuture}
-            <span class="text-xs text-muted-foreground">{EMPTY_DASH}</span>
+            <EmptyValue />
           {:else}
             {formatSignedCurrency(e.delta, currency)}
           {/if}
         </Table.Cell>
         <Table.Cell class="py-2.5">
           {#if isFuture}
-            <span class="text-xs text-muted-foreground">{EMPTY_DASH}</span>
+            <EmptyValue />
           {:else}
             <PacingBar
               pacingPercentage={e.pacingPercentage}

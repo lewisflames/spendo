@@ -4,12 +4,12 @@
   import { Briefcase } from '@lucide/svelte';
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
+  import EmptyValue from '$lib/components/shared/empty-value.svelte';
   import {
     signColor,
     formatSignedCurrency,
     formatSessionCurrency as fmt,
-    formatShares,
-    EMPTY_DASH
+    formatShares
   } from '$lib/utils/format.svelte';
   import NavRow from '$lib/components/shared/nav-row.svelte';
   import { openAccount } from '$lib/utils/navigation';
@@ -56,7 +56,11 @@
             {formatShares(acct.shares)}
           </Table.Cell>
           <Table.Cell class="py-2.5 text-right text-muted-foreground tabular-nums">
-            {acct.shares > 0 ? fmt(acct.costBasis / acct.shares) : EMPTY_DASH}
+            {#if acct.shares > 0}
+              {fmt(acct.costBasis / acct.shares)}
+            {:else}
+              <EmptyValue />
+            {/if}
           </Table.Cell>
           <Table.Cell class="py-2.5 text-right text-muted-foreground tabular-nums">
             {fmt(acct.costBasis)}

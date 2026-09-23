@@ -21,6 +21,7 @@
   import { Receipt } from '@lucide/svelte';
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
+  import EmptyValue from '$lib/components/shared/empty-value.svelte';
   import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
   import { PaginationNav } from '$lib/components/shared/pagination-nav';
   import { appSettings } from '$lib/stores/settings.svelte';
@@ -137,7 +138,7 @@
                 {#if action}
                   <Badge variant={action.variant}>{action.label}</Badge>
                 {:else}
-                  {EMPTY_DASH}
+                  <EmptyValue />
                 {/if}
               </Table.Cell>
             {/if}
@@ -154,7 +155,11 @@
             {#if cols.isVisible('price')}
               {@const unitPrice = pricePerShare(t)}
               <Table.Cell class="py-2.5 text-right text-muted-foreground tabular-nums">
-                {unitPrice === null ? EMPTY_DASH : formatCurrency(unitPrice, currency)}
+                {#if unitPrice === null}
+                  <EmptyValue />
+                {:else}
+                  {formatCurrency(unitPrice, currency)}
+                {/if}
               </Table.Cell>
             {/if}
             {#if cols.isVisible('value')}

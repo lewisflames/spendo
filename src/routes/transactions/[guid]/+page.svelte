@@ -92,7 +92,7 @@
   <meta name="description" content="Transaction details and splits." />
 </svelte:head>
 
-<BookGate title="Transaction">
+<BookGate title="Transaction" description="Transaction details and splits.">
   <div class="flex flex-col gap-6">
     {#if (res.loading || dbBootstrapping.value) && !detail}
       <PageSkeleton variant="transaction-detail" />
@@ -135,9 +135,14 @@
             <ArrowRight aria-hidden="true" class="size-4" />
           </Button>
         </div>
-        <Button variant="outline" onclick={copyGuid}>
+        <Button
+          variant="outline"
+          size="icon"
+          onclick={copyGuid}
+          aria-label="Copy GUID"
+          title="Copy GUID"
+        >
           <Copy aria-hidden="true" class="size-4" />
-          Copy GUID
         </Button>
         <Button href={resolve('/transactions/[guid]/edit', { guid: d.guid })}>
           <Pencil aria-hidden="true" class="size-4" />

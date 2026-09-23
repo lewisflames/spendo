@@ -4,15 +4,12 @@
   import { Button } from '$lib/components/ui/button';
   import { resolve } from '$app/paths';
   import TableShell from '$lib/components/shared/table-shell.svelte';
+  import EmptyValue from '$lib/components/shared/empty-value.svelte';
+  import NavRow from '$lib/components/shared/nav-row.svelte';
+  import { openSchedule } from '$lib/utils/navigation';
   import { CalendarCheck, SkipForward, Pencil, Pause, Play } from '@lucide/svelte';
   import type { Schedule } from '$lib/tauri';
-  import {
-    formatCurrency,
-    formatDate,
-    parseLocalDate,
-    plural,
-    EMPTY_DASH
-  } from '$lib/utils/format.svelte';
+  import { formatCurrency, formatDate, parseLocalDate, plural } from '$lib/utils/format.svelte';
   import {
     frequencyLabel,
     isPostable,
@@ -75,12 +72,17 @@
     {#each schedules as schedule (schedule.guid)}
       {@const status = scheduleStatus(schedule, today)}
       {@const badge = STATUS_BADGE[status]}
-      <Table.Row>
+      <NavRow onNavigate={() => openSchedule(schedule.guid)}>
         <Table.Cell class="py-2.5 whitespace-nowrap">
           <Badge variant={badge.variant}>{badge.label}</Badge>
         </Table.Cell>
         <Table.Cell class="max-w-48 truncate py-2.5">
-          <span class="font-medium">{schedule.name}</span>
+          <a
+            href={resolve('/scheduled/[guid]/edit', { guid: schedule.guid })}
+            class="font-medium focus-visible:outline-2 focus-visible:outline-ring"
+          >
+            {schedule.name}
+          </a>
           {#if schedule.description && schedule.description !== schedule.name}
             <span class="block text-xs text-muted-foreground">{schedule.description}</span>
           {/if}
@@ -97,7 +99,7 @@
               </span>
             {/if}
           {:else}
-            <span class="text-xs text-muted-foreground">{EMPTY_DASH}</span>
+            <EmptyValue />
           {/if}
         </Table.Cell>
         <Table.Cell class="py-2.5 text-right font-medium whitespace-nowrap tabular-nums">
@@ -160,7 +162,7 @@
             </Button>
           </div>
         </Table.Cell>
-      </Table.Row>
+      </NavRow>
     {/each}
   </Table.Body>
 </TableShell>

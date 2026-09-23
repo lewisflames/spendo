@@ -1,6 +1,8 @@
 <script lang="ts">
   import { Button } from '$lib/components/ui/button';
   import { SearchInput } from '$lib/components/shared/search-input';
+  import FilterBar from '$lib/components/shared/filter-bar.svelte';
+  import FilterClearButton from '$lib/components/shared/filter-clear-button.svelte';
   import { dbSession } from '$lib/stores/db.svelte';
   import {
     sessionCurrency,
@@ -13,7 +15,7 @@
   import { useUrlParams, yearParam, debouncedSearchParam } from '$lib/hooks/use-url-params.svelte';
   import { useDebouncedSearch } from '$lib/hooks/use-debounced-search.svelte';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
-  import { Plus, PiggyBank, Wallet, TrendingDown, X } from '@lucide/svelte';
+  import { Plus, PiggyBank, Wallet, TrendingDown } from '@lucide/svelte';
   import { toast } from '$lib/components/ui/sonner';
   import BookGate from '$lib/components/shared/book-gate.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
@@ -121,7 +123,7 @@
   <meta name="description" content="Yearly spending targets." />
 </svelte:head>
 
-<BookGate title="Budgets" description="Yearly spending targets">
+<BookGate title="Budgets" description="Yearly spending targets · carryover always applied">
   <div class="flex flex-col gap-6">
     <PageHeader title="Budgets" description="Yearly spending targets · carryover always applied">
       <BudgetYearStepper
@@ -172,14 +174,17 @@
           valueClass={signColor(clampZero(totalRemaining))}
         >
           {#snippet icon()}
-            <PiggyBank aria-hidden="true" class="size-4 {signColor(clampZero(totalRemaining))}" />
+            <PiggyBank aria-hidden="true" class="size-4 text-muted-foreground" />
           {/snippet}
         </KpiCard>
       </DimWrapper>
     {/if}
 
     {#if rows !== null && rows.length > 0}
-      <div class="flex flex-wrap items-end gap-2">
+      <FilterBar>
+        {#snippet extra()}
+          <ColumnsMenu columns={BUDGET_COLUMNS} cols={budgetCols} />
+        {/snippet}
         <SearchInput
           id="budgets-search"
           label="Search budgets"
@@ -188,22 +193,14 @@
           class="grow basis-48"
         />
         {#if search.value}
-          <Button
-            variant="ghost"
+          <FilterClearButton
             onclick={() => {
               searchInput = '';
               search.set('');
             }}
-          >
-            <X aria-hidden="true" class="mr-1 size-3.5" />
-            Clear filters
-          </Button>
+          />
         {/if}
-
-        <div class="ml-auto flex items-center gap-2">
-          <ColumnsMenu columns={BUDGET_COLUMNS} cols={budgetCols} />
-        </div>
-      </div>
+      </FilterBar>
     {/if}
 
     {#if rows !== null || !res.error}

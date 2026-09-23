@@ -6,10 +6,10 @@
     formatSignedSessionCurrency,
     fmtPct,
     formatDateRange,
-    signColor,
-    EMPTY_DASH
+    signColor
   } from '$lib/utils/format.svelte';
   import NavRow from '$lib/components/shared/nav-row.svelte';
+  import EmptyValue from '$lib/components/shared/empty-value.svelte';
   import { openAccount } from '$lib/utils/navigation';
   import ReportTable from '$lib/features/reports/report-table.svelte';
   import ReportAccountCell from '$lib/features/reports/report-account-cell.svelte';
@@ -85,7 +85,7 @@
           (!isZeroVariance ? signColor(variance, positiveGood) : 'text-muted-foreground')}
       >
         {#if isZeroVariance}
-          {EMPTY_DASH}
+          <EmptyValue />
         {:else}
           {formatSignedSessionCurrency(variance)}
         {/if}
@@ -97,7 +97,7 @@
             : 'text-muted-foreground')}
       >
         {#if isZeroPct}
-          {EMPTY_DASH}
+          <EmptyValue />
         {:else}
           {fmtPct(row.changePct)}
         {/if}
@@ -147,7 +147,7 @@
         (!isZeroVariance ? signColor(variance, positiveGood) : 'text-muted-foreground')}
     >
       {#if isZeroVariance}
-        {EMPTY_DASH}
+        <EmptyValue />
       {:else}
         {formatSignedSessionCurrency(variance)}
       {/if}
@@ -157,7 +157,7 @@
         (!isZeroPct && pct !== null ? signColor(pct, positiveGood) : 'text-muted-foreground')}
     >
       {#if isZeroPct}
-        {EMPTY_DASH}
+        <EmptyValue />
       {:else}
         {fmtPct(pct)}
       {/if}

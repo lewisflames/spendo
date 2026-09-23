@@ -1,8 +1,8 @@
 <script lang="ts">
   import { SearchInput } from '$lib/components/shared/search-input';
   import { DatePicker } from '$lib/components/shared/date-picker';
-  import { Button } from '$lib/components/ui/button';
-  import { X } from '@lucide/svelte';
+  import FilterBar from '$lib/components/shared/filter-bar.svelte';
+  import FilterClearButton from '$lib/components/shared/filter-clear-button.svelte';
   import type { Snippet } from 'svelte';
 
   let {
@@ -30,7 +30,7 @@
   }
 </script>
 
-<div class="flex flex-wrap items-end gap-2">
+<FilterBar {extra}>
   <SearchInput
     id="{idPrefix}-search"
     label="Search description, notes, memo, number"
@@ -50,12 +50,6 @@
   </div>
 
   {#if hasFilters}
-    <Button variant="ghost" onclick={clearFilters}>
-      <X aria-hidden="true" class="mr-1 size-3.5" />
-      Clear filters
-    </Button>
+    <FilterClearButton onclick={clearFilters} />
   {/if}
-  {#if extra}
-    <div class="ml-auto">{@render extra()}</div>
-  {/if}
-</div>
+</FilterBar>
