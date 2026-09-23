@@ -30,8 +30,8 @@
     <p class="text-muted-foreground">
       <span class="font-medium text-foreground">Missing FX rates</span>
       for {missing.join(', ')}
-      {#if reportCurrency}→ {reportCurrency}{/if}: converted at 1.0 parity, totals may be off.
-      Refresh prices in Portfolio to load them from Yahoo Finance.
+      {#if reportCurrency}→ {reportCurrency}{/if}: we treated them as 1-to-1 for now, so totals
+      might be a touch off. Pop into Portfolio and refresh prices to fix it.
     </p>
   </div>
 {/if}
@@ -45,8 +45,8 @@
     <div class="flex min-w-0 flex-col gap-1.5">
       <p class="text-muted-foreground">
         <span class="font-medium text-foreground">No Yahoo price</span>
-        for {missingPrices.length === 1 ? 'this security' : 'these securities'} — shown at cost basis.
-        Set an explicit symbol on the holding, then refresh prices.
+        for {missingPrices.length === 1 ? 'this security' : 'these securities'}. Showing what you
+        paid for now. Add the right Yahoo symbol on the holding, then refresh.
       </p>
       <ul class="flex flex-col gap-1">
         {#each missingPrices as mp (mp.mnemonic)}
@@ -78,7 +78,7 @@
         <span class="font-medium text-foreground">
           {plural(priceErrors.length, 'price')} could not be fetched
         </span>
-        — open the holding and set its Yahoo symbol explicitly.
+        Open the holding and tell us its Yahoo symbol.
       </p>
       <ul class="flex flex-col gap-1">
         {#each priceErrors as err (err.mnemonic)}

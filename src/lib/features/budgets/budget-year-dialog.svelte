@@ -105,7 +105,7 @@
       .catch((e: unknown) => {
         if (cancelled) return;
         existingYears = null;
-        const msg = errMsg(e, 'Failed to load existing budgets');
+        const msg = errMsg(e, "We couldn't load your budgets. Please try again");
         fetchError = msg;
         onError?.(msg);
       })
@@ -117,11 +117,11 @@
     };
   });
 
-  let accountError = $derived(target ? '' : 'Please select an expense account');
-  let amountError = $derived(amount > 0 ? '' : 'Target must be greater than zero');
+  let accountError = $derived(target ? '' : 'Choose an expense account to continue');
+  let amountError = $derived(amount > 0 ? '' : 'Enter an amount above zero');
   let yearError = $derived(
     existingYears !== null && existingYears.includes(Number(by.yearSel))
-      ? 'This account already has a budget for the selected year'
+      ? 'There’s already a budget for this year. Pick another one'
       : ''
   );
 
@@ -158,7 +158,7 @@
       })
       .catch((e: unknown) => {
         existingYears = null;
-        const msg = errMsg(e, 'Failed to load existing budgets');
+        const msg = errMsg(e, "We couldn't load your budgets. Please try again");
         fetchError = msg;
         onError?.(msg);
       })
@@ -181,7 +181,7 @@
       open = false;
       onSave?.(target, y);
     } catch (e: unknown) {
-      const msg = errMsg(e, 'Failed to save budget');
+      const msg = errMsg(e, "We couldn't save this budget. Please try again");
       formError = msg;
       onError?.(msg);
     } finally {
@@ -195,8 +195,8 @@
     <Dialog.Header>
       <Dialog.Title>New budget</Dialog.Title>
       <Dialog.Description>
-        Set the annual target for an expense account for a single year. Years that already have a
-        budget are disabled.
+        How much do you plan to spend from this account this year? Years you’ve already budgeted are
+        greyed out.
       </Dialog.Description>
     </Dialog.Header>
 
@@ -273,7 +273,7 @@
             {#each yearOptions as o (o.value)}
               {@const taken = takenSet.has(Number(o.value))}
               <Select.Item value={o.value} label={o.label} disabled={taken}>
-                {o.label}{taken ? ' — has budget' : ''}
+                {o.label}{taken ? ' (has budget)' : ''}
               </Select.Item>
             {/each}
           </Select.Content>
@@ -297,15 +297,15 @@
 
       <p class="text-sm text-muted-foreground">
         {#if !target}
-          Select an account to see available years.
+          Pick an account to see which years are still free.
         {:else if yearsLoading}
-          Loading existing budgets…
+          Checking which years are taken…
         {:else if existingYears === null}
-          Could not load existing budgets. Retry to see which years are taken.
+          We couldn't load your budgets. Retry to see which years are taken.
         {:else if noFreeYears}
-          This account already has a budget for every available year.
+          Every available year already has a budget for this account.
         {:else}
-          Years with a budget are disabled and cannot be selected.
+          Years with a budget are greyed out.
         {/if}
       </p>
     </div>

@@ -76,7 +76,7 @@
     {/snippet}
   </IconCardHeader>
   <Card.Content class="flex flex-col gap-4">
-    <SettingSelectRow label="Theme" description="Follow the system or pick light / dark">
+    <SettingSelectRow label="Theme" description="Match your system, or go light or dark">
       <Select.Root
         type="single"
         value={appSettings.value.theme}
@@ -95,7 +95,7 @@
         </Select.Content>
       </Select.Root>
     </SettingSelectRow>
-    <SettingSelectRow label="Accent" description="Preset color or your own custom color">
+    <SettingSelectRow label="Accent" description="A preset, or mix your own">
       <div class="flex items-center gap-1.5" role="radiogroup" aria-label="Accent color">
         {#each accents as a (a.value)}
           <button
@@ -158,7 +158,7 @@
         <p aria-live="polite" class="text-xs text-destructive">Enter a hex color like #3b82f6.</p>
       {/if}
     {/if}
-    <SettingSelectRow label="Density" description="Tighter spacing for pages and tables">
+    <SettingSelectRow label="Density" description="Squeeze a little more onto each page">
       <Select.Root
         type="single"
         value={appSettings.value.density}

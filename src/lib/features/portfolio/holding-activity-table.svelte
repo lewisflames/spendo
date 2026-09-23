@@ -74,7 +74,11 @@
 
 <!-- Buy/Sell activity -->
 {#if total === 0}
-  <EmptyState card title="No activity" description="No buys or sells found for this security.">
+  <EmptyState
+    card
+    title="No buys or sells yet"
+    description="When you trade this one, the history will land here."
+  >
     {#snippet icon()}
       <Receipt aria-hidden="true" class="text-muted-foreground" />
     {/snippet}

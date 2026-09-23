@@ -83,8 +83,8 @@
 {:else if !hasBudgets}
   <EmptyState
     card
-    title="No budgets for {year}"
-    description="Set a yearly spending target to get started. Years without a budget stay empty."
+    title="Nothing budgeted for {year} yet"
+    description="Set a yearly target and we'll track your spending against it."
   >
     {#snippet icon()}
       <PiggyBank aria-hidden="true" class="text-muted-foreground" />
@@ -102,7 +102,7 @@
   {#if onClearSearch}
     <FilteredEmptyState title="No matching budgets" onClear={onClearSearch} />
   {:else}
-    <EmptyState card title="No matching budgets" description="Try adjusting your search.">
+    <EmptyState card title="Nothing matches" description="Try a different search.">
       {#snippet icon()}
         <SearchX aria-hidden="true" class="text-muted-foreground" />
       {/snippet}

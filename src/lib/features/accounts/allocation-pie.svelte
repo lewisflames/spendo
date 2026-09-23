@@ -22,7 +22,7 @@
     centerLabel,
     centerValue,
     loading = false,
-    emptyMessage = 'No balances found.',
+    emptyMessage = 'Nothing here yet.',
     onSelect
   }: {
     data: AllocationDatum[];

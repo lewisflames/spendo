@@ -80,14 +80,19 @@
 
 <Card.Root>
   <Card.Header>
-    <Card.Title>Account Hierarchy</Card.Title>
-    <Card.Description>Account balances by type. Click a node to open its account.</Card.Description>
+    <Card.Title>Where your money sits</Card.Title>
+    <Card.Description>Balances grouped by type. Pick any dot to open that account.</Card.Description
+    >
   </Card.Header>
   <Card.Content>
     {#if loading && data.length === 0}
       <Skeleton class="mx-auto h-120 w-full max-w-160" />
     {:else if data.length === 0}
-      <EmptyState card title="No balances" description="No account balances found.">
+      <EmptyState
+        card
+        title="Nothing to show yet"
+        description="Add an account and it'll appear here."
+      >
         {#snippet icon()}
           <FolderTree aria-hidden="true" class="text-muted-foreground" />
         {/snippet}

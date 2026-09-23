@@ -41,7 +41,7 @@
     try {
       await saveBookSetting(field, value);
     } catch (e: unknown) {
-      toast.error(errMsg(e, 'Failed to save book setting'));
+      toast.error(errMsg(e, "We couldn't save that setting. Please try again"));
     } finally {
       savingBookKey = false;
     }
@@ -51,7 +51,7 @@
 <Card.Root>
   <IconCardHeader
     title="Reporting"
-    description="Book-scoped defaults stored inside the .spendo file."
+    description="These live inside your .spendo file, so they follow the book around."
   >
     {#snippet icon()}
       <CalendarDays aria-hidden="true" class="size-4 text-muted-foreground" />
@@ -63,7 +63,7 @@
     {/if}
     <SettingSelectRow
       label="Fiscal year starts"
-      description="Shapes the This-year P&amp;L default; full report grouping follows next"
+      description="Sets what This-year means in P&amp;L; more grouping options are next"
     >
       {#if dbSession.value}
         <Select.Root
@@ -87,12 +87,12 @@
           </Select.Content>
         </Select.Root>
       {:else}
-        <span class="text-xs text-muted-foreground">No book open.</span>
+        <span class="text-xs text-muted-foreground">Open a book to change this.</span>
       {/if}
     </SettingSelectRow>
     <SettingSelectRow
       label="Default P&amp;L period"
-      description="Initial range for Profit &amp; Loss when no dates are in the URL"
+      description="Where Profit &amp; Loss starts when the link has no dates"
     >
       {#if dbSession.value}
         <Select.Root
@@ -120,12 +120,12 @@
           </Select.Content>
         </Select.Root>
       {:else}
-        <span class="text-xs text-muted-foreground">No book open.</span>
+        <span class="text-xs text-muted-foreground">Open a book to change this.</span>
       {/if}
     </SettingSelectRow>
     <SettingSelectRow
       label="Auto-refresh prices"
-      description="Fetch fresh Yahoo prices when opening the Portfolio"
+      description="Grab fresh Yahoo prices whenever you open Portfolio"
     >
       <Switch
         checked={bookSettings.value.priceAutoRefresh === 'on_startup'}
@@ -137,7 +137,7 @@
     </SettingSelectRow>
     {#if !dbSession.value}
       <p class="text-xs text-muted-foreground">
-        Open or create a book to change reporting defaults — they travel with the file.
+        Open or create a book to change reporting defaults. They travel with the file.
       </p>
     {/if}
   </Card.Content>

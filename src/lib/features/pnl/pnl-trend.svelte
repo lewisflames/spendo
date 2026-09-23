@@ -10,9 +10,9 @@
 
 <TimeSeriesChart
   title="Income vs expenses"
-  description="Monthly totals over the selected period"
+  description="Month by month, for the stretch you picked"
   {loading}
-  emptyMessage="No income or expense activity in this period."
+  emptyMessage="Quiet stretch. Nothing earned or spent here."
   {data}
   getX={(d: PnlTrendPoint) => parseLocalDate(d.month)}
   series={[

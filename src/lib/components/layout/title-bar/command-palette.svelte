@@ -98,7 +98,7 @@
   const results = useAsyncData({
     enabled: () => queryActive,
     fetch: () => searchGlobal(query, 5),
-    label: 'Failed to search'
+    label: "We couldn't search right now"
   });
 
   function matchesQuery(cmd: PaletteCommand, q: string): boolean {
@@ -206,7 +206,7 @@
       onmousedown={(e) => e.preventDefault()}
     >
       <Command.List>
-        <Command.Empty>No matching commands or results.</Command.Empty>
+        <Command.Empty>Nothing matches. Try something else.</Command.Empty>
         {#each groups as group (group.name)}
           {#if group.items.length > 0}
             <Command.Group heading={group.name}>

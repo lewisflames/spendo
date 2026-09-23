@@ -228,8 +228,8 @@
 {:else if holdings.length === 0}
   <EmptyState
     card
-    title="No holdings"
-    description="Securities appear here once your book holds investments — for example after a GnuCash import."
+    title="No investments yet"
+    description="Once your book holds investments, say after a GnuCash import, they’ll land here."
   >
     {#snippet icon()}
       <TrendingUp aria-hidden="true" class="text-muted-foreground" />
@@ -248,7 +248,7 @@
       <SearchInput
         id="holdings-search"
         label="Search holdings"
-        placeholder="Search name or ticker…"
+        placeholder="Search by name or ticker…"
         bind:value={searchInput}
         class="grow basis-48"
       />

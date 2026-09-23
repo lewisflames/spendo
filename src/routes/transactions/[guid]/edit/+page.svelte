@@ -23,7 +23,7 @@
       if (!id) return Promise.reject(new Error('No transaction selected'));
       return fetchTransaction(id);
     },
-    label: 'Failed to load transaction'
+    label: "We couldn't load this transaction"
   });
 
   let detail = $derived(res.data?.transaction ?? null);
@@ -56,12 +56,12 @@
 
 <svelte:head>
   <title>
-    {detail ? `Edit ${detail.description || 'transaction'} — Spendo` : 'Edit transaction — Spendo'}
+    {detail ? `Edit ${detail.description || 'transaction'} · Spendo` : 'Edit transaction · Spendo'}
   </title>
   <meta name="description" content="Edit transaction details and splits." />
 </svelte:head>
 
-<BookGate title="Edit transaction" description="Edit transaction details and splits">
+<BookGate title="Edit transaction" description="Tweak the details. Both sides should still balance">
   <div class="mx-auto flex w-full max-w-5xl flex-col gap-6">
     {#if (res.loading || dbBootstrapping.value) && !res.data}
       <PageSkeleton variant="form" />
@@ -89,7 +89,7 @@
     {:else}
       <EmptyState
         card
-        title="Transaction not found"
+        title="That transaction is gone"
         description="No transaction exists with this ID. It may have been removed by a re-import."
       >
         {#snippet icon()}

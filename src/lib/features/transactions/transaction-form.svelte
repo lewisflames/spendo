@@ -144,7 +144,7 @@
   const accountsRes = useAsyncData({
     enabled: () => true,
     fetch: fetchAccounts,
-    label: 'Failed to load accounts'
+    label: "We couldn't load your accounts"
   });
 
   let pickerOptions = $derived(
@@ -181,9 +181,10 @@
   let today = $derived(sharedToday.value);
   let yesterday = $derived(offsetDateStr(today, -1));
   let dateError = $derived.by(() => {
-    if (!postDate) return 'Date is required';
-    if (!isIsoDate(postDate)) return 'Use a valid date (YYYY-MM-DD)';
-    if (postDate > today) return 'Future dates are hidden from balances — use today or earlier';
+    if (!postDate) return 'Pick a date for this transaction';
+    if (!isIsoDate(postDate)) return 'That date doesn’t look right. Use YYYY-MM-DD';
+    if (postDate > today)
+      return 'This date is in the future. Balances only include today or earlier';
     return '';
   });
 
@@ -229,7 +230,7 @@
   let issues = $derived.by(() => {
     const list: string[] = [];
     if (dateError) list.push(dateError);
-    if (splits.length < 2) list.push('Add at least two splits');
+    if (splits.length < 2) list.push('Add at least two splits so both sides balance');
     for (const e of errors) {
       if (e) {
         list.push(e);
@@ -237,7 +238,7 @@
       }
     }
     if (list.length === 0 && balance !== null && !balanced) {
-      list.push('Splits must sum to zero — debits must equal credits');
+      list.push('Splits need to net to zero. Debits should equal credits');
     }
     return list;
   });
@@ -311,7 +312,7 @@
         onSaved?.(newGuid);
       }
     } catch (e: unknown) {
-      formError = errMsg(e, 'Failed to save transaction');
+      formError = errMsg(e, "We couldn't save this transaction. Please try again");
       focusFormError();
     } finally {
       saving = false;
@@ -353,7 +354,7 @@
       showErrors = false;
       focusDescription();
     } catch (e: unknown) {
-      formError = errMsg(e, 'Failed to save transaction');
+      formError = errMsg(e, "We couldn't save this transaction. Please try again");
       focusFormError();
     } finally {
       savingAndNew = false;
@@ -377,7 +378,7 @@
       deleteDialogOpen = false;
       onDeleted?.();
     } catch (e: unknown) {
-      formError = errMsg(e, 'Failed to delete transaction');
+      formError = errMsg(e, "We couldn't delete this transaction. Please try again");
       deleteDialogOpen = false;
       focusFormError();
     } finally {
@@ -459,7 +460,7 @@
   <Card.Root>
     <IconCardHeader
       title="Details"
-      description="Description, date and reference info shown in lists and reports."
+      description="How this shows up in lists and reports: a short description, date and reference."
     >
       {#snippet icon()}
         <Info aria-hidden="true" class="size-4 text-muted-foreground" />
@@ -472,7 +473,7 @@
           id="tx-desc"
           bind:value={description}
           list="tx-desc-history"
-          placeholder="e.g. Groceries"
+          placeholder="What was this for?"
           maxlength={500}
           autofocus
           autocomplete="off"
@@ -517,7 +518,7 @@
             <p id="tx-date-error" role="alert" class="text-xs text-destructive">{dateError}</p>
           {:else}
             <p id="tx-date-hint" class="text-xs text-muted-foreground">
-              Future-dated rows are excluded from balances, budgets and net worth.
+              Dates after today stay out of balances, budgets and net worth.
             </p>
           {/if}
         </div>
@@ -525,7 +526,7 @@
           <label for="tx-num" class="text-sm font-medium">Number (optional)</label>
           <Input id="tx-num" bind:value={num} placeholder="e.g. Check #101" maxlength={100} />
           <p class="text-xs text-muted-foreground">
-            Check or reference number — shown on the detail view.
+            A check or reference number, if you’ve got one.
           </p>
         </div>
       </div>
@@ -534,7 +535,7 @@
         <Textarea
           id="tx-notes"
           bind:value={notes}
-          placeholder="Optional notes"
+          placeholder="Anything worth remembering?"
           rows={3}
           maxlength={2000}
         />
@@ -556,8 +557,8 @@
       role="note"
       class="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300"
     >
-      Some splits are cleared or reconciled. Saving is blocked until you unreconcile them on the
-      reconcile page — the reconcile workflow owns those states.
+      Some splits are already cleared or reconciled, so this one is locked for now. Head to the
+      reconcile page to unreconcile them first.
     </p>
   {/if}
 
@@ -566,7 +567,7 @@
       role="alert"
       class="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
     >
-      <p class="font-medium">Fix {plural(issues.length, 'issue')} before saving:</p>
+      <p class="font-medium">Sort out {plural(issues.length, 'thing')} before saving:</p>
       <ul class="mt-1 list-inside list-disc">
         {#each issues as issue (issue)}
           <li>{issue}</li>
@@ -586,9 +587,9 @@
   <Dialog.Root bind:open={deleteDialogOpen}>
     <Dialog.Content class="max-h-[90vh] overflow-y-auto sm:max-w-lg">
       <Dialog.Header>
-        <Dialog.Title>Delete this transaction?</Dialog.Title>
+        <Dialog.Title>Delete this one?</Dialog.Title>
         <Dialog.Description>
-          Its splits will be removed permanently.
+          It’ll be gone for good, splits and all.
           {#if attachmentCount > 0}
             Its {plural(attachmentCount, 'attachment')} are deleted permanently too.
           {/if}
@@ -608,9 +609,9 @@
   <Dialog.Root bind:open={discardDialogOpen}>
     <Dialog.Content class="max-h-[90vh] overflow-y-auto sm:max-w-lg">
       <Dialog.Header>
-        <Dialog.Title>Discard unsaved changes?</Dialog.Title>
+        <Dialog.Title>Lose your changes?</Dialog.Title>
         <Dialog.Description>
-          You have unsaved edits to this transaction. Leaving now will lose them.
+          You’ve got unsaved edits. Leave now and you’ll lose them.
         </Dialog.Description>
       </Dialog.Header>
       <Dialog.Footer>

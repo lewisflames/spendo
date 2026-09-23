@@ -508,7 +508,7 @@ fn fetch_pnl_report_inner(
     let prev_date_from = utils::validate_optional_iso_date(prev_date_from)?;
     let prev_date_to = utils::validate_optional_iso_date(prev_date_to)?;
     if date_from > date_to {
-        return Err("dateFrom must not be after dateTo".to_string());
+        return Err("Start date is after end date. Flip them around".to_string());
     }
     let current = fetch_pnl_window(conn, &date_from, &date_to)?;
 
@@ -646,7 +646,7 @@ fn fetch_pnl_trend_inner(
     let date_from = utils::validate_iso_date(date_from)?;
     let date_to = utils::validate_iso_date(date_to)?;
     if date_from > date_to {
-        return Err("dateFrom must not be after dateTo".to_string());
+        return Err("Start date is after end date. Flip them around".to_string());
     }
     let buckets = fetch_monthly_buckets(conn, &date_from, &date_to)?;
     let (converted, _, _) = convert_buckets(conn, &buckets)?;

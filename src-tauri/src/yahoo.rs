@@ -192,19 +192,22 @@ pub async fn fetch_single_yahoo_history(
         .header("Accept", "application/json")
         .send()
         .await
-        .map_err(|e| format!("Network error: {}", e))?;
+        .map_err(|e| format!("Couldn't reach Yahoo (network hiccup: {})", e))?;
 
     if response.status().as_u16() == 429 {
-        return Err("Rate limited by Yahoo Finance".to_string());
+        return Err("Yahoo asked us to slow down. Wait a moment and refresh again".to_string());
     }
     if !response.status().is_success() {
-        return Err(format!("HTTP {} from Yahoo", response.status().as_u16()));
+        return Err(format!(
+            "Yahoo hiccupped (HTTP {}). Try again in a bit",
+            response.status().as_u16()
+        ));
     }
 
     let data: YahooChartResponse = response
         .json()
         .await
-        .map_err(|e| format!("Yahoo Finance API error: {}", e))?;
+        .map_err(|e| format!("Yahoo sent something odd: {}", e))?;
 
     if let Some(result) = data.chart.result.first() {
         let currency = result
@@ -232,12 +235,12 @@ pub async fn fetch_single_yahoo_history(
             .collect();
 
         if prices.is_empty() {
-            Err("No price data in response".to_string())
+            Err("Yahoo sent back no prices. Try again in a bit".to_string())
         } else {
             Ok(YahooHistory { prices, currency })
         }
     } else {
-        Err("No result from Yahoo".to_string())
+        Err("Yahoo sent back nothing usable. Try again in a bit".to_string())
     }
 }
 

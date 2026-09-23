@@ -102,14 +102,14 @@ struct ReconcilableAccount {
 fn validate_statement_date(raw: &str) -> Result<String, AppError> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        return Err(AppError::Validation("Statement date is required".to_string()));
+        return Err(AppError::Validation("Add the statement date from your bank".to_string()));
     }
     let normalized = crate::utils::validate_iso_date(trimmed).map_err(AppError::Validation)?;
     // Local "today": the reconcile form offers the user's local today, so the
     // backend must accept it (UTC would reject it east of UTC).
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     if normalized > today {
-        return Err(AppError::Validation("Statement date cannot be in the future".to_string()));
+        return Err(AppError::Validation("That statement date is in the future. Use today or earlier".to_string()));
     }
     Ok(normalized)
 }
@@ -125,17 +125,17 @@ fn load_reconcilable_account(conn: &Connection, guid: &str) -> Result<Reconcilab
         )
         .optional()?;
     let Some((name, account_type, placeholder, commodity)) = row else {
-        return Err(AppError::NotFound("Account not found — it may have been removed".to_string()));
+        return Err(AppError::NotFound("Account not found. It may have been removed".to_string()));
     };
     if account_type == "ROOT" {
-        return Err(AppError::Validation("The root account cannot be reconciled".to_string()));
+        return Err(AppError::Validation("The root account holds everything together. It can't be reconciled".to_string()));
     }
     if placeholder != 0 {
-        return Err(AppError::Validation("Placeholder accounts cannot be reconciled".to_string()));
+        return Err(AppError::Validation("Placeholder accounts just group things. Pick one that holds money to reconcile".to_string()));
     }
     if !RECONCILABLE_TYPES.contains(&account_type.as_str()) {
         return Err(AppError::Validation(format!(
-            "Only cash-like accounts can be reconciled (not {account_type})"
+            "Only cash-like accounts can be reconciled. This one is {account_type}"
         )));
     }
     Ok(ReconcilableAccount { name, account_type, commodity })
@@ -226,20 +226,20 @@ fn mark_reconcile_splits_inner(
     // Validate the target is a real, reconcilable account before touching rows.
     load_reconcilable_account(conn, &input.account_guid)?;
     if input.updates.is_empty() {
-        return Err(AppError::Validation("No changes to save".to_string()));
+        return Err(AppError::Validation("Nothing changed yet. Tick something off first".to_string()));
     }
     if input.updates.len() > 2000 {
-        return Err(AppError::Validation("Too many changes at once (max 2000)".to_string()));
+        return Err(AppError::Validation("That's a lot at once. Keep it to 2000 changes".to_string()));
     }
     for u in &input.updates {
         if u.state != "n" && u.state != "c" {
             return Err(AppError::Validation(format!(
-                "Invalid reconcile state '{}' — expected 'n' or 'c'",
+                "Invalid reconcile state '{}'. Expected 'n' or 'c'",
                 u.state
             )));
         }
         if u.split_guid.trim().is_empty() {
-            return Err(AppError::Validation("Split id is required".to_string()));
+            return Err(AppError::Validation("We’re missing a split id. Please try again".to_string()));
         }
     }
     // De-dupe by split guid; last write wins for repeated entries.
@@ -261,7 +261,7 @@ fn mark_reconcile_splits_inner(
         })?
         .collect::<Result<Vec<_>, _>>()?;
     if rows.len() != guids.len() {
-        return Err(AppError::NotFound("A split was not found — it may have been removed".to_string()));
+        return Err(AppError::NotFound("A split was not found. It may have been removed".to_string()));
     }
     for (guid, owner, _, current) in &rows {
         if owner != &input.account_guid {
@@ -271,7 +271,7 @@ fn mark_reconcile_splits_inner(
         }
         if current.as_deref() == Some("y") {
             return Err(AppError::Validation(
-                "Reconciled splits cannot be changed here — un-reconcile them first".to_string(),
+                "Reconciled splits are locked here. Head back to reconcile to change them".to_string(),
             ));
         }
     }
@@ -325,10 +325,10 @@ fn finish_reconciliation_inner(
     input: FinishReconcileInput,
 ) -> Result<FinishReconcileResult, AppError> {
     if !input.ending_balance.is_finite() {
-        return Err(AppError::Validation("Ending balance must be a number".to_string()));
+        return Err(AppError::Validation("Enter the ending balance as a number".to_string()));
     }
     if input.ending_balance.abs() > 1_000_000_000.0 {
-        return Err(AppError::Validation("Ending balance is too large".to_string()));
+        return Err(AppError::Validation("That ending balance is huge. Keep it under 1,000,000,000".to_string()));
     }
     let statement_date = validate_statement_date(&input.statement_date)?;
     // Validate the target is a real, reconcilable account before touching rows.
@@ -339,12 +339,12 @@ fn finish_reconciliation_inner(
     let diff = input.ending_balance - (starting_balance + cleared_total);
     if diff.abs() > BALANCE_EPS {
         return Err(AppError::Validation(format!(
-            "Out of balance by {diff:.2} — check off cleared transactions until the difference is zero"
+            "Out of balance by {diff:.2}. Tick off what cleared the bank until it hits zero"
         )));
     }
     let guids = cleared_split_guids(conn, &input.account_guid, &statement_date)?;
     if guids.is_empty() {
-        return Err(AppError::Validation("Nothing cleared to reconcile".to_string()));
+        return Err(AppError::Validation("Nothing ticked off yet. Mark what cleared first".to_string()));
     }
     let reconciled_count = guids.len() as i64;
 

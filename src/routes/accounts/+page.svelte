@@ -38,7 +38,7 @@
   const res = useAsyncData({
     enabled: () => !!dbSession.value,
     fetch: () => fetchAccounts(),
-    label: 'Failed to load accounts'
+    label: "We couldn't load your accounts"
   });
 
   // Top-level accounts only, in the canonical category order (unknown
@@ -75,17 +75,17 @@
 </script>
 
 <svelte:head>
-  <title>Accounts — Spendo</title>
-  <meta name="description" content="Chart of accounts." />
+  <title>Accounts · Spendo</title>
+  <meta name="description" content="Your accounts, grouped by type." />
 </svelte:head>
 
-<BookGate title="Accounts" description="Chart of accounts">
+<BookGate title="Accounts" description="Everything you own and owe, in one place">
   <div class="flex flex-col gap-6">
     <PageHeader
       title="Accounts"
       description={res.data
-        ? `Chart of accounts · ${plural(res.data.totalAccounts, 'account')}`
-        : 'Chart of accounts'}
+        ? `Your accounts · ${plural(res.data.totalAccounts, 'account')}`
+        : 'Your accounts'}
     >
       {#if dbSession.value}
         <Button onclick={() => (dialogOpen = true)}>
@@ -143,7 +143,11 @@
       <BalanceTree data={res.data?.trees ?? []} loading={res.loading} />
 
       {#if accounts.length === 0}
-        <EmptyState card title="No accounts" description="No top-level accounts exist yet.">
+        <EmptyState
+          card
+          title="No accounts yet"
+          description="Add your first account to start tracking money."
+        >
           {#snippet icon()}
             <Landmark aria-hidden="true" class="text-muted-foreground" />
           {/snippet}
@@ -163,10 +167,10 @@
       {#if !res.loading && !res.error}
         <p class="text-xs text-muted-foreground">
           {#if balanced}
-            Balanced · Assets = Liabilities + Equity (incl. unrealized gains) + Retained earnings.
+            Balanced. Everything adds up.
           {:else}
-            Out of balance by {formatSessionCurrency(res.data.balanceCheck)} — usually a missing FX rate,
-            an unpriced security, or currency translation in a book without trading accounts.
+            Off by {formatSessionCurrency(res.data.balanceCheck)}. Usually a missing FX rate, an
+            unpriced security, or currency translation in a book without trading accounts.
           {/if}
         </p>
       {/if}

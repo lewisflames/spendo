@@ -252,14 +252,14 @@ fn validate_frequency(raw: &str) -> Result<String, AppError> {
         Ok(v)
     } else {
         Err(AppError::Validation(format!(
-            "Invalid frequency: {raw} — expected one of daily, weekly, biweekly, monthly, quarterly or yearly"
+            "Invalid frequency: {raw}. Expected one of daily, weekly, biweekly, monthly, quarterly or yearly"
         )))
     }
 }
 
 fn parse_iso_date(raw: &str, field: &str) -> Result<String, AppError> {
     utils::validate_iso_date(raw)
-        .map_err(|_| AppError::Validation(format!("Invalid {field} (expected YYYY-MM-DD): {raw}")))
+        .map_err(|_| AppError::Validation(format!("That {field} doesn't look right (use YYYY-MM-DD): {raw}")))
 }
 
 fn parse_stored_date(raw: &str) -> Result<NaiveDate, AppError> {
@@ -296,19 +296,19 @@ fn validate_schedule_input_with(
     let name = input.name.trim().to_string();
     if name.is_empty() {
         return Err(AppError::Validation(
-            "Schedule name is required".to_string(),
+            "Give this schedule a name".to_string(),
         ));
     }
     if name.len() > 200 {
         return Err(AppError::Validation(
-            "Schedule name is too long (max 200)".to_string(),
+            "Keep the schedule name under 200 characters".to_string(),
         ));
     }
     let frequency = validate_frequency(&input.frequency)?;
     let interval_mult = input.interval_mult.unwrap_or(1);
     if !(1..=100).contains(&interval_mult) {
         return Err(AppError::Validation(
-            "Repeat interval must be between 1 and 100".to_string(),
+            "Repeat every 1 to 100 times. Pick something in there".to_string(),
         ));
     }
     let start_date = parse_iso_date(&input.start_date, "start date")?;
@@ -319,14 +319,14 @@ fn validate_schedule_input_with(
     if let Some(ref e) = end_date {
         if e < &start_date {
             return Err(AppError::Validation(
-                "End date cannot be before the start date".to_string(),
+                "The end date is before the start date".to_string(),
             ));
         }
     }
     if let Some(m) = input.max_occurrences {
         if !(1..=1200).contains(&m) {
             return Err(AppError::Validation(
-                "Occurrence limit must be between 1 and 1200".to_string(),
+                "Stop after 1 to 1200 times. Pick something in there".to_string(),
             ));
         }
     }
@@ -510,7 +510,7 @@ fn fetch_row(conn: &Connection, guid: &str) -> Result<ScheduleRow, AppError> {
     conn.query_row(&sql, params![guid], read_row)
         .optional()?
         .ok_or_else(|| {
-            AppError::NotFound("Schedule not found — it may have been removed".to_string())
+            AppError::NotFound("Schedule not found. It may have been deleted".to_string())
         })
 }
 
@@ -528,7 +528,7 @@ fn create_schedule_inner(
     let guid = uuid::Uuid::new_v4().to_string();
     let created_at = utils::iso_now();
     let template_json = serde_json::to_string(&v.template)
-        .map_err(|e| AppError::Validation(format!("Failed to encode schedule: {e}")))?;
+        .map_err(|e| AppError::Validation(format!("We couldn't save that schedule: {e}")))?;
     // The pointer starts verbatim at the start date (no catch-up roll-forward):
     // a backdated start simply surfaces as overdue for the user to post/skip.
     conn.execute(
@@ -584,7 +584,7 @@ fn update_schedule_inner(
         v.end_date.as_deref(),
     );
     let template_json = serde_json::to_string(&v.template)
-        .map_err(|e| AppError::Validation(format!("Failed to encode schedule: {e}")))?;
+        .map_err(|e| AppError::Validation(format!("We couldn't save that schedule: {e}")))?;
     conn.execute(
         "UPDATE recurring_schedules
          SET name = ?1, frequency = ?2, interval_mult = ?3, start_date = ?4,
@@ -781,7 +781,7 @@ pub(crate) fn apply_imported_schedule(
         return Ok(state);
     }
     let template_json = serde_json::to_string(&v.template)
-        .map_err(|e| AppError::Validation(format!("Failed to encode schedule: {e}")))?;
+        .map_err(|e| AppError::Validation(format!("We couldn't save that schedule: {e}")))?;
     match existing {
         Some(row) => {
             let next = import_next_due(
@@ -868,18 +868,18 @@ fn post_schedule_occurrence_inner(
     let row = fetch_row(conn, guid)?;
     if !row.active {
         return Err(AppError::Validation(
-            "Schedule is paused — resume it before posting".to_string(),
+            "Schedule is paused. Resume it before posting".to_string(),
         ));
     }
     let due = row.next_due_date.clone().ok_or_else(|| {
-        AppError::Validation("Schedule is completed — no occurrences remain".to_string())
+        AppError::Validation("This schedule is done. Nothing left to post".to_string())
     })?;
     // Local "today": the frontend enables Post from its local date, so the
     // backend must use the same clock.
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     if due > today {
         return Err(AppError::Validation(format!(
-            "Not due yet — the next occurrence is {due}"
+            "Not due yet. The next occurrence is {due}"
         )));
     }
     let template = parse_template(&row.template_json)?;
@@ -948,11 +948,11 @@ fn skip_schedule_occurrence_inner(
     let row = fetch_row(conn, guid)?;
     if !row.active {
         return Err(AppError::Validation(
-            "Schedule is paused — resume it before skipping".to_string(),
+            "Schedule is paused. Resume it before skipping".to_string(),
         ));
     }
     let due = row.next_due_date.clone().ok_or_else(|| {
-        AppError::Validation("Schedule is completed — no occurrences remain".to_string())
+        AppError::Validation("Schedule is completed. No occurrences remain".to_string())
     })?;
     let advanced =
         next_occurrence(parse_stored_date(&due)?, &row.frequency, row.interval_mult)?

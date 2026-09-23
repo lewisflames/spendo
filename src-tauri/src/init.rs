@@ -71,7 +71,7 @@ pub(crate) fn ensure_default_roots(conn: &Connection) -> Result<Vec<String>, App
 pub(crate) fn normalize_mnemonic(raw: &str) -> Result<String, AppError> {
     let mnemonic = raw.trim().to_uppercase();
     if mnemonic.len() != 3 || !mnemonic.chars().all(|c| c.is_ascii_uppercase()) {
-        return Err(AppError::Validation(format!("Invalid currency code: '{raw}' (expected 3 letters, e.g. EUR)")));
+        return Err(AppError::Validation(format!("Use a 3-letter code like EUR, not '{raw}'")));
     }
     Ok(mnemonic)
 }
@@ -111,7 +111,7 @@ fn set_base_currency_inner(conn: &Connection, currency: &str) -> Result<HomeData
         )
         .optional()?;
     let Some((root_guid, _)) = root else {
-        return Err(AppError::NotFound("No database yet — create an empty book first".to_string()));
+        return Err(AppError::NotFound("No database yet. Create an empty book first".to_string()));
     };
 
     let existing_guid: Option<String> = conn

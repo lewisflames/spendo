@@ -172,8 +172,8 @@ describe('splitErrors', () => {
       { ...makeSplitDraft(3), accountGuid: 'a', amount: '1' }
     ];
     expect(splitErrors(splits)).toEqual([
-      'Split 1: pick an account',
-      'Split 2: enter a number',
+      'Split 1: choose an account',
+      'Split 2: enter an amount',
       ''
     ]);
   });
@@ -187,7 +187,7 @@ describe('splitErrors', () => {
       quantity: 'x'
     };
     const hidden = { ...shown, showQuantity: false };
-    expect(splitErrors([shown])[0]).toBe('Split 1: quantity must be a number');
+    expect(splitErrors([shown])[0]).toBe('Split 1: enter the share count as a number');
     expect(splitErrors([hidden])[0]).toBe('');
   });
 });

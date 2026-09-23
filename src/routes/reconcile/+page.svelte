@@ -38,7 +38,7 @@
   const res = useAsyncData({
     enabled: () => !!dbSession.value,
     fetch: () => fetchAccounts(),
-    label: 'Failed to load accounts'
+    label: "We couldn't load your accounts"
   });
 
   let rows = $derived(flattenReconcilableAccounts(res.data?.trees));
@@ -55,17 +55,17 @@
 </script>
 
 <svelte:head>
-  <title>Reconcile — Spendo</title>
-  <meta name="description" content="Pick an account to reconcile against a bank statement." />
+  <title>Reconcile · Spendo</title>
+  <meta name="description" content="Match your books to a bank statement." />
 </svelte:head>
 
-<BookGate title="Reconcile" description="Pick an account to reconcile against a bank statement">
+<BookGate title="Reconcile" description="Match your books to the bank">
   <div class="flex flex-col gap-6">
     <PageHeader
       title="Reconcile"
       description={res.data
-        ? `Pick an account to reconcile against a bank statement · ${plural(filtered.length, 'reconcilable account')}`
-        : 'Pick an account to reconcile against a bank statement'}
+        ? `Match your books to the bank · ${plural(filtered.length, 'account you can reconcile')}`
+        : 'Match your books to the bank'}
     ></PageHeader>
 
     <FilterBar>
@@ -104,8 +104,8 @@
         {:else}
           <EmptyState
             card
-            title="No reconcilable accounts"
-            description="Cash, bank and credit accounts show up here once your book has accounts."
+            title="Nothing to reconcile yet"
+            description="Your cash, bank and credit accounts will land here once you’ve added them."
           >
             {#snippet icon()}
               <Scale aria-hidden="true" class="text-muted-foreground" />

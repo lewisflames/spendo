@@ -55,7 +55,7 @@
       if (!id) return Promise.reject(new Error('No transaction selected'));
       return fetchTransaction(id);
     },
-    label: 'Failed to load transaction'
+    label: "We couldn't load this transaction"
   });
 
   let detail = $derived(res.data?.transaction ?? null);
@@ -69,9 +69,9 @@
     if (!detail) return;
     try {
       await navigator.clipboard.writeText(detail.guid);
-      toast.success('GUID copied to clipboard');
+      toast.success('Copied. Paste it anywhere');
     } catch (e: unknown) {
-      toast.error(errMsg(e, 'Failed to copy GUID'));
+      toast.error(errMsg(e, "We couldn't copy that"));
     }
   }
 
@@ -97,7 +97,7 @@
 
 <svelte:head>
   <title>
-    {detail ? `${detail.description || 'Transaction'} — Spendo` : 'Transaction — Spendo'}
+    {detail ? `${detail.description || 'Transaction'} · Spendo` : 'Transaction · Spendo'}
   </title>
   <meta name="description" content="Transaction details and splits." />
 </svelte:head>
@@ -246,8 +246,8 @@
     {:else if res.error && isNotFoundMessage(res.error)}
       <EmptyState
         card
-        title="Transaction not found"
-        description="No transaction exists with this ID. It may have been removed by a re-import."
+        title="That transaction is gone"
+        description="It may have been deleted or replaced by a re-import."
       >
         {#snippet icon()}
           <Receipt aria-hidden="true" class="text-muted-foreground" />
@@ -264,8 +264,8 @@
     {:else}
       <EmptyState
         card
-        title="Transaction not found"
-        description="No transaction exists with this ID. It may have been removed by a re-import."
+        title="That transaction is gone"
+        description="It may have been deleted or replaced by a re-import."
       >
         {#snippet icon()}
           <Receipt aria-hidden="true" class="text-muted-foreground" />

@@ -33,16 +33,16 @@ const MAX_PATTERN_CHARS: usize = 200;
 fn validate_rule_input(conn: &Connection, input: &ImportRuleInput) -> Result<(), AppError> {
     if !matches!(input.match_type.as_str(), "contains" | "equals") {
         return Err(AppError::Validation(
-            "Match type must be contains or equals".to_string(),
+            "Pick contains or exact match".to_string(),
         ));
     }
     let pattern = input.pattern.trim();
     if pattern.is_empty() {
-        return Err(AppError::Validation("Pattern is required".to_string()));
+        return Err(AppError::Validation("Tell us what text to look for".to_string()));
     }
     if pattern.chars().count() > MAX_PATTERN_CHARS {
         return Err(AppError::Validation(format!(
-            "Pattern is too long (max {MAX_PATTERN_CHARS} characters)"
+            "Keep the pattern under {MAX_PATTERN_CHARS} characters"
         )));
     }
     // Rules post splits, so the same postability guard as the CSV pickers.
@@ -70,7 +70,7 @@ fn fetch_rule(conn: &Connection, id: i64) -> Result<ImportRule, AppError> {
     )
     .optional()
     .map_err(AppError::from)?
-    .ok_or_else(|| AppError::NotFound("Import rule not found".to_string()))
+    .ok_or_else(|| AppError::NotFound("Import rule not found. It may have been deleted".to_string()))
 }
 
 fn fetch_import_rules_inner(conn: &Connection) -> Result<Vec<ImportRule>, AppError> {
@@ -145,7 +145,7 @@ fn update_import_rule_inner(
         )
         .map_err(AppError::from)?;
     if changed == 0 {
-        return Err(AppError::NotFound("Import rule not found".to_string()));
+        return Err(AppError::NotFound("Import rule not found. It may have been deleted".to_string()));
     }
     fetch_rule(conn, id)
 }
@@ -155,7 +155,7 @@ fn delete_import_rule_inner(conn: &Connection, id: i64) -> Result<(), AppError> 
         .execute("DELETE FROM import_rules WHERE id = ?1", params![id])
         .map_err(AppError::from)?;
     if changed == 0 {
-        return Err(AppError::NotFound("Import rule not found".to_string()));
+        return Err(AppError::NotFound("Import rule not found. It may have been deleted".to_string()));
     }
     Ok(())
 }

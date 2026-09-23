@@ -34,7 +34,7 @@
   const res = useAsyncData({
     enabled: () => !!dbSession.value,
     fetch: fetchPortfolioData,
-    label: 'Failed to load portfolio'
+    label: "We couldn't load your portfolio"
   });
 
   /** Saved allocation targets; the single source of truth for the rebalance columns. */
@@ -49,7 +49,7 @@
       void activeBookPath.value;
       return fetchAllocationTargets();
     },
-    label: 'Failed to load allocation targets',
+    label: "We couldn't load your targets",
     onSuccess: (rows) => {
       savedTargets.clear();
       for (const row of rows) savedTargets.set(row.commodityGuid, row.targetPct);
@@ -142,11 +142,11 @@
 </script>
 
 <svelte:head>
-  <title>Portfolio — Spendo</title>
+  <title>Portfolio · Spendo</title>
   <meta name="description" content="Investment holdings overview." />
 </svelte:head>
 
-<BookGate title="Portfolio" description="Investment holdings overview">
+<BookGate title="Portfolio" description="What you hold and how it’s doing">
   <div class="flex flex-col gap-6">
     <PageHeader title="Portfolio" description={headerDescription}>
       {#if dbSession.value}

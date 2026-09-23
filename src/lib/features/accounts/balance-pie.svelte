@@ -60,9 +60,9 @@
 <AllocationPie
   data={pieData}
   title="Balance Composition"
-  description="Sub-account balances by type."
+  description="How the pieces add up, by type."
   {centerLabel}
   {centerValue}
   {loading}
-  emptyMessage="No sub-account balances found."
+  emptyMessage="Nothing broken down yet."
 />

@@ -918,7 +918,7 @@ fn build_import_schedule(
         utils::truncate_chars(base, 200)
     };
     if name.is_empty() {
-        return Err("no name".to_string());
+        return Err("Missing a name".to_string());
     }
 
     if sx.recurrences.len() != 1 {
@@ -936,10 +936,10 @@ fn build_import_schedule(
         "month" if rec.mult == 3 => ("quarterly", 1),
         "month" => ("monthly", rec.mult),
         "year" => ("yearly", rec.mult),
-        other => return Err(format!("unsupported recurrence ({other})")),
+        other => return Err(format!("That repeat pattern isn't supported yet ({other})")),
     };
     if !(1..=100).contains(&interval_mult) {
-        return Err("repeat interval outside 1–100".to_string());
+        return Err("Repeats every 1 to 100 times".to_string());
     }
 
     let start_date = sx
@@ -995,10 +995,10 @@ fn build_import_schedule(
     let mut template = Vec::with_capacity(template_splits.len());
     for s in &template_splits {
         let Some(slot) = slots.get(&s.guid) else {
-            return Err("template split has no target account".to_string());
+            return Err("A split is missing its account".to_string());
         };
         let Some(account_guid) = slot.account_guid.clone() else {
-            return Err("template split has no target account".to_string());
+            return Err("A split is missing its account".to_string());
         };
         let amount = slot
             .amount()
@@ -1495,7 +1495,7 @@ pub(crate) fn import_gnucash_inner(
     // whole book. Abort instead — there is nothing to import.
     if src.accounts.is_empty() {
         return Err(AppError::Validation(
-            "Source book has no accounts — nothing to import".to_string(),
+            "Source book has no accounts. Nothing to import".to_string(),
         ));
     }
 
@@ -1630,7 +1630,7 @@ async fn fetch_prices_best_effort(
     if let Err(e) = db::run_blocking(db, move |conn| {
         if book_generation.load(std::sync::atomic::Ordering::SeqCst) != expected_generation {
             return Err(
-                "Book changed while prices were refreshing — results discarded".to_string(),
+                "Book changed while prices were refreshing. Those results were discarded".to_string(),
             );
         }
         prices::write_prices_and_log(conn, &write_data).map_err(String::from)
@@ -1682,7 +1682,7 @@ fn preview_gnucash_inner(
     let src = read_source_data(&source)?;
     if src.accounts.is_empty() {
         return Err(AppError::Validation(
-            "Source book has no accounts — nothing to import".to_string(),
+            "Source book has no accounts. Nothing to import".to_string(),
         ));
     }
     let protected = protected_accounts(dest_conn, &src)?;
@@ -1727,7 +1727,7 @@ pub async fn import_gnucash(
     })
     .await?;
     if current_sha != input.sha256 {
-        return Err("Source file changed since the preview — run the import again".to_string());
+        return Err("Source file changed since the preview. Please run the import again".to_string());
     }
     let generation_handle = state.book_generation.clone();
     let GnuCashImportInput {

@@ -76,7 +76,7 @@ fn validate_book_setting(key: &str, value: &str) -> Result<(), String> {
             "iso" | "locale" => Ok(()),
             _ => Err(format!("Invalid value for {key}: {value}")),
         },
-        _ => Err(format!("Unknown book setting: {key}")),
+        _ => Err(format!("Unknown setting: {key}. We don't know that one")),
     }
 }
 

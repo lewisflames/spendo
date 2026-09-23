@@ -74,9 +74,9 @@
     const path = paths.find(isSpendoBookPath);
     if (!path) {
       if (paths.some((p) => p.toLowerCase().endsWith('.gnucash'))) {
-        toast.error('Create a book first, then import this GnuCash file');
+        toast.error('Start a book first, then we can bring in that GnuCash file');
       } else {
-        toast.error('Only Spendo books can be opened');
+        toast.error('That’s not a .spendo book. Pick one of those to open');
       }
       return;
     }
@@ -118,11 +118,11 @@
           Local-first finance manager
         </p>
         <h1 class="text-4xl font-bold tracking-tight text-balance sm:text-5xl">
-          Your books, kept on disk.
+          Your money, kept on this machine.
         </h1>
         <p class="mx-auto max-w-md text-sm text-pretty text-muted-foreground">
-          Browse accounts and transactions, track investments, and review reports. Everything stays
-          in portable files on this machine.
+          See where your money goes, follow investments, and check reports. It all lives in portable
+          files right here.
         </p>
       </div>
     </header>
@@ -151,11 +151,11 @@
         {:else if dropIsGnucash}
           <FileWarning aria-hidden="true" class="size-7 text-destructive" />
           <p class="max-w-xs text-sm font-medium">
-            Create a book first, then import this GnuCash file
+            Start a book first, then bring in that GnuCash file
           </p>
         {:else}
           <FileWarning aria-hidden="true" class="size-7 text-muted-foreground" />
-          <p class="max-w-xs text-sm font-medium">Only .spendo books can be opened</p>
+          <p class="max-w-xs text-sm font-medium">Only .spendo books open here</p>
         {/if}
       </div>
     </div>

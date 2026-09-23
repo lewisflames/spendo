@@ -304,10 +304,10 @@ export function isBalanced(balance: number | null): boolean {
 
 export function splitErrors(splits: SplitDraft[]): string[] {
   return splits.map((s, i) => {
-    if (!s.accountGuid) return `Split ${i + 1}: pick an account`;
-    if (parseAmount(s.amount) === null) return `Split ${i + 1}: enter a number`;
+    if (!s.accountGuid) return `Split ${i + 1}: choose an account`;
+    if (parseAmount(s.amount) === null) return `Split ${i + 1}: enter an amount`;
     if (s.showQuantity && s.quantity.trim() && parseAmount(s.quantity) === null)
-      return `Split ${i + 1}: quantity must be a number`;
+      return `Split ${i + 1}: enter the share count as a number`;
     return '';
   });
 }

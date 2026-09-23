@@ -10,12 +10,12 @@
   let {
     value = $bindable(''),
     options = [],
-    placeholder = 'Select an account',
+    placeholder = 'Pick an account',
     id,
     disabled = false,
     invalid = false,
     describedBy = undefined,
-    emptyText = 'No matching accounts.'
+    emptyText = 'Nothing matches that search.'
   }: {
     value?: string;
     options?: PickerAccount[];

@@ -38,7 +38,7 @@
   const res = useAsyncData({
     enabled: () => !!txGuid,
     fetch: () => fetchAttachments(txGuid ?? ''),
-    label: 'Failed to load attachments'
+    label: "We couldn't load the attachments"
   });
 
   let adding = $state(false);
@@ -69,7 +69,7 @@
         filters: [{ name: 'Documents', extensions: ATTACHMENT_EXTENSIONS }]
       });
     } catch (e: unknown) {
-      toast.error(errMsg(e, 'Failed to open file dialog'));
+      toast.error(errMsg(e, "We couldn't open the file picker"));
       return;
     }
     if (!selected) return;
@@ -82,9 +82,13 @@
     try {
       const added = await addAttachments({ txGuid, paths });
       res.reload();
-      toast.success(added.length === 1 ? 'File attached' : `${added.length} files attached`);
+      toast.success(
+        added.length === 1
+          ? 'Attached. Tucked into your book'
+          : `${added.length} files tucked into your book`
+      );
     } catch (e: unknown) {
-      toast.error(errMsg(e, 'Failed to add attachment'));
+      toast.error(errMsg(e, "We couldn't attach that file"));
     } finally {
       adding = false;
     }
@@ -96,7 +100,7 @@
     try {
       await openAttachment(item.guid);
     } catch (e: unknown) {
-      toast.error(errMsg(e, 'Failed to open attachment'));
+      toast.error(errMsg(e, "We couldn't open that file"));
     } finally {
       openBusy = false;
     }
@@ -108,7 +112,7 @@
     try {
       target = await save({ defaultPath: item.filename });
     } catch (e: unknown) {
-      toast.error(errMsg(e, 'Failed to open save dialog'));
+      toast.error(errMsg(e, "We couldn't open the save dialog"));
       return;
     }
     if (!target) return;
@@ -117,7 +121,7 @@
       await exportAttachment(item.guid, target);
       toast.success(`Saved ${await basename(target)}`);
     } catch (e: unknown) {
-      toast.error(errMsg(e, 'Failed to save attachment'));
+      toast.error(errMsg(e, "We couldn't save that file"));
     } finally {
       saveBusy = false;
     }
@@ -134,9 +138,9 @@
       await deleteAttachment(item.guid);
       confirmDeleteGuid = null;
       res.reload();
-      toast.success('Attachment deleted');
+      toast.success('Attachment gone');
     } catch (e: unknown) {
-      toast.error(errMsg(e, 'Failed to delete attachment'));
+      toast.error(errMsg(e, "We couldn't delete that file"));
     } finally {
       deleting = false;
     }
@@ -146,7 +150,7 @@
 <Card.Root class="relative overflow-hidden">
   <IconCardHeader
     title="Attachments"
-    description="PDF or image files stored inside this book (up to {MAX_ATTACHMENTS})."
+    description="Receipts and images tucked inside this book (up to {MAX_ATTACHMENTS})."
   >
     {#snippet icon()}
       <Paperclip aria-hidden="true" class="size-4 text-muted-foreground" />
@@ -173,7 +177,7 @@
     {#if !txGuid}
       <div class="rounded-lg border border-dashed px-4 py-6 text-center">
         <p class="text-sm text-muted-foreground">
-          Save the transaction first — receipts can be attached afterwards on the detail page.
+          Save first. You can attach receipts on the detail page afterwards.
         </p>
       </div>
     {:else if res.loading && !res.data}

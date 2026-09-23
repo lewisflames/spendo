@@ -8,13 +8,13 @@
 </script>
 
 <svelte:head>
-  <title>Import CSV — Spendo</title>
+  <title>Import CSV · Spendo</title>
   <meta name="description" content="Import bank-statement CSV with column mapping and preview." />
 </svelte:head>
 
-<BookGate title="Import CSV" description="Map columns, dry-run the preview, then import.">
+<BookGate title="Import CSV" description="Match your columns, preview, then bring it in.">
   <div class="mx-auto flex w-full max-w-5xl flex-col gap-6">
-    <PageHeader title="Import CSV" description="Map columns, dry-run the preview, then import.">
+    <PageHeader title="Import CSV" description="Match your columns, preview, then bring it in.">
       <Button variant="outline" href={resolve('/transactions')}>
         <ArrowLeft aria-hidden="true" class="size-4" />
         Transactions

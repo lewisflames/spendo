@@ -198,16 +198,18 @@ pub struct SymbolOverride {
 fn normalize_symbol(input: &str) -> Result<String, AppError> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
-        return Err(AppError::Validation("Symbol must not be empty".to_string()));
+        return Err(AppError::Validation("Enter a Yahoo symbol, like AAPL".to_string()));
     }
     if trimmed.len() > 32 {
-        return Err(AppError::Validation("Symbol must be 32 characters or fewer".to_string()));
+        return Err(AppError::Validation("Keep the symbol under 32 characters".to_string()));
     }
     if trimmed
         .chars()
         .any(|c| c.is_whitespace() || matches!(c, '/' | '?' | '#'))
     {
-        return Err(AppError::Validation("Symbol must not contain spaces, '/', '?' or '#'".to_string()));
+        return Err(AppError::Validation(
+            "Symbols can't have spaces, '/', '?' or '#'".to_string(),
+        ));
     }
     Ok(trimmed.to_ascii_uppercase())
 }
@@ -993,7 +995,7 @@ pub async fn refresh_prices(state: State<'_, AppState>) -> Result<PricesResult, 
     db::run_blocking(state.db.clone(), move |conn| {
         if gen_check.load(Ordering::SeqCst) != generation {
             return Err(
-                "Book changed while prices were refreshing — results discarded".to_string(),
+                "Book changed while prices were refreshing. Those results were discarded".to_string(),
             );
         }
         write_prices_and_log(conn, &write_data).map_err(String::from)

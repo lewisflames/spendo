@@ -35,7 +35,7 @@
     try {
       await saveBookSetting(field, value);
     } catch (e: unknown) {
-      toast.error(errMsg(e, 'Failed to save export preference'));
+      toast.error(errMsg(e, "We couldn't save that preference. Please try again"));
     } finally {
       savingPref = false;
     }
@@ -45,7 +45,7 @@
 <Card.Root>
   <IconCardHeader
     title="Import &amp; export"
-    description="CSV formatting for exports. Import and export run from the book menu or command palette — CSV exports are for interchange; use Save as… for a full backup."
+    description="How your CSVs look on the way out. Find import and export in the book menu or command palette. For a full backup, use Save as… instead."
   >
     {#snippet icon()}
       <ArrowLeftRight aria-hidden="true" class="size-4 text-muted-foreground" />
@@ -55,7 +55,10 @@
     {#if error}
       <ErrorCard message={error} {onRetry} />
     {/if}
-    <SettingSelectRow label="CSV delimiter" description="Use semicolon for Excel in de-DE / fr-FR">
+    <SettingSelectRow
+      label="CSV delimiter"
+      description="Semicolon plays nicer with some Excels (de-DE / fr-FR)"
+    >
       <Select.Root
         type="single"
         value={bookSettings.value.exportCsvDelimiter}
@@ -77,7 +80,7 @@
     </SettingSelectRow>
     <SettingSelectRow
       label="CSV date format"
-      description="ISO stays machine-readable for re-import"
+      description="ISO is easiest if you ever bring the file back in"
     >
       <Select.Root
         type="single"
@@ -100,7 +103,7 @@
     </SettingSelectRow>
     {#if !dbSession.value}
       <p class="text-xs text-muted-foreground">
-        Open or create a book to change export formatting — it travels with the file.
+        Open a book to tweak this. The choice travels with the file.
       </p>
     {/if}
   </Card.Content>

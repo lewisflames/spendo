@@ -48,7 +48,7 @@ fn root_guid(conn: &Connection) -> Result<String, AppError> {
     )
     .optional()
     ?
-    .ok_or_else(|| AppError::NotFound("Book has no ROOT account — re-create the book".to_string()))
+    .ok_or_else(|| AppError::NotFound("This book is missing its main account. Starting fresh is easiest".to_string()))
 }
 
 /// Trimmed name plus all scalar field constraints (required, lengths and
@@ -56,13 +56,13 @@ fn root_guid(conn: &Connection) -> Result<String, AppError> {
 fn validate_scalar_fields(input: &AccountInput) -> Result<&str, AppError> {
     let name = input.name.trim();
     if name.is_empty() {
-        return Err(AppError::Validation("Account name is required".to_string()));
+        return Err(AppError::Validation("Give this account a name".to_string()));
     }
     if name.len() > 200 {
-        return Err(AppError::Validation("Account name is too long (max 200)".to_string()));
+        return Err(AppError::Validation("Keep the account name under 200 characters".to_string()));
     }
     if !ACCOUNT_TYPES.contains(&input.account_type.as_str()) {
-        return Err(AppError::Validation(format!("Invalid account type: {}", input.account_type)));
+        return Err(AppError::Validation(format!("That account type doesn't look right: {}", input.account_type)));
     }
     // A postable account without a currency would be dropped from ledger/split
     // queries (INNER JOIN commodities) while still counting in balances —
@@ -74,12 +74,12 @@ fn validate_scalar_fields(input: &AccountInput) -> Result<&str, AppError> {
     }
     if let Some(ref code) = input.code {
         if code.len() > 100 {
-            return Err(AppError::Validation("Code is too long (max 100)".to_string()));
+            return Err(AppError::Validation("Keep the code under 100 characters".to_string()));
         }
     }
     if let Some(ref d) = input.description {
         if d.len() > 500 {
-            return Err(AppError::Validation("Description is too long (max 500)".to_string()));
+            return Err(AppError::Validation("Keep the description under 500 characters".to_string()));
         }
     }
     Ok(name)
@@ -100,7 +100,7 @@ fn validate_commodity_exists(
             ?
             .is_some();
         if !exists {
-            return Err(AppError::Validation("Selected currency does not exist".to_string()));
+            return Err(AppError::Validation("That currency isn't in this book".to_string()));
         }
     }
     Ok(())
@@ -117,7 +117,7 @@ fn resolve_parent(
         None => root_guid(conn),
         Some(p) => {
             if Some(p.as_str()) == self_guid {
-                return Err(AppError::Validation("An account cannot be its own parent".to_string()));
+                return Err(AppError::Validation("An account can't be its own parent".to_string()));
             }
             let parent_type: Option<String> = conn
                 .query_row(
@@ -128,7 +128,7 @@ fn resolve_parent(
                 .optional()
                 ?;
             let Some(pt) = parent_type else {
-                return Err(AppError::NotFound("Parent account not found".to_string()));
+                return Err(AppError::NotFound("Parent account not found. It may have been removed".to_string()));
             };
             if pt == "ROOT" {
                 root_guid(conn)
@@ -141,7 +141,7 @@ fn resolve_parent(
                         let Some(c) = current else { break };
                         if c == self_g {
                             return Err(AppError::Validation(
-                                "Cannot move an account under its own descendant".to_string()
+                                "You can't tuck an account under one of its own children".to_string()
                             ));
                         }
                         if !visited.insert(c.clone()) {
@@ -183,7 +183,7 @@ fn validate_sibling_name_unique(
         ?
         .is_some();
     if clash {
-        return Err(AppError::Validation("An account with this name already exists under the same parent".to_string()));
+        return Err(AppError::Validation("There's already an account with that name here. Try another".to_string()));
     }
     Ok(())
 }
@@ -240,13 +240,13 @@ fn update_account_inner(
         .optional()
         ?;
     let Some(existing_type) = existing_type else {
-        return Err(AppError::NotFound("Account not found — it may have been removed".to_string()));
+        return Err(AppError::NotFound("Account not found. It may have been removed".to_string()));
     };
     if existing_type == "ROOT" {
-        return Err(AppError::Validation("The root account cannot be edited".to_string()));
+        return Err(AppError::Validation("The root account is special. It can't be edited".to_string()));
     }
     if input.account_type == "ROOT" {
-        return Err(AppError::Validation("Accounts cannot be converted to ROOT".to_string()));
+        return Err(AppError::Validation("An account can't become the root account".to_string()));
     }
     let parent = validate_account_input(conn, &input, Some(guid))?;
 
@@ -281,10 +281,10 @@ fn delete_account_inner(conn: &Connection, guid: &str) -> Result<(), AppError> {
         )
         .optional()?;
     let Some(account_type) = account_type else {
-        return Err(AppError::NotFound("Account not found — it may have been removed".to_string()));
+        return Err(AppError::NotFound("Account not found. It may have been removed".to_string()));
     };
     if account_type == "ROOT" {
-        return Err(AppError::Validation("The root account cannot be deleted".to_string()));
+        return Err(AppError::Validation("The root account holds everything together. It can't be deleted".to_string()));
     }
     let children: i64 = conn
         .query_row(
@@ -295,7 +295,7 @@ fn delete_account_inner(conn: &Connection, guid: &str) -> Result<(), AppError> {
         ?;
     if children > 0 {
         return Err(AppError::Validation(format!(
-            "Cannot delete — it has {children} sub-account{}. Move or delete them first.",
+            "This one still has {children} sub-account{}. Move or delete those first.",
             if children == 1 { "" } else { "s" }
         )));
     }
@@ -308,7 +308,7 @@ fn delete_account_inner(conn: &Connection, guid: &str) -> Result<(), AppError> {
         ?;
     if splits > 0 {
         return Err(AppError::Validation(format!(
-            "Cannot delete — {splits} split{} reference it. Delete or move those transactions first.",
+            "This one’s still used by {splits} split{}. Delete or move those transactions first.",
             if splits == 1 { "" } else { "s" }
         )));
     }
@@ -320,7 +320,7 @@ fn delete_account_inner(conn: &Connection, guid: &str) -> Result<(), AppError> {
         )
         ?;
     if budgets > 0 {
-        return Err(AppError::Validation("Cannot delete — budgets reference it. Remove the budgets first.".to_string()));
+        return Err(AppError::Validation("This one still has budgets attached. Remove those budgets first.".to_string()));
     }
     // Import rules are book config; the FK cascade would drop them silently,
     // so guard like budgets.
@@ -333,7 +333,7 @@ fn delete_account_inner(conn: &Connection, guid: &str) -> Result<(), AppError> {
         ?;
     if rules > 0 {
         return Err(AppError::Validation(
-            "Cannot delete — import rules reference it. Remove the rules first.".to_string(),
+            "This one still has import rules pointing at it. Remove those rules first.".to_string(),
         ));
     }
     // Schedule templates embed account GUIDs in JSON (no FK), so deleting would
@@ -347,7 +347,7 @@ fn delete_account_inner(conn: &Connection, guid: &str) -> Result<(), AppError> {
         ?;
     if schedules > 0 {
         return Err(AppError::Validation(
-            "Cannot delete — schedules reference it. Update or remove those schedules first."
+            "This one is still used by schedules. Update those schedules first."
                 .to_string(),
         ));
     }

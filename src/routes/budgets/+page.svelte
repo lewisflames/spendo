@@ -77,7 +77,7 @@
     // Keep the selection within the transaction date range once the range
     // (and the URL-driven selection) is known.
     onSuccess: () => by.clampSelection(),
-    label: 'Failed to load budgets'
+    label: "We couldn't load your budgets"
   });
 
   // Only accounts with a budget for the selected year are listed.
@@ -111,7 +111,7 @@
   function handleSaveSuccess(accountGuid: string, createdYear: number) {
     res.reload();
     formError = null;
-    toast.success('Budget saved');
+    toast.success('Saved. Nice planning');
     openBudget(accountGuid, createdYear);
   }
 
@@ -120,17 +120,17 @@
 </script>
 
 <svelte:head>
-  <title>Budgets — Spendo</title>
-  <meta name="description" content="Yearly spending targets." />
+  <title>Budgets · Spendo</title>
+  <meta name="description" content="What you plan to spend this year." />
 </svelte:head>
 
-<BookGate title="Budgets" description="Yearly spending targets · carryover always applied">
+<BookGate title="Budgets" description="What you plan to spend. Leftovers roll over">
   <div class="flex flex-col gap-6">
     <PageHeader
       title="Budgets"
       description={rows !== null
-        ? `Yearly spending targets · carryover always applied · ${plural(rows.length, 'budget')}`
-        : 'Yearly spending targets · carryover always applied'}
+        ? `What you plan to spend · ${plural(rows.length, 'budget')}`
+        : 'What you plan to spend'}
     >
       <BudgetYearStepper
         bind:yearSel={by.yearSel}

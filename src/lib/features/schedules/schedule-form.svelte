@@ -110,7 +110,7 @@
   const accountsRes = useAsyncData({
     enabled: () => true,
     fetch: fetchAccounts,
-    label: 'Failed to load accounts'
+    label: "We couldn't load your accounts"
   });
 
   let pickerOptions = $derived(
@@ -125,19 +125,19 @@
   }
 
   let nameError = $derived.by(() => {
-    if (!name.trim()) return 'Name is required';
-    if (name.trim().length > 200) return 'Name is too long (max 200)';
+    if (!name.trim()) return 'Give this schedule a name';
+    if (name.trim().length > 200) return 'Keep the name under 200 characters';
     return '';
   });
 
   let multError = $derived.by(() => {
     const n = Number(intervalMult);
-    if (!Number.isInteger(n) || n < 1 || n > 100) return 'Enter a whole number from 1 to 100';
+    if (!Number.isInteger(n) || n < 1 || n > 100) return 'Use a whole number between 1 and 100';
     return '';
   });
 
   let startError = $derived.by(() => {
-    if (!startDate) return 'Start date is required';
+    if (!startDate) return 'Pick a start date';
     if (!isIsoDate(startDate)) return 'Use YYYY-MM-DD';
     return '';
   });
@@ -145,14 +145,14 @@
   let endError = $derived.by(() => {
     if (!endDate) return '';
     if (!isIsoDate(endDate)) return 'Use YYYY-MM-DD';
-    if (!startError && endDate < startDate) return 'End date cannot be before the start date';
+    if (!startError && endDate < startDate) return 'The end date is before the start date';
     return '';
   });
 
   let countError = $derived.by(() => {
     if (!maxOccurrences.trim()) return '';
     const n = Number(maxOccurrences);
-    if (!Number.isInteger(n) || n < 1 || n > 1200) return 'Enter a whole number from 1 to 1200';
+    if (!Number.isInteger(n) || n < 1 || n > 1200) return 'Use a whole number between 1 and 1200';
     return '';
   });
 
@@ -241,7 +241,7 @@
         onSaved?.(await createSchedule(input));
       }
     } catch (e: unknown) {
-      const msg = errMsg(e, 'Failed to save schedule');
+      const msg = errMsg(e, "We couldn't save this schedule. Please try again");
       formError = msg;
       onError?.(msg);
       focusFormError();
@@ -267,7 +267,7 @@
       deleteDialogOpen = false;
       onDeleted?.();
     } catch (e: unknown) {
-      const msg = errMsg(e, 'Failed to delete schedule');
+      const msg = errMsg(e, "We couldn't delete this schedule. Please try again");
       formError = msg;
       onError?.(msg);
       deleteDialogOpen = false;
@@ -308,7 +308,10 @@
   </PageHeader>
 
   <Card.Root>
-    <IconCardHeader title="Details" description="Name and template info used when posting.">
+    <IconCardHeader
+      title="Details"
+      description="What this is for: the name and details used when it posts."
+    >
       {#snippet icon()}
         <Info aria-hidden="true" class="size-4 text-muted-foreground" />
       {/snippet}
@@ -359,7 +362,7 @@
   <Card.Root>
     <IconCardHeader
       title="Recurrence"
-      description="Nothing posts automatically — each due occurrence surfaces as a reminder to post or skip."
+      description="Nothing posts on its own. When one is due you'll get a reminder to post or skip it."
     >
       {#snippet icon()}
         <Repeat aria-hidden="true" class="size-4 text-muted-foreground" />
@@ -464,8 +467,8 @@
         <p class="text-xs text-muted-foreground">
           Already posted {initial.occurrencesPosted === 1
             ? 'once'
-            : `${initial.occurrencesPosted} times`} — changing the start date won't move the next due
-          date.
+            : `${initial.occurrencesPosted} times`}. Changing the start date won't move what's due
+          next.
         </p>
       {/if}
     </Card.Content>
@@ -498,7 +501,7 @@
       <Dialog.Header>
         <Dialog.Title>Delete this schedule?</Dialog.Title>
         <Dialog.Description>
-          Future reminders stop; already-posted transactions stay in the ledger.
+          You won't be reminded again. Anything already posted stays in your ledger.
         </Dialog.Description>
       </Dialog.Header>
       <Dialog.Footer>
@@ -515,9 +518,9 @@
   <Dialog.Root bind:open={discardDialogOpen}>
     <Dialog.Content class="max-h-[90vh] overflow-y-auto sm:max-w-lg">
       <Dialog.Header>
-        <Dialog.Title>Discard unsaved changes?</Dialog.Title>
+        <Dialog.Title>Lose your changes?</Dialog.Title>
         <Dialog.Description>
-          You have unsaved edits to this schedule. Leaving now will lose them.
+          You've got unsaved edits here. Leaving now means starting over.
         </Dialog.Description>
       </Dialog.Header>
       <Dialog.Footer>

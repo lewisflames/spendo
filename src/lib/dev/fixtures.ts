@@ -122,7 +122,7 @@ export const ACCOUNTS: FixtureAccount[] = [
   {
     guid: 'vti',
     parentGuid: 'brokerage',
-    name: 'VTI — Vanguard Total Stock Market',
+    name: 'VTI · Vanguard Total Stock Market',
     accountType: 'STOCK',
     code: null,
     description: null,
@@ -133,7 +133,7 @@ export const ACCOUNTS: FixtureAccount[] = [
   {
     guid: 'aapl',
     parentGuid: 'brokerage',
-    name: 'AAPL — Apple Inc.',
+    name: 'AAPL · Apple Inc.',
     accountType: 'STOCK',
     code: null,
     description: null,
@@ -421,7 +421,7 @@ function buildTransactions(): FixtureTx[] {
       { accountGuid: 'shopping', raw: 40 + i * 7 }
     ]);
 
-    add(`tx-${month}-interest`, `${month}-28`, 'Interest — High-Yield Savings', [
+    add(`tx-${month}-interest`, `${month}-28`, 'Interest · High-Yield Savings', [
       { accountGuid: 'savings', raw: 19.42 + i },
       { accountGuid: 'interest', raw: -(19.42 + i) }
     ]);

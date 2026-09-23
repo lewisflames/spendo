@@ -9,12 +9,12 @@
 </script>
 
 <svelte:head>
-  <title>About Spendo — Spendo</title>
+  <title>About · Spendo</title>
   <meta name="description" content="About Spendo" />
 </svelte:head>
 
 <div class="flex flex-col gap-6">
-  <PageHeader title="About Spendo" description="What is Spendo and how it works">
+  <PageHeader title="About Spendo" description="The short version">
     {#if !dbSession.value}
       <Button variant="outline" href={resolve('/')}>Welcome</Button>
     {/if}
@@ -26,13 +26,13 @@
     </Card.Header>
     <Card.Content class="flex flex-col gap-4">
       <p class="text-sm text-muted-foreground">
-        Spendo is a local-first desktop application for managing your finances in portable
+        Spendo keeps your money organised in portable
         <code>.spendo</code> books. It runs natively via Tauri with a static SvelteKit frontend and a
         Rust/SQLite backend.
       </p>
       <p class="text-sm text-muted-foreground">
-        Open or create a book to browse your chart of accounts, inspect transactions, track
-        investment prices, and view interactive dashboards. Coming from GnuCash? Import your
+        Open a book to browse accounts, dig into transactions, track investment prices, and view
+        interactive dashboards. Coming from GnuCash? Import your
         <code>.gnucash</code> file into the open book. All data stays local on your machine.
       </p>
     </Card.Content>

@@ -77,8 +77,8 @@
 {#if total === 0}
   <EmptyState
     card
-    title="No prices"
-    description="No price history found — set the Yahoo symbol, then refresh prices."
+    title="No prices yet"
+    description="No prices yet. Set the Yahoo symbol above, then hit refresh."
   >
     {#snippet icon()}
       <TrendingUp aria-hidden="true" class="text-muted-foreground" />

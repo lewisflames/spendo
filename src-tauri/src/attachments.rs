@@ -176,11 +176,11 @@ fn insert_attachments(
     prepared: Vec<PreparedAttachment>,
 ) -> Result<Vec<AttachmentInfo>, AppError> {
     if prepared.is_empty() {
-        return Err(AppError::Validation("No files selected".to_string()));
+        return Err(AppError::Validation("Pick a file to attach first".to_string()));
     }
     if prepared.len() > MAX_ATTACHMENTS_PER_TX {
         return Err(AppError::Validation(format!(
-            "A transaction can have at most {MAX_ATTACHMENTS_PER_TX} attachments"
+            "Keep it to at most {MAX_ATTACHMENTS_PER_TX} attachments per transaction"
         )));
     }
     with_tx_err(conn, || {
@@ -194,7 +194,7 @@ fn insert_attachments(
             .is_some();
         if !exists {
             return Err(AppError::NotFound(
-                "Transaction not found — it may have been removed".to_string(),
+                "Transaction not found. It may have been removed".to_string(),
             ));
         }
 
@@ -205,7 +205,7 @@ fn insert_attachments(
         )?;
         if existing as usize + prepared.len() > MAX_ATTACHMENTS_PER_TX {
             return Err(AppError::Validation(format!(
-                "A transaction can have at most {MAX_ATTACHMENTS_PER_TX} attachments"
+                "Keep it to at most {MAX_ATTACHMENTS_PER_TX} attachments per transaction"
             )));
         }
 
@@ -238,7 +238,7 @@ fn insert_attachments(
                 };
                 if extended_code == Some(rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE) {
                     return Err(AppError::Validation(
-                        "This book stores one attachment per transaction — clear all data or create a new book to use multiple attachments"
+                        "This book holds one attachment per transaction. Clear your data or start a new book to add more"
                             .to_string(),
                     ));
                 }
@@ -260,7 +260,7 @@ fn delete_attachment_inner(conn: &Connection, guid: &str) -> Result<(), AppError
     let deleted = conn.execute("DELETE FROM attachments WHERE guid = ?1", params![guid])?;
     if deleted == 0 {
         return Err(AppError::NotFound(
-            "Attachment not found — it may have been removed".to_string(),
+            "Attachment not found. It may have been removed".to_string(),
         ));
     }
     Ok(())
@@ -275,7 +275,7 @@ fn fetch_blob(conn: &Connection, guid: &str) -> Result<(String, String, Vec<u8>)
     )
     .optional()?
     .ok_or_else(|| {
-        AppError::NotFound("Attachment not found — it may have been removed".to_string())
+        AppError::NotFound("Attachment not found. It may have been removed".to_string())
     })
 }
 

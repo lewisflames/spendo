@@ -31,7 +31,7 @@
     {/snippet}
   </IconCardHeader>
   <Card.Content class="flex flex-col gap-4">
-    <SettingSelectRow label="Locale" description="Date, number and currency display format">
+    <SettingSelectRow label="Locale" description="How dates, numbers and money look">
       <Select.Root
         type="single"
         value={appSettings.value.locale}
@@ -48,10 +48,7 @@
         </Select.Content>
       </Select.Root>
     </SettingSelectRow>
-    <SettingSelectRow
-      label="Rows per page"
-      description="Applies to every list: transactions, ledger, holdings"
-    >
+    <SettingSelectRow label="Rows per page" description="One setting for every list in the app">
       <Select.Root
         type="single"
         value={String(appSettings.value.pageSize)}

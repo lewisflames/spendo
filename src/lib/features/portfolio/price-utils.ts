@@ -49,9 +49,9 @@ export function toastPriceResult(
   const errorCount = result.errors.length;
   if (errorCount > 0) {
     toast.warning(
-      `Prices refreshed with ${plural(errorCount, 'error')}${opts.fixHint ? ' — open Portfolio to fix symbols.' : ''}`
+      `Prices refreshed with ${plural(errorCount, 'error')}${opts.fixHint ? '. Open Portfolio to fix symbols.' : ''}`
     );
   } else if (result.prices.length > 0) {
-    toast.success(opts.fixHint ? 'Prices refreshed from Yahoo Finance' : 'Prices refreshed');
+    toast.success(opts.fixHint ? 'Fresh prices are in' : 'Prices are up to date');
   }
 }

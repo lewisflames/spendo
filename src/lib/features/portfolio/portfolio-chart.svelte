@@ -17,9 +17,9 @@
 
 <TimeSeriesChart
   title="Portfolio Performance"
-  description="Market value vs cost basis over time"
+  description="What it’s worth versus what you paid, over time"
   {loading}
-  emptyMessage="No performance data available."
+  emptyMessage="Not enough history to chart yet."
   {data}
   getX={(d: PortfolioValuePoint) => parseLocalDate(d.date)}
   series={[

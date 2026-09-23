@@ -39,7 +39,7 @@
   let formError = $state('');
   let showErrors = $state(false);
 
-  let amountError = $derived(amount > 0 ? '' : 'Target must be greater than zero');
+  let amountError = $derived(amount > 0 ? '' : 'Enter an amount above zero');
   let canSave = $derived(!loading && amount > 0);
 
   // Re-initialize the form whenever the dialog opens (user interaction), so
@@ -68,7 +68,7 @@
       open = false;
       onSave?.();
     } catch (e: unknown) {
-      const msg = errMsg(e, 'Failed to save annual budget');
+      const msg = errMsg(e, "We couldn't save this budget. Please try again");
       formError = msg;
       onError?.(msg);
     } finally {
@@ -89,7 +89,7 @@
       open = false;
       onDelete?.();
     } catch (e: unknown) {
-      formError = errMsg(e, 'Failed to delete budget');
+      formError = errMsg(e, "We couldn't delete this budget. Please try again");
     } finally {
       deleting = false;
     }
@@ -102,8 +102,8 @@
       <Dialog.Title>{exists ? 'Edit budget' : 'Set budget'}</Dialog.Title>
       <Dialog.Description>
         {exists
-          ? 'Adjust the annual target for this year.'
-          : 'Create the annual target for this year.'}
+          ? 'Tweak what you plan to spend this year.'
+          : 'Set what you plan to spend this year.'}
       </Dialog.Description>
     </Dialog.Header>
 
@@ -147,7 +147,7 @@
           class="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
         >
           Delete the {year} budget for <strong>{accountName ?? 'this account'}</strong>? Other years
-          are kept. This action cannot be undone.
+          stay put. You can't undo this.
         </p>
       {/if}
     </div>
