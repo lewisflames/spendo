@@ -3,32 +3,39 @@
   import { Button } from '$lib/components/ui/button';
 
   /**
-   * Standard create/edit footer: two-step Delete (edit mode only), Cancel and
-   * Save. `layout="dialog"` renders inside `Dialog.Footer`; `layout="form"`
-   * renders the sticky page-form bar. Delete confirmation text lives in the
-   * body.
+   * Standard create/edit footer for dialogs: two-step Delete (edit mode only),
+   * Cancel and Save. Delete confirmation text lives in the body. Optional
+   * `onSaveAndNew` adds a batch-entry button (create mode) and `onDuplicate`
+   * adds an edit-mode shortcut to the new-transaction template. Page forms use
+   * header actions instead — no sticky bar.
    */
   let {
-    layout = 'dialog',
     mode = 'create',
     saving,
     deleting,
     confirmDelete,
     saveLabel,
     saveDisabled,
+    savingAndNew = false,
+    saveAndNewDisabled = false,
     onDelete,
     onSave,
+    onSaveAndNew,
+    onDuplicate,
     onCancel
   }: {
-    layout?: 'dialog' | 'form';
     mode?: 'create' | 'edit';
     saving: boolean;
     deleting: boolean;
     confirmDelete: boolean;
     saveLabel: string;
     saveDisabled: boolean;
+    savingAndNew?: boolean;
+    saveAndNewDisabled?: boolean;
     onDelete?: () => void;
     onSave: () => void;
+    onSaveAndNew?: () => void;
+    onDuplicate?: () => void;
     onCancel: () => void;
   } = $props();
 </script>
@@ -45,20 +52,27 @@
       {deleting ? 'Deleting…' : confirmDelete ? 'Confirm delete' : 'Delete'}
     </Button>
   {/if}
+  {#if mode === 'edit' && onDuplicate}
+    <Button type="button" variant="outline" onclick={onDuplicate} disabled={saving || deleting}>
+      Duplicate
+    </Button>
+  {/if}
   <Button type="button" variant="outline" onclick={onCancel}>Cancel</Button>
+  {#if onSaveAndNew}
+    <Button
+      type="button"
+      variant="outline"
+      onclick={onSaveAndNew}
+      disabled={saveAndNewDisabled || saving || savingAndNew || deleting}
+    >
+      {savingAndNew ? 'Saving…' : 'Save & add another'}
+    </Button>
+  {/if}
   <Button type="button" onclick={onSave} disabled={saveDisabled}>
     {saving ? 'Saving…' : saveLabel}
   </Button>
 {/snippet}
 
-{#if layout === 'dialog'}
-  <Dialog.Footer class="flex-col gap-2 sm:flex-row">
-    {@render buttons()}
-  </Dialog.Footer>
-{:else}
-  <div
-    class="sticky bottom-0 z-10 flex flex-col gap-2 border-t bg-background/95 py-4 backdrop-blur sm:flex-row sm:justify-end"
-  >
-    {@render buttons()}
-  </div>
-{/if}
+<Dialog.Footer class="flex-col gap-2 sm:flex-row">
+  {@render buttons()}
+</Dialog.Footer>

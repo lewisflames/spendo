@@ -10,7 +10,6 @@
   import TransactionForm from '$lib/features/transactions/transaction-form.svelte';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
   import BookGate from '$lib/components/shared/book-gate.svelte';
-  import PageHeader from '$lib/components/layout/page-header.svelte';
   import PageSkeleton from '$lib/components/shared/page-skeleton.svelte';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
@@ -28,7 +27,6 @@
   });
 
   let detail = $derived(res.data?.transaction ?? null);
-  let detailPath = $derived(detail ? resolve('/transactions/[guid]', { guid: detail.guid }) : null);
 
   function goBack() {
     if (detail) {
@@ -47,6 +45,13 @@
     toast.success('Transaction deleted');
     void goto(resolve('/transactions'));
   }
+
+  function handleDuplicate() {
+    if (!detail) return;
+    // Query strings can't go through `resolve()` — same pattern as budgets.
+    // eslint-disable-next-line svelte/no-navigation-without-resolve
+    void goto(resolve('/transactions/new') + `?duplicate=${encodeURIComponent(detail.guid)}`);
+  }
 </script>
 
 <svelte:head>
@@ -57,28 +62,24 @@
 </svelte:head>
 
 <BookGate title="Edit transaction" description="Edit transaction details and splits">
-  <div class="mx-auto flex w-full max-w-6xl flex-col gap-6">
+  <div class="mx-auto flex w-full max-w-5xl flex-col gap-6">
     {#if (res.loading || dbBootstrapping.value) && !res.data}
       <PageSkeleton variant="form" />
     {:else if detail}
       {#if res.error}
         <ErrorCard message={res.error} onRetry={() => res.reload()} />
       {/if}
-      <PageHeader title="Edit transaction" description={detail.description || 'Transaction'}>
-        <Button variant="outline" href={detailPath ?? resolve('/transactions')}>
-          <ArrowLeft aria-hidden="true" class="size-4" />
-          Transaction
-        </Button>
-      </PageHeader>
       {#key detail.guid}
         <TransactionForm
           mode="edit"
           guid={detail.guid}
+          title="Edit transaction"
+          headerDescription={detail.description || 'Transaction'}
           initial={detail}
           onSaved={handleSaved}
           onDeleted={handleDeleted}
           onCancel={goBack}
-          onError={(msg) => toast.error(msg)}
+          onDuplicate={handleDuplicate}
         />
       {/key}
     {:else if res.error}

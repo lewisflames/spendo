@@ -4,9 +4,12 @@
   import { Select as SelectPrimitive } from 'bits-ui';
   import { Input } from '$lib/components/ui/input';
   import { Textarea } from '$lib/components/ui/textarea';
+  import { Button } from '$lib/components/ui/button';
   import * as Card from '$lib/components/ui/card';
+  import IconCardHeader from '$lib/components/shared/icon-card-header.svelte';
+  import { Info, Repeat, Trash2 } from '@lucide/svelte';
   import { DatePicker } from '$lib/components/shared/date-picker';
-  import SaveFooter from '$lib/components/shared/save-footer.svelte';
+  import PageHeader from '$lib/components/layout/page-header.svelte';
   import {
     SplitEditor,
     draftFromSplit,
@@ -36,6 +39,8 @@
     mode = 'create',
     guid = null,
     initial = null,
+    title,
+    headerDescription,
     onSaved,
     onDeleted,
     onCancel,
@@ -44,6 +49,8 @@
     mode?: 'create' | 'edit';
     guid?: string | null;
     initial?: Schedule | null;
+    title: string;
+    headerDescription: string;
     onSaved?: (schedule: Schedule) => void;
     onDeleted?: () => void;
     onCancel: () => void;
@@ -222,182 +229,200 @@
 </script>
 
 <div class="flex w-full flex-col gap-6">
-  <div class="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
-    <div class="order-2 flex min-w-0 flex-col gap-6 lg:order-1">
-      <Card.Root>
-        <Card.Header>
-          <Card.Title>Recurrence</Card.Title>
-          <Card.Description>
-            Nothing posts automatically — each due occurrence surfaces as a reminder to post or
-            skip.
-          </Card.Description>
-        </Card.Header>
-        <Card.Content class="flex flex-col gap-4">
-          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div class="flex flex-col gap-1.5">
-              <label for="sched-freq" class="text-sm font-medium">Repeats</label>
-              <Select.Root
-                type="single"
-                value={frequency}
-                onValueChange={(v) => {
-                  if (FREQUENCY_OPTIONS.some((o) => o.value === v))
-                    frequency = v as ScheduleFrequency;
-                }}
-              >
-                <Select.Trigger id="sched-freq" class="w-full">
-                  <SelectPrimitive.Value placeholder="Select frequency" />
-                </Select.Trigger>
-                <Select.Content>
-                  {#each FREQUENCY_OPTIONS as o (o.value)}
-                    <Select.Item value={o.value} label={o.label}>{o.label}</Select.Item>
-                  {/each}
-                </Select.Content>
-              </Select.Root>
-            </div>
-            <div class="flex flex-col gap-1.5">
-              <label for="sched-mult" class="text-sm font-medium">Every</label>
-              <div class="flex items-center gap-2">
-                <Input
-                  id="sched-mult"
-                  type="text"
-                  inputmode="numeric"
-                  bind:value={intervalMult}
-                  class="w-24"
-                />
-                <span class="text-sm text-muted-foreground">
-                  {frequency === 'daily'
-                    ? 'day(s)'
-                    : frequency === 'weekly'
-                      ? 'week(s)'
-                      : frequency === 'biweekly'
-                        ? '× 2 weeks'
-                        : frequency === 'monthly'
-                          ? 'month(s)'
-                          : frequency === 'quarterly'
-                            ? 'quarter(s)'
-                            : 'year(s)'}
-                </span>
-              </div>
-              {#if multError}
-                <p role="alert" class="text-xs text-destructive">{multError}</p>
-              {/if}
-            </div>
-            <div class="flex flex-col gap-1.5">
-              <label for="sched-start" class="text-sm font-medium">First due date</label>
-              <DatePicker
-                id="sched-start"
-                bind:value={startDate}
-                placeholder="Pick a date"
-                invalid={!!startError}
-                describedBy={startError ? 'sched-start-error' : undefined}
-              />
-              {#if startError}
-                <p id="sched-start-error" role="alert" class="text-xs text-destructive">
-                  {startError}
-                </p>
-              {/if}
-            </div>
-            <div class="flex flex-col gap-1.5">
-              <label for="sched-end" class="text-sm font-medium">End date (optional)</label>
-              <DatePicker
-                id="sched-end"
-                bind:value={endDate}
-                placeholder="No end date"
-                invalid={!!endError}
-                describedBy={endError ? 'sched-end-error' : undefined}
-              />
-              {#if endError}
-                <p id="sched-end-error" role="alert" class="text-xs text-destructive">{endError}</p>
-              {/if}
-            </div>
-            <div class="flex flex-col gap-1.5">
-              <label for="sched-count" class="text-sm font-medium">Stop after (optional)</label>
-              <div class="flex items-center gap-2">
-                <Input
-                  id="sched-count"
-                  type="text"
-                  inputmode="numeric"
-                  bind:value={maxOccurrences}
-                  placeholder="No limit"
-                  class="w-32"
-                />
-                <span class="text-sm text-muted-foreground">occurrence(s)</span>
-              </div>
-              {#if countError}
-                <p role="alert" class="text-xs text-destructive">{countError}</p>
-              {/if}
-            </div>
+  <PageHeader {title} description={headerDescription}>
+    <Button type="button" variant="outline" onclick={onCancel}>Cancel</Button>
+    {#if mode === 'edit'}
+      <Button
+        type="button"
+        variant={confirmDelete ? 'destructive' : 'outline'}
+        size="icon"
+        onclick={() => void handleDelete()}
+        disabled={saving || deleting}
+        aria-label={confirmDelete ? 'Confirm delete schedule' : 'Delete schedule'}
+        title={confirmDelete ? 'Confirm delete' : 'Delete schedule'}
+      >
+        <Trash2 aria-hidden="true" class="size-4" />
+      </Button>
+    {/if}
+    <Button type="button" onclick={() => void handleSave()} disabled={saving || deleting}>
+      {saving ? 'Saving…' : mode === 'edit' ? 'Save changes' : 'Create schedule'}
+    </Button>
+  </PageHeader>
+
+  <Card.Root>
+    <IconCardHeader title="Details" description="Name and template info used when posting.">
+      {#snippet icon()}
+        <Info aria-hidden="true" class="size-4 text-muted-foreground" />
+      {/snippet}
+    </IconCardHeader>
+    <Card.Content class="flex flex-col gap-4">
+      <div class="flex flex-col gap-1.5">
+        <label for="sched-name" class="text-sm font-medium">Name</label>
+        <Input
+          id="sched-name"
+          bind:value={name}
+          placeholder="e.g. Monthly rent"
+          maxlength={200}
+          autofocus
+          aria-invalid={showErrors && !!nameError}
+        />
+        {#if showErrors && nameError}
+          <p role="alert" class="text-xs text-destructive">{nameError}</p>
+        {/if}
+      </div>
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div class="flex flex-col gap-1.5">
+          <label for="sched-desc" class="text-sm font-medium">Description</label>
+          <Input
+            id="sched-desc"
+            bind:value={description}
+            placeholder="e.g. Monthly rent"
+            maxlength={500}
+          />
+        </div>
+        <div class="flex flex-col gap-1.5">
+          <label for="sched-num" class="text-sm font-medium">Number (optional)</label>
+          <Input id="sched-num" bind:value={num} placeholder="e.g. 2024-001" maxlength={100} />
+        </div>
+      </div>
+      <div class="flex flex-col gap-1.5">
+        <label for="sched-notes" class="text-sm font-medium">Notes (optional)</label>
+        <Textarea
+          id="sched-notes"
+          bind:value={notes}
+          placeholder="Optional notes"
+          rows={3}
+          maxlength={2000}
+        />
+      </div>
+    </Card.Content>
+  </Card.Root>
+
+  <Card.Root>
+    <IconCardHeader
+      title="Recurrence"
+      description="Nothing posts automatically — each due occurrence surfaces as a reminder to post or skip."
+    >
+      {#snippet icon()}
+        <Repeat aria-hidden="true" class="size-4 text-muted-foreground" />
+      {/snippet}
+    </IconCardHeader>
+    <Card.Content class="flex flex-col gap-4">
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div class="flex flex-col gap-1.5">
+          <label for="sched-freq" class="text-sm font-medium">Repeats</label>
+          <Select.Root
+            type="single"
+            value={frequency}
+            onValueChange={(v) => {
+              if (FREQUENCY_OPTIONS.some((o) => o.value === v)) frequency = v as ScheduleFrequency;
+            }}
+          >
+            <Select.Trigger id="sched-freq" class="w-full">
+              <SelectPrimitive.Value placeholder="Select frequency" />
+            </Select.Trigger>
+            <Select.Content>
+              {#each FREQUENCY_OPTIONS as o (o.value)}
+                <Select.Item value={o.value} label={o.label}>{o.label}</Select.Item>
+              {/each}
+            </Select.Content>
+          </Select.Root>
+        </div>
+        <div class="flex flex-col gap-1.5">
+          <label for="sched-mult" class="text-sm font-medium">Every</label>
+          <div class="flex items-center gap-2">
+            <Input
+              id="sched-mult"
+              type="text"
+              inputmode="numeric"
+              bind:value={intervalMult}
+              class="w-24"
+            />
+            <span class="text-sm text-muted-foreground">
+              {frequency === 'daily'
+                ? 'day(s)'
+                : frequency === 'weekly'
+                  ? 'week(s)'
+                  : frequency === 'biweekly'
+                    ? '× 2 weeks'
+                    : frequency === 'monthly'
+                      ? 'month(s)'
+                      : frequency === 'quarterly'
+                        ? 'quarter(s)'
+                        : 'year(s)'}
+            </span>
           </div>
-          {#if mode === 'edit' && initial && initial.occurrencesPosted > 0}
-            <p class="text-xs text-muted-foreground">
-              Already posted {initial.occurrencesPosted === 1
-                ? 'once'
-                : `${initial.occurrencesPosted} times`} — changing the start date won't move the next
-              due date.
+          {#if multError}
+            <p role="alert" class="text-xs text-destructive">{multError}</p>
+          {/if}
+        </div>
+        <div class="flex flex-col gap-1.5">
+          <label for="sched-start" class="text-sm font-medium">First due date</label>
+          <DatePicker
+            id="sched-start"
+            bind:value={startDate}
+            placeholder="Pick a date"
+            invalid={!!startError}
+            describedBy={startError ? 'sched-start-error' : undefined}
+          />
+          {#if startError}
+            <p id="sched-start-error" role="alert" class="text-xs text-destructive">
+              {startError}
             </p>
           {/if}
-        </Card.Content>
-      </Card.Root>
-
-      <SplitEditor
-        bind:splits
-        options={pickerOptions}
-        loading={accountsRes.loading}
-        loadError={accountsRes.error ?? ''}
-        {showErrors}
-        title="Template splits"
-        idPrefix="sched-split"
-        makeKey={nextKey}
-      />
-    </div>
-
-    <div class="order-1 lg:order-2">
-      <Card.Root>
-        <Card.Header>
-          <Card.Title>Details</Card.Title>
-        </Card.Header>
-        <Card.Content class="flex flex-col gap-4">
-          <div class="flex flex-col gap-1.5">
-            <label for="sched-name" class="text-sm font-medium">Name</label>
+        </div>
+        <div class="flex flex-col gap-1.5">
+          <label for="sched-end" class="text-sm font-medium">End date (optional)</label>
+          <DatePicker
+            id="sched-end"
+            bind:value={endDate}
+            placeholder="No end date"
+            invalid={!!endError}
+            describedBy={endError ? 'sched-end-error' : undefined}
+          />
+          {#if endError}
+            <p id="sched-end-error" role="alert" class="text-xs text-destructive">{endError}</p>
+          {/if}
+        </div>
+        <div class="flex flex-col gap-1.5">
+          <label for="sched-count" class="text-sm font-medium">Stop after (optional)</label>
+          <div class="flex items-center gap-2">
             <Input
-              id="sched-name"
-              bind:value={name}
-              placeholder="e.g. Monthly rent"
-              maxlength={200}
-              autofocus
-              aria-invalid={showErrors && !!nameError}
+              id="sched-count"
+              type="text"
+              inputmode="numeric"
+              bind:value={maxOccurrences}
+              placeholder="No limit"
+              class="w-32"
             />
-            {#if showErrors && nameError}
-              <p role="alert" class="text-xs text-destructive">{nameError}</p>
-            {/if}
+            <span class="text-sm text-muted-foreground">occurrence(s)</span>
           </div>
-          <div class="flex flex-col gap-1.5">
-            <label for="sched-desc" class="text-sm font-medium">Description</label>
-            <Input
-              id="sched-desc"
-              bind:value={description}
-              placeholder="e.g. Monthly rent"
-              maxlength={500}
-            />
-          </div>
-          <div class="flex flex-col gap-1.5">
-            <label for="sched-num" class="text-sm font-medium">Number (optional)</label>
-            <Input id="sched-num" bind:value={num} placeholder="e.g. 2024-001" maxlength={100} />
-          </div>
-          <div class="flex flex-col gap-1.5">
-            <label for="sched-notes" class="text-sm font-medium">Notes (optional)</label>
-            <Textarea
-              id="sched-notes"
-              bind:value={notes}
-              placeholder="Optional notes"
-              rows={3}
-              maxlength={2000}
-            />
-          </div>
-        </Card.Content>
-      </Card.Root>
-    </div>
-  </div>
+          {#if countError}
+            <p role="alert" class="text-xs text-destructive">{countError}</p>
+          {/if}
+        </div>
+      </div>
+      {#if mode === 'edit' && initial && initial.occurrencesPosted > 0}
+        <p class="text-xs text-muted-foreground">
+          Already posted {initial.occurrencesPosted === 1
+            ? 'once'
+            : `${initial.occurrencesPosted} times`} — changing the start date won't move the next due
+          date.
+        </p>
+      {/if}
+    </Card.Content>
+  </Card.Root>
+
+  <SplitEditor
+    bind:splits
+    options={pickerOptions}
+    loading={accountsRes.loading}
+    loadError={accountsRes.error ?? ''}
+    {showErrors}
+    title="Template splits"
+    idPrefix="sched-split"
+    makeKey={nextKey}
+  />
 
   {#if formError}
     <p role="alert" class="text-sm text-destructive">{formError}</p>
@@ -409,19 +434,7 @@
       class="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
     >
       Delete this schedule? Future reminders stop; already-posted transactions stay in the ledger.
+      Press the trash icon again to confirm.
     </p>
   {/if}
-
-  <SaveFooter
-    layout="form"
-    {mode}
-    {saving}
-    {deleting}
-    {confirmDelete}
-    saveLabel={mode === 'edit' ? 'Save changes' : 'Create schedule'}
-    saveDisabled={saving || deleting}
-    onDelete={handleDelete}
-    onSave={handleSave}
-    {onCancel}
-  />
 </div>

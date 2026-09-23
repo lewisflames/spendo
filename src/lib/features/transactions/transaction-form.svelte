@@ -1,10 +1,16 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import { Input } from '$lib/components/ui/input';
   import { Textarea } from '$lib/components/ui/textarea';
+  import { Button } from '$lib/components/ui/button';
   import * as Card from '$lib/components/ui/card';
+  import * as Dialog from '$lib/components/ui/dialog';
+  import IconCardHeader from '$lib/components/shared/icon-card-header.svelte';
+  import { Copy, Info, Plus, Trash2 } from '@lucide/svelte';
+  import * as ButtonGroup from '$lib/components/ui/button-group';
   import { DatePicker } from '$lib/components/shared/date-picker';
-  import SaveFooter from '$lib/components/shared/save-footer.svelte';
+  import PageHeader from '$lib/components/layout/page-header.svelte';
+  import TransactionAttachments from '$lib/features/transactions/transaction-attachments.svelte';
   import {
     SplitEditor,
     draftFromSplit,
@@ -25,26 +31,36 @@
   } from '$lib/tauri';
   import { errMsg } from '$lib/utils/error';
   import { isIsoDate, today as sharedToday, todayStr } from '$lib/utils/date-utils.svelte';
+  import { parseLocalDate } from '$lib/utils/format.svelte';
   import { plural } from '$lib/utils/format.svelte';
   import { flattenAccountsForPicker } from '$lib/features/accounts/account-picker-utils';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
+
+  const LAST_ACCOUNTS_KEY = 'tx-last-accounts';
+  const RECENT_DESCRIPTIONS_KEY = 'tx-recent-descriptions';
 
   let {
     mode = 'create',
     guid = null,
     initial = null,
+    title,
+    headerDescription,
     onSaved,
+    onSavedAndNew,
     onDeleted,
     onCancel,
-    onError
+    onDuplicate
   }: {
     mode?: 'create' | 'edit';
     guid?: string | null;
     initial?: TransactionDetail | null;
+    title: string;
+    headerDescription: string;
     onSaved?: (guid: string) => void;
+    onSavedAndNew?: (guid: string) => void;
     onDeleted?: () => void;
     onCancel: () => void;
-    onError?: (msg: string) => void;
+    onDuplicate?: () => void;
   } = $props();
 
   let keySeq = $state(0);
@@ -52,6 +68,34 @@
   function nextKey(): number {
     keySeq += 1;
     return keySeq;
+  }
+
+  function offsetDateStr(base: string, deltaDays: number): string {
+    const d = parseLocalDate(base);
+    if (Number.isNaN(d.getTime())) return todayStr();
+    d.setDate(d.getDate() + deltaDays);
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${d.getFullYear()}-${m}-${day}`;
+  }
+
+  function readStoredArray(key: string): string[] {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return [];
+      const parsed: unknown = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function writeStoredArray(key: string, values: string[]): void {
+    try {
+      localStorage.setItem(key, JSON.stringify(values.slice(0, 20)));
+    } catch {
+      // Storage full or unavailable — entry speed hints are best-effort.
+    }
   }
 
   // The edit page mounts this form only after the payload resolves, so the
@@ -82,12 +126,20 @@
   let num = $state(snapshot.num);
   let notes = $state(snapshot.notes);
   let splits = $state<SplitDraft[]>(snapshot.splits);
+  // Dirty baseline moves after "Save & add another" resets the form.
+  let baseline = $state(snapshot);
 
   let saving = $state(false);
+  let savingAndNew = $state(false);
   let deleting = $state(false);
-  let confirmDelete = $state(false);
+  let deleteDialogOpen = $state(false);
+  let discardDialogOpen = $state(false);
   let formError = $state('');
   let showErrors = $state(false);
+  let didPrefillAccounts = $state(false);
+  let recentDescriptions = $state<string[]>(
+    untrack(() => readStoredArray(RECENT_DESCRIPTIONS_KEY))
+  );
 
   const accountsRes = useAsyncData({
     enabled: () => true,
@@ -98,14 +150,40 @@
   let pickerOptions = $derived(
     flattenAccountsForPicker(accountsRes.data?.trees, { hidePlaceholders: true })
   );
+  let knownGuids = $derived(new Set(pickerOptions.map((o) => o.guid)));
+
+  // Batch entry: prefill blank splits with the accounts used last time.
+  $effect(() => {
+    if (mode !== 'create' || initial || didPrefillAccounts || !accountsRes.data) return;
+    const pristine = splits.every((s) => !s.accountGuid && !s.amount.trim());
+    if (!pristine) {
+      didPrefillAccounts = true;
+      return;
+    }
+    const last = untrack(() => readStoredArray(LAST_ACCOUNTS_KEY)).filter((g) => knownGuids.has(g));
+    if (last.length > 0) {
+      for (let i = 0; i < splits.length && i < last.length; i += 1) {
+        splits[i].accountGuid = last[i];
+      }
+      baseline = {
+        postDate,
+        description,
+        num,
+        notes,
+        splits: splits.map((s) => ({ ...s }))
+      };
+    }
+    didPrefillAccounts = true;
+  });
 
   // Shared local date; the guard re-evaluates after midnight (same comparison
   // as `isFutureDate`, but against the reactive clock).
   let today = $derived(sharedToday.value);
+  let yesterday = $derived(offsetDateStr(today, -1));
   let dateError = $derived.by(() => {
     if (!postDate) return 'Date is required';
     if (!isIsoDate(postDate)) return 'Use a valid date (YYYY-MM-DD)';
-    if (postDate > today) return 'Future dates are not allowed';
+    if (postDate > today) return 'Future dates are hidden from balances — use today or earlier';
     return '';
   });
 
@@ -113,12 +191,77 @@
   let balance = $derived(splitBalance(splits));
   let balanced = $derived(isBalanced(balance));
 
+  // The backend rejects edits/deletes on cleared/reconciled splits — the
+  // reconcile page owns those transitions.
+  let hasLockedSplits = $derived(
+    initial?.splits.some((s) => s.reconcileState === 'c' || s.reconcileState === 'y') ?? false
+  );
+
   // Receipts are deleted permanently with their transaction.
   let attachmentCount = $derived(initial?.attachmentCount ?? 0);
 
+  let dirty = $derived.by(() => {
+    if (
+      postDate !== baseline.postDate ||
+      description !== baseline.description ||
+      num !== baseline.num ||
+      notes !== baseline.notes ||
+      splits.length !== baseline.splits.length
+    ) {
+      return true;
+    }
+    return splits.some((s, i) => {
+      const b = baseline.splits[i];
+      return (
+        s.accountGuid !== b.accountGuid ||
+        s.amount !== b.amount ||
+        s.quantity !== b.quantity ||
+        s.showQuantity !== b.showQuantity ||
+        s.memo !== b.memo
+      );
+    });
+  });
+
+  // Show inline split errors live once the user has touched the form; the save
+  // buttons stay honestly disabled until the form can actually save.
+  let effectiveShowErrors = $derived(showErrors || dirty);
+
+  let issues = $derived.by(() => {
+    const list: string[] = [];
+    if (dateError) list.push(dateError);
+    if (splits.length < 2) list.push('Add at least two splits');
+    for (const e of errors) {
+      if (e) {
+        list.push(e);
+        if (list.length >= 4) break;
+      }
+    }
+    if (list.length === 0 && balance !== null && !balanced) {
+      list.push('Splits must sum to zero — debits must equal credits');
+    }
+    return list;
+  });
+
   let canSave = $derived(
-    !saving && !deleting && !dateError && splits.length >= 2 && errors.every((e) => !e) && balanced
+    !saving &&
+      !savingAndNew &&
+      !deleting &&
+      !dateError &&
+      splits.length >= 2 &&
+      errors.every((e) => !e) &&
+      balanced
   );
+
+  function rememberForNextTime(accountGuids: string[], desc: string) {
+    const valid = accountGuids.filter((g) => knownGuids.has(g));
+    if (valid.length > 0) writeStoredArray(LAST_ACCOUNTS_KEY, valid);
+    const trimmed = desc.trim();
+    if (trimmed) {
+      const next = [trimmed, ...recentDescriptions.filter((d) => d !== trimmed)].slice(0, 20);
+      recentDescriptions = next;
+      writeStoredArray(RECENT_DESCRIPTIONS_KEY, next);
+    }
+  }
 
   function buildInput(): TxInput {
     return {
@@ -130,8 +273,20 @@
     };
   }
 
+  function focusDescription() {
+    void tick().then(() => {
+      document.getElementById('tx-desc')?.focus();
+    });
+  }
+
+  function focusFormError() {
+    void tick().then(() => {
+      document.getElementById('tx-form-error')?.focus();
+    });
+  }
+
   async function handleSave() {
-    if (saving || deleting) return;
+    if (saving || savingAndNew || deleting) return;
     if (!canSave) {
       showErrors = true;
       return;
@@ -142,128 +297,334 @@
       const input = buildInput();
       if (mode === 'edit' && guid) {
         await updateTransaction(guid, input);
+        rememberForNextTime(
+          splits.map((s) => s.accountGuid),
+          description
+        );
         onSaved?.(guid);
       } else {
         const newGuid = await createTransaction(input);
+        rememberForNextTime(
+          splits.map((s) => s.accountGuid),
+          description
+        );
         onSaved?.(newGuid);
       }
     } catch (e: unknown) {
-      const msg = errMsg(e, 'Failed to save transaction');
-      formError = msg;
-      onError?.(msg);
+      formError = errMsg(e, 'Failed to save transaction');
+      focusFormError();
     } finally {
       saving = false;
     }
   }
 
-  async function handleDelete() {
-    if (mode !== 'edit' || !guid) return;
-    if (!confirmDelete) {
-      confirmDelete = true;
+  async function handleSaveAndNew() {
+    if (mode !== 'create' || saving || savingAndNew || deleting) return;
+    if (!canSave) {
+      showErrors = true;
       return;
     }
+    savingAndNew = true;
+    formError = '';
+    try {
+      const newGuid = await createTransaction(buildInput());
+      rememberForNextTime(
+        splits.map((s) => s.accountGuid),
+        description
+      );
+      onSavedAndNew?.(newGuid);
+      // Keep the date and accounts for fast batch entry; clear the rest.
+      description = '';
+      num = '';
+      notes = '';
+      splits = splits.map((s) => ({
+        ...makeSplitDraft(nextKey()),
+        accountGuid: knownGuids.has(s.accountGuid) ? s.accountGuid : '',
+        showQuantity: s.showQuantity
+      }));
+      while (splits.length < 2) splits.push(makeSplitDraft(nextKey()));
+      baseline = {
+        postDate,
+        description,
+        num,
+        notes,
+        splits: splits.map((s) => ({ ...s }))
+      };
+      showErrors = false;
+      focusDescription();
+    } catch (e: unknown) {
+      formError = errMsg(e, 'Failed to save transaction');
+      focusFormError();
+    } finally {
+      savingAndNew = false;
+    }
+  }
+
+  function requestCancel() {
+    if (!dirty || saving || savingAndNew || deleting) {
+      onCancel();
+      return;
+    }
+    discardDialogOpen = true;
+  }
+
+  async function handleDeleteConfirm() {
+    if (mode !== 'edit' || !guid || deleting) return;
     deleting = true;
     formError = '';
     try {
       await deleteTransaction(guid);
+      deleteDialogOpen = false;
       onDeleted?.();
     } catch (e: unknown) {
-      const msg = errMsg(e, 'Failed to delete transaction');
-      formError = msg;
-      onError?.(msg);
+      formError = errMsg(e, 'Failed to delete transaction');
+      deleteDialogOpen = false;
+      focusFormError();
     } finally {
       deleting = false;
     }
   }
+
+  function handleKeydown(e: KeyboardEvent) {
+    const mod = e.ctrlKey || e.metaKey;
+    if (!mod || e.key.toLowerCase() !== 's') return;
+    // Don't hijack the browser save dialog when a native dialog has focus.
+    if (e.defaultPrevented) return;
+    e.preventDefault();
+    if (e.shiftKey && mode === 'create' && onSavedAndNew) {
+      void handleSaveAndNew();
+    } else {
+      void handleSave();
+    }
+  }
 </script>
 
+<svelte:window onkeydown={handleKeydown} />
+
 <div class="flex w-full flex-col gap-6">
-  <div class="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
-    <div class="order-2 min-w-0 lg:order-1">
-      <SplitEditor
-        bind:splits
-        options={pickerOptions}
-        loading={accountsRes.loading}
-        loadError={accountsRes.error ?? ''}
-        {showErrors}
-        makeKey={nextKey}
-      />
-    </div>
-
-    <div class="order-1 lg:order-2">
-      <Card.Root>
-        <Card.Header>
-          <Card.Title>Details</Card.Title>
-        </Card.Header>
-        <Card.Content class="flex flex-col gap-4">
-          <div class="flex flex-col gap-1.5">
-            <label for="tx-desc" class="text-sm font-medium">Description</label>
-            <Input
-              id="tx-desc"
-              bind:value={description}
-              placeholder="e.g. Groceries"
-              maxlength={500}
-              autofocus
-            />
-          </div>
-          <div class="flex flex-col gap-1.5">
-            <label for="tx-date" class="text-sm font-medium">Date</label>
-            <DatePicker
-              id="tx-date"
-              bind:value={postDate}
-              placeholder="Pick a date"
-              invalid={!!dateError}
-              describedBy={dateError ? 'tx-date-error' : undefined}
-            />
-            {#if dateError}
-              <p id="tx-date-error" role="alert" class="text-xs text-destructive">{dateError}</p>
-            {/if}
-          </div>
-          <div class="flex flex-col gap-1.5">
-            <label for="tx-num" class="text-sm font-medium">Number (optional)</label>
-            <Input id="tx-num" bind:value={num} placeholder="e.g. 2024-001" maxlength={100} />
-          </div>
-          <div class="flex flex-col gap-1.5">
-            <label for="tx-notes" class="text-sm font-medium">Notes (optional)</label>
-            <Textarea
-              id="tx-notes"
-              bind:value={notes}
-              placeholder="Optional notes"
-              rows={3}
-              maxlength={2000}
-            />
-          </div>
-        </Card.Content>
-      </Card.Root>
-    </div>
-  </div>
-
-  {#if formError}
-    <p role="alert" class="text-sm text-destructive">{formError}</p>
-  {/if}
-
-  {#if mode === 'edit' && confirmDelete}
-    <p
-      role="alert"
-      class="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-    >
-      Delete this transaction? Its splits will be removed permanently.
-      {#if attachmentCount > 0}
-        Its {plural(attachmentCount, 'attachment')} are deleted permanently too.
+  <PageHeader {title} description={headerDescription}>
+    <Button type="button" variant="outline" onclick={requestCancel}>Cancel</Button>
+    {#if mode === 'edit'}
+      <ButtonGroup.Root>
+        {#if onDuplicate}
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            onclick={onDuplicate}
+            disabled={saving || savingAndNew || deleting}
+            aria-label="Duplicate transaction"
+            title="Duplicate transaction"
+          >
+            <Copy aria-hidden="true" class="size-4" />
+          </Button>
+        {/if}
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          onclick={() => (deleteDialogOpen = true)}
+          disabled={saving || savingAndNew || deleting}
+          aria-label="Delete transaction"
+          title="Delete transaction"
+        >
+          <Trash2 aria-hidden="true" class="size-4" />
+        </Button>
+      </ButtonGroup.Root>
+    {/if}
+    <ButtonGroup.Root>
+      {#if mode === 'create' && onSavedAndNew}
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          onclick={() => void handleSaveAndNew()}
+          disabled={!canSave || saving || savingAndNew || deleting}
+          aria-label="Save and add another"
+          title="Save and add another (Shift+Ctrl+S)"
+        >
+          <Plus aria-hidden="true" class="size-4" />
+        </Button>
       {/if}
+      <Button
+        type="button"
+        onclick={() => void handleSave()}
+        disabled={saving || savingAndNew || deleting || !canSave}
+      >
+        {saving ? 'Saving…' : mode === 'edit' ? 'Save changes' : 'Create transaction'}
+      </Button>
+    </ButtonGroup.Root>
+  </PageHeader>
+
+  <Card.Root>
+    <IconCardHeader
+      title="Details"
+      description="Description, date and reference info shown in lists and reports."
+    >
+      {#snippet icon()}
+        <Info aria-hidden="true" class="size-4 text-muted-foreground" />
+      {/snippet}
+    </IconCardHeader>
+    <Card.Content class="flex flex-col gap-4">
+      <div class="flex flex-col gap-1.5">
+        <label for="tx-desc" class="text-sm font-medium">Description</label>
+        <Input
+          id="tx-desc"
+          bind:value={description}
+          list="tx-desc-history"
+          placeholder="e.g. Groceries"
+          maxlength={500}
+          autofocus
+          autocomplete="off"
+        />
+        <datalist id="tx-desc-history">
+          {#each recentDescriptions as recent (recent)}
+            <option value={recent}></option>
+          {/each}
+        </datalist>
+      </div>
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div class="flex flex-col gap-1.5">
+          <label for="tx-date" class="text-sm font-medium">Date</label>
+          <DatePicker
+            id="tx-date"
+            bind:value={postDate}
+            placeholder="Pick a date"
+            invalid={!!dateError}
+            describedBy={dateError ? 'tx-date-error' : 'tx-date-hint'}
+          />
+          <div class="flex gap-1.5">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onclick={() => (postDate = today)}
+              disabled={postDate === today}
+            >
+              Today
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onclick={() => (postDate = yesterday)}
+              disabled={postDate === yesterday}
+            >
+              Yesterday
+            </Button>
+          </div>
+          {#if dateError}
+            <p id="tx-date-error" role="alert" class="text-xs text-destructive">{dateError}</p>
+          {:else}
+            <p id="tx-date-hint" class="text-xs text-muted-foreground">
+              Future-dated rows are excluded from balances, budgets and net worth.
+            </p>
+          {/if}
+        </div>
+        <div class="flex flex-col gap-1.5">
+          <label for="tx-num" class="text-sm font-medium">Number (optional)</label>
+          <Input id="tx-num" bind:value={num} placeholder="e.g. Check #101" maxlength={100} />
+          <p class="text-xs text-muted-foreground">
+            Check or reference number — shown on the detail view.
+          </p>
+        </div>
+      </div>
+      <div class="flex flex-col gap-1.5">
+        <label for="tx-notes" class="text-sm font-medium">Notes (optional)</label>
+        <Textarea
+          id="tx-notes"
+          bind:value={notes}
+          placeholder="Optional notes"
+          rows={3}
+          maxlength={2000}
+        />
+      </div>
+    </Card.Content>
+  </Card.Root>
+
+  <SplitEditor
+    bind:splits
+    options={pickerOptions}
+    loading={accountsRes.loading}
+    loadError={accountsRes.error ?? ''}
+    showErrors={effectiveShowErrors}
+    makeKey={nextKey}
+  />
+
+  {#if mode === 'edit' && hasLockedSplits}
+    <p
+      role="note"
+      class="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300"
+    >
+      Some splits are cleared or reconciled. Saving is blocked until you unreconcile them on the
+      reconcile page — the reconcile workflow owns those states.
     </p>
   {/if}
 
-  <SaveFooter
-    layout="form"
-    {mode}
-    {saving}
-    {deleting}
-    {confirmDelete}
-    saveLabel={mode === 'edit' ? 'Save changes' : 'Create transaction'}
-    saveDisabled={saving || deleting}
-    onDelete={handleDelete}
-    onSave={handleSave}
-    {onCancel}
-  />
+  {#if !canSave && (dirty || showErrors)}
+    <div
+      role="alert"
+      class="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+    >
+      <p class="font-medium">Fix {plural(issues.length, 'issue')} before saving:</p>
+      <ul class="mt-1 list-inside list-disc">
+        {#each issues as issue (issue)}
+          <li>{issue}</li>
+        {/each}
+      </ul>
+    </div>
+  {/if}
+
+  {#if formError}
+    <p id="tx-form-error" role="alert" tabindex="-1" class="text-sm text-destructive outline-none">
+      {formError}
+    </p>
+  {/if}
+
+  <TransactionAttachments txGuid={mode === 'edit' ? guid : null} />
+
+  <Dialog.Root bind:open={deleteDialogOpen}>
+    <Dialog.Content class="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+      <Dialog.Header>
+        <Dialog.Title>Delete this transaction?</Dialog.Title>
+        <Dialog.Description>
+          Its splits will be removed permanently.
+          {#if attachmentCount > 0}
+            Its {plural(attachmentCount, 'attachment')} are deleted permanently too.
+          {/if}
+        </Dialog.Description>
+      </Dialog.Header>
+      <Dialog.Footer>
+        <Button variant="outline" onclick={() => (deleteDialogOpen = false)} disabled={deleting}>
+          Cancel
+        </Button>
+        <Button variant="destructive" onclick={handleDeleteConfirm} disabled={deleting}>
+          {deleting ? 'Deleting…' : 'Yes, delete'}
+        </Button>
+      </Dialog.Footer>
+    </Dialog.Content>
+  </Dialog.Root>
+
+  <Dialog.Root bind:open={discardDialogOpen}>
+    <Dialog.Content class="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+      <Dialog.Header>
+        <Dialog.Title>Discard unsaved changes?</Dialog.Title>
+        <Dialog.Description>
+          You have unsaved edits to this transaction. Leaving now will lose them.
+        </Dialog.Description>
+      </Dialog.Header>
+      <Dialog.Footer>
+        <Button variant="outline" onclick={() => (discardDialogOpen = false)}>Keep editing</Button>
+        <Button
+          variant="destructive"
+          onclick={() => {
+            discardDialogOpen = false;
+            onCancel();
+          }}
+        >
+          Discard changes
+        </Button>
+      </Dialog.Footer>
+    </Dialog.Content>
+  </Dialog.Root>
 </div>
