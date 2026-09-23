@@ -145,7 +145,9 @@
   <div class="flex flex-col gap-6">
     <PageHeader
       title="Transactions"
-      description={res.data ? plural(res.data.total, 'transaction') : ''}
+      description={res.data
+        ? `Transaction ledger with filters · ${plural(res.data.total, 'transaction')}`
+        : 'Transaction ledger with filters'}
     >
       {#if dbSession.value}
         <Button variant="outline" href={resolve('/scheduled')}>

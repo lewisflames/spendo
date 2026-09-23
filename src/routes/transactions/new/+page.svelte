@@ -44,11 +44,16 @@
 </script>
 
 <svelte:head>
-  <title>New transaction — Spendo</title>
+  <title>{duplicateGuid ? 'Duplicate transaction' : 'New transaction'} — Spendo</title>
   <meta name="description" content="Create a transaction with splits." />
 </svelte:head>
 
-<BookGate title="New transaction" description="Create a transaction with splits">
+<BookGate
+  title={duplicateGuid ? 'Duplicate transaction' : 'New transaction'}
+  description={duplicateGuid
+    ? 'Duplicate a transaction with splits'
+    : 'Create a transaction with splits'}
+>
   <div class="mx-auto flex w-full max-w-5xl flex-col gap-6">
     {#if duplicateGuid}
       {#if dupRes.loading && !dupRes.data}

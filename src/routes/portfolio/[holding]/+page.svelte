@@ -123,7 +123,7 @@
   <meta name="description" content="Holding detail: price history, value trend and accounts." />
 </svelte:head>
 
-<BookGate title={name} description="Investment holding detail">
+<BookGate title="Holding" description="Investment holding detail">
   {#if dbBootstrapping.value || (res.loading && !res.data && !res.error)}
     <div class="flex flex-col gap-6">
       <PageSkeleton variant="holding" />

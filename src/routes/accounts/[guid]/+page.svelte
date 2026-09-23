@@ -166,7 +166,7 @@
   <meta name="description" content="Account transactions and balance." />
 </svelte:head>
 
-<BookGate title={res.data ? (res.data.account.description ?? res.data.account.name) : 'Account'}>
+<BookGate title="Account" description="Account transactions and balance.">
   <div class="flex flex-col gap-6">
     {#if (res.loading || dbBootstrapping.value) && !res.data}
       <PageHeaderSkeleton />

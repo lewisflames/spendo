@@ -10,7 +10,8 @@
     formatSignedCurrency,
     fmtPct,
     formatAllocPct,
-    formatDate
+    formatDate,
+    plural
   } from '$lib/utils/format.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import KpiCard from '$lib/components/shared/kpi-card.svelte';
@@ -124,6 +125,9 @@
 
   let headerDescription = $derived.by(() => {
     let desc = 'Investment holdings overview';
+    if (res.data) {
+      desc += ` · ${plural(res.data.holdings.length, 'holding')}`;
+    }
     const lastRefreshed = res.data?.lastRefreshed;
     if (lastRefreshed) {
       desc += ` · Prices updated ${formatDate(lastRefreshed, {

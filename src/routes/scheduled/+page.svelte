@@ -99,7 +99,12 @@
 
 <BookGate title="Scheduled" description="Recurring transactions and reminders">
   <div class="flex flex-col gap-6">
-    <PageHeader title="Scheduled" description={res.data ? plural(res.data.length, 'schedule') : ''}>
+    <PageHeader
+      title="Scheduled"
+      description={res.data
+        ? `Recurring transactions and reminders · ${plural(res.data.length, 'schedule')}`
+        : 'Recurring transactions and reminders'}
+    >
       {#if dbSession.value}
         <Button href={resolve('/scheduled/new')}>
           <Plus aria-hidden="true" class="size-4" />

@@ -225,7 +225,7 @@
 </svelte:head>
 
 <BookGate
-  title={res.data ? `Reconcile ${res.data.accountName}` : 'Reconcile'}
+  title="Reconcile"
   description="Check off cleared transactions until the difference is zero, then finish."
 >
   <div class="flex flex-col gap-6">

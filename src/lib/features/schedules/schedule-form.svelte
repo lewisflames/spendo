@@ -1,11 +1,13 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import * as Select from '$lib/components/ui/select';
   import { Select as SelectPrimitive } from 'bits-ui';
   import { Input } from '$lib/components/ui/input';
   import { Textarea } from '$lib/components/ui/textarea';
   import { Button } from '$lib/components/ui/button';
   import * as Card from '$lib/components/ui/card';
+  import * as Dialog from '$lib/components/ui/dialog';
+  import * as ButtonGroup from '$lib/components/ui/button-group';
   import IconCardHeader from '$lib/components/shared/icon-card-header.svelte';
   import { Info, Repeat, Trash2 } from '@lucide/svelte';
   import { DatePicker } from '$lib/components/shared/date-picker';
@@ -98,9 +100,12 @@
 
   let saving = $state(false);
   let deleting = $state(false);
-  let confirmDelete = $state(false);
+  let deleteDialogOpen = $state(false);
+  let discardDialogOpen = $state(false);
   let formError = $state('');
   let showErrors = $state(false);
+  // Dirty baseline is the initial snapshot; {#key} remounts on schedule change.
+  let baseline = $state(snapshot);
 
   const accountsRes = useAsyncData({
     enabled: () => true,
@@ -168,6 +173,37 @@
       balanced
   );
 
+  let dirty = $derived.by(() => {
+    if (
+      name !== baseline.name ||
+      frequency !== baseline.frequency ||
+      intervalMult !== baseline.intervalMult ||
+      startDate !== baseline.startDate ||
+      endDate !== baseline.endDate ||
+      maxOccurrences !== baseline.maxOccurrences ||
+      description !== baseline.description ||
+      num !== baseline.num ||
+      notes !== baseline.notes ||
+      splits.length !== baseline.splits.length
+    ) {
+      return true;
+    }
+    return splits.some((s, i) => {
+      const b = baseline.splits[i];
+      return (
+        s.accountGuid !== b.accountGuid ||
+        s.amount !== b.amount ||
+        s.quantity !== b.quantity ||
+        s.showQuantity !== b.showQuantity ||
+        s.memo !== b.memo
+      );
+    });
+  });
+
+  // Show inline split errors live once the user has touched the form; the save
+  // button stays honestly disabled until the form can actually save.
+  let effectiveShowErrors = $derived(showErrors || dirty);
+
   function buildInput(): ScheduleInput {
     return {
       name: name.trim(),
@@ -181,6 +217,12 @@
       notes: notes.trim() ? notes.trim() : null,
       splits: splits.map(splitToInput)
     };
+  }
+
+  function focusFormError() {
+    void tick().then(() => {
+      document.getElementById('sched-form-error')?.focus();
+    });
   }
 
   async function handleSave() {
@@ -202,26 +244,34 @@
       const msg = errMsg(e, 'Failed to save schedule');
       formError = msg;
       onError?.(msg);
+      focusFormError();
     } finally {
       saving = false;
     }
   }
 
-  async function handleDelete() {
-    if (mode !== 'edit' || !guid) return;
-    if (!confirmDelete) {
-      confirmDelete = true;
+  function requestCancel() {
+    if (!dirty || saving || deleting) {
+      onCancel();
       return;
     }
+    discardDialogOpen = true;
+  }
+
+  async function handleDeleteConfirm() {
+    if (mode !== 'edit' || !guid || deleting) return;
     deleting = true;
     formError = '';
     try {
       await deleteSchedule(guid);
+      deleteDialogOpen = false;
       onDeleted?.();
     } catch (e: unknown) {
       const msg = errMsg(e, 'Failed to delete schedule');
       formError = msg;
       onError?.(msg);
+      deleteDialogOpen = false;
+      focusFormError();
     } finally {
       deleting = false;
     }
@@ -230,23 +280,31 @@
 
 <div class="flex w-full flex-col gap-6">
   <PageHeader {title} description={headerDescription}>
-    <Button type="button" variant="outline" onclick={onCancel}>Cancel</Button>
+    <Button type="button" variant="outline" onclick={requestCancel}>Cancel</Button>
     {#if mode === 'edit'}
+      <ButtonGroup.Root>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          onclick={() => (deleteDialogOpen = true)}
+          disabled={saving || deleting}
+          aria-label="Delete schedule"
+          title="Delete schedule"
+        >
+          <Trash2 aria-hidden="true" class="size-4" />
+        </Button>
+      </ButtonGroup.Root>
+    {/if}
+    <ButtonGroup.Root>
       <Button
         type="button"
-        variant={confirmDelete ? 'destructive' : 'outline'}
-        size="icon"
-        onclick={() => void handleDelete()}
-        disabled={saving || deleting}
-        aria-label={confirmDelete ? 'Confirm delete schedule' : 'Delete schedule'}
-        title={confirmDelete ? 'Confirm delete' : 'Delete schedule'}
+        onclick={() => void handleSave()}
+        disabled={saving || deleting || !canSave}
       >
-        <Trash2 aria-hidden="true" class="size-4" />
+        {saving ? 'Saving…' : mode === 'edit' ? 'Save changes' : 'Create schedule'}
       </Button>
-    {/if}
-    <Button type="button" onclick={() => void handleSave()} disabled={saving || deleting}>
-      {saving ? 'Saving…' : mode === 'edit' ? 'Save changes' : 'Create schedule'}
-    </Button>
+    </ButtonGroup.Root>
   </PageHeader>
 
   <Card.Root>
@@ -264,9 +322,9 @@
           placeholder="e.g. Monthly rent"
           maxlength={200}
           autofocus
-          aria-invalid={showErrors && !!nameError}
+          aria-invalid={effectiveShowErrors && !!nameError}
         />
-        {#if showErrors && nameError}
+        {#if effectiveShowErrors && nameError}
           <p role="alert" class="text-xs text-destructive">{nameError}</p>
         {/if}
       </div>
@@ -418,23 +476,62 @@
     options={pickerOptions}
     loading={accountsRes.loading}
     loadError={accountsRes.error ?? ''}
-    {showErrors}
+    showErrors={effectiveShowErrors}
     title="Template splits"
     idPrefix="sched-split"
     makeKey={nextKey}
   />
 
   {#if formError}
-    <p role="alert" class="text-sm text-destructive">{formError}</p>
-  {/if}
-
-  {#if mode === 'edit' && confirmDelete}
     <p
+      id="sched-form-error"
       role="alert"
-      class="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+      tabindex="-1"
+      class="text-sm text-destructive outline-none"
     >
-      Delete this schedule? Future reminders stop; already-posted transactions stay in the ledger.
-      Press the trash icon again to confirm.
+      {formError}
     </p>
   {/if}
+
+  <Dialog.Root bind:open={deleteDialogOpen}>
+    <Dialog.Content class="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+      <Dialog.Header>
+        <Dialog.Title>Delete this schedule?</Dialog.Title>
+        <Dialog.Description>
+          Future reminders stop; already-posted transactions stay in the ledger.
+        </Dialog.Description>
+      </Dialog.Header>
+      <Dialog.Footer>
+        <Button variant="outline" onclick={() => (deleteDialogOpen = false)} disabled={deleting}>
+          Cancel
+        </Button>
+        <Button variant="destructive" onclick={handleDeleteConfirm} disabled={deleting}>
+          {deleting ? 'Deleting…' : 'Yes, delete'}
+        </Button>
+      </Dialog.Footer>
+    </Dialog.Content>
+  </Dialog.Root>
+
+  <Dialog.Root bind:open={discardDialogOpen}>
+    <Dialog.Content class="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+      <Dialog.Header>
+        <Dialog.Title>Discard unsaved changes?</Dialog.Title>
+        <Dialog.Description>
+          You have unsaved edits to this schedule. Leaving now will lose them.
+        </Dialog.Description>
+      </Dialog.Header>
+      <Dialog.Footer>
+        <Button variant="outline" onclick={() => (discardDialogOpen = false)}>Keep editing</Button>
+        <Button
+          variant="destructive"
+          onclick={() => {
+            discardDialogOpen = false;
+            onCancel();
+          }}
+        >
+          Discard changes
+        </Button>
+      </Dialog.Footer>
+    </Dialog.Content>
+  </Dialog.Root>
 </div>

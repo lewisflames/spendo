@@ -108,7 +108,7 @@
   <meta name="description" content="Yearly budget for this account." />
 </svelte:head>
 
-<BookGate title={accountName} description="Yearly budget for this account">
+<BookGate title="Budget" description="Yearly budget for this account">
   <div class="flex flex-col gap-6">
     <PageHeader title={accountName} description="Yearly budget for this account">
       <Button variant="outline" href={resolve('/budgets')}>

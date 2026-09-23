@@ -8,7 +8,8 @@
     sessionCurrency,
     formatSessionCurrency,
     clampZero,
-    signColor
+    signColor,
+    plural
   } from '$lib/utils/format.svelte';
   import { fetchBudgetVsActual, fetchAccounts, fetchBudgetDateRange } from '$lib/tauri';
   import { openBudget } from '$lib/utils/navigation';
@@ -125,7 +126,12 @@
 
 <BookGate title="Budgets" description="Yearly spending targets · carryover always applied">
   <div class="flex flex-col gap-6">
-    <PageHeader title="Budgets" description="Yearly spending targets · carryover always applied">
+    <PageHeader
+      title="Budgets"
+      description={rows !== null
+        ? `Yearly spending targets · carryover always applied · ${plural(rows.length, 'budget')}`
+        : 'Yearly spending targets · carryover always applied'}
+    >
       <BudgetYearStepper
         bind:yearSel={by.yearSel}
         yearOptions={by.yearOptions}
