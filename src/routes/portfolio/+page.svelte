@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Briefcase, TrendingUp, TrendingDown, RefreshCw, Pencil } from '@lucide/svelte';
+  import { Briefcase, TrendingUp, RefreshCw, Pencil } from '@lucide/svelte';
   import { SvelteMap } from 'svelte/reactivity';
   import { dbBootstrapping, dbSession, activeBookPath } from '$lib/stores/db.svelte';
   import { fetchPortfolioData, fetchAllocationTargets } from '$lib/tauri';
@@ -214,11 +214,7 @@
             </KpiCard>
             <KpiCard title="Gain / Loss" valueClass={signColor(d.totalGainLoss)}>
               {#snippet icon()}
-                {#if d.totalGainLoss >= 0}
-                  <TrendingUp aria-hidden="true" class="size-4 text-success" />
-                {:else}
-                  <TrendingDown aria-hidden="true" class="size-4 text-destructive" />
-                {/if}
+                <TrendingUp aria-hidden="true" class="size-4 text-muted-foreground" />
               {/snippet}
               {#snippet value()}
                 {formatSignedCurrency(d.totalGainLoss, currency)}
@@ -226,11 +222,7 @@
             </KpiCard>
             <KpiCard title="XIRR" valueClass={signColor(d.totalXirr ?? 0)}>
               {#snippet icon()}
-                {#if (d.totalXirr ?? 0) >= 0}
-                  <TrendingUp aria-hidden="true" class="size-4 text-success" />
-                {:else}
-                  <TrendingDown aria-hidden="true" class="size-4 text-destructive" />
-                {/if}
+                <TrendingUp aria-hidden="true" class="size-4 text-muted-foreground" />
               {/snippet}
               {#snippet value()}
                 {fmtPct(d.totalXirr)}

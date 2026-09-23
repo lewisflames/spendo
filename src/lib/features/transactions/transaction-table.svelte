@@ -26,6 +26,7 @@
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import SortHead from '$lib/components/shared/sort-head.svelte';
   import NavRow from '$lib/components/shared/nav-row.svelte';
+  import EmptyValue from '$lib/components/shared/empty-value.svelte';
   import { openTransaction } from '$lib/utils/navigation';
   import { statusFor } from '$lib/utils/reconcile';
   import type { DetailTransaction, TransactionRow, TxSortKey } from '$lib/tauri';
@@ -80,7 +81,7 @@
 
 {#snippet multiValue(values: string[])}
   {#if values.length === 0}
-    {EMPTY_DASH}
+    <EmptyValue />
   {:else}
     <div class="flex items-center gap-1">
       <span class="truncate">{values[0]}</span>
@@ -123,7 +124,7 @@
             active={sortBy === 'amount'}
             dir={sortDir}
             onclick={() => onSort?.('amount')}
-            class="text-right"
+            align="right"
           />
         {/if}
       {:else}
@@ -139,7 +140,7 @@
             active={sortBy === 'amount'}
             dir={sortDir}
             onclick={() => onSort?.('amount')}
-            class="text-right"
+            align="right"
           />
         {/if}
         {#if isVisible('runningBalance')}

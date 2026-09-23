@@ -140,10 +140,7 @@
           loading={!pnlData && (res.loading || dbBootstrapping.value)}
         >
           {#snippet icon()}
-            <ArrowLeftRight
-              aria-hidden="true"
-              class="size-4 {pnlData ? signColor(pnlData.netIncome) : 'text-muted-foreground'}"
-            />
+            <ArrowLeftRight aria-hidden="true" class="size-4 text-muted-foreground" />
           {/snippet}
         </KpiCard>
         <KpiCard
@@ -169,12 +166,7 @@
           loading={!pnlData && (res.loading || dbBootstrapping.value)}
         >
           {#snippet icon()}
-            <TrendingUp
-              aria-hidden="true"
-              class="size-4 {pnlData && netVariance !== null && !isZeroVariance
-                ? signColor(netVariance)
-                : 'text-muted-foreground'}"
-            />
+            <TrendingUp aria-hidden="true" class="size-4 text-muted-foreground" />
           {/snippet}
         </KpiCard>
         <KpiCard
@@ -190,12 +182,7 @@
           loading={!pnlData && (res.loading || dbBootstrapping.value)}
         >
           {#snippet icon()}
-            <Percent
-              aria-hidden="true"
-              class="size-4 {pnlData && netChangePct !== null && !isZeroChange
-                ? signColor(netChangePct)
-                : 'text-muted-foreground'}"
-            />
+            <Percent aria-hidden="true" class="size-4 text-muted-foreground" />
           {/snippet}
         </KpiCard>
       </DimWrapper>

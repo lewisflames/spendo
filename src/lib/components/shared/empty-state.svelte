@@ -13,7 +13,7 @@
     title?: string;
     description?: string;
     action?: Snippet;
-    /** Wrap in a borderless card so the empty state matches table shells. */
+    /** Wrap in a bordered card so the empty state matches table shells. */
     card?: boolean;
   } = $props();
 </script>

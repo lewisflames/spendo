@@ -7,14 +7,19 @@
     active = false,
     dir = 'desc',
     onclick,
-    class: className = ''
+    class: className = '',
+    align = 'left'
   }: {
     label: string;
     active?: boolean;
     dir?: 'asc' | 'desc';
     onclick: () => void;
     class?: string;
+    /** Horizontal alignment; `right` right-aligns the sort button for numeric columns. */
+    align?: 'left' | 'right';
   } = $props();
+
+  let alignClass = $derived(align === 'right' ? 'w-full justify-end text-right' : '');
 </script>
 
 <Table.Head
@@ -23,7 +28,7 @@
 >
   <button
     type="button"
-    class="inline-flex items-center gap-1 transition-colors hover:text-foreground {active
+    class="inline-flex items-center gap-1 transition-colors hover:text-foreground {alignClass} {active
       ? 'text-foreground'
       : ''}"
     {onclick}

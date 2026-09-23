@@ -18,6 +18,7 @@
   import PageSkeleton from '$lib/components/shared/page-skeleton.svelte';
   import BookGate from '$lib/components/shared/book-gate.svelte';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
+  import FilteredEmptyState from '$lib/components/shared/filtered-empty-state.svelte';
   import { ColumnsMenu } from '$lib/components/shared/columns-menu';
   import { useDebouncedSearch } from '$lib/hooks/use-debounced-search.svelte';
   import {
@@ -31,7 +32,7 @@
   import { useResetPageOnChange } from '$lib/hooks/use-page-reset.svelte';
   import { useTableSort } from '$lib/hooks/use-table-sort.svelte';
   import { plural, sessionCurrency } from '$lib/utils/format.svelte';
-  import { ArrowLeftRight, CalendarClock, SearchX } from '@lucide/svelte';
+  import { ArrowLeftRight, CalendarClock } from '@lucide/svelte';
   import type { TransactionColumnId } from '$lib/features/transactions/transaction-table.svelte';
 
   let pageSize = $derived(appSettings.value.pageSize);
@@ -175,29 +176,21 @@
       {/if}
       {#if res.data.transactions.length === 0}
         {@const isFiltered = !!(search.value || dateFrom || dateTo)}
-        <EmptyState
-          card
-          title="No transactions"
-          description="No transactions found{isFiltered ? ' matching the current filters' : ''}."
-        >
-          {#snippet icon()}
-            {#if isFiltered}
-              <SearchX aria-hidden="true" class="text-muted-foreground" />
-            {:else}
+        {#if isFiltered}
+          <FilteredEmptyState title="No matching transactions" onClear={clearFilters} />
+        {:else}
+          <EmptyState card title="No transactions" description="No transactions found.">
+            {#snippet icon()}
               <ArrowLeftRight aria-hidden="true" class="text-muted-foreground" />
-            {/if}
-          {/snippet}
-          {#snippet action()}
-            {#if search.value || dateFrom || dateTo}
-              <Button variant="outline" onclick={clearFilters}>Clear filters</Button>
-            {:else}
+            {/snippet}
+            {#snippet action()}
               <Button href={resolve('/transactions/new')}>
                 <Plus aria-hidden="true" class="size-4" />
                 New transaction
               </Button>
-            {/if}
-          {/snippet}
-        </EmptyState>
+            {/snippet}
+          </EmptyState>
+        {/if}
       {:else}
         <!-- Keep the previous table visible (dimmed) during refetches so the
              page doesn't jump and pagination stays in place. -->

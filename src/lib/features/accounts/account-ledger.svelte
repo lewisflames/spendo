@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { Receipt, SearchX } from '@lucide/svelte';
-  import { Button } from '$lib/components/ui/button';
+  import { Receipt } from '@lucide/svelte';
   import { ColumnsMenu } from '$lib/components/shared/columns-menu';
   import { PaginationNav } from '$lib/components/shared/pagination-nav';
   import { appSettings } from '$lib/stores/settings.svelte';
   import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
+  import FilteredEmptyState from '$lib/components/shared/filtered-empty-state.svelte';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
   import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
   import TransactionFilters from '$lib/features/transactions/transaction-filters.svelte';
@@ -85,33 +85,22 @@
 
   {#if ledger.transactions.length === 0}
     {@const isFiltered = !!(searchText || dateFrom || dateTo)}
-    <EmptyState
-      card
-      title="No transactions"
-      description="No transactions found{isFiltered ? ' matching the current filters' : ''}."
-    >
-      {#snippet icon()}
-        {#if isFiltered}
-          <SearchX aria-hidden="true" class="text-muted-foreground" />
-        {:else}
+    {#if isFiltered}
+      <FilteredEmptyState
+        title="No matching transactions"
+        onClear={() => {
+          searchInput = '';
+          dateFrom = '';
+          dateTo = '';
+        }}
+      />
+    {:else}
+      <EmptyState card title="No transactions" description="No transactions found.">
+        {#snippet icon()}
           <Receipt aria-hidden="true" class="text-muted-foreground" />
-        {/if}
-      {/snippet}
-      {#snippet action()}
-        {#if isFiltered}
-          <Button
-            variant="outline"
-            onclick={() => {
-              searchInput = '';
-              dateFrom = '';
-              dateTo = '';
-            }}
-          >
-            Clear filters
-          </Button>
-        {/if}
-      {/snippet}
-    </EmptyState>
+        {/snippet}
+      </EmptyState>
+    {/if}
   {:else}
     <!-- Keep the previous table visible (dimmed) during refetches so the
          page doesn't jump and pagination stays in place. -->

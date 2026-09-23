@@ -37,15 +37,12 @@
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
-  import {
-    formatCurrency,
-    formatSignedCurrency,
-    signColor,
-    EMPTY_DASH
-  } from '$lib/utils/format.svelte';
+  import FilteredEmptyState from '$lib/components/shared/filtered-empty-state.svelte';
+  import EmptyValue from '$lib/components/shared/empty-value.svelte';
+  import { formatCurrency, formatSignedCurrency, signColor } from '$lib/utils/format.svelte';
   import NavRow from '$lib/components/shared/nav-row.svelte';
   import { openBudget } from '$lib/utils/navigation';
-  import { PiggyBank, Plus, SearchX } from '@lucide/svelte';
+  import { PiggyBank, Plus } from '@lucide/svelte';
   import { Button } from '$lib/components/ui/button';
   import type { BudgetActualRow } from '$lib/tauri';
   import type { ColumnVisibility } from '$lib/hooks/use-column-visibility.svelte';
@@ -102,16 +99,11 @@
     {/snippet}
   </EmptyState>
 {:else if rows.length === 0}
-  <EmptyState card title="No matching budgets" description="Try adjusting your search.">
-    {#snippet icon()}
-      <SearchX aria-hidden="true" class="text-muted-foreground" />
-    {/snippet}
-    {#snippet action()}
-      {#if onClearSearch}
-        <Button variant="outline" onclick={onClearSearch}>Clear filters</Button>
-      {/if}
-    {/snippet}
-  </EmptyState>
+  {#if onClearSearch}
+    <FilteredEmptyState title="No matching budgets" onClear={onClearSearch} />
+  {:else}
+    <EmptyState card title="No matching budgets" description="Try adjusting your search." />
+  {/if}
 {:else}
   {@const totals = budgetTotals(rows)}
   <TableShell>
@@ -186,7 +178,7 @@
               {#if item.elapsedMonths > 0}
                 {fmt(item.expectedYtd)}
               {:else}
-                <span class="text-xs text-muted-foreground">{EMPTY_DASH}</span>
+                <EmptyValue />
               {/if}
             </Table.Cell>
           {/if}
@@ -200,7 +192,7 @@
               {#if item.elapsedMonths > 0}
                 {fmtSigned(item.delta)}
               {:else}
-                <span class="text-xs text-muted-foreground">{EMPTY_DASH}</span>
+                <EmptyValue />
               {/if}
             </Table.Cell>
           {/if}
@@ -215,7 +207,7 @@
                   {fmt}
                 />
               {:else}
-                <span class="text-xs text-muted-foreground">{EMPTY_DASH}</span>
+                <EmptyValue />
               {/if}
             </Table.Cell>
           {/if}
@@ -257,7 +249,7 @@
             {#if totals.elapsedMonths > 0}
               {fmt(totals.expectedYtd)}
             {:else}
-              <span class="text-xs text-muted-foreground">{EMPTY_DASH}</span>
+              <EmptyValue />
             {/if}
           </Table.Cell>
         {/if}
@@ -271,7 +263,7 @@
             {#if totals.elapsedMonths > 0}
               {fmtSigned(totals.delta)}
             {:else}
-              <span class="text-xs text-muted-foreground">{EMPTY_DASH}</span>
+              <EmptyValue />
             {/if}
           </Table.Cell>
         {/if}
@@ -286,7 +278,7 @@
                 {fmt}
               />
             {:else}
-              <span class="text-xs text-muted-foreground">{EMPTY_DASH}</span>
+              <EmptyValue />
             {/if}
           </Table.Cell>
         {/if}

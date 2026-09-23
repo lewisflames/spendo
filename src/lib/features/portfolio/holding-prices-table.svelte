@@ -15,16 +15,11 @@
   import { TrendingUp } from '@lucide/svelte';
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
+  import EmptyValue from '$lib/components/shared/empty-value.svelte';
   import { PaginationNav } from '$lib/components/shared/pagination-nav';
   import { appSettings, applyPageSize } from '$lib/stores/settings.svelte';
   import type { ColumnVisibility } from '$lib/hooks/use-column-visibility.svelte';
-  import {
-    signColor,
-    formatCurrency,
-    formatDate,
-    fmtPct,
-    EMPTY_DASH
-  } from '$lib/utils/format.svelte';
+  import { signColor, formatCurrency, formatDate, fmtPct } from '$lib/utils/format.svelte';
   import type { PriceHistoryEntry } from '$lib/tauri';
   import { dayChangePct } from '$lib/features/portfolio/price-utils';
 
@@ -120,7 +115,11 @@
                   ? 'text-muted-foreground'
                   : signColor(row.changePct)}"
               >
-                {row.changePct === null ? EMPTY_DASH : fmtPct(row.changePct)}
+                {#if row.changePct === null}
+                  <EmptyValue />
+                {:else}
+                  {fmtPct(row.changePct)}
+                {/if}
               </Table.Cell>
             {/if}
           </Table.Row>

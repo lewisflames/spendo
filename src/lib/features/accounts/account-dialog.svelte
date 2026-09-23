@@ -251,7 +251,7 @@
       </Dialog.Description>
     </Dialog.Header>
 
-    <div class="flex flex-col gap-4 py-2">
+    <div class="flex flex-col gap-4 py-4">
       <div class="flex flex-col gap-1.5">
         <label for="acct-name" class="text-sm font-medium">Name</label>
         <Input
