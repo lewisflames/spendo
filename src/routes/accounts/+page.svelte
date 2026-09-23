@@ -85,7 +85,7 @@
       title="Accounts"
       description={res.data
         ? `Chart of accounts · ${plural(res.data.totalAccounts, 'account')}`
-        : ''}
+        : 'Chart of accounts'}
     >
       {#if dbSession.value}
         <Button onclick={() => (dialogOpen = true)}>

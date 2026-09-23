@@ -55,7 +55,7 @@
           mode="edit"
           guid={schedule.guid}
           title="Edit schedule"
-          headerDescription={schedule.name}
+          headerDescription={`${schedule.name} · Nothing posts automatically — each due occurrence surfaces as a reminder to post or skip.`}
           initial={schedule}
           onSaved={handleSaved}
           onDeleted={handleDeleted}

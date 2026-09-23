@@ -6,7 +6,7 @@
   import * as Card from '$lib/components/ui/card';
   import * as Dialog from '$lib/components/ui/dialog';
   import IconCardHeader from '$lib/components/shared/icon-card-header.svelte';
-  import { Copy, Info, Plus, Trash2 } from '@lucide/svelte';
+  import { CopyPlus, Info, Plus, Trash2 } from '@lucide/svelte';
   import * as ButtonGroup from '$lib/components/ui/button-group';
   import { DatePicker } from '$lib/components/shared/date-picker';
   import PageHeader from '$lib/components/layout/page-header.svelte';
@@ -416,7 +416,7 @@
             aria-label="Duplicate transaction"
             title="Duplicate transaction"
           >
-            <Copy aria-hidden="true" class="size-4" />
+            <CopyPlus aria-hidden="true" class="size-4" />
           </Button>
         {/if}
         <Button

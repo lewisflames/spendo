@@ -11,6 +11,7 @@
     ArrowRight,
     CircleCheck,
     Copy,
+    CopyPlus,
     Pencil,
     Receipt,
     Calendar
@@ -154,7 +155,7 @@
           <Copy aria-hidden="true" class="size-4" />
         </Button>
         <Button variant="outline" onclick={duplicateTransaction} aria-label="Duplicate transaction">
-          <Copy aria-hidden="true" class="size-4" />
+          <CopyPlus aria-hidden="true" class="size-4" />
           Duplicate
         </Button>
         <Button href={resolve('/transactions/[guid]/edit', { guid: d.guid })}>

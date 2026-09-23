@@ -74,7 +74,9 @@
           mode="edit"
           guid={detail.guid}
           title="Edit transaction"
-          headerDescription={detail.description || 'Transaction'}
+          headerDescription={detail.description
+            ? `${detail.description} · Splits use raw amounts as shown in the detail view and must sum to zero. Ctrl+S saves.`
+            : 'Splits use raw amounts as shown in the detail view and must sum to zero. Ctrl+S saves.'}
           initial={detail}
           onSaved={handleSaved}
           onDeleted={handleDeleted}

@@ -12,8 +12,8 @@
   <meta name="description" content="Import bank-statement CSV with column mapping and preview." />
 </svelte:head>
 
-<BookGate title="Import CSV" description="Bank-statement CSV with mapping and preview">
-  <div class="mx-auto flex w-full max-w-6xl flex-col gap-6">
+<BookGate title="Import CSV" description="Map columns, dry-run the preview, then import.">
+  <div class="mx-auto flex w-full max-w-5xl flex-col gap-6">
     <PageHeader title="Import CSV" description="Map columns, dry-run the preview, then import.">
       <Button variant="outline" href={resolve('/transactions')}>
         <ArrowLeft aria-hidden="true" class="size-4" />

@@ -64,7 +64,7 @@
     <PageHeader
       title="Reconcile"
       description={res.data
-        ? plural(filtered.length, 'reconcilable account')
+        ? `Pick an account to reconcile against a bank statement · ${plural(filtered.length, 'reconcilable account')}`
         : 'Pick an account to reconcile against a bank statement'}
     ></PageHeader>
 
