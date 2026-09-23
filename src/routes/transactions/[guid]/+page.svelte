@@ -28,7 +28,7 @@
     sessionCurrency,
     signColor
   } from '$lib/utils/format.svelte';
-  import { errMsg } from '$lib/utils/error';
+  import { errMsg, isNotFoundMessage } from '$lib/utils/error';
   import { statusFor } from '$lib/utils/reconcile';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
   import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
@@ -220,6 +220,22 @@
       {#key d.guid}
         <TransactionAttachments txGuid={d.guid} />
       {/key}
+    {:else if res.error && isNotFoundMessage(res.error)}
+      <EmptyState
+        card
+        title="Transaction not found"
+        description="No transaction exists with this ID. It may have been removed by a re-import."
+      >
+        {#snippet icon()}
+          <Receipt aria-hidden="true" class="text-muted-foreground" />
+        {/snippet}
+        {#snippet action()}
+          <Button variant="outline" href={resolve('/transactions')}>
+            <ArrowLeft aria-hidden="true" class="size-4" />
+            Transactions
+          </Button>
+        {/snippet}
+      </EmptyState>
     {:else if res.error}
       <ErrorCard message={res.error} onRetry={() => res.reload()} />
     {:else}

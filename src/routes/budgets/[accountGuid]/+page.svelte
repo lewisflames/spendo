@@ -21,6 +21,7 @@
   import BudgetYearStepper from '$lib/features/budgets/budget-year-stepper.svelte';
   import { accountNameMap } from '$lib/features/budgets/budget-utils';
   import { useBudgetYear } from '$lib/hooks/use-budget-year.svelte';
+  import { isNotFoundMessage } from '$lib/utils/error';
   import BookGate from '$lib/components/shared/book-gate.svelte';
 
   let accountGuid = $derived(page.params.accountGuid);
@@ -64,11 +65,11 @@
   let dateRange = $derived(res.data?.range ?? null);
   let accountsData = $derived(res.data?.accounts ?? null);
 
-  // A missing budget row surfaces as a backend error ("No budget for this
-  // year" in Rust, "[mock] No budget for …" in the dev mock). Treat that as
-  // an empty state so a year without a target shows the consistent
-  // EmptyState instead of an ErrorCard; genuine failures still use ErrorCard.
-  let isMissing = $derived(detail === null && !!res.error && /No budget for/.test(res.error));
+  // A missing budget row surfaces as a backend "No budget for …" error.
+  // Treat that as an empty state so a year without a target shows the
+  // consistent EmptyState instead of an ErrorCard; genuine failures still
+  // use ErrorCard. Uses the shared not-found helper with the other details.
+  let isMissing = $derived(detail === null && isNotFoundMessage(res.error));
   let formError = $state<string | null>(null);
 
   let showEditDialog = $state(false);
@@ -122,11 +123,7 @@
         onPrev={() => by.shiftYear(-1)}
         onNext={() => by.shiftYear(1)}
       />
-      <Button
-        variant="outline"
-        onclick={() => (showEditDialog = true)}
-        disabled={detail === null && res.loading}
-      >
+      <Button onclick={() => (showEditDialog = true)} disabled={detail === null && res.loading}>
         <Pencil aria-hidden="true" class="size-4" />
         {detail ? 'Edit budget' : 'Set budget'}
       </Button>

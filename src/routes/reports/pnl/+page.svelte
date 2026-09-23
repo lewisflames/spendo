@@ -12,6 +12,7 @@
   import { ArrowLeftRight, History, TrendingUp, Percent } from '@lucide/svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import KpiCard from '$lib/components/shared/kpi-card.svelte';
+  import PageSkeleton from '$lib/components/shared/page-skeleton.svelte';
   import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
   import BookGate from '$lib/components/shared/book-gate.svelte';
   import PnlTreetable from '$lib/features/pnl/pnl-treetable.svelte';
@@ -123,107 +124,111 @@
     </PageHeader>
 
     {#if !range.rangeValid}
-      <p role="alert" class="text-sm text-destructive">
-        Start date must not be after end date — adjust the period to generate the report.
-      </p>
+      <ErrorCard
+        message="Start date must not be after end date — adjust the period to generate the report."
+      />
     {/if}
-    <!-- Net income KPI summary cards -->
-    <DimWrapper active={res.loading} class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
-      <KpiCard
-        title="Net Income"
-        value={pnlData ? fmt(pnlData.netIncome) : EMPTY_DASH}
-        valueClass={pnlData ? signColor(pnlData.netIncome) : ''}
-        loading={!pnlData && (res.loading || dbBootstrapping.value)}
-      >
-        {#snippet icon()}
-          <ArrowLeftRight
-            aria-hidden="true"
-            class="size-4 {pnlData ? signColor(pnlData.netIncome) : 'text-muted-foreground'}"
-          />
-        {/snippet}
-      </KpiCard>
-      <KpiCard
-        title="Previous Period"
-        value={pnlData && prevNetIncome !== null ? fmt(prevNetIncome) : EMPTY_DASH}
-        valueClass={pnlData ? 'text-muted-foreground' : ''}
-        loading={!pnlData && (res.loading || dbBootstrapping.value)}
-      >
-        {#snippet icon()}
-          <History aria-hidden="true" class="size-4 text-muted-foreground" />
-        {/snippet}
-      </KpiCard>
-      <KpiCard
-        title="Variance"
-        value={pnlData && netVariance !== null
-          ? isZeroVariance
-            ? EMPTY_DASH
-            : formatSignedSessionCurrency(netVariance)
-          : EMPTY_DASH}
-        valueClass={pnlData && netVariance !== null && !isZeroVariance
-          ? signColor(netVariance)
-          : 'text-muted-foreground'}
-        loading={!pnlData && (res.loading || dbBootstrapping.value)}
-      >
-        {#snippet icon()}
-          <TrendingUp
-            aria-hidden="true"
-            class="size-4 {pnlData && netVariance !== null && !isZeroVariance
-              ? signColor(netVariance)
-              : 'text-muted-foreground'}"
-          />
-        {/snippet}
-      </KpiCard>
-      <KpiCard
-        title="Change"
-        value={pnlData && netChangePct !== null
-          ? isZeroChange
-            ? EMPTY_DASH
-            : fmtPct(netChangePct)
-          : EMPTY_DASH}
-        valueClass={pnlData && netChangePct !== null && !isZeroChange
-          ? signColor(netChangePct)
-          : 'text-muted-foreground'}
-        loading={!pnlData && (res.loading || dbBootstrapping.value)}
-      >
-        {#snippet icon()}
-          <Percent
-            aria-hidden="true"
-            class="size-4 {pnlData && netChangePct !== null && !isZeroChange
-              ? signColor(netChangePct)
-              : 'text-muted-foreground'}"
-          />
-        {/snippet}
-      </KpiCard>
-    </DimWrapper>
-    {#if pnlData}
-      <MissingFxWarning missing={pnlData.missingFx} reportCurrency={pnlData.reportCurrency} />
-    {/if}
-    {#if trendData}
-      {#if trendError}
-        <ErrorCard message={trendError} onRetry={() => trend.reload()} />
-      {/if}
-      <DimWrapper active={trendLoading}>
-        <PnlTrend data={trendData} loading={false} />
+    {#if !pnlData && (res.loading || dbBootstrapping.value) && range.rangeValid && !res.error}
+      <PageSkeleton variant="pnl" />
+    {:else}
+      <!-- Net income KPI summary cards -->
+      <DimWrapper active={res.loading} class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+        <KpiCard
+          title="Net Income"
+          value={pnlData ? fmt(pnlData.netIncome) : EMPTY_DASH}
+          valueClass={pnlData ? signColor(pnlData.netIncome) : ''}
+          loading={!pnlData && (res.loading || dbBootstrapping.value)}
+        >
+          {#snippet icon()}
+            <ArrowLeftRight
+              aria-hidden="true"
+              class="size-4 {pnlData ? signColor(pnlData.netIncome) : 'text-muted-foreground'}"
+            />
+          {/snippet}
+        </KpiCard>
+        <KpiCard
+          title="Previous Period"
+          value={pnlData && prevNetIncome !== null ? fmt(prevNetIncome) : EMPTY_DASH}
+          valueClass={pnlData ? 'text-muted-foreground' : ''}
+          loading={!pnlData && (res.loading || dbBootstrapping.value)}
+        >
+          {#snippet icon()}
+            <History aria-hidden="true" class="size-4 text-muted-foreground" />
+          {/snippet}
+        </KpiCard>
+        <KpiCard
+          title="Variance"
+          value={pnlData && netVariance !== null
+            ? isZeroVariance
+              ? EMPTY_DASH
+              : formatSignedSessionCurrency(netVariance)
+            : EMPTY_DASH}
+          valueClass={pnlData && netVariance !== null && !isZeroVariance
+            ? signColor(netVariance)
+            : 'text-muted-foreground'}
+          loading={!pnlData && (res.loading || dbBootstrapping.value)}
+        >
+          {#snippet icon()}
+            <TrendingUp
+              aria-hidden="true"
+              class="size-4 {pnlData && netVariance !== null && !isZeroVariance
+                ? signColor(netVariance)
+                : 'text-muted-foreground'}"
+            />
+          {/snippet}
+        </KpiCard>
+        <KpiCard
+          title="Change"
+          value={pnlData && netChangePct !== null
+            ? isZeroChange
+              ? EMPTY_DASH
+              : fmtPct(netChangePct)
+            : EMPTY_DASH}
+          valueClass={pnlData && netChangePct !== null && !isZeroChange
+            ? signColor(netChangePct)
+            : 'text-muted-foreground'}
+          loading={!pnlData && (res.loading || dbBootstrapping.value)}
+        >
+          {#snippet icon()}
+            <Percent
+              aria-hidden="true"
+              class="size-4 {pnlData && netChangePct !== null && !isZeroChange
+                ? signColor(netChangePct)
+                : 'text-muted-foreground'}"
+            />
+          {/snippet}
+        </KpiCard>
       </DimWrapper>
-    {:else if trendError}
-      <ErrorCard message={trendError} onRetry={() => trend.reload()} />
-    {:else if trendData || trendLoading}
-      <PnlTrend data={trendData ?? []} loading={trendLoading} />
-    {/if}
+      {#if pnlData}
+        <MissingFxWarning missing={pnlData.missingFx} reportCurrency={pnlData.reportCurrency} />
+      {/if}
+      {#if trendData}
+        {#if trendError}
+          <ErrorCard message={trendError} onRetry={() => trend.reload()} />
+        {/if}
+        <DimWrapper active={trendLoading}>
+          <PnlTrend data={trendData} loading={false} />
+        </DimWrapper>
+      {:else if trendError}
+        <ErrorCard message={trendError} onRetry={() => trend.reload()} />
+      {:else if trendData || trendLoading}
+        <PnlTrend data={trendData ?? []} loading={trendLoading} />
+      {/if}
 
-    <PnlTreetable
-      loading={res.loading || dbBootstrapping.value}
-      error={res.error}
-      onRetry={() => res.reload()}
-      {pnlData}
-      {visibleIncomeRows}
-      {visibleExpenseRows}
-    />
+      <PnlTreetable
+        loading={res.loading || dbBootstrapping.value}
+        error={res.error}
+        onRetry={() => res.reload()}
+        {pnlData}
+        {visibleIncomeRows}
+        {visibleExpenseRows}
+      />
 
-    {#if pnlData && !res.loading && !res.error}
-      <p class="text-xs text-muted-foreground">
-        Amounts converted to {pnlData.reportCurrency || 'report currency'} at month-end rates.
-      </p>
+      {#if pnlData && !res.loading && !res.error}
+        <p class="text-xs text-muted-foreground">
+          Amounts converted to {pnlData.reportCurrency || 'report currency'} at month-end rates.
+        </p>
+      {/if}
     {/if}
   </div>
 </BookGate>

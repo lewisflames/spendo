@@ -18,8 +18,7 @@
   import BookGate from '$lib/components/shared/book-gate.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import KpiCard from '$lib/components/shared/kpi-card.svelte';
-  import KpiCardRow from '$lib/components/shared/kpi-card-row.svelte';
-  import ToolbarSkeleton from '$lib/components/shared/toolbar-skeleton.svelte';
+  import PageSkeleton from '$lib/components/shared/page-skeleton.svelte';
   import BudgetYearDialog from '$lib/features/budgets/budget-year-dialog.svelte';
   import BudgetYearStepper from '$lib/features/budgets/budget-year-stepper.svelte';
   import { accountPathMap } from '$lib/features/budgets/budget-utils';
@@ -133,6 +132,16 @@
         onPrev={() => by.shiftYear(-1)}
         onNext={() => by.shiftYear(1)}
       />
+      {#if dbSession.value}
+        <Button
+          onclick={() => {
+            showAddDialog = true;
+          }}
+        >
+          <Plus aria-hidden="true" class="size-4" />
+          New budget
+        </Button>
+      {/if}
     </PageHeader>
 
     {#if formError}
@@ -144,24 +153,17 @@
 
     <!-- KPI summary cards -->
     {#if rows === null && !res.error}
-      <KpiCardRow />
+      <PageSkeleton variant="budgets" />
     {:else if rows !== null}
-      <DimWrapper active={yearLoading} class="grid grid-cols-1 gap-6 sm:grid-cols-3">
+      <DimWrapper active={yearLoading} class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
         <KpiCard title="Effective budget" value={fmt(clampZero(totalEffective))}>
           {#snippet icon()}
             <Wallet aria-hidden="true" class="size-4 text-muted-foreground" />
           {/snippet}
         </KpiCard>
-        <KpiCard
-          title="Spent"
-          value={fmt(clampZero(totalSpent))}
-          valueClass={signColor(clampZero(totalEffective - totalSpent))}
-        >
+        <KpiCard title="Spent" value={fmt(clampZero(totalSpent))}>
           {#snippet icon()}
-            <TrendingDown
-              aria-hidden="true"
-              class="size-4 {signColor(clampZero(totalEffective - totalSpent))}"
-            />
+            <TrendingDown aria-hidden="true" class="size-4 text-muted-foreground" />
           {/snippet}
         </KpiCard>
         <KpiCard
@@ -176,9 +178,7 @@
       </DimWrapper>
     {/if}
 
-    {#if rows === null && !res.error}
-      <ToolbarSkeleton />
-    {:else if rows !== null && rows.length > 0}
+    {#if rows !== null && rows.length > 0}
       <div class="flex flex-wrap items-end gap-2">
         <SearchInput
           id="budgets-search"
@@ -196,19 +196,11 @@
             }}
           >
             <X aria-hidden="true" class="mr-1 size-3.5" />
-            Clear
+            Clear filters
           </Button>
         {/if}
 
         <div class="ml-auto flex items-center gap-2">
-          <Button
-            onclick={() => {
-              showAddDialog = true;
-            }}
-          >
-            <Plus aria-hidden="true" class="size-4" />
-            New budget
-          </Button>
           <ColumnsMenu columns={BUDGET_COLUMNS} cols={budgetCols} />
         </div>
       </div>

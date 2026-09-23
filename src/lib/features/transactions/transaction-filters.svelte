@@ -52,7 +52,7 @@
   {#if hasFilters}
     <Button variant="ghost" onclick={clearFilters}>
       <X aria-hidden="true" class="mr-1 size-3.5" />
-      Clear
+      Clear filters
     </Button>
   {/if}
   {#if extra}

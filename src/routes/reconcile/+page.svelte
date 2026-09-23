@@ -6,10 +6,10 @@
   import { plural } from '$lib/utils/format.svelte';
   import BookGate from '$lib/components/shared/book-gate.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
+  import PageSkeleton from '$lib/components/shared/page-skeleton.svelte';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
   import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
-  import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
   import { Button } from '$lib/components/ui/button';
   import { SearchInput } from '$lib/components/shared/search-input';
   import { useDebouncedSearch } from '$lib/hooks/use-debounced-search.svelte';
@@ -85,13 +85,13 @@
           }}
         >
           <X aria-hidden="true" class="mr-1 size-3.5" />
-          Clear
+          Clear filters
         </Button>
       {/if}
     </div>
 
     {#if res.loading && !res.data}
-      <TableSkeleton cols={4} rows={8} />
+      <PageSkeleton variant="reconcile" />
     {:else if res.data}
       {#if res.error}
         <ErrorCard message={res.error} onRetry={() => res.reload()} />

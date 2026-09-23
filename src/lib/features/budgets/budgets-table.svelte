@@ -137,7 +137,7 @@
           <Table.Head class="text-right text-muted-foreground">Ahead / Behind</Table.Head>
         {/if}
         {#if cols.isVisible('pacing')}
-          <Table.Head class="text-muted-foreground">Pacing</Table.Head>
+          <Table.Head class="text-left text-muted-foreground">Pacing</Table.Head>
         {/if}
         {#if cols.isVisible('remaining')}
           <Table.Head class="text-right text-muted-foreground">Remaining</Table.Head>
