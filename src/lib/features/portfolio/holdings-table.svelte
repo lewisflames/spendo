@@ -235,7 +235,7 @@
       <TrendingUp aria-hidden="true" class="text-muted-foreground" />
     {/snippet}
     {#snippet action()}
-      <Button variant="outline" href={resolve('/accounts')}>Go to accounts</Button>
+      <Button variant="outline" href={resolve('/accounts')}>Accounts</Button>
     {/snippet}
   </EmptyState>
 {:else}

@@ -6,17 +6,12 @@
   import { Checkbox } from '$lib/components/ui/checkbox';
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
+  import EmptyValue from '$lib/components/shared/empty-value.svelte';
   import { PaginationNav } from '$lib/components/shared/pagination-nav';
   import { ArrowLeft, LoaderCircle, Sparkles, Upload } from '@lucide/svelte';
   import type { SvelteSet } from 'svelte/reactivity';
   import type { CsvPreviewResult } from '$lib/tauri';
-  import {
-    formatCurrency,
-    formatDate,
-    plural,
-    sessionCurrency,
-    EMPTY_DASH
-  } from '$lib/utils/format.svelte';
+  import { formatCurrency, formatDate, plural, sessionCurrency } from '$lib/utils/format.svelte';
 
   let {
     preview,
@@ -117,13 +112,21 @@
                 />
               </Table.Cell>
               <Table.Cell class="py-2.5 whitespace-nowrap">
-                {row.postDate ? formatDate(row.postDate) : EMPTY_DASH}
+                {#if row.postDate}
+                  {formatDate(row.postDate)}
+                {:else}
+                  <EmptyValue />
+                {/if}
               </Table.Cell>
               <Table.Cell
                 class="max-w-md truncate py-2.5 font-medium"
                 title={row.description ?? ''}
               >
-                {row.description || EMPTY_DASH}
+                {#if row.description}
+                  {row.description}
+                {:else}
+                  <EmptyValue />
+                {/if}
               </Table.Cell>
               <Table.Cell
                 class="max-w-40 truncate py-2.5 text-muted-foreground"
@@ -140,7 +143,11 @@
                 </span>
               </Table.Cell>
               <Table.Cell class="py-2.5 text-right tabular-nums">
-                {row.amount !== null ? formatCurrency(row.amount, currency) : EMPTY_DASH}
+                {#if row.amount !== null}
+                  {formatCurrency(row.amount, currency)}
+                {:else}
+                  <EmptyValue />
+                {/if}
               </Table.Cell>
               <Table.Cell class="py-2.5">
                 {#if !row.valid}

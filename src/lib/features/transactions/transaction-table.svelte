@@ -20,8 +20,7 @@
     formatDate as fmtDate,
     formatSignedCurrency,
     formatSessionCurrency,
-    signColor,
-    EMPTY_DASH
+    signColor
   } from '$lib/utils/format.svelte';
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import SortHead from '$lib/components/shared/sort-head.svelte';
@@ -168,7 +167,11 @@
           >
             {#if txn.num && showInlineNum}<span class="mr-1 text-muted-foreground">#{txn.num}</span
               >{/if}
-            {txn.description || EMPTY_DASH}
+            {#if txn.description}
+              {txn.description}
+            {:else}
+              <EmptyValue />
+            {/if}
           </a>
           {#if txn.notes}
             <p class="truncate text-xs font-normal text-muted-foreground" title={txn.notes}>
@@ -179,7 +182,11 @@
         {#if variant === 'all'}
           {#if isVisible('num')}
             <Table.Cell class="py-2.5 whitespace-nowrap text-muted-foreground tabular-nums">
-              {txn.num || EMPTY_DASH}
+              {#if txn.num}
+                {txn.num}
+              {:else}
+                <EmptyValue />
+              {/if}
             </Table.Cell>
           {/if}
           {#if isVisible('accounts')}

@@ -42,7 +42,7 @@
   import { formatCurrency, formatSignedCurrency, signColor } from '$lib/utils/format.svelte';
   import NavRow from '$lib/components/shared/nav-row.svelte';
   import { openBudget } from '$lib/utils/navigation';
-  import { PiggyBank, Plus } from '@lucide/svelte';
+  import { PiggyBank, Plus, SearchX } from '@lucide/svelte';
   import { Button } from '$lib/components/ui/button';
   import type { BudgetActualRow } from '$lib/tauri';
   import type { ColumnVisibility } from '$lib/hooks/use-column-visibility.svelte';
@@ -102,7 +102,11 @@
   {#if onClearSearch}
     <FilteredEmptyState title="No matching budgets" onClear={onClearSearch} />
   {:else}
-    <EmptyState card title="No matching budgets" description="Try adjusting your search." />
+    <EmptyState card title="No matching budgets" description="Try adjusting your search.">
+      {#snippet icon()}
+        <SearchX aria-hidden="true" class="text-muted-foreground" />
+      {/snippet}
+    </EmptyState>
   {/if}
 {:else}
   {@const totals = budgetTotals(rows)}

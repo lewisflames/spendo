@@ -16,7 +16,7 @@
   {#snippet action()}
     <Button variant="outline" href={resolve('/settings')}>
       <Settings aria-hidden="true" class="size-4" />
-      Go to settings
+      Settings
     </Button>
   {/snippet}
 </EmptyState>

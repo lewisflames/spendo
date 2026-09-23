@@ -5,13 +5,9 @@
   import { Checkbox } from '$lib/components/ui/checkbox';
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import SortHead from '$lib/components/shared/sort-head.svelte';
+  import EmptyValue from '$lib/components/shared/empty-value.svelte';
   import { handleRowClick } from '$lib/utils/navigation';
-  import {
-    formatDate as fmtDate,
-    formatSignedCurrency,
-    signColor,
-    EMPTY_DASH
-  } from '$lib/utils/format.svelte';
+  import { formatDate as fmtDate, formatSignedCurrency, signColor } from '$lib/utils/format.svelte';
   import { selectionState } from '$lib/features/reconcile/math';
   import type { ReconcileCandidate, TxSortKey } from '$lib/tauri';
 
@@ -102,7 +98,11 @@
             class="block truncate focus-visible:outline-2 focus-visible:outline-ring"
           >
             {#if row.num}<span class="mr-1 text-muted-foreground">#{row.num}</span>{/if}
-            {row.description || EMPTY_DASH}
+            {#if row.description}
+              {row.description}
+            {:else}
+              <EmptyValue />
+            {/if}
           </a>
           {#if row.memo}
             <p class="truncate text-xs font-normal text-muted-foreground" title={row.memo}>
