@@ -29,7 +29,7 @@
   import { errMsg } from '$lib/utils/error';
   import { formatBytes, formatDate } from '$lib/utils/format.svelte';
 
-  let { txGuid }: { txGuid: string } = $props();
+  let { txGuid = null }: { txGuid?: string | null } = $props();
 
   /** Mirrors `ALLOWED_TYPES` in `src-tauri/src/attachments.rs`; the backend re-validates. */
   const ATTACHMENT_EXTENSIONS = ['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp'];
@@ -37,7 +37,7 @@
 
   const res = useAsyncData({
     enabled: () => !!txGuid,
-    fetch: () => fetchAttachments(txGuid),
+    fetch: () => fetchAttachments(txGuid ?? ''),
     label: 'Failed to load attachments'
   });
 
@@ -48,7 +48,9 @@
   let confirmDeleteGuid = $state<string | null>(null);
 
   // Webview-level OS drop; anywhere on the page attaches to this transaction.
+  // Disabled until the transaction exists.
   const drop = useFileDrop((paths) => {
+    if (!txGuid) return;
     void addPaths(paths);
   });
 
@@ -59,6 +61,7 @@
   }
 
   async function pickFiles() {
+    if (!txGuid || adding) return;
     let selected: string | string[] | null;
     try {
       selected = await open({
@@ -74,7 +77,7 @@
   }
 
   async function addPaths(paths: string[]) {
-    if (!paths.length || adding) return;
+    if (!txGuid || !paths.length || adding) return;
     adding = true;
     try {
       const added = await addAttachments({ txGuid, paths });
@@ -149,7 +152,13 @@
       <Paperclip aria-hidden="true" class="size-4 text-muted-foreground" />
     {/snippet}
     {#snippet action()}
-      <Button variant="outline" size="sm" onclick={pickFiles} disabled={adding}>
+      <Button
+        variant="outline"
+        size="sm"
+        onclick={pickFiles}
+        disabled={adding || !txGuid}
+        title={!txGuid ? 'Save the transaction first' : undefined}
+      >
         {#if adding}
           <LoaderCircle aria-hidden="true" class="size-4 animate-spin" />
           Adding…
@@ -161,7 +170,13 @@
     {/snippet}
   </IconCardHeader>
   <Card.Content class="flex flex-col gap-3">
-    {#if res.loading && !res.data}
+    {#if !txGuid}
+      <div class="rounded-lg border border-dashed px-4 py-6 text-center">
+        <p class="text-sm text-muted-foreground">
+          Save the transaction first — receipts can be attached afterwards on the detail page.
+        </p>
+      </div>
+    {:else if res.loading && !res.data}
       <p class="py-2 text-sm text-muted-foreground">Loading attachments…</p>
     {:else if res.error}
       <ErrorCard message={res.error} onRetry={() => res.reload()} />
@@ -244,7 +259,7 @@
     {/if}
   </Card.Content>
 
-  {#if drop.dragging && !adding}
+  {#if txGuid && drop.dragging && !adding}
     <div
       class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-xl border-2 border-dashed border-primary bg-background/85"
     >

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { page } from '$app/state';
+  import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import * as Table from '$lib/components/ui/table';
   import { Badge } from '$lib/components/ui/badge';
@@ -73,6 +74,13 @@
     }
   }
 
+  function duplicateTransaction() {
+    if (!detail) return;
+    // Query strings can't go through `resolve()` — same pattern as budgets.
+    // eslint-disable-next-line svelte/no-navigation-without-resolve
+    void goto(resolve('/transactions/new') + `?duplicate=${encodeURIComponent(detail.guid)}`);
+  }
+
   /**
    * Native-unit line for a split ("10 AAPL", "-50 USD"): the raw quantity
    * differs from the signed report-currency amount whenever the account's
@@ -144,6 +152,10 @@
           title="Copy GUID"
         >
           <Copy aria-hidden="true" class="size-4" />
+        </Button>
+        <Button variant="outline" onclick={duplicateTransaction} aria-label="Duplicate transaction">
+          <Copy aria-hidden="true" class="size-4" />
+          Duplicate
         </Button>
         <Button href={resolve('/transactions/[guid]/edit', { guid: d.guid })}>
           <Pencil aria-hidden="true" class="size-4" />
