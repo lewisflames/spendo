@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
   draftFromSplit,
+  formatDraftAmount,
   isBalanced,
+  isInvestmentAccountType,
   makeSplitDraft,
   parseAmount,
+  remainderFor,
   splitBalance,
   splitErrors,
-  splitToInput
+  splitToInput,
+  splitTotals
 } from './split-draft';
 
 describe('parseAmount', () => {
@@ -21,15 +25,32 @@ describe('parseAmount', () => {
     expect(parseAmount('-2,25')).toBe(-2.25);
   });
 
+  it('accepts thousands separators and currency symbols', () => {
+    expect(parseAmount('1,000')).toBe(1000);
+    expect(parseAmount('1,000.50')).toBe(1000.5);
+    expect(parseAmount('1 000.50')).toBe(1000.5);
+    expect(parseAmount("1'000.50")).toBe(1000.5);
+    expect(parseAmount('$12.50')).toBe(12.5);
+    expect(parseAmount('1.000,50')).toBe(1000.5);
+  });
+
+  it('evaluates simple arithmetic', () => {
+    expect(parseAmount('10+5')).toBe(15);
+    expect(parseAmount('100/4')).toBe(25);
+    expect(parseAmount('(10+2)*3')).toBe(36);
+    expect(parseAmount('10 - 4 - 1')).toBe(5);
+  });
+
   it('rejects hex, scientific notation and malformed separators', () => {
     expect(parseAmount('0x10')).toBeNull();
     expect(parseAmount('1e3')).toBeNull();
     expect(parseAmount('1.2.3')).toBeNull();
     expect(parseAmount('1,')).toBeNull();
     expect(parseAmount(',5')).toBeNull();
-    expect(parseAmount('1 000')).toBeNull();
     expect(parseAmount('Infinity')).toBeNull();
     expect(parseAmount('NaN')).toBeNull();
+    expect(parseAmount('10/0')).toBeNull();
+    expect(parseAmount('(10+')).toBeNull();
   });
 
   it('returns null for empty or non-numeric input', () => {
@@ -100,6 +121,46 @@ describe('splitBalance / isBalanced', () => {
       { ...makeSplitDraft(2), amount: '-0.1' }
     ];
     expect(isBalanced(splitBalance(splits))).toBe(true);
+  });
+});
+
+describe('splitTotals / remainderFor', () => {
+  it('splits debits and credits', () => {
+    const splits = [
+      { ...makeSplitDraft(1), amount: '100' },
+      { ...makeSplitDraft(2), amount: '-40' },
+      { ...makeSplitDraft(3), amount: '-60' }
+    ];
+    expect(splitTotals(splits)).toEqual({ debit: 100, credit: 100 });
+  });
+
+  it('returns null totals when any amount is invalid', () => {
+    const splits = [
+      { ...makeSplitDraft(1), amount: '10' },
+      { ...makeSplitDraft(2), amount: '' }
+    ];
+    expect(splitTotals(splits)).toBeNull();
+  });
+
+  it('computes the balancing remainder for a row', () => {
+    const splits = [
+      { ...makeSplitDraft(1), amount: '100' },
+      { ...makeSplitDraft(2), amount: '' }
+    ];
+    expect(remainderFor(1, splits)).toBe(-100);
+    expect(remainderFor(0, [{ ...makeSplitDraft(1), amount: '' }, splits[1]])).toBeNull();
+  });
+
+  it('formats computed amounts without float dust', () => {
+    expect(formatDraftAmount(0.1 + 0.2 - 0.3)).toBe('0');
+    expect(formatDraftAmount(-100)).toBe('-100');
+  });
+
+  it('detects investment account types', () => {
+    expect(isInvestmentAccountType('STOCK')).toBe(true);
+    expect(isInvestmentAccountType('mutual')).toBe(true);
+    expect(isInvestmentAccountType('BANK')).toBe(false);
+    expect(isInvestmentAccountType(null)).toBe(false);
   });
 });
 
