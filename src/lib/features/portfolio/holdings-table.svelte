@@ -255,7 +255,7 @@
           }}
         >
           <X aria-hidden="true" class="mr-1 size-3.5" />
-          Clear
+          Clear filters
         </Button>
       {/if}
       <div class="ml-auto">
@@ -309,7 +309,9 @@
             {@const rebalance = rebalanceByGuid.get(h.commodityGuid)}
             <NavRow
               onNavigate={() => openHolding(h.commodityGuid)}
-              class={isClosed || isWatchOnly ? 'text-muted-foreground' : ''}
+              class={isClosed || isWatchOnly
+                ? 'cursor-pointer text-muted-foreground hover:bg-muted/50'
+                : 'cursor-pointer hover:bg-muted/50'}
             >
               <Table.Cell class="py-2.5">
                 <!-- Real link for keyboard/AT users; the row click stays as a

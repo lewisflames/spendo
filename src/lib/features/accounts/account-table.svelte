@@ -42,11 +42,12 @@
   <Table.Body>
     {#each rows as node (node.guid)}
       <NavRow onNavigate={() => openAccount(node.guid)}>
-        <Table.Cell class="p-0">
+        <Table.Cell class="py-2.5">
           <!-- Accessible link target for keyboard/middle-click; the row click
-               is a convenience shortcut. -->
+               is a convenience shortcut. Cell padding comes from TableShell
+               (px-4) so all tables share the same horizontal rhythm. -->
           <a
-            class="block min-w-0 px-2 py-2.5 focus-visible:outline-2 focus-visible:outline-ring"
+            class="block min-w-0 focus-visible:outline-2 focus-visible:outline-ring"
             href={resolve('/accounts/[guid]', { guid: node.guid })}
             title={node.description ?? undefined}
           >

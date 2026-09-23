@@ -11,6 +11,7 @@
   import { toast } from '$lib/components/ui/sonner';
   import SymbolOverrideDialog from '$lib/features/portfolio/symbol-override-dialog.svelte';
   import { sessionCurrency, parseLocalDate, formatCurrency } from '$lib/utils/format.svelte';
+  import { isNotFoundMessage } from '$lib/utils/error';
   import TimeSeriesChart from '$lib/components/shared/time-series-chart.svelte';
   import { ColumnsMenu } from '$lib/components/shared/columns-menu';
   import { useColumnVisibility } from '$lib/hooks/use-column-visibility.svelte';
@@ -74,9 +75,7 @@
     }
   });
 
-  let notFound = $derived(
-    res.data === null && res.error !== null && /holding not found/i.test(res.error)
-  );
+  let notFound = $derived(res.data === null && isNotFoundMessage(res.error));
 
   let holding = $derived(res.data?.holding ?? null);
   let name = $derived(holding ? holdingLabel(holding) : 'Holding');

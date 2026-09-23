@@ -4,6 +4,7 @@
   import KpiCardRow from '$lib/components/shared/kpi-card-row.svelte';
   import PageHeaderSkeleton from '$lib/components/shared/page-header-skeleton.svelte';
   import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
+  import ToolbarSkeleton from '$lib/components/shared/toolbar-skeleton.svelte';
 
   /**
    * Full-page loading placeholder. Each variant mirrors the loaded layout of
@@ -19,10 +20,14 @@
       | 'transactions'
       | 'transaction-detail'
       | 'form'
+      | 'budgets'
       | 'budget-detail'
+      | 'pnl'
       | 'portfolio'
       | 'holding'
-      | 'scheduled';
+      | 'scheduled'
+      | 'reconcile'
+      | 'reconcile-detail';
   } = $props();
 </script>
 
@@ -62,6 +67,10 @@
   <PageHeaderSkeleton />
   <KpiCardRow gridClass="sm:grid-cols-2 lg:grid-cols-3" />
   <TableSkeleton cols={4} rows={3} />
+{:else if variant === 'budgets'}
+  <KpiCardRow count={3} gridClass="sm:grid-cols-2 lg:grid-cols-3" />
+  <ToolbarSkeleton />
+  <TableSkeleton cols={7} rows={4} />
 {:else if variant === 'budget-detail'}
   <KpiCardRow count={4} />
   <!-- Mirrors the pacing card shape. -->
@@ -77,6 +86,10 @@
     <Skeleton class="mt-2 h-3 w-72" />
   </div>
   <TableSkeleton cols={6} rows={6} />
+{:else if variant === 'pnl'}
+  <KpiCardRow count={4} />
+  <ChartSkeleton withFilters />
+  <TableSkeleton cols={5} rows={6} />
 {:else if variant === 'portfolio'}
   <!-- The holdings table renders its own skeleton via HoldingsTable loading. -->
   <KpiCardRow count={4} />
@@ -97,6 +110,23 @@
 {:else if variant === 'scheduled'}
   <PageHeaderSkeleton />
   <TableSkeleton cols={7} rows={4} />
+{:else if variant === 'reconcile'}
+  <PageHeaderSkeleton />
+  <ToolbarSkeleton />
+  <TableSkeleton cols={4} rows={8} />
+{:else if variant === 'reconcile-detail'}
+  <PageHeaderSkeleton />
+  <div class="rounded-lg border p-4">
+    <div class="flex flex-wrap items-baseline justify-between gap-2">
+      <Skeleton class="h-4 w-52" />
+      <Skeleton class="h-4 w-44" />
+    </div>
+    <div class="mt-3 flex items-center gap-3">
+      <Skeleton class="h-9 flex-1" />
+      <Skeleton class="h-9 w-24" />
+    </div>
+  </div>
+  <TableSkeleton cols={5} rows={8} />
 {:else if variant === 'form'}
   <PageHeaderSkeleton />
   <div class="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">

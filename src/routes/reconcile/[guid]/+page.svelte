@@ -21,7 +21,7 @@
   import ErrorCard from '$lib/components/shared/error-card.svelte';
   import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
-  import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
+  import PageSkeleton from '$lib/components/shared/page-skeleton.svelte';
   import { SearchInput } from '$lib/components/shared/search-input';
   import { useDebouncedSearch } from '$lib/hooks/use-debounced-search.svelte';
   import { useUrlParams, dateParam, debouncedSearchParam } from '$lib/hooks/use-url-params.svelte';
@@ -234,7 +234,7 @@
     </PageHeader>
 
     {#if res.loading && !res.data && !res.error}
-      <TableSkeleton cols={5} rows={8} />
+      <PageSkeleton variant="reconcile-detail" />
     {:else if res.data}
       {#if res.error}
         <ErrorCard message={res.error} onRetry={() => res.reload()} />
@@ -258,74 +258,76 @@
           onFinish={finish}
         />
 
-        <div class="flex flex-wrap items-end gap-2">
-          <SearchInput
-            id="reconcile-search"
-            label="Search description, number, memo"
-            placeholder="Search description, number, memo…"
-            bind:value={searchInput}
-            class="grow basis-48"
-          />
-          {#if search.value}
-            <Button
-              variant="ghost"
-              onclick={() => {
-                searchInput = '';
-                search.set('');
-              }}
+        <div class="flex flex-col gap-4">
+          <div class="flex flex-wrap items-end gap-2">
+            <SearchInput
+              id="reconcile-search"
+              label="Search description, number, memo"
+              placeholder="Search description, number, memo…"
+              bind:value={searchInput}
+              class="grow basis-48"
+            />
+            {#if search.value}
+              <Button
+                variant="ghost"
+                onclick={() => {
+                  searchInput = '';
+                  search.set('');
+                }}
+              >
+                <X aria-hidden="true" class="mr-1 size-3.5" />
+                Clear filters
+              </Button>
+            {/if}
+          </div>
+
+          {#if filtered.length === 0}
+            <EmptyState
+              card
+              title="Nothing to reconcile"
+              description={search.value
+                ? 'No candidates match the current filters.'
+                : 'No unreconciled transactions at or before the statement date.'}
             >
-              <X aria-hidden="true" class="mr-1 size-3.5" />
-              Clear
-            </Button>
+              {#snippet icon()}
+                {#if search.value}
+                  <SearchX aria-hidden="true" class="text-muted-foreground" />
+                {:else}
+                  <CircleCheck aria-hidden="true" class="text-muted-foreground" />
+                {/if}
+              {/snippet}
+              {#snippet action()}
+                {#if search.value}
+                  <Button
+                    variant="outline"
+                    onclick={() => {
+                      searchInput = '';
+                      search.set('');
+                    }}
+                  >
+                    Clear filters
+                  </Button>
+                {/if}
+              {/snippet}
+            </EmptyState>
+          {:else}
+            <ReconcileTable
+              rows={filtered}
+              {checked}
+              {currency}
+              sortBy={sort.sortBy}
+              sortDir={sort.sortDir}
+              {onSort}
+              onToggle={toggle}
+              onToggleAll={toggleAll}
+            />
           {/if}
         </div>
-
-        {#if filtered.length === 0}
-          <EmptyState
-            card
-            title="Nothing to reconcile"
-            description={search.value
-              ? 'No candidates match the current filters.'
-              : 'No unreconciled transactions at or before the statement date.'}
-          >
-            {#snippet icon()}
-              {#if search.value}
-                <SearchX aria-hidden="true" class="text-muted-foreground" />
-              {:else}
-                <CircleCheck aria-hidden="true" class="text-muted-foreground" />
-              {/if}
-            {/snippet}
-            {#snippet action()}
-              {#if search.value}
-                <Button
-                  variant="outline"
-                  onclick={() => {
-                    searchInput = '';
-                    search.set('');
-                  }}
-                >
-                  Clear filters
-                </Button>
-              {/if}
-            {/snippet}
-          </EmptyState>
-        {:else}
-          <ReconcileTable
-            rows={filtered}
-            {checked}
-            {currency}
-            sortBy={sort.sortBy}
-            sortDir={sort.sortDir}
-            {onSort}
-            onToggle={toggle}
-            onToggleAll={toggleAll}
-          />
-        {/if}
       </DimWrapper>
     {:else if res.error}
       <ErrorCard message={res.error} onRetry={() => res.reload()} />
     {:else if res.loading}
-      <TableSkeleton cols={5} rows={8} />
+      <PageSkeleton variant="reconcile-detail" />
     {:else}
       <EmptyState
         card
