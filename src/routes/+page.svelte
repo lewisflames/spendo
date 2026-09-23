@@ -16,10 +16,10 @@
 </script>
 
 <svelte:head>
-  <title>Welcome — Spendo</title>
+  <title>Welcome · Spendo</title>
   <meta
     name="description"
-    content="Spendo — explore your finances locally. Open or create a book to get started."
+    content="Spendo explores your finances locally. Open or create a book to get started."
   />
 </svelte:head>
 

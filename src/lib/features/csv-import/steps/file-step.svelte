@@ -17,9 +17,9 @@
 
 <Card.Root>
   <Card.Header>
-    <Card.Title>Choose a CSV file</Card.Title>
+    <Card.Title>Bring in a bank file</Card.Title>
     <Card.Description>
-      Bank-statement exports (.csv, .txt, .tsv). Nothing is written until the final import step.
+      Bank exports (.csv, .txt, .tsv). Nothing lands in your book until the last step.
     </Card.Description>
   </Card.Header>
   <Card.Content class="flex flex-col gap-4">
@@ -38,7 +38,7 @@
       </Button>
     </div>
     <p class="text-xs text-muted-foreground">
-      Detection runs locally: encoding, delimiter and header row are sniffed before mapping.
+      We’ll peek at the encoding and columns first. Nothing is saved yet.
     </p>
   </Card.Content>
 </Card.Root>

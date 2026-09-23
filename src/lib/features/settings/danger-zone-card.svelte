@@ -24,9 +24,9 @@
       clearSession();
       resetBookSettings();
       clearDialogOpen = false;
-      toast.success('Database cleared');
+      toast.success('Cleared everything from this book');
     } catch (e: unknown) {
-      toast.error(errMsg(e, 'Failed to clear database'));
+      toast.error(errMsg(e, "We couldn't clear your data. Please try again"));
     } finally {
       clearing = false;
     }
@@ -39,7 +39,7 @@
 </script>
 
 <Card.Root class="border-destructive/30">
-  <IconCardHeader title="Danger zone" description="Destructive actions. These cannot be undone.">
+  <IconCardHeader title="Danger zone" description="Be careful here. There’s no undo.">
     {#snippet icon()}
       <Trash2 aria-hidden="true" class="size-4 text-destructive" />
     {/snippet}
@@ -47,7 +47,7 @@
   <Card.Content class="flex flex-col items-start gap-4">
     <SettingSelectRow
       label="Clear all data"
-      description="Delete accounts, transactions, scheduled transactions, budgets and prices from this book"
+      description="Wipe accounts, transactions, schedules, budgets and prices from this book"
       class="w-full"
     >
       <Dialog.Root bind:open={clearDialogOpen}>
@@ -62,8 +62,8 @@
           <Dialog.Header>
             <Dialog.Title>Clear all data?</Dialog.Title>
             <Dialog.Description>
-              This will permanently delete all accounts, transactions, scheduled transactions,
-              budgets, prices and symbol overrides. Your appearance preferences will be preserved.
+              This clears out everything in the book for good. Your theme and display choices stay
+              put.
             </Dialog.Description>
           </Dialog.Header>
           <Dialog.Footer>
@@ -78,11 +78,11 @@
       </Dialog.Root>
     </SettingSelectRow>
     {#if !dbSession.value}
-      <p class="text-xs text-muted-foreground">No data imported yet — nothing to clear.</p>
+      <p class="text-xs text-muted-foreground">Nothing in here yet, so nothing to clear.</p>
     {/if}
     <SettingSelectRow
       label="Reset preferences"
-      description="Restore theme, density, locale and list settings to defaults"
+      description="Back to the original theme, density, locale and list setup"
       class="w-full"
     >
       <Dialog.Root bind:open={resetDialogOpen}>
@@ -94,8 +94,7 @@
           <Dialog.Header>
             <Dialog.Title>Reset preferences?</Dialog.Title>
             <Dialog.Description>
-              This restores all appearance and display settings to their defaults. Your book data is
-              not touched.
+              This puts your look and feel back to defaults. Your money data stays exactly as it is.
             </Dialog.Description>
           </Dialog.Header>
           <Dialog.Footer>

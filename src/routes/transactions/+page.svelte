@@ -132,22 +132,22 @@
       }
       return r;
     },
-    label: 'Failed to load transactions'
+    label: "We couldn't load your transactions"
   });
 </script>
 
 <svelte:head>
-  <title>Transactions — Spendo</title>
-  <meta name="description" content="Transaction ledger with filters." />
+  <title>Transactions · Spendo</title>
+  <meta name="description" content="Every move your money has made." />
 </svelte:head>
 
-<BookGate title="Transactions" description="Transaction ledger with filters">
+<BookGate title="Transactions" description="Every move your money has made">
   <div class="flex flex-col gap-6">
     <PageHeader
       title="Transactions"
       description={res.data
-        ? `Transaction ledger with filters · ${plural(res.data.total, 'transaction')}`
-        : 'Transaction ledger with filters'}
+        ? `Every move your money has made · ${plural(res.data.total, 'transaction')}`
+        : 'Every move your money has made'}
     >
       {#if dbSession.value}
         <Button variant="outline" href={resolve('/scheduled')}>
@@ -183,8 +183,8 @@
         {:else}
           <EmptyState
             card
-            title="No transactions"
-            description="Create your first transaction to get started."
+            title="No transactions yet"
+            description="Record your first one. It takes a few seconds."
           >
             {#snippet icon()}
               <ArrowLeftRight aria-hidden="true" class="text-muted-foreground" />

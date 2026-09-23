@@ -94,7 +94,7 @@ describe('toastPriceResult', () => {
       { fixHint: true }
     );
     expect(mockedToast.warning).toHaveBeenCalledWith(
-      'Prices refreshed with 1 error — open Portfolio to fix symbols.'
+      'Prices refreshed with 1 error. Open Portfolio to fix symbols.'
     );
     expect(mockedToast.success).not.toHaveBeenCalled();
   });
@@ -103,8 +103,8 @@ describe('toastPriceResult', () => {
     toastPriceResult({ prices: [], errors: [{ mnemonic: 'SAP', error: 'no symbol' }] });
     expect(mockedToast.warning).toHaveBeenCalledWith('Prices refreshed with 1 error');
     toastPriceResult({ prices: [price], errors: [] });
-    expect(mockedToast.success).toHaveBeenCalledWith('Prices refreshed');
+    expect(mockedToast.success).toHaveBeenCalledWith('Prices are up to date');
     toastPriceResult({ prices: [price], errors: [] }, { fixHint: true });
-    expect(mockedToast.success).toHaveBeenCalledWith('Prices refreshed from Yahoo Finance');
+    expect(mockedToast.success).toHaveBeenCalledWith('Fresh prices are in');
   });
 });

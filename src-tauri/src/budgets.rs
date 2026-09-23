@@ -105,14 +105,14 @@ fn row_to_budget(row: &rusqlite::Row) -> rusqlite::Result<Budget> {
 
 fn validate_year(year: i32) -> Result<(), String> {
     if !(1900..=2200).contains(&year) {
-        return Err(format!("Budget year must be between 1900 and 2200, got {year}"));
+        return Err(format!("Pick a budget year between 1900 and 2200 (got {year})"));
     }
     Ok(())
 }
 
 fn validate_amount(amount: f64) -> Result<(), String> {
     if !amount.is_finite() || amount <= 0.0 {
-        return Err("Budget amount must be positive and finite".to_string());
+        return Err("Enter a budget amount above zero".to_string());
     }
     Ok(())
 }
@@ -200,9 +200,9 @@ fn assert_expense_account(conn: &Connection, account_guid: &str) -> Result<(), S
         )
         .optional()
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Account not found: {account_guid}"))?;
+        .ok_or_else(|| format!("Account not found. It may have been removed: {account_guid}"))?;
     if acct_type != "EXPENSE" {
-        return Err("Only expense accounts can have budgets".to_string());
+        return Err("Only expense accounts can have budgets. Pick an expense account".to_string());
     }
     Ok(())
 }

@@ -56,7 +56,7 @@
       open = false;
       onSave?.();
     } catch (e: unknown) {
-      const msg = errMsg(e, 'Failed to save Yahoo symbol');
+      const msg = errMsg(e, "We couldn't save this symbol. Please try again");
       formError = msg;
       onError?.(msg);
     } finally {
@@ -76,7 +76,7 @@
       open = false;
       onSave?.();
     } catch (e: unknown) {
-      const msg = errMsg(e, 'Failed to reset Yahoo symbol');
+      const msg = errMsg(e, "We couldn't reset this symbol. Please try again");
       formError = msg;
       onError?.(msg);
     } finally {
@@ -88,13 +88,12 @@
 <Dialog.Root bind:open>
   <Dialog.Content class="max-h-[90vh] overflow-y-auto sm:max-w-lg">
     <Dialog.Header>
-      <Dialog.Title>Yahoo symbol for {mnemonic}</Dialog.Title>
+      <Dialog.Title>Which Yahoo symbol is {mnemonic}?</Dialog.Title>
       <Dialog.Description>
         {#if currentSymbol}
-          Override in use: <span class="font-mono font-medium">{currentSymbol}</span>. Prices are
-          fetched for this symbol only.
+          Right now we’re using <span class="font-mono font-medium">{currentSymbol}</span> for prices.
         {:else}
-          Automatic detection is in use. Set an override to fetch a specific Yahoo Finance symbol.
+          We’re guessing the symbol for now. Tell us the exact one and we’ll use that instead.
         {/if}
       </Dialog.Description>
     </Dialog.Header>
@@ -121,12 +120,11 @@
           role="alert"
           class="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
         >
-          Resetting removes the override and returns to automatic detection. Click reset again to
-          confirm.
+          This forgets your pick and goes back to guessing. Hit reset again if you’re sure.
         </p>
       {:else}
         <p class="text-xs text-muted-foreground">
-          Saved in uppercase. Refresh prices afterwards to fetch with the new symbol.
+          We’ll save it in uppercase. Refresh prices after to use it right away.
         </p>
       {/if}
     </div>

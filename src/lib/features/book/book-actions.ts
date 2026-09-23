@@ -28,7 +28,7 @@ async function reloadBookSettings() {
   try {
     await loadBookSettings(true);
   } catch (e: unknown) {
-    toast.error(errMsg(e, 'Failed to load book settings'));
+    toast.error(errMsg(e, "We couldn't load your book settings"));
   }
 }
 
@@ -51,7 +51,7 @@ export async function openBookAt(path: string): Promise<boolean> {
     await activateBook(path, result.summary, `Opened ${await basename(path)}`);
     return true;
   } catch (e: unknown) {
-    toast.error(errMsg(e, 'Failed to open book'));
+    toast.error(errMsg(e, "We couldn't open that book"));
     return false;
   } finally {
     switching = false;
@@ -64,7 +64,7 @@ export async function openBookViaDialog(): Promise<boolean> {
   try {
     selected = await open({ multiple: false, filters: [BOOK_FILTER] });
   } catch (e: unknown) {
-    toast.error(errMsg(e, 'Failed to open file dialog'));
+    toast.error(errMsg(e, "We couldn't open the file picker"));
     return false;
   }
   if (!selected || Array.isArray(selected)) return false;
@@ -79,7 +79,7 @@ export async function createBookViaDialog(currency?: string): Promise<boolean> {
   try {
     target = await save({ defaultPath: 'book.spendo', filters: [SAVE_FILTER] });
   } catch (e: unknown) {
-    toast.error(errMsg(e, 'Failed to open save dialog'));
+    toast.error(errMsg(e, "We couldn't open the save dialog"));
     return false;
   }
   if (!target) return false;
@@ -91,7 +91,7 @@ export async function createBookViaDialog(currency?: string): Promise<boolean> {
     await activateBook(file, result.summary, `Book created (${base})`);
     return true;
   } catch (e: unknown) {
-    toast.error(errMsg(e, 'Failed to create book'));
+    toast.error(errMsg(e, "We couldn't create that book"));
     return false;
   } finally {
     switching = false;
@@ -104,7 +104,7 @@ export async function saveBookAsViaDialog(): Promise<boolean> {
   try {
     target = await save({ defaultPath: 'book.spendo', filters: [SAVE_FILTER] });
   } catch (e: unknown) {
-    toast.error(errMsg(e, 'Failed to open save dialog'));
+    toast.error(errMsg(e, "We couldn't open the save dialog"));
     return false;
   }
   if (!target) return false;
@@ -115,7 +115,7 @@ export async function saveBookAsViaDialog(): Promise<boolean> {
     await activateBook(file, result.summary, `Book saved as ${await basename(file)}`);
     return true;
   } catch (e: unknown) {
-    toast.error(errMsg(e, 'Failed to save book'));
+    toast.error(errMsg(e, "We couldn't save that book"));
     return false;
   } finally {
     switching = false;
@@ -140,7 +140,7 @@ export async function closeActiveBook(): Promise<boolean> {
     await goto(resolve('/'));
     return true;
   } catch (e: unknown) {
-    toast.error(errMsg(e, 'Failed to close book'));
+    toast.error(errMsg(e, "We couldn't close the book"));
     return false;
   } finally {
     switching = false;
@@ -155,7 +155,7 @@ export async function copyBookPathAt(path: string): Promise<boolean> {
     toast.success('Book path copied');
     return true;
   } catch (e: unknown) {
-    toast.error(errMsg(e, 'Failed to copy path'));
+    toast.error(errMsg(e, "We couldn't copy that path"));
     return false;
   }
 }
@@ -174,7 +174,7 @@ export async function revealActiveBook(): Promise<boolean> {
     await revealItemInDir(path);
     return true;
   } catch (e: unknown) {
-    toast.error(errMsg(e, 'Failed to show book in folder'));
+    toast.error(errMsg(e, "We couldn't open that folder"));
     return false;
   }
 }

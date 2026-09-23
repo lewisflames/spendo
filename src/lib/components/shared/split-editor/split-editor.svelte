@@ -330,16 +330,16 @@
         )}
       </span>
       {#if balanced}
-        <span> · Balanced.</span>
+        <span> · Looks good. Everything balances.</span>
       {:else}
         <span>
-          · Out of balance by {formatSessionCurrency(balance ?? 0)} — use the scale button to fill a row.
+          · Off by {formatSessionCurrency(balance ?? 0)}. The scale button can fill a row for you.
         </span>
       {/if}
     {:else if showErrors}
-      Enter an amount for every split.
+      Add an amount to every split.
     {:else}
-      Splits must sum to zero — amounts accept 1,000.00 and 10+5.
+      Splits should net to zero. Try 1,000.00 or even 10+5.
     {/if}
   </div>
 </div>

@@ -22,7 +22,7 @@
       if (!id) return Promise.reject(new Error('No transaction selected'));
       return fetchTransaction(id);
     },
-    label: 'Failed to load transaction'
+    label: "We couldn't load this transaction"
   });
 
   // Duplicates start from today's date with no attachments; the user edits
@@ -44,7 +44,7 @@
 </script>
 
 <svelte:head>
-  <title>{duplicateGuid ? 'Duplicate transaction' : 'New transaction'} — Spendo</title>
+  <title>{duplicateGuid ? 'Duplicate transaction' : 'New transaction'} · Spendo</title>
   <meta name="description" content="Create a transaction with splits." />
 </svelte:head>
 
@@ -66,7 +66,7 @@
           <TransactionForm
             mode="create"
             title="Duplicate transaction"
-            headerDescription="Splits use raw amounts as shown in the detail view and must sum to zero. Ctrl+S saves; Shift+Ctrl+S saves and starts another."
+            headerDescription="Both sides should balance. Ctrl+S saves. Add Shift to jump straight to the next one."
             initial={template}
             onSaved={handleSaved}
             onSavedAndNew={handleSavedAndNew}
@@ -80,7 +80,7 @@
         <TransactionForm
           mode="create"
           title="Duplicate transaction"
-          headerDescription="Splits use raw amounts as shown in the detail view and must sum to zero. Ctrl+S saves; Shift+Ctrl+S saves and starts another."
+          headerDescription="Both sides should balance. Ctrl+S saves. Add Shift to jump straight to the next one."
           onSaved={handleSaved}
           onSavedAndNew={handleSavedAndNew}
           onCancel={() => void goto(resolve('/transactions'))}
@@ -90,7 +90,7 @@
       <TransactionForm
         mode="create"
         title="New transaction"
-        headerDescription="Splits use raw amounts as shown in the detail view and must sum to zero. Ctrl+S saves; Shift+Ctrl+S saves and starts another."
+        headerDescription="Both sides should balance. Ctrl+S saves. Add Shift to jump straight to the next one."
         onSaved={handleSaved}
         onSavedAndNew={handleSavedAndNew}
         onCancel={() => void goto(resolve('/transactions'))}

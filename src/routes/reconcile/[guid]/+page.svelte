@@ -76,7 +76,7 @@
       if (!g) return Promise.reject(new Error('No account selected'));
       return fetchReconcileInfo(g, statementDate);
     },
-    label: 'Failed to load reconciliation data'
+    label: "We couldn't load this reconciliation"
   });
 
   let candidates = $derived(res.data?.candidates ?? []);
@@ -184,10 +184,10 @@
       // Saving progress doesn't move the summary counters; refresh the session
       // so nav roots and badges pick up any changes.
       refreshSession();
-      toast.success('Progress saved');
+      toast.success('Saved. Pick up where you left off');
       res.reload();
     } catch (e) {
-      toast.error(errMsg(e, 'Failed to save progress'));
+      toast.error(errMsg(e, "We couldn't save your progress"));
     } finally {
       saving = false;
     }
@@ -205,10 +205,10 @@
         await markReconcileSplits(g, updates);
       }
       const out = await finishReconciliation(g, statementDate, endingBalance);
-      toast.success(`Reconciled ${plural(out.reconciledCount, 'split')}`);
+      toast.success(`All matched. Reconciled ${plural(out.reconciledCount, 'split')}`);
       void goto(resolve('/reconcile'));
     } catch (e) {
-      toast.error(errMsg(e, 'Failed to finish reconciliation'));
+      toast.error(errMsg(e, "We couldn't finish reconciling"));
     } finally {
       finishing = false;
     }
@@ -220,7 +220,7 @@
 </script>
 
 <svelte:head>
-  <title>{res.data ? `Reconcile ${res.data.accountName} — Spendo` : 'Reconcile — Spendo'}</title>
+  <title>{res.data ? `Reconcile ${res.data.accountName} · Spendo` : 'Reconcile · Spendo'}</title>
   <meta name="description" content="Reconcile an account against a bank statement." />
 </svelte:head>
 

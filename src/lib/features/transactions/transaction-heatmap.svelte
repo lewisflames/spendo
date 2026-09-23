@@ -79,7 +79,7 @@
     enabled: () => !!dbSession.value && mounted,
     // Reads `debouncedFilters`, so changing a filter refetches (debounced).
     fetch: () => fetchTransactionHeatmap(debouncedFilters),
-    label: 'Failed to load activity'
+    label: "We couldn't load recent activity"
   });
 
   // Backend dates are already `YYYY-MM-DD`, matching the grid keys below, so
@@ -196,7 +196,7 @@
 <Card.Root>
   <Card.Header>
     <Card.Title>Activity</Card.Title>
-    <Card.Description>Number of transactions per day</Card.Description>
+    <Card.Description>How busy each day was</Card.Description>
   </Card.Header>
   <Card.Content>
     {#if !mounted || (res.loading && columns.length === 0 && !res.error)}
@@ -204,7 +204,9 @@
     {:else if res.error && columns.length === 0}
       <ErrorCard message={res.error} onRetry={() => res.reload()} />
     {:else if range.empty}
-      <div class="py-6 text-center text-sm text-muted-foreground">No activity in this period.</div>
+      <div class="py-6 text-center text-sm text-muted-foreground">
+        Quiet around here. Nothing in this stretch.
+      </div>
     {:else}
       {#if res.error}
         <div class="mb-3">

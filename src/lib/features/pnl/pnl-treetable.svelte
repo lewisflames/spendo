@@ -168,8 +168,8 @@
 {#if !pnlData && !loading && !error}
   <EmptyState
     card
-    title="No period selected"
-    description="Select a period to generate the report."
+    title="Pick a stretch of time"
+    description="Choose dates above and your income and spending will show up here."
   />
 {:else}
   {#if pnlData}
@@ -187,8 +187,8 @@
     hasData={pnlData !== null}
     {isEmpty}
     emptyMessage={section === 'income'
-      ? 'No income transactions found for this period.'
-      : 'No expense transactions found for this period.'}
+      ? 'Nothing earned in this stretch.'
+      : 'Nothing spent in this stretch.'}
     skeletonCols={5}
   >
     {#snippet header()}

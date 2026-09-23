@@ -59,14 +59,14 @@ export async function importGnucashViaDialog(): Promise<boolean> {
   try {
     selected = await open({ multiple: false, filters: [GNUCASH_FILTER] });
   } catch (e: unknown) {
-    toast.error(errMsg(e, 'Failed to open file dialog'));
+    toast.error(errMsg(e, "We couldn't open the file picker"));
     return false;
   }
   if (!selected || Array.isArray(selected)) return false;
   try {
     return await openPreview(selected, await basename(selected));
   } catch (e: unknown) {
-    toast.error(errMsg(e, 'Import preview failed'));
+    toast.error(errMsg(e, "We couldn't preview that file"));
     return false;
   }
 }
@@ -104,14 +104,14 @@ export async function confirmGnucashImport(deleteOrphans: boolean): Promise<bool
       if (result.schedulesSkipped) {
         parts.push(`${plural(result.schedulesSkipped, 'schedule')} skipped`);
       }
-      toast.success(`Imported ${preview.filename} — ${parts.join(' · ')}`);
+      toast.success(`Brought in ${preview.filename} (${parts.join(' · ')})`);
     } else {
       toast.warning('No new data imported');
     }
     toastPriceResult(result.prices, { fixHint: true });
     return true;
   } catch (e: unknown) {
-    toast.error(errMsg(e, 'Import failed'));
+    toast.error(errMsg(e, "We couldn't finish that import"));
     return false;
   } finally {
     toast.dismiss(loading);
@@ -153,7 +153,7 @@ async function saveExport(
     try {
       target = await save({ defaultPath, filters: [filter] });
     } catch (e: unknown) {
-      toast.error(errMsg(e, 'Failed to open save dialog'));
+      toast.error(errMsg(e, "We couldn't open the save dialog"));
       return false;
     }
     // Null means the user cancelled — stay silent.
@@ -163,7 +163,7 @@ async function saveExport(
     toast.success(message ?? `Saved ${await basename(file)}`);
     return true;
   } catch (e: unknown) {
-    toast.error(errMsg(e, `Failed to export ${label}`));
+    toast.error(errMsg(e, `We couldn't export ${label}. Please try again`));
     return false;
   } finally {
     busy = false;
@@ -223,12 +223,12 @@ export async function exportGnuCashViaDialog(): Promise<boolean> {
       const result = await exportGnuCash(path);
       if (result.attachmentsSkipped > 0) {
         toast.warning(
-          `${plural(result.attachmentsSkipped, 'receipt')} not exported — GnuCash cannot store attached files`
+          `${plural(result.attachmentsSkipped, 'receipt')} not exported. GnuCash cannot store attached files`
         );
       }
       if (result.roundedAmounts > 0) {
         toast.warning(
-          `${plural(result.roundedAmounts, 'amount')} have more than 2 decimals — GnuCash rounds them on open`
+          `${plural(result.roundedAmounts, 'amount')} have more than 2 decimals. GnuCash rounds them on open`
         );
       }
       const parts = [
@@ -238,7 +238,7 @@ export async function exportGnuCashViaDialog(): Promise<boolean> {
       if (result.schedules > 0) parts.push(plural(result.schedules, 'schedule'));
       if (result.prices > 0) parts.push(plural(result.prices, 'price'));
       if (result.futureDated > 0) parts.push(`${result.futureDated} future-dated`);
-      return `Saved ${await basename(path)} — ${parts.join(' · ')}`;
+      return `Saved ${await basename(path)} (${parts.join(' · ')})`;
     },
     'GnuCash file'
   );

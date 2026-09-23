@@ -345,14 +345,14 @@ fn validate_delimiter(raw: &str) -> Result<u8, AppError> {
         "," => Ok(b','),
         ";" => Ok(b';'),
         other => Err(AppError::Validation(format!(
-            "Unsupported CSV delimiter: {other:?}"
+            "That delimiter doesn't look right: {other:?}. Use , or ;"
         ))),
     }
 }
 
 fn validate_export_path(path: &str) -> Result<(), AppError> {
     if path.trim().is_empty() {
-        return Err(AppError::Validation("Export path is required".to_string()));
+        return Err(AppError::Validation("Pick where to save that export".to_string()));
     }
     Ok(())
 }
@@ -382,7 +382,7 @@ fn validate_date_options(
             Ok(Some((parts, separator)))
         }
         other => Err(AppError::Validation(format!(
-            "Unsupported date format: {other}"
+            "That date format doesn't look right: {other}"
         ))),
     }
 }
@@ -416,15 +416,15 @@ fn build_csv_bytes(
         .from_writer(Vec::new());
     writer
         .write_record(headers)
-        .map_err(|e| AppError::Validation(format!("Failed to build CSV: {e}")))?;
+        .map_err(|e| AppError::Validation(format!("We couldn't put that CSV together: {e}")))?;
     for row in rows {
         writer
             .write_record(row)
-            .map_err(|e| AppError::Validation(format!("Failed to build CSV: {e}")))?;
+            .map_err(|e| AppError::Validation(format!("We couldn't put that CSV together: {e}")))?;
     }
     let mut bytes = writer
         .into_inner()
-        .map_err(|e| AppError::Validation(format!("Failed to build CSV: {e}")))?;
+        .map_err(|e| AppError::Validation(format!("We couldn't put that CSV together: {e}")))?;
     let mut out = Vec::with_capacity(bytes.len() + 3);
     out.extend_from_slice(b"\xEF\xBB\xBF");
     out.append(&mut bytes);

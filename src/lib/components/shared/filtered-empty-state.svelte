@@ -5,12 +5,12 @@
 
   /**
    * Standard filtered-empty state: SearchX icon, "No matching …" title,
-   * "Try adjusting your search." description and an outline Clear action.
+   * friendly retry hint and an outline Clear action.
    * Use for search-filtered tables; unfiltered empties keep bespoke copy.
    */
   let {
     title,
-    description = 'Try adjusting your search.',
+    description = 'Try a different search or clear the filters below.',
     onClear
   }: {
     title: string;

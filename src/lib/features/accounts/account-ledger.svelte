@@ -97,8 +97,8 @@
     {:else}
       <EmptyState
         card
-        title="No transactions"
-        description="Transactions for this account will appear here."
+        title="Nothing here yet"
+        description="Once you add transactions to this account, they'll show up here."
       >
         {#snippet icon()}
           <Receipt aria-hidden="true" class="text-muted-foreground" />

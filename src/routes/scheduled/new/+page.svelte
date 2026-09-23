@@ -7,22 +7,22 @@
   import type { Schedule } from '$lib/tauri';
 
   function handleSaved(schedule: Schedule) {
-    toast.success(`Created "${schedule.name}"`);
+    toast.success(`“${schedule.name}” is on repeat now`);
     void goto(resolve('/scheduled'), { replaceState: true });
   }
 </script>
 
 <svelte:head>
-  <title>New schedule — Spendo</title>
+  <title>New schedule · Spendo</title>
   <meta name="description" content="Create a recurring schedule with template splits." />
 </svelte:head>
 
-<BookGate title="New schedule" description="Create a recurring schedule with template splits">
+<BookGate title="New schedule" description="Set it once. We’ll remind you each time it’s due">
   <div class="mx-auto flex w-full max-w-5xl flex-col gap-6">
     <ScheduleForm
       mode="create"
       title="New schedule"
-      headerDescription="Nothing posts automatically — each due occurrence surfaces as a reminder to post or skip."
+      headerDescription="Set it once. We’ll remind you each time it’s due. Nothing posts without you."
       onSaved={handleSaved}
       onCancel={() => void goto(resolve('/scheduled'))}
       onError={(msg) => toast.error(msg)}

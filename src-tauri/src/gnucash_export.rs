@@ -277,7 +277,7 @@ fn fetch_export_data_inner(conn: &Connection) -> Result<ExportData, AppError> {
 
     if accounts.is_empty() {
         return Err(AppError::Validation(
-            "Book has no accounts — nothing to export".to_string(),
+            "Book has no accounts. Nothing to export".to_string(),
         ));
     }
 
@@ -591,7 +591,7 @@ fn choose_root(accounts: &[AccountRow]) -> Result<String, AppError> {
         .collect();
     let Some(first) = roots.first() else {
         return Err(AppError::Validation(
-            "Book has no ROOT account — nothing to export".to_string(),
+            "Book has no ROOT account. Nothing to export".to_string(),
         ));
     };
 
@@ -1496,7 +1496,7 @@ pub async fn export_gnucash(
 ) -> Result<GnuCashExportResult, String> {
     let path = PathBuf::from(input.path.trim());
     if path.as_os_str().is_empty() {
-        return Err("Export path is required".to_string());
+        return Err("Pick where to save that export".to_string());
     }
 
     let active = state.db_path.lock().map_err(|e| e.to_string())?.clone();

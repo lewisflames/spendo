@@ -158,7 +158,7 @@
       })
       .catch((e: unknown) => {
         if (cancelled) return;
-        onError?.(errMsg(e, 'Failed to load accounts'));
+        onError?.(errMsg(e, "We couldn't load your accounts. Please try again"));
       })
       .finally(() => {
         if (!cancelled) loading = false;
@@ -168,9 +168,9 @@
     };
   });
 
-  let nameError = $derived(!name.trim() ? 'Name is required' : '');
-  let typeError = $derived(ACCOUNT_TYPES.includes(accountType) ? '' : 'Pick an account type');
-  let currencyError = $derived(!placeholder && !commodityGuid ? 'Pick a currency' : '');
+  let nameError = $derived(!name.trim() ? 'Give this account a name' : '');
+  let typeError = $derived(ACCOUNT_TYPES.includes(accountType) ? '' : 'Choose an account type');
+  let currencyError = $derived(!placeholder && !commodityGuid ? 'Choose a currency' : '');
   let canSave = $derived(
     !saving && !deleting && !nameError && !typeError && !currencyError && !loading
   );
@@ -207,7 +207,7 @@
         onSaved?.(newGuid);
       }
     } catch (e: unknown) {
-      const msg = errMsg(e, 'Failed to save account');
+      const msg = errMsg(e, "We couldn't save this account. Please try again");
       formError = msg;
       onError?.(msg);
     } finally {
@@ -228,7 +228,7 @@
       open = false;
       onDeleted?.();
     } catch (e: unknown) {
-      const msg = errMsg(e, 'Failed to delete account');
+      const msg = errMsg(e, "We couldn't delete this account. Please try again");
       formError = msg;
       onError?.(msg);
     } finally {
@@ -243,10 +243,10 @@
       <Dialog.Title>{mode === 'edit' ? 'Edit account' : 'New account'}</Dialog.Title>
       <Dialog.Description>
         {#if mode === 'edit' && descendantCount > 0}
-          Changing the parent moves {descendantCount}
-          {descendantCount === 1 ? 'sub-account' : 'sub-accounts'} along with it.
+          Moving this also moves {descendantCount}
+          {descendantCount === 1 ? 'sub-account' : 'sub-accounts'} with it.
         {:else}
-          Names must be unique among siblings.
+          Sibling accounts can't share a name.
         {/if}
       </Dialog.Description>
     </Dialog.Header>
@@ -337,7 +337,7 @@
         <span class="text-sm">
           <span class="font-medium">Placeholder</span>
           <span class="block text-xs text-muted-foreground">
-            Grouping account: no splits directly, totals roll up from children.
+            Just for grouping. Totals roll up from below, and it can't hold money itself.
           </span>
         </span>
         <Switch bind:checked={placeholder} />
@@ -352,8 +352,8 @@
           role="alert"
           class="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
         >
-          Delete this account? Only empty accounts (no splits, sub-accounts or budgets) can be
-          deleted.
+          Delete this account? It needs to be empty first: no transactions, sub-accounts or budgets
+          attached.
         </p>
       {/if}
     </div>

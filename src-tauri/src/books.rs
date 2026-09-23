@@ -25,7 +25,7 @@ fn gnucash_guidance() -> String {
 /// actionable errors.
 fn validate_spendo_db_inner(path: &Path) -> Result<(), String> {
     if !path.is_file() {
-        return Err(format!("File not found: {}", path.display()));
+        return Err(format!("File not found. We couldn't find it: {}", path.display()));
     }
     // Extension hint first: a valid Spendo book renamed to .gnucash is still
     // opened via Import, never via Open.
@@ -33,13 +33,13 @@ fn validate_spendo_db_inner(path: &Path) -> Result<(), String> {
         return Err(gnucash_guidance());
     }
     let probe = db::connect_source_db(&path.to_path_buf())
-        .map_err(|e| format!("Failed to open file: {}", e))?;
+        .map_err(|e| format!("We couldn't open that file: {}", e))?;
 
     let app_id: Result<i32, _> = probe.query_row("PRAGMA application_id", [], |row| row.get(0));
     match app_id {
         Ok(id) if id == db::SPENDO_APP_ID => return Ok(()),
         // Not a SQLite database at all.
-        Err(_) => return Err(format!("Not a Spendo database: {}", path.display())),
+        Err(_) => return Err(format!("Not a Spendo database. That isn't a Spendo book: {}", path.display())),
         Ok(_) => {}
     }
 

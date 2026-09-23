@@ -52,9 +52,9 @@
     try {
       const result = await setBaseCurrency(v);
       setDbSession(result.summary);
-      toast.success(`Base currency set to ${v}`);
+      toast.success(`Now reporting in ${v}`);
     } catch (e: unknown) {
-      toast.error(errMsg(e, 'Failed to set base currency'));
+      toast.error(errMsg(e, "We couldn't change the currency. Please try again"));
     } finally {
       savingCurrency = false;
     }
@@ -71,7 +71,7 @@
 <Card.Root>
   <IconCardHeader
     title="Book"
-    description="Your book is a portable .spendo file. Open, create, import into or export from it via the menu at the bottom of the sidebar."
+    description="Your book lives in one portable .spendo file. Use the menu at the bottom of the sidebar to open, create, import or export."
   >
     {#snippet icon()}
       <HardDrive aria-hidden="true" class="size-4 text-muted-foreground" />
@@ -80,7 +80,7 @@
   <Card.Content class="flex flex-col gap-4">
     <SettingSelectRow
       label="Base currency"
-      description="Report currency for the book — revalues net worth, reports and portfolio"
+      description="What everything gets converted to in reports, net worth and portfolio"
     >
       {#if dbSession.value}
         <Select.Root
@@ -101,7 +101,7 @@
         </Select.Root>
       {:else}
         <span class="text-xs text-muted-foreground">
-          No book yet — start from <a href={resolve('/')} class="underline">Welcome</a>.
+          Nothing open yet. Start from <a href={resolve('/')} class="underline">Welcome</a>.
         </span>
       {/if}
     </SettingSelectRow>
@@ -110,7 +110,7 @@
         class="max-w-full flex-1 truncate rounded bg-muted px-2 py-1 font-mono text-xs text-muted-foreground"
         title={activePath ?? undefined}
       >
-        {activePath ?? 'No book open'}
+        {activePath ?? 'Nothing open right now'}
       </code>
       <Button
         variant="outline"
@@ -135,8 +135,8 @@
     <Dialog.Header>
       <Dialog.Title>Change base currency?</Dialog.Title>
       <Dialog.Description>
-        This revalues net worth, P&amp;L reports and portfolio totals to {pendingCurrency ?? ''}.
-        Past transactions keep their original amounts; only the report currency changes.
+        This converts net worth, P&amp;L and portfolio totals to {pendingCurrency ?? ''}. Past
+        transactions keep their original amounts; only the report currency changes.
       </Dialog.Description>
     </Dialog.Header>
     <Dialog.Footer>

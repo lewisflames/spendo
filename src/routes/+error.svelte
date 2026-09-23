@@ -15,7 +15,7 @@
 </script>
 
 <svelte:head>
-  <title>{page.status} — Spendo</title>
+  <title>{page.status} · Spendo</title>
 </svelte:head>
 
 <div class="flex flex-col gap-6">
@@ -23,16 +23,16 @@
     {#if isNotFound}
       <SearchX aria-hidden="true" class="size-16 text-muted-foreground" />
       <h1 class="text-6xl font-bold tracking-tight">404</h1>
-      <h2 class="text-xl font-semibold">Page not found</h2>
+      <h2 class="text-xl font-semibold">We can't find that page</h2>
       <p class="max-w-md text-sm text-muted-foreground">
-        The page you're looking for doesn't exist or has been moved.
+        That link doesn’t go anywhere anymore. It may have moved.
       </p>
     {:else}
       <Frown aria-hidden="true" class="size-16 text-destructive" />
       <h1 class="text-6xl font-bold tracking-tight">{page.status}</h1>
-      <h2 class="text-xl font-semibold">Something went wrong</h2>
+      <h2 class="text-xl font-semibold">That didn’t work</h2>
       <p class="max-w-md text-sm text-muted-foreground">
-        {page.error?.message ?? 'An unexpected error occurred.'}
+        {page.error?.message ?? 'Something hiccupped on our side. Try again, or head back.'}
       </p>
       <Button variant="outline" onclick={() => location.reload()}>
         <RefreshCw aria-hidden="true" class="size-4" />

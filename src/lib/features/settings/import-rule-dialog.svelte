@@ -75,11 +75,13 @@
       } else {
         await createImportRule(input);
       }
-      toast.success(rule ? 'Import rule updated' : 'Import rule added');
+      toast.success(
+        rule ? 'Rule updated. Future rows will follow it' : 'Rule added. Future rows will follow it'
+      );
       open = false;
       onSaved();
     } catch (e: unknown) {
-      toast.error(errMsg(e, 'Failed to save the rule'));
+      toast.error(errMsg(e, "We couldn't save this rule. Please try again"));
     } finally {
       saving = false;
     }
@@ -98,7 +100,7 @@
       open = false;
       onSaved();
     } catch (e: unknown) {
-      toast.error(errMsg(e, 'Failed to delete the rule'));
+      toast.error(errMsg(e, "We couldn't delete this rule. Please try again"));
     } finally {
       deleting = false;
     }
@@ -110,8 +112,7 @@
     <Dialog.Header>
       <Dialog.Title>{rule ? 'Edit import rule' : 'New import rule'}</Dialog.Title>
       <Dialog.Description>
-        A CSV row whose description matches goes to this account instead of the mapping step's
-        account.
+        When a row’s description matches, it lands here instead of the fallback account.
       </Dialog.Description>
     </Dialog.Header>
 

@@ -149,7 +149,7 @@ pub struct CsvCommitResult {
 fn validate_csv_path(path: &str) -> Result<PathBuf, AppError> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
-        return Err(AppError::Validation("CSV path is required".to_string()));
+        return Err(AppError::Validation("Pick a CSV file to get started".to_string()));
     }
     let p = PathBuf::from(trimmed);
     let ext = p
@@ -159,11 +159,11 @@ fn validate_csv_path(path: &str) -> Result<PathBuf, AppError> {
         .to_ascii_lowercase();
     if !matches!(ext.as_str(), "csv" | "txt" | "tsv") {
         return Err(AppError::Validation(format!(
-            "Not a CSV file (expected .csv/.txt/.tsv): {trimmed}"
+            "That doesn't look like a CSV file (.csv, .txt or .tsv): {trimmed}"
         )));
     }
     if !p.is_file() {
-        return Err(AppError::Validation(format!("File not found: {trimmed}")));
+        return Err(AppError::Validation(format!("We couldn't find that file: {trimmed}")));
     }
     Ok(p)
 }
@@ -171,14 +171,14 @@ fn validate_csv_path(path: &str) -> Result<PathBuf, AppError> {
 fn read_file_bytes(path: &str) -> Result<Vec<u8>, AppError> {
     let p = validate_csv_path(path)?;
     let bytes = std::fs::read(&p).map_err(|e| {
-        AppError::Validation(format!("Failed to read CSV file: {}", e))
+        AppError::Validation(format!("We couldn't read that CSV file: {}", e))
     })?;
     if bytes.is_empty() {
-        return Err(AppError::Validation("CSV file is empty".to_string()));
+        return Err(AppError::Validation("That CSV file is empty. Pick one with rows in it".to_string()));
     }
     if bytes.len() > MAX_FILE_BYTES {
         return Err(AppError::Validation(
-            "CSV file is too large (max 10 MB)".to_string(),
+            "That CSV file is over 10 MB. Trim it down and try again".to_string(),
         ));
     }
     Ok(bytes)
@@ -207,7 +207,7 @@ fn bytes_sha256(bytes: &[u8]) -> String {
 fn ensure_unchanged_file(bytes: &[u8], expected: &str) -> Result<(), AppError> {
     if bytes_sha256(bytes) != expected {
         return Err(AppError::Validation(
-            "CSV file changed since it was selected — pick the file again".to_string(),
+            "CSV file changed since it was selected. Pick the file again".to_string(),
         ));
     }
     Ok(())
@@ -295,7 +295,7 @@ fn sniff_delimiter(text: &str) -> char {
 fn parse_delimiter(raw: Option<&str>, text: &str) -> Result<(u8, String), AppError> {
     if let Some(d) = raw {
         let c = d.chars().next().ok_or_else(|| {
-            AppError::Validation("Delimiter must be a single character".to_string())
+            AppError::Validation("Pick a single character for the delimiter".to_string())
         })?;
         if !matches!(c, ',' | ';' | '\t' | '|') {
             return Err(AppError::Validation(format!(
@@ -317,7 +317,7 @@ fn parse_records(text: &str, delimiter: u8) -> Result<Vec<Vec<String>>, AppError
     let mut out = Vec::new();
     for record in reader.records() {
         let record =
-            record.map_err(|e| AppError::Validation(format!("Failed to parse CSV: {e}")))?;
+            record.map_err(|e| AppError::Validation(format!("We couldn't make sense of that CSV: {e}")))?;
         let cells: Vec<String> = record.iter().map(|c| c.to_string()).collect();
         // Skip blank lines (all cells whitespace-empty).
         if cells.iter().all(|c| c.trim().is_empty()) {
@@ -368,7 +368,7 @@ fn map_two_digit_year(yy: i32) -> i32 {
 fn parse_csv_date(raw: &str, preference: &str) -> Result<String, AppError> {
     let s = raw.trim();
     if s.is_empty() {
-        return Err(AppError::Validation("Date is required".to_string()));
+        return Err(AppError::Validation("Add a date to every row".to_string()));
     }
     // ISO datetime prefix: `2024-03-01T…` / `2024-03-01 10:00`.
     let first_token = s.split(['T', ' ']).next().unwrap_or(s).trim();
@@ -448,7 +448,7 @@ fn parse_csv_date(raw: &str, preference: &str) -> Result<String, AppError> {
 fn parse_csv_amount(raw: &str, dot_is_thousands: bool) -> Result<f64, AppError> {
     let s = raw.trim();
     if s.is_empty() {
-        return Err(AppError::Validation("Amount is required".to_string()));
+        return Err(AppError::Validation("Add an amount to every row".to_string()));
     }
     // Typographic minus/dash variants would otherwise be dropped by the filter
     // below, silently flipping a debit into a credit.
@@ -474,7 +474,7 @@ fn parse_csv_amount(raw: &str, dot_is_thousands: bool) -> Result<f64, AppError> 
     }
     let mut normalized: String = kept.chars().filter(|c| *c != ' ' && *c != '\'' && *c != '’').collect();
     if normalized.is_empty() || normalized == "-" || normalized == "+" {
-        return Err(AppError::Validation(format!("Invalid amount: {s}")));
+        return Err(AppError::Validation(format!("That amount doesn't look right: {s}")));
     }
     let has_comma = normalized.contains(',');
     let has_dot = normalized.contains('.');
@@ -520,15 +520,15 @@ fn parse_csv_amount(raw: &str, dot_is_thousands: bool) -> Result<f64, AppError> 
     }
     let mut value: f64 = normalized
         .parse()
-        .map_err(|_| AppError::Validation(format!("Invalid amount: {s}")))?;
+        .map_err(|_| AppError::Validation(format!("That amount doesn't look right: {s}")))?;
     if negative_parens {
         value = -value.abs();
     }
     if !value.is_finite() {
-        return Err(AppError::Validation(format!("Invalid amount: {s}")));
+        return Err(AppError::Validation(format!("That amount doesn't look right: {s}")));
     }
     if value.abs() > 1_000_000_000.0 {
-        return Err(AppError::Validation("Split amount is too large".to_string()));
+        return Err(AppError::Validation("That amount is huge. Keep it under 1,000,000,000".to_string()));
     }
     Ok(value)
 }
@@ -643,16 +643,16 @@ pub(crate) fn ensure_postable_account(
         .optional()
         .map_err(AppError::from)?;
     let Some((placeholder, account_type)) = row else {
-        return Err(AppError::NotFound(format!("{label} account not found")));
+        return Err(AppError::NotFound(format!("{label} account not found. It may have been removed")));
     };
     if account_type == "ROOT" {
         return Err(AppError::Validation(format!(
-            "{label} account is the root account and cannot hold splits"
+            "{label} account is the root account. Pick one below it"
         )));
     }
     if placeholder != 0 {
         return Err(AppError::Validation(format!(
-            "{label} account is a placeholder and cannot hold splits"
+            "{label} account just groups things. Pick one that holds money"
         )));
     }
     Ok(())
@@ -661,12 +661,12 @@ pub(crate) fn ensure_postable_account(
 fn validate_accounts(conn: &Connection, target: &str, offset: &str) -> Result<(), AppError> {
     if target.trim().is_empty() || offset.trim().is_empty() {
         return Err(AppError::Validation(
-            "Target and offset accounts are required".to_string(),
+            "Pick both accounts for the import".to_string(),
         ));
     }
     if target == offset {
         return Err(AppError::Validation(
-            "Target and offset accounts must differ".to_string(),
+            "Pick two different accounts. Money needs somewhere to go".to_string(),
         ));
     }
     // The internal ROOT is not a real account: posting to it corrupts the
@@ -843,7 +843,7 @@ fn parse_amount_cell(
         let a_raw = cell_at(cells, mapping.amount_col);
         let amount = parse_csv_amount(&a_raw, dot_is_thousands)?;
         if amount == 0.0 {
-            return Err(AppError::Validation("Amount must not be zero".to_string()));
+            return Err(AppError::Validation("Amounts can't be zero. Skip the row or add a value".to_string()));
         }
         Ok(amount)
     }
@@ -860,7 +860,7 @@ fn parse_file_rows(
 ) -> Result<ParsedFile, AppError> {
     let column_count = records.iter().map(|r| r.len()).max().unwrap_or(0);
     if column_count == 0 {
-        return Err(AppError::Validation("CSV has no columns".to_string()));
+        return Err(AppError::Validation("That CSV has no columns. Check the delimiter and try again".to_string()));
     }
     let use_pair = validate_mapping(mapping, column_count)?;
     validate_accounts(conn, target_guid, offset_guid)?;
@@ -1091,14 +1091,14 @@ fn load_preset(conn: &Connection, signature: &str) -> Result<Option<CsvPreset>, 
     match json {
         Some(json) => serde_json::from_str(&json)
             .map(Some)
-            .map_err(|e| AppError::Validation(format!("Saved mapping is unreadable: {e}"))),
+            .map_err(|e| AppError::Validation(format!("We couldn't read that saved mapping: {e}"))),
         None => Ok(None),
     }
 }
 
 fn save_preset(conn: &Connection, preset: &CsvPreset) -> Result<(), AppError> {
     let json = serde_json::to_string(preset)
-        .map_err(|e| AppError::Validation(format!("Failed to store mapping: {e}")))?;
+        .map_err(|e| AppError::Validation(format!("We couldn't remember that mapping: {e}")))?;
     conn.execute(
         "INSERT INTO csv_import_presets (signature, name, mapping_json, updated_at)
          VALUES (?1, ?2, ?3, ?4)
@@ -1450,7 +1450,7 @@ fn select_rows_to_insert(
     }
     if to_insert.is_empty() {
         return Err(AppError::Validation(
-            "Nothing to import — all selected rows are duplicates or errors".to_string(),
+            "Nothing to import. All selected rows are duplicates or errors".to_string(),
         ));
     }
     Ok(StagedSelection {

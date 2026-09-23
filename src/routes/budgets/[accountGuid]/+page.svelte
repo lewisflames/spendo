@@ -52,7 +52,7 @@
       ]);
       return { detail, range, accounts };
     },
-    label: 'Failed to load budget',
+    label: "We couldn't load this budget",
     onSuccess: () => by.clampSelection()
   });
 
@@ -104,7 +104,7 @@
 </script>
 
 <svelte:head>
-  <title>{accountName} — Spendo</title>
+  <title>{accountName} · Spendo</title>
   <meta name="description" content="Yearly budget for this account." />
 </svelte:head>
 

@@ -71,7 +71,7 @@
       const { prevFrom, prevTo } = computePrevRange(range.dateFrom, range.dateTo);
       return fetchPnlReport(range.dateFrom, range.dateTo, prevFrom, prevTo);
     },
-    label: 'Failed to load P&L'
+    label: "We couldn't load this report"
   });
 
   let pnlData = $derived(res.data);
@@ -79,7 +79,7 @@
   const trend = useAsyncData({
     enabled: () => !!dbSession.value && !!range.dateFrom && !!range.dateTo && range.rangeValid,
     fetch: () => fetchPnlTrend(range.dateFrom, range.dateTo),
-    label: 'Failed to load P&L trend'
+    label: "We couldn't load that chart"
   });
 
   let trendData = $derived(trend.data);
@@ -106,11 +106,11 @@
 </script>
 
 <svelte:head>
-  <title>Profit &amp; Loss — Spendo</title>
+  <title>Profit &amp; Loss · Spendo</title>
   <meta name="description" content="Profit and loss statement for a selected period." />
 </svelte:head>
 
-<BookGate title="Profit & Loss" description="Income and expense statement for a selected period">
+<BookGate title="Profit & Loss" description="What came in and what went out">
   <div class="flex flex-col gap-6">
     <PageHeader
       title="Profit & Loss"
@@ -125,7 +125,7 @@
 
     {#if !range.rangeValid}
       <ErrorCard
-        message="Start date must not be after end date — adjust the period to generate the report."
+        message="Start date must not be after end date. Adjust the period to generate the report."
       />
     {/if}
     {#if !pnlData && (res.loading || dbBootstrapping.value) && range.rangeValid && !res.error}

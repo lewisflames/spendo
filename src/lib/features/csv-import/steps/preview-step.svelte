@@ -69,7 +69,7 @@
 <div class="flex flex-col gap-4">
   <Card.Root>
     <Card.Header>
-      <Card.Title>Dry-run preview</Card.Title>
+      <Card.Title>Check it before it counts</Card.Title>
       <Card.Description>
         {preview.validCount} ready · {preview.duplicateCount} duplicates (pre-unchecked) ·
         {preview.errorCount} errors · {selected.size} selected{#if rulesApplied > 0}
@@ -176,7 +176,8 @@
       </div>
       {#if preview.errorCount > 0}
         <p class="mt-2 text-xs text-muted-foreground">
-          Rows with errors stay disabled. Fix the mapping or the file, then re-run preview.
+          Anything with an error stays switched off. Tweak the mapping or the file, then preview
+          again.
         </p>
       {/if}
     </Card.Content>

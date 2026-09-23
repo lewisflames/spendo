@@ -79,7 +79,7 @@
   <EmptyState
     card
     title="No accounts hold this security"
-    description="The price history is tracked without an open position in your book."
+    description="We’re still tracking prices. You just don’t hold any of it right now."
   >
     {#snippet icon()}
       <Briefcase aria-hidden="true" class="text-muted-foreground" />

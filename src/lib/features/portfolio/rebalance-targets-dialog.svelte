@@ -96,9 +96,9 @@
       );
       onSaved(new Map(rows.map((r) => [r.commodityGuid, r.targetPct])));
       open = false;
-      toast.success('Allocation targets saved');
+      toast.success('Targets saved. Looking balanced');
     } catch (e: unknown) {
-      formError = errMsg(e, 'Failed to save allocation targets');
+      formError = errMsg(e, "We couldn't save your targets. Please try again");
     } finally {
       saving = false;
     }
@@ -110,8 +110,8 @@
     <Dialog.Header>
       <Dialog.Title>Allocation targets</Dialog.Title>
       <Dialog.Description>
-        Set each holding's share of the portfolio. Targets must add up to 100% — nothing is sold,
-        cash covers the buys.
+        How much of the pie should each holding be? Add up to 100%. This only plans, cash covers the
+        buys.
       </Dialog.Description>
     </Dialog.Header>
 
@@ -154,12 +154,10 @@
         {/if}
       </p>
       {#if hasBadValues}
-        <p class="text-xs text-destructive" role="alert">
-          Every target must be between 0 and 100%.
-        </p>
+        <p class="text-xs text-destructive" role="alert">Keep each target between 0 and 100%.</p>
       {:else if !sumValid}
         <p class="text-xs text-destructive" role="alert">
-          Targets add up to {formatAllocPct(result.targetSumPct)} — they must total 100%.
+          You’re at {formatAllocPct(result.targetSumPct)}. Aim for 100% total.
         </p>
       {/if}
       {#if result.unallocatedCount > 0}

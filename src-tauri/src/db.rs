@@ -85,7 +85,7 @@ where
 /// take the DB lock, so the check is authoritative once the lock is held.
 pub(crate) fn ensure_same_book(book_generation: &AtomicU64, expected: u64) -> Result<(), String> {
     if book_generation.load(std::sync::atomic::Ordering::SeqCst) != expected {
-        return Err("Book changed while the operation was preparing — try again".to_string());
+        return Err("Book changed while the operation was preparing. Please try again".to_string());
     }
     Ok(())
 }

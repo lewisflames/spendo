@@ -51,7 +51,7 @@
   <Card.Header>
     <Card.Title>Statement</Card.Title>
     <Card.Description>
-      Enter the bank statement ending balance and date, then check off cleared transactions.
+      Type in the ending balance and date from your statement, then tick off what cleared the bank.
       {checkedCount} of {plural(totalCount, 'candidate')} cleared.
     </Card.Description>
   </Card.Header>
@@ -105,11 +105,11 @@
       </Button>
       {#if dirty}
         <p class="text-sm text-muted-foreground">
-          Unsaved changes — save progress now, or they will be saved when you finish.
+          You’ve got unsaved changes. Save now, or we’ll save them when you finish.
         </p>
       {:else if !balanced}
         <p class="text-sm text-muted-foreground">
-          Difference must be zero to finish. Check off cleared transactions.
+          Get the difference to zero to finish. Tick off what cleared the bank.
         </p>
       {/if}
     </div>

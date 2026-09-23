@@ -30,7 +30,7 @@
   const res = useAsyncData({
     enabled: () => !!dbSession.value,
     fetch: fetchSchedules,
-    label: 'Failed to load scheduled transactions'
+    label: "We couldn't load your schedules"
   });
 
   let busyGuid = $state<string | null>(null);
@@ -46,11 +46,11 @@
     busyGuid = schedule.guid;
     try {
       const txGuid = await postScheduleOccurrence(schedule.guid);
-      toast.success(`Posted "${schedule.name}"`);
+      toast.success(`Added "${schedule.name}" to your ledger`);
       await refreshAfterMutation();
       await openTransaction(txGuid);
     } catch (e: unknown) {
-      toast.error(errMsg(e, 'Failed to post occurrence'));
+      toast.error(errMsg(e, "We couldn't post that occurrence"));
     } finally {
       busyGuid = null;
     }
@@ -63,12 +63,12 @@
       const next = await skipScheduleOccurrence(schedule.guid);
       toast.success(
         next
-          ? `Skipped "${schedule.name}" — next due ${formatDate(next)}`
+          ? `Skipped "${schedule.name}". Next due ${formatDate(next)}`
           : `Skipped "${schedule.name}"`
       );
       await refreshAfterMutation();
     } catch (e: unknown) {
-      toast.error(errMsg(e, 'Failed to skip occurrence'));
+      toast.error(errMsg(e, "We couldn't skip that occurrence"));
     } finally {
       busyGuid = null;
     }
@@ -82,7 +82,7 @@
       toast.success(schedule.active ? `Paused "${schedule.name}"` : `Resumed "${schedule.name}"`);
       res.reload();
     } catch (e: unknown) {
-      toast.error(errMsg(e, 'Failed to update schedule'));
+      toast.error(errMsg(e, "We couldn't update that schedule"));
     } finally {
       busyGuid = null;
     }
@@ -90,20 +90,20 @@
 </script>
 
 <svelte:head>
-  <title>Scheduled — Spendo</title>
+  <title>Scheduled · Spendo</title>
   <meta
     name="description"
-    content="Recurring transactions with manual reminders. Nothing posts automatically."
+    content="Bills and paychecks you revisit. You stay in control. Nothing posts on its own."
   />
 </svelte:head>
 
-<BookGate title="Scheduled" description="Recurring transactions and reminders">
+<BookGate title="Scheduled" description="Bills and paychecks, on repeat">
   <div class="flex flex-col gap-6">
     <PageHeader
       title="Scheduled"
       description={res.data
-        ? `Recurring transactions and reminders · ${plural(res.data.length, 'schedule')}`
-        : 'Recurring transactions and reminders'}
+        ? `Bills and paychecks on repeat · ${plural(res.data.length, 'schedule')}`
+        : 'Bills and paychecks, on repeat'}
     >
       {#if dbSession.value}
         <Button href={resolve('/scheduled/new')}>
@@ -122,8 +122,8 @@
       {#if res.data.length === 0}
         <EmptyState
           card
-          title="No scheduled transactions"
-          description="Set up rent, subscriptions or paychecks — due occurrences surface as reminders to post or skip. Nothing posts automatically."
+          title="Nothing on repeat yet"
+          description="Set up rent, subscriptions or paydays. We’ll nudge you when one’s due. Nothing posts without you."
         >
           {#snippet icon()}
             <CalendarClock aria-hidden="true" class="text-muted-foreground" />

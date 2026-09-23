@@ -20,7 +20,7 @@
       if (!id) return Promise.reject(new Error('No schedule selected'));
       return fetchSchedule(id);
     },
-    label: 'Failed to load schedule'
+    label: "We couldn't load this schedule"
   });
 
   let schedule = $derived(res.data ?? null);
@@ -30,7 +30,7 @@
   }
 
   function handleSaved(updated: Schedule) {
-    toast.success(`Updated "${updated.name}"`);
+    toast.success(`Updated “${updated.name}”`);
     goBack();
   }
 
@@ -41,11 +41,11 @@
 </script>
 
 <svelte:head>
-  <title>{schedule ? `Edit ${schedule.name} — Spendo` : 'Edit schedule — Spendo'}</title>
+  <title>{schedule ? `Edit ${schedule.name} · Spendo` : 'Edit schedule · Spendo'}</title>
   <meta name="description" content="Edit a recurring schedule and its template splits." />
 </svelte:head>
 
-<BookGate title="Edit schedule" description="Edit a recurring schedule and its template splits">
+<BookGate title="Edit schedule" description="Tweak the rhythm. Future reminders follow along">
   <div class="mx-auto flex w-full max-w-5xl flex-col gap-6">
     {#if (res.loading || dbBootstrapping.value) && !res.data}
       <PageSkeleton variant="form" />
@@ -55,7 +55,7 @@
           mode="edit"
           guid={schedule.guid}
           title="Edit schedule"
-          headerDescription={`${schedule.name} · Nothing posts automatically — each due occurrence surfaces as a reminder to post or skip.`}
+          headerDescription={`${schedule.name} · Nothing posts without you. Due dates just nudge you to post or skip.`}
           initial={schedule}
           onSaved={handleSaved}
           onDeleted={handleDeleted}

@@ -19,7 +19,7 @@
 
   $effect(() => {
     loadBookSettings().catch((e: unknown) => {
-      bookSettingsError = errMsg(e, 'Failed to load book settings');
+      bookSettingsError = errMsg(e, "We couldn't load your book settings");
     });
   });
 
@@ -29,24 +29,24 @@
     try {
       await loadBookSettings(true);
     } catch (e: unknown) {
-      bookSettingsError = errMsg(e, 'Failed to load book settings');
+      bookSettingsError = errMsg(e, "We couldn't load your book settings");
     }
   }
 
   function handleResetPreferences() {
     resetSettings();
     customDraft = DEFAULT_CUSTOM_PRIMARY;
-    toast.success('Preferences reset to defaults');
+    toast.success('Back to defaults. Fresh start');
   }
 </script>
 
 <svelte:head>
-  <title>Settings — Spendo</title>
+  <title>Settings · Spendo</title>
   <meta name="description" content="Configure Spendo preferences" />
 </svelte:head>
 
 <div class="flex flex-col gap-6">
-  <PageHeader title="Settings" description="Configure your preferences" />
+  <PageHeader title="Settings" description="Make Spendo yours" />
 
   <AppearanceCard bind:customDraft />
 

@@ -108,7 +108,7 @@
     <Card.Content class="grid gap-4 md:grid-cols-2">
       {#if presetApplied}
         <div class="flex items-center gap-2 md:col-span-2">
-          <p class="text-sm text-muted-foreground">Saved mapping applied for this layout.</p>
+          <p class="text-sm text-muted-foreground">We reused your saved mapping for this layout.</p>
           <Button variant="ghost" size="sm" onclick={onForgetPreset}>Forget</Button>
         </div>
       {/if}
@@ -147,7 +147,9 @@
       </div>
       <div class="flex items-center gap-2 md:col-span-2">
         <Checkbox checked={usePair} onCheckedChange={(v) => (usePair = v === true)} id="csv-pair" />
-        <label for="csv-pair" class="text-sm">My file has separate Debit / Credit columns</label>
+        <label for="csv-pair" class="text-sm"
+          >This file splits money in and out into two columns</label
+        >
       </div>
       {#if usePair}
         <div class="flex flex-col gap-2">
@@ -235,7 +237,7 @@
         </Select.Root>
       </div>
       <div class="flex flex-col gap-2">
-        <span class="text-sm font-medium">Target account (statement)</span>
+        <span class="text-sm font-medium">Which account is this statement for?</span>
         <AccountPicker
           bind:value={targetAccountGuid}
           options={pickerOptions}
@@ -243,7 +245,7 @@
         />
       </div>
       <div class="flex flex-col gap-2">
-        <span class="text-sm font-medium">Fallback category (used when no rule matches)</span>
+        <span class="text-sm font-medium">Fallback category (when no rule matches)</span>
         <AccountPicker
           bind:value={offsetAccountGuid}
           options={pickerOptions}
@@ -303,7 +305,9 @@
             onCheckedChange={(v) => (rememberMapping = v === true)}
             id="csv-remember"
           />
-          <label for="csv-remember" class="text-sm">Remember this mapping for this bank</label>
+          <label for="csv-remember" class="text-sm"
+            >Remember this for next time with this bank</label
+          >
         </div>
       {/if}
     </Card.Content>

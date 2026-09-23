@@ -23,13 +23,13 @@
   const rulesRes = useAsyncData({
     enabled: () => true,
     fetch: fetchImportRules,
-    label: 'Failed to load import rules'
+    label: "We couldn't load your import rules"
   });
 
   const accountsRes = useAsyncData({
     enabled: () => true,
     fetch: fetchAccounts,
-    label: 'Failed to load accounts'
+    label: "We couldn't load your accounts"
   });
 
   const rules = $derived(rulesRes.data ?? []);
@@ -75,7 +75,7 @@
       await updateImportRule(adjacent.id, ruleInput(adjacent, current.priority));
       rulesRes.reload();
     } catch (e: unknown) {
-      toast.error(errMsg(e, 'Failed to reorder import rules'));
+      toast.error(errMsg(e, "We couldn't reorder your rules. Please try again"));
     } finally {
       movingId = null;
     }
@@ -94,7 +94,7 @@
       rulesRes.reload();
       toast.success('Import rule deleted');
     } catch (e: unknown) {
-      toast.error(errMsg(e, 'Failed to delete the rule'));
+      toast.error(errMsg(e, "We couldn't delete this rule. Please try again"));
     } finally {
       deletingId = null;
     }
@@ -104,7 +104,7 @@
 <Card.Root>
   <IconCardHeader
     title="Import rules"
-    description="CSV rows whose description matches a rule post to that category; the mapping step's account is the fallback."
+    description="When a row’s description matches a rule, it goes straight to that category. Otherwise it falls back to the mapping step’s account."
   >
     {#snippet icon()}
       <ListFilter aria-hidden="true" class="size-4 text-muted-foreground" />
@@ -116,7 +116,7 @@
         {#if rules.length > 0}
           {plural(rules.length, 'rule')}
         {:else}
-          No rules yet
+          Nothing yet
         {/if}
       </p>
       <Button variant="outline" size="sm" onclick={openCreate}>
@@ -126,7 +126,7 @@
     </div>
 
     {#if rulesRes.loading && !rulesRes.data}
-      <p class="py-2 text-sm text-muted-foreground">Loading rules…</p>
+      <p class="py-2 text-sm text-muted-foreground">Finding your rules…</p>
     {:else if rulesRes.error}
       <ErrorCard message={rulesRes.error} onRetry={() => rulesRes.reload()} />
     {:else if rules.length > 0}
@@ -213,7 +213,7 @@
     {:else}
       <EmptyState
         title="No import rules"
-        description="Add a rule to route CSV rows whose description matches to a category."
+        description="Tell Spendo where to file rows whose description matches some text."
       >
         {#snippet icon()}
           <ListFilter aria-hidden="true" class="text-muted-foreground" />

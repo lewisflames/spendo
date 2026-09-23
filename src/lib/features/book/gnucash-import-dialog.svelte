@@ -38,7 +38,7 @@
     <Dialog.Content class="max-h-[90vh] overflow-y-auto sm:max-w-lg">
       <Dialog.Header>
         <Dialog.Title>Import {preview.filename}?</Dialog.Title>
-        <Dialog.Description>This merges the file into the active book.</Dialog.Description>
+        <Dialog.Description>We’ll fold this file into the book you’ve got open.</Dialog.Description>
       </Dialog.Header>
 
       <div class="grid grid-cols-3 gap-3 rounded-md border p-3">
@@ -76,7 +76,7 @@
           </p>
           <ul class="mt-2 space-y-1 text-muted-foreground">
             {#each shownSkipped as skipped, i (i)}
-              <li>{skipped.name} — {skipped.reason}</li>
+              <li>{skipped.name}: {skipped.reason}</li>
             {/each}
             {#if skippedSchedules.length > shownSkipped.length}
               <li>and {skippedSchedules.length - shownSkipped.length} more</li>
@@ -87,7 +87,7 @@
 
       {#if hasRemovals}
         <div class="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm">
-          <p>Some data in this book is not present in the source file.</p>
+          <p>Some of what’s in your book isn’t in this file.</p>
           <p class="mt-2 text-muted-foreground">
             {preview.accountsOrphaned} accounts · {preview.transactionsOrphaned} transactions would be
             removed.
@@ -100,7 +100,7 @@
           <div class="mt-3 flex items-start gap-2">
             <Checkbox id="gnucash-delete-orphans" bind:checked={deleteOrphans} />
             <label for="gnucash-delete-orphans" class="font-medium">
-              Delete data that isn't in the source file
+              Also remove what’s missing from the file
             </label>
           </div>
         </div>

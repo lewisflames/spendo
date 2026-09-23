@@ -67,7 +67,7 @@
       if (!g) return Promise.reject(new Error('No holding selected'));
       return fetchHoldingDetail(g, pg, pageSize);
     },
-    label: 'Failed to load holding',
+    label: "We couldn't load this holding",
     onSuccess: (result) => {
       // The backend clamps out-of-range pages; snap back to the valid page
       // (possible after shrinking pageSize).
@@ -83,7 +83,7 @@
   const overridesRes = useAsyncData({
     enabled: () => !!dbSession.value,
     fetch: fetchSymbolOverrides,
-    label: 'Failed to load Yahoo symbol overrides'
+    label: "We couldn't load your symbols"
   });
 
   let overrideSymbol = $derived(
@@ -101,7 +101,7 @@
 
   async function handleSymbolSave() {
     overridesRes.reload();
-    toast.success('Yahoo symbol saved — refreshing prices to apply it');
+    toast.success('Symbol saved. Grabbing fresh prices');
     await priceRefresh.refresh();
   }
   let currency = $derived(sessionCurrency());
@@ -119,7 +119,7 @@
 </script>
 
 <svelte:head>
-  <title>{name} — Spendo</title>
+  <title>{name} · Spendo</title>
   <meta name="description" content="Holding detail: price history, value trend and accounts." />
 </svelte:head>
 
@@ -169,7 +169,7 @@
           title="Price History"
           description={priceHistoryDescription}
           loading={false}
-          emptyMessage="No price history found — set the Yahoo symbol, then refresh prices."
+          emptyMessage="No price history found. Set the Yahoo symbol, then refresh prices."
           data={res.data.priceHistory}
           getX={(d: PriceHistoryEntry) => parseLocalDate(d.date)}
           yField="price"
@@ -239,8 +239,8 @@
   {:else if notFound}
     <EmptyState
       card
-      title="Holding not found"
-      description="This security does not exist in your book."
+      title="Can’t find that holding"
+      description="It may have been sold, or never made it into this book."
     >
       {#snippet icon()}
         <TrendingUp aria-hidden="true" class="text-muted-foreground" />

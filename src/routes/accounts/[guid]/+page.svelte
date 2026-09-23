@@ -116,7 +116,7 @@
         sortDir
       );
     },
-    label: 'Failed to load account transactions',
+    label: "We couldn't load this account's transactions",
     onSuccess: (result) => {
       pg = result.page;
     }
@@ -160,13 +160,13 @@
 <svelte:head>
   <title
     >{res.data
-      ? `${res.data.account.description ?? res.data.account.name} — Spendo`
-      : 'Account — Spendo'}</title
+      ? `${res.data.account.description ?? res.data.account.name} · Spendo`
+      : 'Account · Spendo'}</title
   >
-  <meta name="description" content="Account transactions and balance." />
+  <meta name="description" content="What’s come and gone for this account." />
 </svelte:head>
 
-<BookGate title="Account" description="Account transactions and balance.">
+<BookGate title="Account" description="What’s come and gone, and where you stand.">
   <div class="flex flex-col gap-6">
     {#if (res.loading || dbBootstrapping.value) && !res.data}
       <PageHeaderSkeleton />

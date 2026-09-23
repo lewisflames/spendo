@@ -175,24 +175,24 @@ pub struct HeatmapPoint {
 fn validate_post_date(post_date: &str) -> Result<String, AppError> {
     let trimmed = post_date.trim();
     if trimmed.is_empty() {
-        return Err(AppError::Validation("Date is required".to_string()));
+        return Err(AppError::Validation("Pick a date for this transaction".to_string()));
     }
     let normalized = utils::validate_iso_date(trimmed).map_err(AppError::Validation)?;
     // Local "today" so users east of UTC can post their current day (matches
     // the frontend's `todayStr` and the visibility window).
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     if normalized > today {
-        return Err(AppError::Validation("Future dates are not allowed".to_string()));
+        return Err(AppError::Validation("Future dates stay out of balances. Use today or earlier".to_string()));
     }
     Ok(normalized)
 }
 
 fn to_value_rational(amount: f64) -> Result<(i64, i64), AppError> {
     if !amount.is_finite() {
-        return Err(AppError::Validation("Split amounts must be finite numbers".to_string()));
+        return Err(AppError::Validation("Split amounts need to be real numbers".to_string()));
     }
     if amount.abs() > 1_000_000_000.0 {
-        return Err(AppError::Validation("Split amount is too large".to_string()));
+        return Err(AppError::Validation("That split amount is huge. Keep it under 1,000,000,000".to_string()));
     }
     let scaled = amount * VALUE_DENOM as f64;
     let rounded = scaled.round();
@@ -202,7 +202,7 @@ fn to_value_rational(amount: f64) -> Result<(i64, i64), AppError> {
     let tolerance = 1e-6 + scaled.abs() * f64::EPSILON * 4.0;
     if (scaled - rounded).abs() > tolerance {
         return Err(AppError::Validation(
-            "Split amount cannot be represented (max 4 decimal places)".to_string(),
+            "That amount has too many decimals (4 max)".to_string(),
         ));
     }
     Ok((rounded as i64, VALUE_DENOM))
@@ -210,10 +210,10 @@ fn to_value_rational(amount: f64) -> Result<(i64, i64), AppError> {
 
 fn to_quantity_rational(qty: f64) -> Result<(i64, i64), AppError> {
     if !qty.is_finite() {
-        return Err(AppError::Validation("Split quantities must be finite numbers".to_string()));
+        return Err(AppError::Validation("Share counts need to be real numbers".to_string()));
     }
     if qty.abs() > 1_000_000_000.0 {
-        return Err(AppError::Validation("Split quantity is too large".to_string()));
+        return Err(AppError::Validation("That share count is huge. Keep it under 1,000,000,000".to_string()));
     }
     let num = (qty * QUANTITY_DENOM as f64).round() as i64;
     Ok((num, QUANTITY_DENOM))
@@ -274,16 +274,16 @@ pub(crate) fn validate_tx_body_with(
     lookup: &dyn Fn(&str) -> Result<Option<SplitAccountInfo>, AppError>,
 ) -> Result<(), AppError> {
     if input.splits.len() < 2 {
-        return Err(AppError::Validation("A transaction needs at least two splits".to_string()));
+        return Err(AppError::Validation("A transaction needs at least two splits so both sides balance".to_string()));
     }
     if input.splits.len() > 50 {
-        return Err(AppError::Validation("Too many splits (max 50)".to_string()));
+        return Err(AppError::Validation("Keep it to 50 splits or fewer".to_string()));
     }
     let mut sum = 0.0;
     for (i, s) in input.splits.iter().enumerate() {
         let n = i + 1;
         if s.account_guid.trim().is_empty() {
-            return Err(AppError::Validation(format!("Split {n}: account is required")));
+            return Err(AppError::Validation(format!("Split {n}: choose an account")));
         }
         let account = lookup(s.account_guid.trim())?;
         let Some(SplitAccountInfo {
@@ -291,51 +291,51 @@ pub(crate) fn validate_tx_body_with(
             account_type,
         }) = account
         else {
-            return Err(AppError::NotFound(format!("Split {n}: account not found")));
+            return Err(AppError::NotFound(format!("Split {n}: account not found. It may have been removed")));
         };
         // The internal ROOT is not a real account: posting to it corrupts the
         // balance-sheet identity (the picker never offers it).
         if account_type == "ROOT" {
             return Err(AppError::Validation(format!(
-                "Split {n}: the root account cannot hold splits"
+                "Split {n}: the root account just holds everything together. Pick one below it"
             )));
         }
         if placeholder != 0 {
-            return Err(AppError::Validation(format!("Split {n}: placeholder accounts cannot hold splits")));
+            return Err(AppError::Validation(format!("Split {n}: placeholder accounts just group things. Pick a real one")));
         }
         if !s.amount.is_finite() {
-            return Err(AppError::Validation(format!("Split {n}: amount must be a number")));
+            return Err(AppError::Validation(format!("Split {n}: enter an amount")));
         }
         if let Some(q) = s.quantity {
             if !q.is_finite() {
-                return Err(AppError::Validation(format!("Split {n}: quantity must be a number")));
+                return Err(AppError::Validation(format!("Split {n}: enter the share count as a number")));
             }
         }
         if let Some(ref memo) = s.memo {
             if memo.len() > 500 {
-                return Err(AppError::Validation(format!("Split {n}: memo is too long (max 500)")));
+                return Err(AppError::Validation(format!("Split {n}: keep the memo under 500 characters")));
             }
         }
         sum += s.amount;
     }
     if sum.abs() > BALANCE_EPS {
         return Err(AppError::Validation(format!(
-            "Splits are out of balance by {sum:.2} — debits must equal credits"
+            "Splits are out of balance by {sum:.2}. Debits should equal credits"
         )));
     }
     if let Some(ref d) = input.description {
         if d.len() > 500 {
-            return Err(AppError::Validation("Description is too long (max 500)".to_string()));
+            return Err(AppError::Validation("Keep the description under 500 characters".to_string()));
         }
     }
     if let Some(ref n) = input.num {
         if n.len() > 100 {
-            return Err(AppError::Validation("Number is too long (max 100)".to_string()));
+            return Err(AppError::Validation("Keep the number under 100 characters".to_string()));
         }
     }
     if let Some(ref n) = input.notes {
         if n.len() > 2000 {
-            return Err(AppError::Validation("Notes are too long (max 2000)".to_string()));
+            return Err(AppError::Validation("Keep notes under 2000 characters".to_string()));
         }
     }
 
@@ -805,7 +805,7 @@ pub(crate) fn insert_split_rows(
         let sum: i64 = converted.iter().map(|(num, _, _, _)| *num).sum();
         if sum != 0 {
             return Err(AppError::Validation(
-                "Splits are out of balance after rounding — adjust the amounts".to_string(),
+                "Splits are out of balance after rounding. Please adjust the amounts".to_string(),
             ));
         }
     }
@@ -848,7 +848,7 @@ fn reject_when_reconciled(conn: &Connection, tx_guid: &str, action: &str) -> Res
     )?;
     if locked > 0 {
         return Err(AppError::Validation(format!(
-            "Cannot {action} — this transaction has cleared or reconciled splits. Adjust them on the reconcile page first"
+            "Cannot {action}. This transaction has cleared or reconciled splits. Adjust them on the reconcile page first"
         )));
     }
     Ok(())
@@ -892,7 +892,7 @@ fn update_transaction_inner(
         ?
         .is_some();
     if !exists {
-        return Err(AppError::NotFound("Transaction not found — it may have been removed".to_string()));
+        return Err(AppError::NotFound("Transaction not found. It may have been deleted or replaced".to_string()));
     }
     // Manual edits delete + re-insert splits as `'n'`, which would silently
     // wipe reconciliation state. Block edits while any split is cleared or
@@ -930,7 +930,7 @@ fn delete_transaction_inner(conn: &Connection, guid: &str) -> Result<(), AppErro
         ?
         .is_some();
     if !exists {
-        return Err(AppError::NotFound("Transaction not found — it may have been removed".to_string()));
+        return Err(AppError::NotFound("Transaction not found. It may have been deleted or replaced".to_string()));
     }
     reject_when_reconciled(conn, guid, "delete")?;
 

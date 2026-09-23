@@ -34,7 +34,7 @@
   <Dialog.Content class="sm:max-w-sm">
     <Dialog.Header>
       <Dialog.Title>Keyboard Shortcuts</Dialog.Title>
-      <Dialog.Description>Available keyboard shortcuts for Spendo.</Dialog.Description>
+      <Dialog.Description>Move a little faster with these.</Dialog.Description>
     </Dialog.Header>
     <div class="flex flex-col gap-3">
       {#snippet shortcutList(title: string, shortcuts: ShortcutEntry[])}

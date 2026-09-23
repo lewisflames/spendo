@@ -93,7 +93,7 @@
     } catch (e: unknown) {
       if (request !== accountsRequest) return;
       accountsData = null;
-      accountsError = errMsg(e, 'Failed to load accounts');
+      accountsError = errMsg(e, "We couldn't load your accounts");
     }
   }
 
@@ -170,7 +170,7 @@
       page = 1;
       step = 'mapping';
     } catch (e: unknown) {
-      detectError = errMsg(e, 'Failed to read CSV file');
+      detectError = errMsg(e, "We couldn't read that CSV file");
     } finally {
       picking = false;
     }
@@ -216,7 +216,7 @@
       page = 1;
       step = 'preview';
     } catch (e: unknown) {
-      previewError = errMsg(e, 'Failed to preview CSV');
+      previewError = errMsg(e, "We couldn't preview that CSV");
     } finally {
       previewing = false;
     }
@@ -242,7 +242,7 @@
       });
       commitResult = result;
       step = 'done';
-      toast.success(`Imported ${plural(result.created, 'transaction')}`);
+      toast.success(`Brought in ${plural(result.created, 'transaction')}`);
       try {
         const home = await fetchHomeData();
         setDbSession(home.summary);
@@ -261,9 +261,9 @@
     try {
       await deleteCsvPreset(signature);
       presetApplied = false;
-      toast.success('Saved mapping forgotten');
+      toast.success('Mapping forgotten. We’ll ask next time');
     } catch (e: unknown) {
-      toast.error(errMsg(e, 'Failed to forget the saved mapping'));
+      toast.error(errMsg(e, "We couldn't forget that mapping. Please try again"));
     }
   }
 

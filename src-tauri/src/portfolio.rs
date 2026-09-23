@@ -1102,13 +1102,13 @@ fn validate_allocation_targets(
     for t in targets {
         if !t.target_pct.is_finite() || !(0.0..=100.0).contains(&t.target_pct) {
             return Err(AppError::Validation(format!(
-                "Target percentage for {} must be between 0 and 100",
+                "Keep the target for {} between 0 and 100",
                 t.commodity_guid
             )));
         }
         if !seen.insert(t.commodity_guid.as_str()) {
             return Err(AppError::Validation(format!(
-                "Duplicate target for commodity {}",
+                "You listed {} twice. Keep one row per holding",
                 t.commodity_guid
             )));
         }
@@ -1116,7 +1116,7 @@ fn validate_allocation_targets(
     }
     if total > 100.0 + TARGET_SUM_EPSILON {
         return Err(AppError::Validation(
-            "Target allocation must not exceed 100%".to_string(),
+            "Those targets add up to more than 100%. Trim them back".to_string(),
         ));
     }
 
@@ -1141,7 +1141,7 @@ fn validate_allocation_targets(
             .map_err(AppError::from)?;
         if count as usize != chunk.len() {
             return Err(AppError::Validation(
-                "Target allocation references an unknown commodity".to_string(),
+                "One of those targets points somewhere unknown. Refresh and try again".to_string(),
             ));
         }
     }

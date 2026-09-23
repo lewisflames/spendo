@@ -20,7 +20,7 @@
     enabled: () => !!dbSession.value && !!guid,
     // Reads `guid`, so navigating between accounts refetches automatically.
     fetch: () => fetchAccountBalanceTrend(guid),
-    label: 'Failed to load balance trend'
+    label: "We couldn't load the balance chart"
   });
 
   let data = $derived(res.data ?? []);
@@ -35,9 +35,9 @@
 {:else}
   <TimeSeriesChart
     title="Balance Over Time"
-    description="Account balance after each transaction"
+    description="How the balance moved, transaction by transaction"
     {loading}
-    emptyMessage="No balance history found."
+    emptyMessage="Not enough history to draw a line yet."
     {data}
     getX={(d: AccountBalancePoint) => parseLocalDate(d.date)}
     series={[{ key: 'balance', label: 'Balance', color }]}
