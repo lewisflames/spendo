@@ -43,11 +43,17 @@
   import { plural } from '$lib/utils/format.svelte';
 
   const bookName = $derived(bookDisplayName(activeBookPath.value));
-  const bookSubtitle = $derived(
-    dbSession.value
-      ? `${dbSession.value.summary.currency} · ${plural(dbSession.value.summary.totalTransactions, 'transaction')}`
-      : null
-  );
+  const bookSubtitle = $derived.by(() => {
+    const session = dbSession.value;
+    if (!session) return null;
+    // Cleared books report "Unknown" until a base currency is set again;
+    // drop the code rather than showing it.
+    const currency = /^[A-Za-z]{3}$/.test(session.summary.currency)
+      ? session.summary.currency
+      : null;
+    const count = plural(session.summary.totalTransactions, 'transaction');
+    return currency ? `${currency} · ${count}` : count;
+  });
 
   // Resolve dynamic account-root hrefs, active state and badge counts once per
   // render pass; items without a target (roots still loading) are hidden.

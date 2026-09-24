@@ -50,11 +50,13 @@ export function ensureDbSessionLoaded(force = false): Promise<void> {
   }
   const p = fetchHomeData()
     .then((result) => {
-      setDbSession(result.hasData ? result.summary : null);
+      // A summary exists whenever a book is open, even an empty one — the
+      // shell must stay so pages can show their empty states.
+      setDbSession(result.summary);
     })
     .catch((e) => {
       // A failed bootstrap must not stick: allow a later call to retry so a
-      // transient startup error doesn't leave the session null forever.
+      // transient startup error doesn’t leave the session null forever.
       bootstrapped = false;
       throw e;
     });
@@ -68,11 +70,6 @@ export function ensureDbSessionLoaded(force = false): Promise<void> {
   });
   inflight = q;
   return q;
-}
-
-export function clearSession() {
-  setDbSession(null);
-  // The (empty) book stays open — welcome offers New/Open from here.
 }
 
 /**

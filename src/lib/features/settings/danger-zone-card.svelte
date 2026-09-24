@@ -5,7 +5,7 @@
   import IconCardHeader from '$lib/components/shared/icon-card-header.svelte';
   import SettingSelectRow from './setting-select-row.svelte';
   import { Trash2, RotateCcw } from '@lucide/svelte';
-  import { dbSession, clearSession } from '$lib/stores/db.svelte';
+  import { dbSession, refreshSession } from '$lib/stores/db.svelte';
   import { resetBookSettings } from '$lib/stores/book-settings.svelte';
   import { clearAppDb } from '$lib/tauri';
   import { errMsg } from '$lib/utils/error';
@@ -21,12 +21,14 @@
     clearing = true;
     try {
       await clearAppDb();
-      clearSession();
+      // Stay in the book: the shell now shows its empty states, so the user
+      // can import fresh data without hunting for the file again.
+      refreshSession();
       resetBookSettings();
       clearDialogOpen = false;
       toast.success('Cleared everything from this book');
     } catch (e: unknown) {
-      toast.error(errMsg(e, "We couldn't clear your data. Please try again"));
+      toast.error(errMsg(e, 'We couldn’t clear your data. Please try again'));
     } finally {
       clearing = false;
     }
@@ -47,7 +49,7 @@
   <Card.Content class="flex flex-col items-start gap-4">
     <SettingSelectRow
       label="Clear all data"
-      description="Wipe accounts, transactions, schedules, budgets and prices from this book"
+      description="Erase accounts, transactions, schedules, budgets, prices, receipts, import rules and targets from this book"
       class="w-full"
     >
       <Dialog.Root bind:open={clearDialogOpen}>
@@ -62,8 +64,8 @@
           <Dialog.Header>
             <Dialog.Title>Clear all data?</Dialog.Title>
             <Dialog.Description>
-              This clears out everything in the book for good. Your theme and display choices stay
-              put.
+              This wipes accounts, transactions, schedules, budgets, prices, receipts, import rules
+              and portfolio targets for good. Your theme and display choices stay put.
             </Dialog.Description>
           </Dialog.Header>
           <Dialog.Footer>
@@ -82,7 +84,7 @@
     {/if}
     <SettingSelectRow
       label="Reset preferences"
-      description="Back to the original theme, density, locale and list setup"
+      description="Back to the original theme, accent, density, locale and list setup"
       class="w-full"
     >
       <Dialog.Root bind:open={resetDialogOpen}>
@@ -99,7 +101,7 @@
           </Dialog.Header>
           <Dialog.Footer>
             <Button variant="outline" onclick={() => (resetDialogOpen = false)}>Cancel</Button>
-            <Button variant="destructive" onclick={handleReset}>Reset preferences</Button>
+            <Button variant="outline" onclick={handleReset}>Reset preferences</Button>
           </Dialog.Footer>
         </Dialog.Content>
       </Dialog.Root>

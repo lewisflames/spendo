@@ -15,6 +15,7 @@
   import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
   import BookGate from '$lib/components/shared/book-gate.svelte';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
+  import EmptyBookPrompt from '$lib/components/shared/empty-book-prompt.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import PageSkeleton from '$lib/components/shared/page-skeleton.svelte';
   import KpiCard from '$lib/components/shared/kpi-card.svelte';
@@ -38,7 +39,7 @@
   const res = useAsyncData({
     enabled: () => !!dbSession.value,
     fetch: () => fetchAccounts(),
-    label: "We couldn't load your accounts"
+    label: 'We couldn’t load your accounts'
   });
 
   // Top-level accounts only, in the canonical category order (unknown
@@ -143,21 +144,25 @@
       <BalanceTree data={res.data?.trees ?? []} loading={res.loading} />
 
       {#if accounts.length === 0}
-        <EmptyState
-          card
-          title="No accounts yet"
-          description="Add your first account to start tracking money."
-        >
-          {#snippet icon()}
-            <Landmark aria-hidden="true" class="text-muted-foreground" />
-          {/snippet}
-          {#snippet action()}
-            <Button onclick={() => (dialogOpen = true)}>
-              <Plus aria-hidden="true" class="size-4" />
-              New account
-            </Button>
-          {/snippet}
-        </EmptyState>
+        {#if res.data.totalAccounts === 0}
+          <EmptyBookPrompt />
+        {:else}
+          <EmptyState
+            card
+            title="No accounts yet"
+            description="Add your first account to start tracking money."
+          >
+            {#snippet icon()}
+              <Landmark aria-hidden="true" class="text-muted-foreground" />
+            {/snippet}
+            {#snippet action()}
+              <Button onclick={() => (dialogOpen = true)}>
+                <Plus aria-hidden="true" class="size-4" />
+                New account
+              </Button>
+            {/snippet}
+          </EmptyState>
+        {/if}
       {:else}
         <DimWrapper active={res.loading}>
           <AccountTable rows={accounts} />

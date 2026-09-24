@@ -112,20 +112,29 @@ pub fn get_summary(conn: &Connection) -> Result<DataSummary, String> {
 
 #[tauri::command]
 pub async fn fetch_home_data(state: State<'_, AppState>) -> Result<HomeDataResult, String> {
+    // A book being open is not the same as a book having data: a cleared or
+    // freshly seeded book still needs its shell so pages can show their empty
+    // states and the import paths stay reachable. `has_data` keeps tracking
+    // whether accounts exist; only `summary` is tied to the book being open.
+    let book_open = state
+        .db_path
+        .lock()
+        .map_err(|e| e.to_string())?
+        .is_some();
     run_blocking(state.db.clone(), move |conn| {
-        let cnt: i64 = conn
-            .query_row("SELECT COUNT(*) as cnt FROM accounts", [], |row| row.get(0))
-            .map_err(|e| e.to_string())?;
-
-        if cnt == 0 {
+        if !book_open {
             return Ok(HomeDataResult {
                 has_data: false,
                 summary: None,
             });
         }
 
+        let cnt: i64 = conn
+            .query_row("SELECT COUNT(*) as cnt FROM accounts", [], |row| row.get(0))
+            .map_err(|e| e.to_string())?;
+
         Ok(HomeDataResult {
-            has_data: true,
+            has_data: cnt > 0,
             summary: Some(get_summary(conn)?),
         })
     })
