@@ -2,7 +2,7 @@
   import * as Card from '$lib/components/ui/card';
   import * as Chart from '$lib/components/ui/chart';
   import { Skeleton } from '$lib/components/ui/skeleton';
-  import { formatAllocPct } from '$lib/utils/format.svelte';
+  import { formatAllocPct, formatCurrency } from '$lib/utils/format.svelte';
   import { PieChart } from 'layerchart';
   import ChartTooltipRow from '$lib/components/ui/chart/chart-tooltip-row.svelte';
 
@@ -19,6 +19,7 @@
     data,
     title = 'Allocation',
     description,
+    currency,
     centerLabel,
     centerValue,
     loading = false,
@@ -28,6 +29,8 @@
     data: AllocationDatum[];
     title?: string;
     description?: string;
+    /** When set, the tooltip shows each slice’s amount as well as its share. */
+    currency?: string;
     centerLabel?: string | null;
     centerValue?: string | null;
     loading?: boolean;
@@ -56,7 +59,9 @@
     {#if loading}
       <Skeleton class="h-72 w-full" />
     {:else if data.length === 0}
-      <div class="py-6 text-center text-sm text-muted-foreground">
+      <div
+        class="flex min-h-72 items-center justify-center py-6 text-center text-sm text-muted-foreground"
+      >
         {emptyMessage}
       </div>
     {:else}
@@ -80,7 +85,12 @@
                   <ChartTooltipRow
                     color={item.color as string}
                     label={datum?.label ?? String(item.label ?? item.key)}
-                    value={datum?.sharePct != null ? formatAllocPct(datum.sharePct) : undefined}
+                    value={[
+                      currency && datum ? formatCurrency(datum.value, currency) : null,
+                      datum?.sharePct != null ? formatAllocPct(datum.sharePct) : null
+                    ]
+                      .filter(Boolean)
+                      .join(' · ') || undefined}
                   />
                 {/snippet}
               </Chart.Tooltip>

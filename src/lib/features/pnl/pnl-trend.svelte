@@ -9,7 +9,7 @@
 </script>
 
 <TimeSeriesChart
-  title="Income vs expenses"
+  title="Income vs Expenses"
   description="Month by month, for the stretch you picked"
   {loading}
   emptyMessage="Quiet stretch. Nothing earned or spent here."

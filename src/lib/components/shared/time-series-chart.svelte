@@ -4,7 +4,12 @@
   import ChartTooltipRow from '$lib/components/ui/chart/chart-tooltip-row.svelte';
   import { Skeleton } from '$lib/components/ui/skeleton';
   import { AreaChart, BarChart } from 'layerchart';
-  import { formatCurrency, formatDate, formatInteger } from '$lib/utils/format.svelte';
+  import {
+    formatCurrency,
+    formatDate,
+    formatInteger,
+    formatNumber
+  } from '$lib/utils/format.svelte';
   import { curveStepAfter } from 'd3-shape';
 
   interface TimeSeriesSeries {
@@ -93,7 +98,9 @@
   }
   function yTickFormatter(v: unknown): string {
     if (typeof v !== 'number' || !Number.isFinite(v)) return `${v ?? ''}`;
-    return formatInteger(v);
+    // Keep axis labels honest for low-priced series (e.g. a price of 4.25):
+    // only round to integers once the magnitude makes fractions noise.
+    return Math.abs(v) >= 100 ? formatInteger(v) : formatNumber(v);
   }
 
   const rangeOptions = [
@@ -150,8 +157,12 @@
       <div class="flex items-center justify-center">
         <Skeleton class="h-72 w-full" />
       </div>
-    {:else if !data || data.length === 0}
-      <div class="py-6 text-center text-sm text-muted-foreground">{emptyMessage}</div>
+    {:else if filteredData.length === 0}
+      <div
+        class="flex min-h-72 items-center justify-center py-6 text-center text-sm text-muted-foreground"
+      >
+        {emptyMessage}
+      </div>
     {:else}
       <Chart.Container
         config={chartConfig satisfies Chart.ChartConfig}

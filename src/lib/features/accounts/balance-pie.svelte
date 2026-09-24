@@ -7,10 +7,12 @@
   let {
     node,
     parent,
+    currency,
     loading
   }: {
     node: AccountNode | null;
     parent: ParentAccountInfo | null;
+    currency?: string;
     loading: boolean;
   } = $props();
 
@@ -61,6 +63,7 @@
   data={pieData}
   title="Balance Composition"
   description="How the pieces add up, by type."
+  {currency}
   {centerLabel}
   {centerValue}
   {loading}

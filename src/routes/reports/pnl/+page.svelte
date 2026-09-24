@@ -9,7 +9,7 @@
     fmtPct,
     EMPTY_DASH
   } from '$lib/utils/format.svelte';
-  import { ArrowLeftRight, History, TrendingUp, Percent } from '@lucide/svelte';
+  import { ArrowLeftRight, History, TrendingDown, TrendingUp, Percent } from '@lucide/svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import KpiCard from '$lib/components/shared/kpi-card.svelte';
   import PageSkeleton from '$lib/components/shared/page-skeleton.svelte';
@@ -71,7 +71,7 @@
       const { prevFrom, prevTo } = computePrevRange(range.dateFrom, range.dateTo);
       return fetchPnlReport(range.dateFrom, range.dateTo, prevFrom, prevTo);
     },
-    label: "We couldn't load this report"
+    label: 'We couldn’t load this report'
   });
 
   let pnlData = $derived(res.data);
@@ -79,7 +79,7 @@
   const trend = useAsyncData({
     enabled: () => !!dbSession.value && !!range.dateFrom && !!range.dateTo && range.rangeValid,
     fetch: () => fetchPnlTrend(range.dateFrom, range.dateTo),
-    label: "We couldn't load that chart"
+    label: 'We couldn’t load that chart'
   });
 
   let trendData = $derived(trend.data);
@@ -165,7 +165,15 @@
           loading={!pnlData && (res.loading || dbBootstrapping.value)}
         >
           {#snippet icon()}
-            <TrendingUp aria-hidden="true" class="size-4 text-muted-foreground" />
+            {#if pnlData && netVariance !== null && !isZeroVariance}
+              {#if netVariance >= 0}
+                <TrendingUp aria-hidden="true" class="size-4 text-success" />
+              {:else}
+                <TrendingDown aria-hidden="true" class="size-4 text-destructive" />
+              {/if}
+            {:else}
+              <TrendingUp aria-hidden="true" class="size-4 text-muted-foreground" />
+            {/if}
           {/snippet}
         </KpiCard>
         <KpiCard

@@ -116,7 +116,7 @@
         sortDir
       );
     },
-    label: "We couldn't load this account's transactions",
+    label: 'We couldn’t load this account’s transactions',
     onSuccess: (result) => {
       pg = result.page;
     }
@@ -150,7 +150,7 @@
     !!subtreeNode && subtreeNode.children.some((c) => Math.abs(clampZero(c.balance)) >= 0.005)
   );
 
-  // Charts loading gate: while the detail payload hasn't arrived we reserve
+  // Charts loading gate: while the detail payload hasn’t arrived we reserve
   // both chart slots (assuming the pie exists) so the trend chart settling
   // before/after the pie data never changes the grid shape mid-paint.
   let chartsLoading = $derived((res.loading || dbBootstrapping.value) && !res.data);
@@ -233,7 +233,7 @@
     <!-- Balance over time + composition. The grid keeps its shape across the
       detail fetch: the pie slot is reserved with a skeleton while loading,
       and the trend chart instance is never remounted by the loading/settle
-      transition, so independent fetch timing can't shift layout. -->
+      transition, so independent fetch timing can’t shift layout. -->
     {#if guid}
       <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div class={showPie || chartsLoading ? 'lg:col-span-2' : 'lg:col-span-3'}>
@@ -252,9 +252,9 @@
           {/if}
         </div>
         {#if showPie}
-          <BalancePie node={subtreeNode} parent={parentInfo} loading={res.loading} />
+          <BalancePie node={subtreeNode} parent={parentInfo} {currency} loading={res.loading} />
         {:else if chartsLoading}
-          <BalancePie node={null} parent={null} loading={true} />
+          <BalancePie node={null} parent={null} {currency} loading={true} />
         {/if}
       </div>
     {/if}
