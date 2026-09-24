@@ -280,14 +280,30 @@
     position: absolute;
     inset: 0;
     overflow: visible;
+    /* Keep chart ramps and progress bars from printing blank. */
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
   }
 }
 
-/* Compact density: tighter page + card spacing (Settings → Appearance → Density). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Compact density: tighter page spacing (Settings → Appearance → Density).
+ * Targets each route's `flex flex-col gap-6` shell, since the wrapper inside
+ * `#main-content` only ever holds one child and has no gap to tighten. */
 html.compact #main-content {
   padding: 1.25rem;
 }
 
-html.compact #main-content > div {
+html.compact #main-content > div > .flex.flex-col {
   gap: 1rem;
 }
