@@ -18,7 +18,7 @@
   };
 </script>
 
-<div class="grid grid-cols-1 gap-6 {(gridClass || GRID_COLS[count]) ?? 'sm:grid-cols-' + count}">
+<div class="grid grid-cols-1 gap-6 {(gridClass || GRID_COLS[count]) ?? GRID_COLS[3]}">
   {#each Array(count) as _, i (i)}
     <KpiCard loading />
   {/each}

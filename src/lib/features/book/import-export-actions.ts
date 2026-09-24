@@ -31,11 +31,11 @@ const CSV_FILTER = { name: 'CSV', extensions: ['csv'] };
 /**
  * Single frontend path for every book-scoped data transfer (sidebar book menu,
  * command palette). A module-level flag serializes the native
- * dialogs; menu items don't render disabled state, so re-entry simply no-ops.
+ * dialogs; menu items don’t render disabled state, so re-entry simply no-ops.
  */
 let busy = false;
 
-/** The CSV wizard needs a page (mapping + preview); GnuCash import doesn't. */
+/** The CSV wizard needs a page (mapping + preview); GnuCash import doesn’t. */
 export function openCsvImport(): void {
   void goto(resolve('/import/csv'));
 }
@@ -59,14 +59,14 @@ export async function importGnucashViaDialog(): Promise<boolean> {
   try {
     selected = await open({ multiple: false, filters: [GNUCASH_FILTER] });
   } catch (e: unknown) {
-    toast.error(errMsg(e, "We couldn't open the file picker"));
+    toast.error(errMsg(e, 'We couldn’t open the file picker'));
     return false;
   }
   if (!selected || Array.isArray(selected)) return false;
   try {
     return await openPreview(selected, await basename(selected));
   } catch (e: unknown) {
-    toast.error(errMsg(e, "We couldn't preview that file"));
+    toast.error(errMsg(e, 'We couldn’t preview that file'));
     return false;
   }
 }
@@ -111,7 +111,7 @@ export async function confirmGnucashImport(deleteOrphans: boolean): Promise<bool
     toastPriceResult(result.prices, { fixHint: true });
     return true;
   } catch (e: unknown) {
-    toast.error(errMsg(e, "We couldn't finish that import"));
+    toast.error(errMsg(e, 'We couldn’t finish that import'));
     return false;
   } finally {
     toast.dismiss(loading);
@@ -121,13 +121,13 @@ export async function confirmGnucashImport(deleteOrphans: boolean): Promise<bool
 }
 
 /** Export preferences live in the book; load them on demand so the menu and
- * palette paths don't depend on the Settings page having been visited. A failed
+ * palette paths don’t depend on the Settings page having been visited. A failed
  * load falls back to defaults rather than blocking the export. */
 async function exportOptions() {
   try {
     await loadBookSettings();
   } catch {
-    // Defaults below are good enough to save the user's data.
+    // Defaults below are good enough to save the user’s data.
   }
   return {
     delimiter: bookSettings.value.exportCsvDelimiter,
@@ -153,17 +153,23 @@ async function saveExport(
     try {
       target = await save({ defaultPath, filters: [filter] });
     } catch (e: unknown) {
-      toast.error(errMsg(e, "We couldn't open the save dialog"));
+      toast.error(errMsg(e, 'We couldn’t open the save dialog'));
       return false;
     }
     // Null means the user cancelled — stay silent.
     if (!target) return false;
     const file = ensureExtension(target);
-    const message = await run(file);
-    toast.success(message ?? `Saved ${await basename(file)}`);
+    const filename = await basename(file);
+    const loading = toast.loading(`Exporting ${filename}…`);
+    try {
+      const message = await run(file);
+      toast.success(message ?? `Saved ${filename}`);
+    } finally {
+      toast.dismiss(loading);
+    }
     return true;
   } catch (e: unknown) {
-    toast.error(errMsg(e, `We couldn't export ${label}. Please try again`));
+    toast.error(errMsg(e, `We couldn’t export ${label}. Please try again`));
     return false;
   } finally {
     busy = false;

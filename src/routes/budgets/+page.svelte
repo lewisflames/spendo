@@ -209,7 +209,7 @@
       </FilterBar>
     {/if}
 
-    {#if rows !== null || !res.error}
+    {#if rows !== null}
       <DimWrapper active={yearLoading}>
         <BudgetsTable
           rows={rows !== null ? filteredRows : null}

@@ -22,10 +22,7 @@
 <Card.Root>
   {#if loading}
     <Card.Header>
-      <div class="flex items-center gap-2">
-        <Skeleton class="h-4 w-20" />
-        <Skeleton class="h-5 w-8 rounded-full" />
-      </div>
+      <Skeleton class="h-4 w-20" />
     </Card.Header>
     <Card.Content>
       <Skeleton class="h-7 w-28" />
