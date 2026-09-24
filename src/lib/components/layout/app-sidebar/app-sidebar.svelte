@@ -106,9 +106,14 @@
               <Sidebar.MenuItem>
                 <Sidebar.MenuButton
                   isActive={active}
-                  tooltipContent={item.chord
-                    ? `${item.label} · G ${item.chord.toUpperCase()}`
-                    : item.label}
+                  tooltipContent={[
+                    item.chord ? `${item.label} · G ${item.chord.toUpperCase()}` : item.label,
+                    badge > 0
+                      ? `${badge} ${item.badge === 'reconcile' ? 'uncleared' : 'due'}`
+                      : null
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
                 >
                   {#snippet child({ props })}
                     <a

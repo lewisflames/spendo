@@ -18,7 +18,7 @@ import type { NavRoot } from '$lib/tauri';
 
 export type NavBadgeKey = 'reconcile' | 'scheduled';
 
-/** `g`-chord targets for the app's primary pages. */
+/** `g`-chord targets for the app’s primary pages. */
 export const NAV_CHORD_TARGETS = {
   t: '/transactions',
   r: '/reconcile',
@@ -61,7 +61,9 @@ function rootHref(roots: NavRoot[], category: string): Pathname | null {
 
 function rootMatch(pathname: string, roots: NavRoot[], category: string): boolean {
   const guid = rootGuid(roots, category);
-  return guid !== null && pathname === `/accounts/${guid}`;
+  return (
+    guid !== null && (pathname === `/accounts/${guid}` || pathname.startsWith(`/accounts/${guid}/`))
+  );
 }
 
 export const NAV_GROUPS: NavGroup[] = [

@@ -31,7 +31,7 @@ export function pageParam(
 
 /**
  * Spec factory: debounced search. The caller applies the value to both the
- * raw input (what's in the field) and the committed search (what's fetched).
+ * raw input (what’s in the field) and the committed search (what’s fetched).
  */
 export function debouncedSearchParam(
   key: string,
@@ -52,7 +52,9 @@ export function dateParam(
   get: () => string | null,
   set: (v: string | null) => void
 ): UrlParamSpec {
-  return { key, get, apply: (v) => set(v || null) };
+  // Replace rather than push: date tweaks are view refinements, like search,
+  // so the back button shouldn’t walk through every pick.
+  return { key, get, apply: (v) => set(v || null), replace: true };
 }
 
 /** Spec factory for a budget year (`1900-2200`) stored as string state. */
@@ -118,8 +120,8 @@ export function useUrlParams(specs: UrlParamSpec[]) {
     }
     const query = parts.join('&');
     const url = query ? `${page.url.pathname}?${query}` : page.url.pathname;
-    // Reconstructs the current route's URL (query-only sync), so resolve()
-    // doesn't apply.
+    // Reconstructs the current route’s URL (query-only sync), so resolve()
+    // doesn’t apply.
     // eslint-disable-next-line svelte/no-navigation-without-resolve
     goto(url, {
       replaceState: changedSpecs.every((s) => s.replace === true),

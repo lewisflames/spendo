@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { goto } from '$app/navigation';
+  import { goto, afterNavigate } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { page } from '$app/state';
   import { untrack } from 'svelte';
@@ -37,6 +37,13 @@
 
   initNavHistory();
 
+  // The inset main is the app’s only scroll container (the window can’t
+  // scroll), so reset it on every navigation — detail and form pages should
+  // open at the top even when the previous list was scrolled.
+  afterNavigate(() => {
+    document.getElementById('main-content')?.scrollTo({ top: 0 });
+  });
+
   const prefersDark = new MediaQuery('(prefers-color-scheme: dark)');
 
   // Bootstrap DB state once so deep-linked/refreshed pages see real data
@@ -64,12 +71,12 @@
 
   // Chrome is always mounted now; only the sidebar depends on having a book.
   // While book-less (welcome) the inset panel keeps its frame through the
-  // explicit classes below, because Sidebar.Inset's peer-driven styles
+  // explicit classes below, because Sidebar.Inset’s peer-driven styles
   // (rounded corners, gutter) need a rendered Sidebar.Root to match.
   let showSidebar = $derived(!!dbSession.value);
 
   // Strict onboarding: any route other than the welcome page redirects home
-  // while empty. `/about` stays reachable so the welcome footer's link works.
+  // while empty. `/about` stays reachable so the welcome footer’s link works.
   // The welcome screen lives on `/`, so this never loops. Waits for the
   // bootstrap specifically (not refresh loading) so a home revalidation
   // never triggers a redirect.

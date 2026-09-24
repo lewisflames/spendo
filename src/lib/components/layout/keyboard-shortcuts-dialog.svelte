@@ -11,6 +11,8 @@
   interface ShortcutEntry {
     keys: string[];
     description: string;
+    /** Keys are pressed one after another (g then t), not held together. */
+    sequence?: boolean;
   }
 
   const globalShortcuts: ShortcutEntry[] = [
@@ -22,10 +24,21 @@
     { keys: [modKey, 'B'], description: 'Toggle sidebar' }
   ];
 
+  const formShortcuts: ShortcutEntry[] = [
+    { keys: [modKey, 'S'], description: 'Save the open form' },
+    { keys: [modKey, 'Shift', 'S'], description: 'Save & add another (new transactions)' }
+  ];
+
   const navShortcuts: ShortcutEntry[] = NAV_GROUPS.flatMap((group) => group.items).flatMap(
     (item) =>
       item.chord
-        ? [{ keys: ['G', item.chord.toUpperCase()], description: `Go to ${item.label}` }]
+        ? [
+            {
+              keys: ['G', item.chord.toUpperCase()],
+              description: `Go to ${item.label}`,
+              sequence: true
+            }
+          ]
         : []
   );
 </script>
@@ -33,7 +46,7 @@
 <Dialog.Root bind:open={keyboardShortcutsDialog.value}>
   <Dialog.Content class="sm:max-w-sm">
     <Dialog.Header>
-      <Dialog.Title>Keyboard Shortcuts</Dialog.Title>
+      <Dialog.Title>Keyboard shortcuts</Dialog.Title>
       <Dialog.Description>Move a little faster with these.</Dialog.Description>
     </Dialog.Header>
     <div class="flex flex-col gap-3">
@@ -49,7 +62,9 @@
                 {#each shortcut.keys as key, i (key)}
                   <Kbd>{key}</Kbd>
                   {#if i < shortcut.keys.length - 1}
-                    <span class="text-xs text-muted-foreground">+</span>
+                    <span class="px-0.5 text-xs text-muted-foreground"
+                      >{shortcut.sequence ? 'then' : '+'}</span
+                    >
                   {/if}
                 {/each}
               </div>
@@ -59,6 +74,7 @@
       {/snippet}
       {@render shortcutList('Navigation', navShortcuts)}
       {@render shortcutList('Global', globalShortcuts)}
+      {@render shortcutList('Forms', formShortcuts)}
     </div>
   </Dialog.Content>
 </Dialog.Root>

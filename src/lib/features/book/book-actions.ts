@@ -5,6 +5,7 @@ import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { basename } from '@tauri-apps/api/path';
 import { toast } from '$lib/components/ui/sonner';
 import { activeBookPath, dbSession, setActiveBookPath, setDbSession } from '$lib/stores/db.svelte';
+import { resetNav } from '$lib/stores/nav.svelte';
 import { loadBookSettings, resetBookSettings } from '$lib/stores/book-settings.svelte';
 import { appSettings } from '$lib/stores/settings.svelte';
 import { closeBook, createBookAt, openBook, saveBookAs, type DataSummary } from '$lib/tauri';
@@ -18,7 +19,7 @@ const SAVE_FILTER = { name: 'Spendo book', extensions: ['spendo'] };
 /**
  * Single frontend path for every book switch (sidebar menu, Settings, palette).
  * A module-level flag serializes the native dialogs and backend swaps; menu
- * items don't render disabled state, so re-entry simply no-ops.
+ * items don’t render disabled state, so re-entry simply no-ops.
  */
 let switching = false;
 
@@ -28,13 +29,14 @@ async function reloadBookSettings() {
   try {
     await loadBookSettings(true);
   } catch (e: unknown) {
-    toast.error(errMsg(e, "We couldn't load your book settings"));
+    toast.error(errMsg(e, 'We couldn’t load your book settings'));
   }
 }
 
 /** Shared success tail of every book switch: adopt the session, sync
- * book-scoped settings, announce. The `switching` guard is the caller's job. */
+ * book-scoped settings, announce. The `switching` guard is the caller’s job. */
 async function activateBook(path: string, summary: DataSummary, message: string): Promise<void> {
+  resetNav();
   setDbSession(summary);
   setActiveBookPath(path);
   await reloadBookSettings();
@@ -51,7 +53,7 @@ export async function openBookAt(path: string): Promise<boolean> {
     await activateBook(path, result.summary, `Opened ${await basename(path)}`);
     return true;
   } catch (e: unknown) {
-    toast.error(errMsg(e, "We couldn't open that book"));
+    toast.error(errMsg(e, 'We couldn’t open that book'));
     return false;
   } finally {
     switching = false;
@@ -64,22 +66,22 @@ export async function openBookViaDialog(): Promise<boolean> {
   try {
     selected = await open({ multiple: false, filters: [BOOK_FILTER] });
   } catch (e: unknown) {
-    toast.error(errMsg(e, "We couldn't open the file picker"));
+    toast.error(errMsg(e, 'We couldn’t open the file picker'));
     return false;
   }
   if (!selected || Array.isArray(selected)) return false;
   return openBookAt(selected);
 }
 
-/** Create a book at a user-chosen path. `currency` defaults to the locale's
- * when the caller (welcome screen) doesn't offer a picker. */
+/** Create a book at a user-chosen path. `currency` defaults to the locale’s
+ * when the caller (welcome screen) doesn’t offer a picker. */
 export async function createBookViaDialog(currency?: string): Promise<boolean> {
   if (switching) return false;
   let target: string | null;
   try {
     target = await save({ defaultPath: 'book.spendo', filters: [SAVE_FILTER] });
   } catch (e: unknown) {
-    toast.error(errMsg(e, "We couldn't open the save dialog"));
+    toast.error(errMsg(e, 'We couldn’t open the save dialog'));
     return false;
   }
   if (!target) return false;
@@ -91,7 +93,7 @@ export async function createBookViaDialog(currency?: string): Promise<boolean> {
     await activateBook(file, result.summary, `Book created (${base})`);
     return true;
   } catch (e: unknown) {
-    toast.error(errMsg(e, "We couldn't create that book"));
+    toast.error(errMsg(e, 'We couldn’t create that book'));
     return false;
   } finally {
     switching = false;
@@ -104,7 +106,7 @@ export async function saveBookAsViaDialog(): Promise<boolean> {
   try {
     target = await save({ defaultPath: 'book.spendo', filters: [SAVE_FILTER] });
   } catch (e: unknown) {
-    toast.error(errMsg(e, "We couldn't open the save dialog"));
+    toast.error(errMsg(e, 'We couldn’t open the save dialog'));
     return false;
   }
   if (!target) return false;
@@ -115,14 +117,14 @@ export async function saveBookAsViaDialog(): Promise<boolean> {
     await activateBook(file, result.summary, `Book saved as ${await basename(file)}`);
     return true;
   } catch (e: unknown) {
-    toast.error(errMsg(e, "We couldn't save that book"));
+    toast.error(errMsg(e, 'We couldn’t save that book'));
     return false;
   } finally {
     switching = false;
   }
 }
 
-/** Writes are persisted live, so closing needs no confirmation; the layout's
+/** Writes are persisted live, so closing needs no confirmation; the layout’s
  * empty-session guard would redirect anyway — `goto` makes it immediate. */
 export async function closeActiveBook(): Promise<boolean> {
   if (switching) return false;
@@ -133,6 +135,7 @@ export async function closeActiveBook(): Promise<boolean> {
   switching = true;
   try {
     await closeBook();
+    resetNav();
     setDbSession(null);
     setActiveBookPath(null);
     resetBookSettings();
@@ -140,7 +143,7 @@ export async function closeActiveBook(): Promise<boolean> {
     await goto(resolve('/'));
     return true;
   } catch (e: unknown) {
-    toast.error(errMsg(e, "We couldn't close the book"));
+    toast.error(errMsg(e, 'We couldn’t close the book'));
     return false;
   } finally {
     switching = false;
@@ -155,7 +158,7 @@ export async function copyBookPathAt(path: string): Promise<boolean> {
     toast.success('Book path copied');
     return true;
   } catch (e: unknown) {
-    toast.error(errMsg(e, "We couldn't copy that path"));
+    toast.error(errMsg(e, 'We couldn’t copy that path'));
     return false;
   }
 }
@@ -174,7 +177,7 @@ export async function revealActiveBook(): Promise<boolean> {
     await revealItemInDir(path);
     return true;
   } catch (e: unknown) {
-    toast.error(errMsg(e, "We couldn't open that folder"));
+    toast.error(errMsg(e, 'We couldn’t open that folder'));
     return false;
   }
 }

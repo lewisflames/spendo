@@ -38,7 +38,7 @@ import {
   importGnucashViaDialog,
   openCsvImport
 } from '$lib/features/book/import-export-actions';
-import { goBack, goForward } from '$lib/stores/nav-history.svelte';
+import { goBack, goForward, navHistory } from '$lib/stores/nav-history.svelte';
 
 type PaletteGroup = 'Go to' | 'Actions';
 
@@ -100,7 +100,7 @@ export const PALETTE_COMMANDS: PaletteCommand[] = [
   },
   {
     id: 'new-schedule',
-    title: 'New scheduled transaction',
+    title: 'New schedule',
     group: 'Actions',
     icon: CalendarPlus,
     keywords: ['new', 'add', 'schedule', 'recurring', 'bill', 'subscription'],
@@ -228,6 +228,7 @@ export const PALETTE_COMMANDS: PaletteCommand[] = [
     group: 'Actions',
     icon: ArrowLeft,
     keywords: ['back', 'previous', 'history'],
+    when: () => navHistory.value.index > 0,
     run: () => goBack()
   },
   {
@@ -236,6 +237,7 @@ export const PALETTE_COMMANDS: PaletteCommand[] = [
     group: 'Actions',
     icon: ArrowRight,
     keywords: ['forward', 'next', 'history'],
+    when: () => navHistory.value.index < navHistory.value.stack.length - 1,
     run: () => goForward()
   },
   {

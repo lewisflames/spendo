@@ -65,7 +65,7 @@
   );
   let visibleColumns = $derived(cols.visibleColumns);
 
-  // Don't leave an invisible sort in effect: prefer the still-visible date,
+  // Don’t leave an invisible sort in effect: prefer the still-visible date,
   // else the always-visible description.
   const SORT_FALLBACKS = ['date', 'description', 'amount'] as const;
   function handleHideColumn(id: TransactionColumnId) {
@@ -132,7 +132,7 @@
       }
       return r;
     },
-    label: "We couldn't load your transactions"
+    label: 'We couldn’t load your transactions'
   });
 </script>
 
@@ -152,7 +152,7 @@
       {#if dbSession.value}
         <Button variant="outline" href={resolve('/scheduled')}>
           <CalendarClock aria-hidden="true" class="size-4" />
-          Recurring
+          Scheduled
         </Button>
         <Button href={resolve('/transactions/new')}>
           <Plus aria-hidden="true" class="size-4" />
@@ -199,7 +199,7 @@
         {/if}
       {:else}
         <!-- Keep the previous table visible (dimmed) during refetches so the
-             page doesn't jump and pagination stays in place. -->
+             page doesn’t jump and pagination stays in place. -->
         <DimWrapper active={res.loading} class="flex flex-col gap-4">
           <TransactionTable
             transactions={res.data.transactions}
