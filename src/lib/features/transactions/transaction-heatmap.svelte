@@ -79,7 +79,7 @@
     enabled: () => !!dbSession.value && mounted,
     // Reads `debouncedFilters`, so changing a filter refetches (debounced).
     fetch: () => fetchTransactionHeatmap(debouncedFilters),
-    label: "We couldn't load recent activity"
+    label: 'We couldn’t load recent activity'
   });
 
   // Backend dates are already `YYYY-MM-DD`, matching the grid keys below, so
@@ -113,7 +113,7 @@
     'color-mix(in srgb, var(--color-chart-1) 75%, var(--color-background))',
     'var(--color-chart-1)'
   ];
-  const EMPTY_CELL = 'rgb(0 0 0 / 20%)';
+  const EMPTY_CELL = 'color-mix(in srgb, var(--color-foreground) 12%, var(--color-background))';
 
   function toKey(d: Date): string {
     const m = `${d.getMonth() + 1}`.padStart(2, '0');
@@ -187,7 +187,7 @@
     return weekCols;
   });
 
-  // Strip-width cap (previous chart's 35px cell cap + 2px gap): fluid columns
+  // Strip-width cap (previous chart’s 35px cell cap + 2px gap): fluid columns
   // never grow past this and center instead. Pure column count — no DOM
   // measurement, so nothing re-renders on window resize.
   let stripMaxWidth = $derived(columns.length * 37);
@@ -204,7 +204,9 @@
     {:else if res.error && columns.length === 0}
       <ErrorCard message={res.error} onRetry={() => res.reload()} />
     {:else if range.empty}
-      <div class="py-6 text-center text-sm text-muted-foreground">
+      <div
+        class="flex min-h-40 items-center justify-center py-6 text-center text-sm text-muted-foreground"
+      >
         Quiet around here. Nothing in this stretch.
       </div>
     {:else}
@@ -237,6 +239,19 @@
             </div>
           {/each}
         </div>
+      </div>
+      <div
+        class="mt-3 flex items-center justify-end gap-1 text-[10px] text-muted-foreground"
+        aria-hidden="true"
+      >
+        <span>Less</span>
+        {#each CELL_RAMP as color (color)}
+          <span
+            class="size-3 rounded-[4px] border border-foreground/10"
+            style={`background: ${color};`}
+          ></span>
+        {/each}
+        <span>More</span>
       </div>
     {/if}
   </Card.Content>

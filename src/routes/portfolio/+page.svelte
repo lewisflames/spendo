@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Briefcase, TrendingUp, RefreshCw, Pencil } from '@lucide/svelte';
+  import { Briefcase, TrendingDown, TrendingUp, RefreshCw, Pencil } from '@lucide/svelte';
   import { SvelteMap } from 'svelte/reactivity';
   import { dbBootstrapping, dbSession, activeBookPath } from '$lib/stores/db.svelte';
   import { fetchPortfolioData, fetchAllocationTargets } from '$lib/tauri';
@@ -34,7 +34,7 @@
   const res = useAsyncData({
     enabled: () => !!dbSession.value,
     fetch: fetchPortfolioData,
-    label: "We couldn't load your portfolio"
+    label: 'We couldn’t load your portfolio'
   });
 
   /** Saved allocation targets; the single source of truth for the rebalance columns. */
@@ -45,11 +45,11 @@
     enabled: () => !!dbSession.value,
     fetch: () => {
       // Read the active book path so a book switch refetches targets instead
-      // of showing the previous book's allocation.
+      // of showing the previous book’s allocation.
       void activeBookPath.value;
       return fetchAllocationTargets();
     },
-    label: "We couldn't load your targets",
+    label: 'We couldn’t load your targets',
     onSuccess: (rows) => {
       savedTargets.clear();
       for (const row of rows) savedTargets.set(row.commodityGuid, row.targetPct);
@@ -218,15 +218,29 @@
             </KpiCard>
             <KpiCard title="Gain / Loss" valueClass={signColor(d.totalGainLoss)}>
               {#snippet icon()}
-                <TrendingUp aria-hidden="true" class="size-4 text-muted-foreground" />
+                {#if d.totalGainLoss >= 0}
+                  <TrendingUp aria-hidden="true" class="size-4 text-success" />
+                {:else}
+                  <TrendingDown aria-hidden="true" class="size-4 text-destructive" />
+                {/if}
               {/snippet}
               {#snippet value()}
                 {formatSignedCurrency(d.totalGainLoss, currency)}
               {/snippet}
             </KpiCard>
-            <KpiCard title="XIRR" valueClass={signColor(d.totalXirr ?? 0)}>
+            <KpiCard
+              title="XIRR"
+              valueClass={d.totalXirr !== null ? signColor(d.totalXirr) : 'text-muted-foreground'}
+            >
               {#snippet icon()}
-                <TrendingUp aria-hidden="true" class="size-4 text-muted-foreground" />
+                {#if d.totalXirr !== null && d.totalXirr < 0}
+                  <TrendingDown aria-hidden="true" class="size-4 text-destructive" />
+                {:else}
+                  <TrendingUp
+                    aria-hidden="true"
+                    class="size-4 {d.totalXirr !== null ? 'text-success' : 'text-muted-foreground'}"
+                  />
+                {/if}
               {/snippet}
               {#snippet value()}
                 {fmtPct(d.totalXirr)}
@@ -246,6 +260,7 @@
                 data={pieData}
                 title="Allocation"
                 description="By market value"
+                {currency}
                 centerLabel={netWorthSharePct != null ? 'of Net Worth' : null}
                 centerValue={netWorthSharePct != null ? formatAllocPct(netWorthSharePct) : null}
                 onSelect={(key) => openHolding(key)}
