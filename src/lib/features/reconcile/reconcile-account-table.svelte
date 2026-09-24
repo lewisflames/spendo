@@ -26,11 +26,12 @@
   <Table.Body>
     {#each rows as row (row.guid)}
       <NavRow onNavigate={() => openReconcile(row.guid)}>
-        <Table.Cell class="p-0">
+        <Table.Cell class="py-2.5">
           <!-- Accessible link target for keyboard/middle-click; the row click
-               is a convenience shortcut. -->
+               is a convenience shortcut. Cell padding comes from TableShell
+               (px-4) so all tables share the same horizontal rhythm. -->
           <a
-            class="block min-w-0 px-2 py-2.5"
+            class="block min-w-0 focus-visible:outline-2 focus-visible:outline-ring"
             href={resolve('/reconcile/[guid]', { guid: row.guid })}
             title={row.label}
           >

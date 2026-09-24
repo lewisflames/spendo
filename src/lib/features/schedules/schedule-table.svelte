@@ -80,11 +80,14 @@
           <a
             href={resolve('/scheduled/[guid]/edit', { guid: schedule.guid })}
             class="font-medium focus-visible:outline-2 focus-visible:outline-ring"
+            title={schedule.name}
           >
             {schedule.name}
           </a>
           {#if schedule.description && schedule.description !== schedule.name}
-            <span class="block text-xs text-muted-foreground">{schedule.description}</span>
+            <span class="block truncate text-xs text-muted-foreground" title={schedule.description}
+              >{schedule.description}</span
+            >
           {/if}
         </Table.Cell>
         <Table.Cell class="py-2.5 whitespace-nowrap">

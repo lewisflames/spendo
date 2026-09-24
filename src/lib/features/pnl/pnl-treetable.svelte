@@ -10,6 +10,7 @@
   } from '$lib/utils/format.svelte';
   import NavRow from '$lib/components/shared/nav-row.svelte';
   import EmptyValue from '$lib/components/shared/empty-value.svelte';
+  import { cn } from '$lib/utils';
   import { openAccount } from '$lib/utils/navigation';
   import ReportTable from '$lib/features/reports/report-table.svelte';
   import ReportAccountCell from '$lib/features/reports/report-account-cell.svelte';
@@ -44,7 +45,7 @@
   let isEmpty = $derived(section === 'income' ? isIncomeEmpty : isExpensesEmpty);
 
   // Default to the first non-empty side when a new report arrives so users
-  // don't land on an empty tab when only the other side has activity.
+  // don’t land on an empty tab when only the other side has activity.
   let lastPnlData = $state<ProfitLossReport | null>(null);
   $effect(() => {
     if (pnlData && pnlData !== lastPnlData) {
@@ -143,8 +144,10 @@
       {fmt(previous)}
     </Table.Cell>
     <Table.Cell
-      class={'py-2.5 text-right whitespace-nowrap tabular-nums ' +
-        (!isZeroVariance ? signColor(variance, positiveGood) : 'text-muted-foreground')}
+      class={cn(
+        'py-2.5 text-right whitespace-nowrap tabular-nums',
+        !isZeroVariance ? signColor(variance, positiveGood) : 'text-muted-foreground'
+      )}
     >
       {#if isZeroVariance}
         <EmptyValue />
@@ -153,8 +156,10 @@
       {/if}
     </Table.Cell>
     <Table.Cell
-      class={'py-2.5 text-right whitespace-nowrap tabular-nums ' +
-        (!isZeroPct && pct !== null ? signColor(pct, positiveGood) : 'text-muted-foreground')}
+      class={cn(
+        'py-2.5 text-right whitespace-nowrap tabular-nums',
+        !isZeroPct && pct !== null ? signColor(pct, positiveGood) : 'text-muted-foreground'
+      )}
     >
       {#if isZeroPct}
         <EmptyValue />

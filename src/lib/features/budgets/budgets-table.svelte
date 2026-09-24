@@ -42,7 +42,7 @@
   import { formatCurrency, formatSignedCurrency, signColor } from '$lib/utils/format.svelte';
   import NavRow from '$lib/components/shared/nav-row.svelte';
   import { openBudget } from '$lib/utils/navigation';
-  import { PiggyBank, Plus, SearchX } from '@lucide/svelte';
+  import { PiggyBank, Plus } from '@lucide/svelte';
   import { Button } from '$lib/components/ui/button';
   import type { BudgetActualRow } from '$lib/tauri';
   import type { ColumnVisibility } from '$lib/hooks/use-column-visibility.svelte';
@@ -64,7 +64,7 @@
     year: number;
     cols: ColumnVisibility<BudgetColumnId>;
     onAddClick?: () => void;
-    onClearSearch?: () => void;
+    onClearSearch: () => void;
   } = $props();
 
   let skeletonCols = $derived(cols.visibleColumns.length + 1);
@@ -84,7 +84,7 @@
   <EmptyState
     card
     title="Nothing budgeted for {year} yet"
-    description="Set a yearly target and we'll track your spending against it."
+    description="Set a yearly target and we’ll track your spending against it."
   >
     {#snippet icon()}
       <PiggyBank aria-hidden="true" class="text-muted-foreground" />
@@ -99,15 +99,7 @@
     {/snippet}
   </EmptyState>
 {:else if rows.length === 0}
-  {#if onClearSearch}
-    <FilteredEmptyState title="No matching budgets" onClear={onClearSearch} />
-  {:else}
-    <EmptyState card title="Nothing matches" description="Try a different search.">
-      {#snippet icon()}
-        <SearchX aria-hidden="true" class="text-muted-foreground" />
-      {/snippet}
-    </EmptyState>
-  {/if}
+  <FilteredEmptyState title="No matching budgets" onClear={onClearSearch} />
 {:else}
   {@const totals = budgetTotals(rows)}
   <TableShell>

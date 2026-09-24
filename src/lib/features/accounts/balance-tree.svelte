@@ -33,8 +33,8 @@
   // Full tree with aggregate (subtree) balances, fully expanded. Placeholder
   // parents contribute 0: they hold no splits themselves and their `balance`
   // already carries propagated child balances, so summing it would double
-  // count. `.sum()` adds children recursively, so each node's value is its
-  // subtree total with every account's own balance counted exactly once.
+  // count. `.sum()` adds children recursively, so each node’s value is its
+  // subtree total with every account’s own balance counted exactly once.
   let root = $derived(
     hierarchy<TreeDatum>({ name: 'root', children: data }, (d) => d.children).sum((d) =>
       d.placeholder ? 0 : Math.abs(clampZero(d.balance ?? 0))
@@ -88,11 +88,7 @@
     {#if loading && data.length === 0}
       <Skeleton class="mx-auto h-120 w-full max-w-160" />
     {:else if data.length === 0}
-      <EmptyState
-        card
-        title="Nothing to show yet"
-        description="Add an account and it'll appear here."
-      >
+      <EmptyState title="Nothing to show yet" description="Add an account and it’ll appear here.">
         {#snippet icon()}
           <FolderTree aria-hidden="true" class="text-muted-foreground" />
         {/snippet}
@@ -136,13 +132,13 @@
                             {#if node.data.guid}
                               <a
                                 href={resolve('/accounts/[guid]', { guid: node.data.guid })}
-                                class="block h-full w-full cursor-pointer rounded-full border hover:scale-110"
+                                class="block h-full w-full cursor-pointer rounded-full border hover:scale-110 focus-visible:outline-2 focus-visible:outline-ring"
                                 style={`background-color: ${nodeFill(node)}; border-color: ${color};`}
                                 aria-label={label}
                               ></a>
                             {:else}
                               <div
-                                class="h-full w-full rounded-full border hover:scale-110"
+                                class="h-full w-full rounded-full border"
                                 style={`background-color: ${nodeFill(node)}; border-color: ${color};`}
                               ></div>
                             {/if}
