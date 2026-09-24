@@ -32,7 +32,8 @@
     type ScheduleInput
   } from '$lib/tauri';
   import { errMsg } from '$lib/utils/error';
-  import { todayStr } from '$lib/utils/date-utils.svelte';
+  import { modKeyLabel } from '$lib/utils/platform';
+  import { isIsoDate, todayStr } from '$lib/utils/date-utils.svelte';
   import { flattenAccountsForPicker } from '$lib/features/accounts/account-picker-utils';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import { FREQUENCY_OPTIONS } from './schedule-utils';
@@ -45,8 +46,7 @@
     headerDescription,
     onSaved,
     onDeleted,
-    onCancel,
-    onError
+    onCancel
   }: {
     mode?: 'create' | 'edit';
     guid?: string | null;
@@ -56,7 +56,6 @@
     onSaved?: (schedule: Schedule) => void;
     onDeleted?: () => void;
     onCancel: () => void;
-    onError?: (msg: string) => void;
   } = $props();
 
   let keySeq = $state(0);
@@ -104,25 +103,42 @@
   let discardDialogOpen = $state(false);
   let formError = $state('');
   let showErrors = $state(false);
+
+  const modKey = modKeyLabel();
+  let headerText = $derived(`${headerDescription} ${modKey}+S saves.`);
+
+  let intervalUnit = $derived.by(() => {
+    const one = Math.abs(Number(intervalMult)) === 1;
+    switch (frequency) {
+      case 'daily':
+        return one ? 'day' : 'days';
+      case 'weekly':
+        return one ? 'week' : 'weeks';
+      case 'biweekly':
+        return '× 2 weeks';
+      case 'monthly':
+        return one ? 'month' : 'months';
+      case 'quarterly':
+        return one ? 'quarter' : 'quarters';
+      default:
+        return one ? 'year' : 'years';
+    }
+  });
+  let occurrenceUnit = $derived(
+    Math.abs(Number(maxOccurrences)) === 1 ? 'occurrence' : 'occurrences'
+  );
   // Dirty baseline is the initial snapshot; {#key} remounts on schedule change.
   let baseline = $state(snapshot);
 
   const accountsRes = useAsyncData({
     enabled: () => true,
     fetch: fetchAccounts,
-    label: "We couldn't load your accounts"
+    label: 'We couldn’t load your accounts'
   });
 
   let pickerOptions = $derived(
     flattenAccountsForPicker(accountsRes.data?.trees, { hidePlaceholders: true })
   );
-
-  function isIsoDate(v: string): boolean {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
-    const [y, m, d] = v.split('-').map(Number);
-    const dt = new Date(y, m - 1, d);
-    return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d;
-  }
 
   let nameError = $derived.by(() => {
     if (!name.trim()) return 'Give this schedule a name';
@@ -138,13 +154,13 @@
 
   let startError = $derived.by(() => {
     if (!startDate) return 'Pick a start date';
-    if (!isIsoDate(startDate)) return 'Use YYYY-MM-DD';
+    if (!isIsoDate(startDate)) return 'Pick a valid date';
     return '';
   });
 
   let endError = $derived.by(() => {
     if (!endDate) return '';
-    if (!isIsoDate(endDate)) return 'Use YYYY-MM-DD';
+    if (!isIsoDate(endDate)) return 'Pick a valid date';
     if (!startError && endDate < startDate) return 'The end date is before the start date';
     return '';
   });
@@ -241,13 +257,20 @@
         onSaved?.(await createSchedule(input));
       }
     } catch (e: unknown) {
-      const msg = errMsg(e, "We couldn't save this schedule. Please try again");
-      formError = msg;
-      onError?.(msg);
+      formError = errMsg(e, 'We couldn’t save this schedule. Please try again');
       focusFormError();
     } finally {
       saving = false;
     }
+  }
+
+  function handleKeydown(e: KeyboardEvent) {
+    const mod = e.ctrlKey || e.metaKey;
+    if (!mod || e.key.toLowerCase() !== 's') return;
+    // Never save behind the delete/discard confirmations.
+    if (e.defaultPrevented || deleteDialogOpen || discardDialogOpen) return;
+    e.preventDefault();
+    void handleSave();
   }
 
   function requestCancel() {
@@ -267,9 +290,7 @@
       deleteDialogOpen = false;
       onDeleted?.();
     } catch (e: unknown) {
-      const msg = errMsg(e, "We couldn't delete this schedule. Please try again");
-      formError = msg;
-      onError?.(msg);
+      formError = errMsg(e, 'We couldn’t delete this schedule. Please try again');
       deleteDialogOpen = false;
       focusFormError();
     } finally {
@@ -278,8 +299,10 @@
   }
 </script>
 
+<svelte:window onkeydown={handleKeydown} />
+
 <div class="flex w-full flex-col gap-6">
-  <PageHeader {title} description={headerDescription}>
+  <PageHeader {title} description={headerText}>
     <Button type="button" variant="outline" onclick={requestCancel}>Cancel</Button>
     {#if mode === 'edit'}
       <ButtonGroup.Root>
@@ -362,7 +385,7 @@
   <Card.Root>
     <IconCardHeader
       title="Recurrence"
-      description="Nothing posts on its own. When one is due you'll get a reminder to post or skip it."
+      description="Nothing posts on its own. When one is due you’ll get a reminder to post or skip it."
     >
       {#snippet icon()}
         <Repeat aria-hidden="true" class="size-4 text-muted-foreground" />
@@ -399,19 +422,7 @@
               bind:value={intervalMult}
               class="w-24"
             />
-            <span class="text-sm text-muted-foreground">
-              {frequency === 'daily'
-                ? 'day(s)'
-                : frequency === 'weekly'
-                  ? 'week(s)'
-                  : frequency === 'biweekly'
-                    ? '× 2 weeks'
-                    : frequency === 'monthly'
-                      ? 'month(s)'
-                      : frequency === 'quarterly'
-                        ? 'quarter(s)'
-                        : 'year(s)'}
-            </span>
+            <span class="text-sm text-muted-foreground">{intervalUnit}</span>
           </div>
           {#if multError}
             <p role="alert" class="text-xs text-destructive">{multError}</p>
@@ -440,6 +451,7 @@
             placeholder="No end date"
             invalid={!!endError}
             describedBy={endError ? 'sched-end-error' : undefined}
+            clearable
           />
           {#if endError}
             <p id="sched-end-error" role="alert" class="text-xs text-destructive">{endError}</p>
@@ -456,7 +468,7 @@
               placeholder="No limit"
               class="w-32"
             />
-            <span class="text-sm text-muted-foreground">occurrence(s)</span>
+            <span class="text-sm text-muted-foreground">{occurrenceUnit}</span>
           </div>
           {#if countError}
             <p role="alert" class="text-xs text-destructive">{countError}</p>
@@ -467,7 +479,7 @@
         <p class="text-xs text-muted-foreground">
           Already posted {initial.occurrencesPosted === 1
             ? 'once'
-            : `${initial.occurrencesPosted} times`}. Changing the start date won't move what's due
+            : `${initial.occurrencesPosted} times`}. Changing the start date won’t move what’s due
           next.
         </p>
       {/if}
@@ -501,7 +513,7 @@
       <Dialog.Header>
         <Dialog.Title>Delete this schedule?</Dialog.Title>
         <Dialog.Description>
-          You won't be reminded again. Anything already posted stays in your ledger.
+          You won’t be reminded again. Anything already posted stays in your ledger.
         </Dialog.Description>
       </Dialog.Header>
       <Dialog.Footer>
@@ -520,7 +532,7 @@
       <Dialog.Header>
         <Dialog.Title>Lose your changes?</Dialog.Title>
         <Dialog.Description>
-          You've got unsaved edits here. Leaving now means starting over.
+          You’ve got unsaved edits here. Leaving now means starting over.
         </Dialog.Description>
       </Dialog.Header>
       <Dialog.Footer>

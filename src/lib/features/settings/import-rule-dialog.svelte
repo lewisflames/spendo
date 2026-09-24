@@ -81,7 +81,7 @@
       open = false;
       onSaved();
     } catch (e: unknown) {
-      toast.error(errMsg(e, "We couldn't save this rule. Please try again"));
+      toast.error(errMsg(e, 'We couldn’t save this rule. Please try again'));
     } finally {
       saving = false;
     }
@@ -100,7 +100,7 @@
       open = false;
       onSaved();
     } catch (e: unknown) {
-      toast.error(errMsg(e, "We couldn't delete this rule. Please try again"));
+      toast.error(errMsg(e, 'We couldn’t delete this rule. Please try again'));
     } finally {
       deleting = false;
     }
@@ -117,6 +117,11 @@
     </Dialog.Header>
 
     <div class="flex flex-col gap-4 py-4">
+      {#if pattern.trim() === '' || accountGuid === ''}
+        <p class="text-xs text-muted-foreground">
+          Add a description pattern and pick a category to save.
+        </p>
+      {/if}
       <div class="flex flex-col gap-1.5">
         <label for="rule-pattern" class="text-sm font-medium">Description pattern</label>
         <Input
@@ -164,7 +169,7 @@
           role="alert"
           class="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
         >
-          Delete this rule? Matching rows fall back to the mapping step's account.
+          Delete this rule? Matching rows fall back to the mapping step’s account.
         </p>
       {/if}
     </div>

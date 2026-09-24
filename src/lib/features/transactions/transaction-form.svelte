@@ -30,6 +30,7 @@
     type TxInput
   } from '$lib/tauri';
   import { errMsg } from '$lib/utils/error';
+  import { modKeyLabel } from '$lib/utils/platform';
   import { isIsoDate, today as sharedToday, todayStr } from '$lib/utils/date-utils.svelte';
   import { parseLocalDate } from '$lib/utils/format.svelte';
   import { plural } from '$lib/utils/format.svelte';
@@ -134,6 +135,16 @@
   let deleting = $state(false);
   let deleteDialogOpen = $state(false);
   let discardDialogOpen = $state(false);
+
+  const modKey = modKeyLabel();
+  // The save chord belongs to the form, so platforms show the key they
+  // actually press instead of a hardcoded Ctrl.
+  let saveHint = $derived(
+    mode === 'create' && onSavedAndNew
+      ? `${modKey}+S saves. Add Shift to jump straight to the next one.`
+      : `${modKey}+S saves.`
+  );
+  let headerText = $derived(headerDescription ? `${headerDescription} ${saveHint}` : saveHint);
   let formError = $state('');
   let showErrors = $state(false);
   let didPrefillAccounts = $state(false);
@@ -144,7 +155,7 @@
   const accountsRes = useAsyncData({
     enabled: () => true,
     fetch: fetchAccounts,
-    label: "We couldn't load your accounts"
+    label: 'We couldn’t load your accounts'
   });
 
   let pickerOptions = $derived(
@@ -182,7 +193,7 @@
   let yesterday = $derived(offsetDateStr(today, -1));
   let dateError = $derived.by(() => {
     if (!postDate) return 'Pick a date for this transaction';
-    if (!isIsoDate(postDate)) return 'That date doesn’t look right. Use YYYY-MM-DD';
+    if (!isIsoDate(postDate)) return 'Pick a valid date';
     if (postDate > today)
       return 'This date is in the future. Balances only include today or earlier';
     return '';
@@ -312,7 +323,7 @@
         onSaved?.(newGuid);
       }
     } catch (e: unknown) {
-      formError = errMsg(e, "We couldn't save this transaction. Please try again");
+      formError = errMsg(e, 'We couldn’t save this transaction. Please try again');
       focusFormError();
     } finally {
       saving = false;
@@ -354,7 +365,7 @@
       showErrors = false;
       focusDescription();
     } catch (e: unknown) {
-      formError = errMsg(e, "We couldn't save this transaction. Please try again");
+      formError = errMsg(e, 'We couldn’t save this transaction. Please try again');
       focusFormError();
     } finally {
       savingAndNew = false;
@@ -378,7 +389,7 @@
       deleteDialogOpen = false;
       onDeleted?.();
     } catch (e: unknown) {
-      formError = errMsg(e, "We couldn't delete this transaction. Please try again");
+      formError = errMsg(e, 'We couldn’t delete this transaction. Please try again');
       deleteDialogOpen = false;
       focusFormError();
     } finally {
@@ -389,8 +400,9 @@
   function handleKeydown(e: KeyboardEvent) {
     const mod = e.ctrlKey || e.metaKey;
     if (!mod || e.key.toLowerCase() !== 's') return;
-    // Don't hijack the browser save dialog when a native dialog has focus.
-    if (e.defaultPrevented) return;
+    // Don’t hijack the browser save dialog when a native dialog has focus,
+    // and never save behind the delete/discard confirmations.
+    if (e.defaultPrevented || deleteDialogOpen || discardDialogOpen) return;
     e.preventDefault();
     if (e.shiftKey && mode === 'create' && onSavedAndNew) {
       void handleSaveAndNew();
@@ -403,7 +415,7 @@
 <svelte:window onkeydown={handleKeydown} />
 
 <div class="flex w-full flex-col gap-6">
-  <PageHeader {title} description={headerDescription}>
+  <PageHeader {title} description={headerText}>
     <Button type="button" variant="outline" onclick={requestCancel}>Cancel</Button>
     {#if mode === 'edit'}
       <ButtonGroup.Root>
@@ -441,8 +453,8 @@
           size="icon"
           onclick={() => void handleSaveAndNew()}
           disabled={!canSave || saving || savingAndNew || deleting}
-          aria-label="Save and add another"
-          title="Save and add another (Shift+Ctrl+S)"
+          aria-label="Save & add another"
+          title={`Save & add another (Shift+${modKey}+S)`}
         >
           <Plus aria-hidden="true" class="size-4" />
         </Button>

@@ -23,7 +23,7 @@
       if (!id) return Promise.reject(new Error('No transaction selected'));
       return fetchTransaction(id);
     },
-    label: "We couldn't load this transaction"
+    label: 'We couldn’t load this transaction'
   });
 
   let detail = $derived(res.data?.transaction ?? null);
@@ -48,7 +48,7 @@
 
   function handleDuplicate() {
     if (!detail) return;
-    // Query strings can't go through `resolve()` — same pattern as budgets.
+    // Query strings can’t go through `resolve()` — same pattern as budgets.
     // eslint-disable-next-line svelte/no-navigation-without-resolve
     void goto(resolve('/transactions/new') + `?duplicate=${encodeURIComponent(detail.guid)}`);
   }
@@ -75,8 +75,8 @@
           guid={detail.guid}
           title="Edit transaction"
           headerDescription={detail.description
-            ? `${detail.description} · Splits use raw amounts as shown in the detail view and must sum to zero. Ctrl+S saves.`
-            : 'Splits use raw amounts as shown in the detail view and must sum to zero. Ctrl+S saves.'}
+            ? `${detail.description} · Splits use raw amounts as shown in the detail view and must sum to zero.`
+            : 'Splits use raw amounts as shown in the detail view and must sum to zero.'}
           initial={detail}
           onSaved={handleSaved}
           onDeleted={handleDeleted}

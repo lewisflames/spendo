@@ -16,8 +16,7 @@
     currency = 'EUR',
     accountName,
     onSave,
-    onDelete,
-    onError
+    onDelete
   }: {
     open: boolean;
     accountGuid: string;
@@ -28,7 +27,6 @@
     accountName?: string;
     onSave?: () => void;
     onDelete?: () => void;
-    onError?: (msg: string) => void;
   } = $props();
 
   let amount = $state(0);
@@ -68,9 +66,7 @@
       open = false;
       onSave?.();
     } catch (e: unknown) {
-      const msg = errMsg(e, "We couldn't save this budget. Please try again");
-      formError = msg;
-      onError?.(msg);
+      formError = errMsg(e, 'We couldn’t save this budget. Please try again');
     } finally {
       loading = false;
     }
@@ -89,7 +85,7 @@
       open = false;
       onDelete?.();
     } catch (e: unknown) {
-      formError = errMsg(e, "We couldn't delete this budget. Please try again");
+      formError = errMsg(e, 'We couldn’t delete this budget. Please try again');
     } finally {
       deleting = false;
     }
@@ -147,7 +143,7 @@
           class="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
         >
           Delete the {year} budget for <strong>{accountName ?? 'this account'}</strong>? Other years
-          stay put. You can't undo this.
+          stay put. You can’t undo this.
         </p>
       {/if}
     </div>
@@ -158,7 +154,7 @@
       {deleting}
       {confirmDelete}
       saveLabel={exists ? 'Save changes' : 'Create budget'}
-      saveDisabled={loading || deleting}
+      saveDisabled={!canSave}
       onDelete={handleDelete}
       onSave={handleSave}
       onCancel={() => {

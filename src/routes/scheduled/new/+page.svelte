@@ -25,7 +25,6 @@
       headerDescription="Set it once. We’ll remind you each time it’s due. Nothing posts without you."
       onSaved={handleSaved}
       onCancel={() => void goto(resolve('/scheduled'))}
-      onError={(msg) => toast.error(msg)}
     />
   </div>
 </BookGate>

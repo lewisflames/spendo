@@ -190,7 +190,7 @@
   <div class="flex items-center gap-2">
     <Button variant="outline" onclick={onBack}>
       <ArrowLeft aria-hidden="true" class="size-4" />
-      Mapping
+      Back to mapping
     </Button>
     <Button onclick={onCommit} disabled={committing || selected.size === 0}>
       {#if committing}

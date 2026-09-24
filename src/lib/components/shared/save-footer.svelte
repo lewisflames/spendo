@@ -57,7 +57,9 @@
       Duplicate
     </Button>
   {/if}
-  <Button type="button" variant="outline" onclick={onCancel}>Cancel</Button>
+  <Button type="button" variant="outline" onclick={onCancel} disabled={saving || deleting}
+    >Cancel</Button
+  >
   {#if onSaveAndNew}
     <Button
       type="button"

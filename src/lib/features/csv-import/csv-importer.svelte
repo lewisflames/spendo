@@ -2,6 +2,7 @@
   import { open } from '@tauri-apps/plugin-dialog';
   import { basename } from '@tauri-apps/api/path';
   import { SvelteSet } from 'svelte/reactivity';
+  import { tick } from 'svelte';
   import { toast } from '$lib/components/ui/sonner';
   import {
     csvCommit,
@@ -27,7 +28,28 @@
 
   type Step = 'file' | 'mapping' | 'preview' | 'done';
 
+  const STEPS: { id: Step; label: string }[] = [
+    { id: 'file', label: 'File' },
+    { id: 'mapping', label: 'Map' },
+    { id: 'preview', label: 'Preview' },
+    { id: 'done', label: 'Done' }
+  ];
+
   let step = $state<Step>('file');
+  let stepIndex = $derived(STEPS.findIndex((s) => s.id === step));
+  let stepRoot = $state<HTMLElement | null>(null);
+  let stepsMounted = false;
+
+  // Move focus to the incoming step so keyboard/screen-reader users land in
+  // the new content instead of on the button that disappeared.
+  $effect(() => {
+    void step;
+    if (!stepsMounted) {
+      stepsMounted = true;
+      return;
+    }
+    void tick().then(() => stepRoot?.focus());
+  });
   let path = $state('');
   let filename = $state('');
   let detect = $state<CsvDetectResult | null>(null);
@@ -93,7 +115,7 @@
     } catch (e: unknown) {
       if (request !== accountsRequest) return;
       accountsData = null;
-      accountsError = errMsg(e, "We couldn't load your accounts");
+      accountsError = errMsg(e, 'We couldn’t load your accounts');
     }
   }
 
@@ -139,7 +161,7 @@
     }
   }
 
-  // Apply the saved preset's accounts once the tree is available. The picker
+  // Apply the saved preset’s accounts once the tree is available. The picker
   // only accepts real account guids, so the check also drops stale presets.
   $effect(() => {
     if (!presetAccounts || !accountsData) return;
@@ -170,7 +192,7 @@
       page = 1;
       step = 'mapping';
     } catch (e: unknown) {
-      detectError = errMsg(e, "We couldn't read that CSV file");
+      detectError = errMsg(e, 'We couldn’t read that CSV file');
     } finally {
       picking = false;
     }
@@ -216,7 +238,7 @@
       page = 1;
       step = 'preview';
     } catch (e: unknown) {
-      previewError = errMsg(e, "We couldn't preview that CSV");
+      previewError = errMsg(e, 'We couldn’t preview that CSV');
     } finally {
       previewing = false;
     }
@@ -263,7 +285,7 @@
       presetApplied = false;
       toast.success('Mapping forgotten. We’ll ask next time');
     } catch (e: unknown) {
-      toast.error(errMsg(e, "We couldn't forget that mapping. Please try again"));
+      toast.error(errMsg(e, 'We couldn’t forget that mapping. Please try again'));
     }
   }
 
@@ -290,49 +312,67 @@
   }
 </script>
 
-{#if step === 'file'}
-  <FileStep {detectError} {picking} onDetect={() => void handlePickFile()} />
-{:else if step === 'mapping' && detect}
-  <MappingStep
-    {detect}
-    {filename}
-    bind:delimiter
-    bind:hasHeader
-    bind:datePreference
-    bind:usePair
-    bind:dateCol
-    bind:descCol
-    bind:amountCol
-    bind:debitCol
-    bind:creditCol
-    bind:numCol
-    bind:notesCol
-    bind:targetAccountGuid
-    bind:offsetAccountGuid
-    bind:rememberMapping
-    {accountsData}
-    {accountsError}
-    {previewError}
-    {previewing}
-    {presetApplied}
-    hasSignature={signature !== null}
-    onForgetPreset={() => void forgetPreset()}
-    onPreview={() => void handlePreview()}
-    onReset={resetWizard}
-    onRetryAccounts={() => void loadAccounts()}
-  />
-{:else if step === 'preview' && preview}
-  <PreviewStep
-    {preview}
-    {selected}
-    bind:page
-    bind:pageSize
-    {commitError}
-    {committing}
-    {targetCommodity}
-    onCommit={() => void handleCommit()}
-    onBack={() => (step = 'mapping')}
-  />
-{:else if step === 'done' && commitResult}
-  <DoneStep {commitResult} onReset={resetWizard} />
-{/if}
+<div bind:this={stepRoot} tabindex="-1" class="flex flex-col gap-6 outline-none">
+  <ol class="flex flex-wrap items-center gap-2 text-sm" aria-label="Import steps">
+    {#each STEPS as s, i (s.id)}
+      <li class="flex items-center gap-2" aria-current={i === stepIndex ? 'step' : undefined}>
+        <span
+          class="flex size-5 items-center justify-center rounded-full text-xs font-medium {i <=
+          stepIndex
+            ? 'bg-primary text-primary-foreground'
+            : 'bg-muted text-muted-foreground'}"
+        >
+          {i + 1}
+        </span>
+        <span class={i === stepIndex ? 'font-medium' : 'text-muted-foreground'}>{s.label}</span>
+      </li>
+    {/each}
+  </ol>
+
+  {#if step === 'file'}
+    <FileStep {detectError} {picking} onDetect={() => void handlePickFile()} />
+  {:else if step === 'mapping' && detect}
+    <MappingStep
+      {detect}
+      {filename}
+      bind:delimiter
+      bind:hasHeader
+      bind:datePreference
+      bind:usePair
+      bind:dateCol
+      bind:descCol
+      bind:amountCol
+      bind:debitCol
+      bind:creditCol
+      bind:numCol
+      bind:notesCol
+      bind:targetAccountGuid
+      bind:offsetAccountGuid
+      bind:rememberMapping
+      {accountsData}
+      {accountsError}
+      {previewError}
+      {previewing}
+      {presetApplied}
+      hasSignature={signature !== null}
+      onForgetPreset={() => void forgetPreset()}
+      onPreview={() => void handlePreview()}
+      onReset={resetWizard}
+      onRetryAccounts={() => void loadAccounts()}
+    />
+  {:else if step === 'preview' && preview}
+    <PreviewStep
+      {preview}
+      {selected}
+      bind:page
+      bind:pageSize
+      {commitError}
+      {committing}
+      {targetCommodity}
+      onCommit={() => void handleCommit()}
+      onBack={() => (step = 'mapping')}
+    />
+  {:else if step === 'done' && commitResult}
+    <DoneStep {commitResult} onReset={resetWizard} />
+  {/if}
+</div>

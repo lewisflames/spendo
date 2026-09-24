@@ -35,7 +35,12 @@
 
 {#if preview}
   <Dialog.Root bind:open={gnucashImportDialog.open}>
-    <Dialog.Content class="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+    <Dialog.Content
+      class="max-h-[90vh] overflow-y-auto sm:max-w-lg"
+      escapeKeydownBehavior={gnucashImportDialog.importing ? 'ignore' : 'close'}
+      interactOutsideBehavior={gnucashImportDialog.importing ? 'ignore' : 'close'}
+      showCloseButton={!gnucashImportDialog.importing}
+    >
       <Dialog.Header>
         <Dialog.Title>Import {preview.filename}?</Dialog.Title>
         <Dialog.Description>We’ll fold this file into the book you’ve got open.</Dialog.Description>
@@ -72,7 +77,7 @@
         <div class="rounded-md border p-3 text-sm">
           <p>
             {skippedSchedules.length} scheduled
-            {skippedSchedules.length === 1 ? 'transaction' : 'transactions'} can't be imported.
+            {skippedSchedules.length === 1 ? 'transaction' : 'transactions'} can’t be imported.
           </p>
           <ul class="mt-2 space-y-1 text-muted-foreground">
             {#each shownSkipped as skipped, i (i)}

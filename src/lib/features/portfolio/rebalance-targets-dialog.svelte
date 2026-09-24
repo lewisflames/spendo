@@ -98,7 +98,7 @@
       open = false;
       toast.success('Targets saved. Looking balanced');
     } catch (e: unknown) {
-      formError = errMsg(e, "We couldn't save your targets. Please try again");
+      formError = errMsg(e, 'We couldn’t save your targets. Please try again');
     } finally {
       saving = false;
     }
@@ -155,7 +155,7 @@
       </p>
       {#if hasBadValues}
         <p class="text-xs text-destructive" role="alert">Keep each target between 0 and 100%.</p>
-      {:else if !sumValid}
+      {:else if !sumValid && (dirty || result.targetSumPct > 100)}
         <p class="text-xs text-destructive" role="alert">
           You’re at {formatAllocPct(result.targetSumPct)}. Aim for 100% total.
         </p>

@@ -113,14 +113,16 @@
         </div>
       {/if}
       <div class="flex flex-col gap-2">
-        <span class="text-sm font-medium">Date column</span>
+        <label for="csv-date-col" class="text-sm font-medium">Date column</label>
         <Select.Root
           type="single"
           value={String(dateCol)}
           onValueChange={(v) => (dateCol = Number(v))}
           items={columnOptions}
         >
-          <Select.Trigger><SelectPrimitive.Value placeholder="Date column" /></Select.Trigger>
+          <Select.Trigger id="csv-date-col"
+            ><SelectPrimitive.Value placeholder="Date column" /></Select.Trigger
+          >
           <Select.Content>
             {#each columnOptions as opt (opt.value)}
               <Select.Item value={opt.value} label={opt.label}>{opt.label}</Select.Item>
@@ -129,14 +131,15 @@
         </Select.Root>
       </div>
       <div class="flex flex-col gap-2">
-        <span class="text-sm font-medium">Description column</span>
+        <label for="csv-desc-col" class="text-sm font-medium">Description column</label>
         <Select.Root
           type="single"
           value={String(descCol)}
           onValueChange={(v) => (descCol = Number(v))}
           items={columnOptions}
         >
-          <Select.Trigger><SelectPrimitive.Value placeholder="Description column" /></Select.Trigger
+          <Select.Trigger id="csv-desc-col"
+            ><SelectPrimitive.Value placeholder="Description column" /></Select.Trigger
           >
           <Select.Content>
             {#each columnOptions as opt (opt.value)}
@@ -153,14 +156,16 @@
       </div>
       {#if usePair}
         <div class="flex flex-col gap-2">
-          <span class="text-sm font-medium">Debit column (money out)</span>
+          <label for="csv-debit-col" class="text-sm font-medium">Debit column (money out)</label>
           <Select.Root
             type="single"
             value={debitCol !== null ? String(debitCol) : ''}
             onValueChange={(v) => (debitCol = Number(v))}
             items={columnOptions}
           >
-            <Select.Trigger><SelectPrimitive.Value placeholder="Debit column" /></Select.Trigger>
+            <Select.Trigger id="csv-debit-col"
+              ><SelectPrimitive.Value placeholder="Debit column" /></Select.Trigger
+            >
             <Select.Content>
               {#each columnOptions as opt (opt.value)}
                 <Select.Item value={opt.value} label={opt.label}>{opt.label}</Select.Item>
@@ -169,14 +174,16 @@
           </Select.Root>
         </div>
         <div class="flex flex-col gap-2">
-          <span class="text-sm font-medium">Credit column (money in)</span>
+          <label for="csv-credit-col" class="text-sm font-medium">Credit column (money in)</label>
           <Select.Root
             type="single"
             value={creditCol !== null ? String(creditCol) : ''}
             onValueChange={(v) => (creditCol = Number(v))}
             items={columnOptions}
           >
-            <Select.Trigger><SelectPrimitive.Value placeholder="Credit column" /></Select.Trigger>
+            <Select.Trigger id="csv-credit-col"
+              ><SelectPrimitive.Value placeholder="Credit column" /></Select.Trigger
+            >
             <Select.Content>
               {#each columnOptions as opt (opt.value)}
                 <Select.Item value={opt.value} label={opt.label}>{opt.label}</Select.Item>
@@ -186,14 +193,16 @@
         </div>
       {:else}
         <div class="flex flex-col gap-2 md:col-span-2">
-          <span class="text-sm font-medium">Amount column</span>
+          <label for="csv-amount-col" class="text-sm font-medium">Amount column</label>
           <Select.Root
             type="single"
             value={amountCol !== null ? String(amountCol) : ''}
             onValueChange={(v) => (amountCol = Number(v))}
             items={columnOptions}
           >
-            <Select.Trigger><SelectPrimitive.Value placeholder="Amount column" /></Select.Trigger>
+            <Select.Trigger id="csv-amount-col"
+              ><SelectPrimitive.Value placeholder="Amount column" /></Select.Trigger
+            >
             <Select.Content>
               {#each columnOptions as opt (opt.value)}
                 <Select.Item value={opt.value} label={opt.label}>{opt.label}</Select.Item>
@@ -203,14 +212,14 @@
         </div>
       {/if}
       <div class="flex flex-col gap-2">
-        <span class="text-sm font-medium">Reference / number (optional)</span>
+        <label for="csv-num-col" class="text-sm font-medium">Reference / number (optional)</label>
         <Select.Root
           type="single"
           value={numCol !== null ? String(numCol) : 'none'}
           onValueChange={(v) => (numCol = v === 'none' ? null : Number(v))}
           items={[{ value: 'none', label: 'Not imported' }, ...columnOptions]}
         >
-          <Select.Trigger><SelectPrimitive.Value /></Select.Trigger>
+          <Select.Trigger id="csv-num-col"><SelectPrimitive.Value /></Select.Trigger>
           <Select.Content>
             <Select.Item value="none" label="Not imported">Not imported</Select.Item>
             {#each columnOptions as opt (opt.value)}
@@ -220,14 +229,14 @@
         </Select.Root>
       </div>
       <div class="flex flex-col gap-2">
-        <span class="text-sm font-medium">Notes / memo (optional)</span>
+        <label for="csv-notes-col" class="text-sm font-medium">Notes / memo (optional)</label>
         <Select.Root
           type="single"
           value={notesCol !== null ? String(notesCol) : 'none'}
           onValueChange={(v) => (notesCol = v === 'none' ? null : Number(v))}
           items={[{ value: 'none', label: 'Not imported' }, ...columnOptions]}
         >
-          <Select.Trigger><SelectPrimitive.Value /></Select.Trigger>
+          <Select.Trigger id="csv-notes-col"><SelectPrimitive.Value /></Select.Trigger>
           <Select.Content>
             <Select.Item value="none" label="Not imported">Not imported</Select.Item>
             {#each columnOptions as opt (opt.value)}
@@ -237,23 +246,29 @@
         </Select.Root>
       </div>
       <div class="flex flex-col gap-2">
-        <span class="text-sm font-medium">Which account is this statement for?</span>
+        <label for="csv-target-account" class="text-sm font-medium"
+          >Which account is this statement for?</label
+        >
         <AccountPicker
+          id="csv-target-account"
           bind:value={targetAccountGuid}
           options={pickerOptions}
           placeholder="Money in/out of…"
         />
       </div>
       <div class="flex flex-col gap-2">
-        <span class="text-sm font-medium">Fallback category (when no rule matches)</span>
+        <label for="csv-offset-account" class="text-sm font-medium"
+          >Fallback category (when no rule matches)</label
+        >
         <AccountPicker
+          id="csv-offset-account"
           bind:value={offsetAccountGuid}
           options={pickerOptions}
           placeholder="Balanced against…"
         />
       </div>
       <div class="flex flex-col gap-2">
-        <span class="text-sm font-medium">Delimiter</span>
+        <label for="csv-delimiter" class="text-sm font-medium">Delimiter</label>
         <Select.Root
           type="single"
           value={delimiter}
@@ -262,7 +277,7 @@
           }}
           items={delimiters}
         >
-          <Select.Trigger><SelectPrimitive.Value /></Select.Trigger>
+          <Select.Trigger id="csv-delimiter"><SelectPrimitive.Value /></Select.Trigger>
           <Select.Content>
             {#each delimiters as d (d.value)}
               <Select.Item value={d.value} label={d.label}>{d.label}</Select.Item>
@@ -271,7 +286,9 @@
         </Select.Root>
       </div>
       <div class="flex flex-col gap-2">
-        <span class="text-sm font-medium">Ambiguous dates (01/02/2026)</span>
+        <label for="csv-date-preference" class="text-sm font-medium"
+          >Ambiguous dates (01/02/2026)</label
+        >
         <Select.Root
           type="single"
           value={datePreference}
@@ -283,7 +300,7 @@
             { value: 'mdy', label: 'Month first (MDY)' }
           ]}
         >
-          <Select.Trigger><SelectPrimitive.Value /></Select.Trigger>
+          <Select.Trigger id="csv-date-preference"><SelectPrimitive.Value /></Select.Trigger>
           <Select.Content>
             <Select.Item value="dmy" label="Day first (DMY)">Day first (DMY)</Select.Item>
             <Select.Item value="mdy" label="Month first (MDY)">Month first (MDY)</Select.Item>
@@ -356,9 +373,9 @@
   <div class="flex items-center gap-2">
     <Button variant="outline" onclick={onReset}>
       <ArrowLeft aria-hidden="true" class="size-4" />
-      Back
+      Start over
     </Button>
-    <Button onclick={onPreview} disabled={previewing || !targetAccountGuid || !offsetAccountGuid}>
+    <Button onclick={onPreview} disabled={previewing}>
       {#if previewing}
         <LoaderCircle aria-hidden="true" class="size-4 animate-spin" />
         Previewing…
