@@ -8,7 +8,7 @@
 <EmptyState
   card
   title="This book is empty"
-  description="Bring in a GnuCash file or a bank CSV from Settings → Data import, and your accounts will show up here."
+  description="Bring in a GnuCash file or a bank CSV from the book menu at the bottom of the sidebar, or from the command palette. Imported accounts will show up here."
 >
   {#snippet icon()}
     <FileUp aria-hidden="true" class="text-muted-foreground" />
