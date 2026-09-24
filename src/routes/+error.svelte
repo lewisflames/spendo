@@ -5,12 +5,19 @@
   import { page } from '$app/state';
   import { Button } from '$lib/components/ui/button';
   import { dbSession } from '$lib/stores/db.svelte';
+  import { goBack as goBackInApp, navHistory } from '$lib/stores/nav-history.svelte';
 
   const isNotFound = $derived(page.status === 404);
+  const rawError = $derived(page.error?.message ?? '');
 
+  // Prefer in-app history so the button matches the title bar; deep links
+  // (empty stack) fall back to the app’s home instead of leaving it.
   function goBack() {
-    if (window.history.length > 1) window.history.back();
-    else void goto(dbSession.value ? resolve('/transactions') : resolve('/'));
+    if (navHistory.value.index > 0) {
+      goBackInApp();
+    } else {
+      void goto(dbSession.value ? resolve('/transactions') : resolve('/'));
+    }
   }
 </script>
 
@@ -23,7 +30,7 @@
     {#if isNotFound}
       <SearchX aria-hidden="true" class="size-16 text-muted-foreground" />
       <h1 class="text-6xl font-bold tracking-tight">404</h1>
-      <h2 class="text-xl font-semibold">We can't find that page</h2>
+      <h2 class="text-xl font-semibold">We can’t find that page</h2>
       <p class="max-w-md text-sm text-muted-foreground">
         That link doesn’t go anywhere anymore. It may have moved.
       </p>
@@ -32,8 +39,15 @@
       <h1 class="text-6xl font-bold tracking-tight">{page.status}</h1>
       <h2 class="text-xl font-semibold">That didn’t work</h2>
       <p class="max-w-md text-sm text-muted-foreground">
-        {page.error?.message ?? 'Something hiccupped on our side. Try again, or head back.'}
+        Something hiccupped on our side. Try again, or head back. If it keeps happening, the details
+        below may help.
       </p>
+      {#if rawError}
+        <details class="max-w-md text-left text-xs text-muted-foreground">
+          <summary class="cursor-pointer">Error details</summary>
+          <p class="mt-1 break-words">{rawError}</p>
+        </details>
+      {/if}
       <Button variant="outline" onclick={() => location.reload()}>
         <RefreshCw aria-hidden="true" class="size-4" />
         Try again
