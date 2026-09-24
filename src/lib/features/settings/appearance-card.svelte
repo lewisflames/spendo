@@ -14,9 +14,11 @@
   } from '$lib/stores/settings.svelte';
   import { SunMoon, Palette } from '@lucide/svelte';
   import { cn } from '$lib/utils';
+  import { modKeyLabel } from '$lib/utils/platform';
   import SettingSelectRow from './setting-select-row.svelte';
 
   const DEFAULT_CUSTOM_PRIMARY = '#3b82f6';
+  const modKey = modKeyLabel();
 
   const themes: { value: Theme; label: string }[] = [
     { value: 'system', label: 'System' },
@@ -76,7 +78,11 @@
     {/snippet}
   </IconCardHeader>
   <Card.Content class="flex flex-col gap-4">
-    <SettingSelectRow label="Theme" description="Match your system, or go light or dark">
+    <SettingSelectRow
+      label="Theme"
+      description="Match your system, or go light or dark"
+      labelFor="setting-theme"
+    >
       <Select.Root
         type="single"
         value={appSettings.value.theme}
@@ -85,7 +91,7 @@
         }}
         items={themes}
       >
-        <Select.Trigger class="w-36">
+        <Select.Trigger id="setting-theme" class="w-36">
           <SelectPrimitive.Value placeholder="Select theme" />
         </Select.Trigger>
         <Select.Content>
@@ -179,7 +185,7 @@
     </SettingSelectRow>
     <SettingSelectRow
       label="Sidebar"
-      description="Start with the navigation collapsed (Ctrl+B toggles)"
+      description={`Start with the navigation collapsed (${modKey}B toggles)`}
     >
       <Switch
         checked={appSettings.value.sidebarCollapsed}

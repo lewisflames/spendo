@@ -31,14 +31,18 @@
     {/snippet}
   </IconCardHeader>
   <Card.Content class="flex flex-col gap-4">
-    <SettingSelectRow label="Locale" description="How dates, numbers and money look">
+    <SettingSelectRow
+      label="Locale"
+      description="How dates, numbers and money look"
+      labelFor="setting-locale"
+    >
       <Select.Root
         type="single"
         value={appSettings.value.locale}
         onValueChange={(v) => saveSettings({ locale: v as Locale })}
         items={locales}
       >
-        <Select.Trigger class="w-48">
+        <Select.Trigger id="setting-locale" class="w-48">
           <SelectPrimitive.Value placeholder="Select locale" />
         </Select.Trigger>
         <Select.Content>
@@ -48,14 +52,18 @@
         </Select.Content>
       </Select.Root>
     </SettingSelectRow>
-    <SettingSelectRow label="Rows per page" description="One setting for every list in the app">
+    <SettingSelectRow
+      label="Rows per page"
+      description="One setting for every list in the app"
+      labelFor="setting-page-size"
+    >
       <Select.Root
         type="single"
         value={String(appSettings.value.pageSize)}
         onValueChange={(v) => saveSettings({ pageSize: Number(v) })}
         items={PAGE_SIZE_OPTIONS.map((opt) => ({ value: String(opt), label: `${opt} per page` }))}
       >
-        <Select.Trigger class="w-36">
+        <Select.Trigger id="setting-page-size" class="w-36">
           <SelectPrimitive.Value placeholder="Select size" />
         </Select.Trigger>
         <Select.Content>

@@ -3,7 +3,6 @@
   import * as Select from '$lib/components/ui/select';
   import { Select as SelectPrimitive } from 'bits-ui';
   import IconCardHeader from '$lib/components/shared/icon-card-header.svelte';
-  import ErrorCard from '$lib/components/shared/error-card.svelte';
   import SettingSelectRow from './setting-select-row.svelte';
   import { ArrowLeftRight } from '@lucide/svelte';
   import { dbSession } from '$lib/stores/db.svelte';
@@ -11,8 +10,6 @@
   import { errMsg } from '$lib/utils/error';
   import { toast } from '$lib/components/ui/sonner';
   import type { CsvDelimiter, ExportDateFormat } from '$lib/tauri';
-
-  let { error, onRetry }: { error: string | null; onRetry: () => void } = $props();
 
   let savingPref = $state(false);
 
@@ -35,7 +32,7 @@
     try {
       await saveBookSetting(field, value);
     } catch (e: unknown) {
-      toast.error(errMsg(e, "We couldn't save that preference. Please try again"));
+      toast.error(errMsg(e, 'We couldn’t save that preference. Please try again'));
     } finally {
       savingPref = false;
     }
@@ -52,12 +49,10 @@
     {/snippet}
   </IconCardHeader>
   <Card.Content class="flex flex-col gap-4">
-    {#if error}
-      <ErrorCard message={error} {onRetry} />
-    {/if}
     <SettingSelectRow
       label="CSV delimiter"
       description="Semicolon plays nicer with some Excels (de-DE / fr-FR)"
+      labelFor="setting-csv-delimiter"
     >
       <Select.Root
         type="single"
@@ -68,7 +63,7 @@
         items={delimiters}
         disabled={!dbSession.value || savingPref}
       >
-        <Select.Trigger class="w-44">
+        <Select.Trigger id="setting-csv-delimiter" class="w-44">
           <SelectPrimitive.Value placeholder="Select delimiter" />
         </Select.Trigger>
         <Select.Content>
@@ -81,6 +76,7 @@
     <SettingSelectRow
       label="CSV date format"
       description="ISO is easiest if you ever bring the file back in"
+      labelFor="setting-csv-date-format"
     >
       <Select.Root
         type="single"
@@ -91,7 +87,7 @@
         items={dateFormats}
         disabled={!dbSession.value || savingPref}
       >
-        <Select.Trigger class="w-44">
+        <Select.Trigger id="setting-csv-date-format" class="w-44">
           <SelectPrimitive.Value placeholder="Select format" />
         </Select.Trigger>
         <Select.Content>
@@ -102,9 +98,7 @@
       </Select.Root>
     </SettingSelectRow>
     {#if !dbSession.value}
-      <p class="text-xs text-muted-foreground">
-        Open a book to tweak this. The choice travels with the file.
-      </p>
+      <p class="text-xs text-muted-foreground">Open a book to change this.</p>
     {/if}
   </Card.Content>
 </Card.Root>
