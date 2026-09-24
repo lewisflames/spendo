@@ -20,7 +20,7 @@
       if (!id) return Promise.reject(new Error('No schedule selected'));
       return fetchSchedule(id);
     },
-    label: "We couldn't load this schedule"
+    label: 'We couldn’t load this schedule'
   });
 
   let schedule = $derived(res.data ?? null);
@@ -60,7 +60,6 @@
           onSaved={handleSaved}
           onDeleted={handleDeleted}
           onCancel={goBack}
-          onError={(msg) => toast.error(msg)}
         />
       {/key}
     {:else if res.error}

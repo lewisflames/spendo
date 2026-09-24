@@ -67,7 +67,7 @@
       if (!g) return Promise.reject(new Error('No holding selected'));
       return fetchHoldingDetail(g, pg, pageSize);
     },
-    label: "We couldn't load this holding",
+    label: 'We couldn’t load this holding',
     onSuccess: (result) => {
       // The backend clamps out-of-range pages; snap back to the valid page
       // (possible after shrinking pageSize).
@@ -83,7 +83,7 @@
   const overridesRes = useAsyncData({
     enabled: () => !!dbSession.value,
     fetch: fetchSymbolOverrides,
-    label: "We couldn't load your symbols"
+    label: 'We couldn’t load your symbols'
   });
 
   let overrideSymbol = $derived(
@@ -160,7 +160,6 @@
         mnemonic={holding.mnemonic}
         currentSymbol={overrideSymbol}
         onSave={() => void handleSymbolSave()}
-        onError={(msg) => toast.error(msg)}
       />
 
       <!-- Charts (previous data stays visible, dimmed, while refetching) -->

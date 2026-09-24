@@ -41,12 +41,12 @@
 
   <div class="flex flex-col gap-1">
     <label for="{idPrefix}-from" class="text-xs text-muted-foreground">From</label>
-    <DatePicker id="{idPrefix}-from" bind:value={dateFrom} placeholder="Start date" />
+    <DatePicker id="{idPrefix}-from" bind:value={dateFrom} placeholder="Start date" clearable />
   </div>
 
   <div class="flex flex-col gap-1">
     <label for="{idPrefix}-to" class="text-xs text-muted-foreground">To</label>
-    <DatePicker id="{idPrefix}-to" bind:value={dateTo} placeholder="End date" />
+    <DatePicker id="{idPrefix}-to" bind:value={dateTo} placeholder="End date" clearable />
   </div>
 
   {#if hasFilters}

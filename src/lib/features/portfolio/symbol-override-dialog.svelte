@@ -12,15 +12,13 @@
     commodityGuid,
     mnemonic,
     currentSymbol,
-    onSave,
-    onError
+    onSave
   }: {
     open: boolean;
     commodityGuid: string;
     mnemonic: string;
     currentSymbol: string | null;
     onSave?: () => void;
-    onError?: (msg: string) => void;
   } = $props();
 
   let symbol = $state('');
@@ -36,13 +34,15 @@
   function syncFromEntry() {
     symbol = currentSymbol ?? '';
     formError = '';
+    touched = false;
     confirmReset = false;
     loading = false;
     resetting = false;
   }
 
+  let touched = $state(false);
   let symbolError = $derived(
-    symbol.trim() ? '' : 'Enter a Yahoo symbol (e.g. AAPL, SIE.DE, BTC-EUR)'
+    touched && !symbol.trim() ? 'Enter a Yahoo symbol (e.g. AAPL, SIE.DE, BTC-EUR)' : ''
   );
   let saveDisabled = $derived(loading || resetting || !symbol.trim());
 
@@ -56,9 +56,7 @@
       open = false;
       onSave?.();
     } catch (e: unknown) {
-      const msg = errMsg(e, "We couldn't save this symbol. Please try again");
-      formError = msg;
-      onError?.(msg);
+      formError = errMsg(e, 'We couldn’t save this symbol. Please try again');
     } finally {
       loading = false;
     }
@@ -76,9 +74,7 @@
       open = false;
       onSave?.();
     } catch (e: unknown) {
-      const msg = errMsg(e, "We couldn't reset this symbol. Please try again");
-      formError = msg;
-      onError?.(msg);
+      formError = errMsg(e, 'We couldn’t reset this symbol. Please try again');
     } finally {
       resetting = false;
     }
@@ -105,6 +101,7 @@
         bind:value={symbol}
         placeholder="e.g. AAPL, SIE.DE, BTC-EUR"
         class="font-mono"
+        oninput={() => (touched = true)}
         aria-invalid={!!symbolError}
         aria-describedby={symbolError ? 'yahoo-symbol-error' : undefined}
         autofocus

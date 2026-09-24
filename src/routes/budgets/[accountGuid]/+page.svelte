@@ -3,7 +3,7 @@
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { Button } from '$lib/components/ui/button';
-  import { dbSession } from '$lib/stores/db.svelte';
+  import { dbSession, dbBootstrapping } from '$lib/stores/db.svelte';
   import { sessionCurrency } from '$lib/utils/format.svelte';
   import { fetchBudgetDetail, fetchBudgetDateRange, fetchAccounts } from '$lib/tauri';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
@@ -26,7 +26,7 @@
 
   let accountGuid = $derived(page.params.accountGuid);
 
-  // Detail view extends one year beyond the latest transaction so next year's
+  // Detail view extends one year beyond the latest transaction so next year’s
   // budget can be planned ahead (mirrors BudgetYearDialog).
   const by = useBudgetYear(() => dateRange, { plusOne: true });
 
@@ -52,7 +52,7 @@
       ]);
       return { detail, range, accounts };
     },
-    label: "We couldn't load this budget",
+    label: 'We couldn’t load this budget',
     onSuccess: () => by.clampSelection()
   });
 
@@ -144,7 +144,7 @@
           {currency}
         />
       </DimWrapper>
-    {:else if res.loading}
+    {:else if res.loading || dbBootstrapping.value}
       <PageSkeleton variant="budget-detail" />
     {:else if isMissing || (detail === null && !res.error)}
       <EmptyState
@@ -183,7 +183,6 @@
       {accountName}
       onSave={handleSaveSuccess}
       onDelete={handleDeleteSuccess}
-      onError={(msg) => (formError = msg)}
     />
   {/key}
 {/if}

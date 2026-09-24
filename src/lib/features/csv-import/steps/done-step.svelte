@@ -37,9 +37,5 @@
       </Button>
       <Button variant="outline" onclick={onReset}>Import another file</Button>
     </div>
-    <a
-      class="text-sm text-muted-foreground underline underline-offset-4"
-      href={resolve('/settings')}>Back to settings</a
-    >
   </Card.Content>
 </Card.Root>

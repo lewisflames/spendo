@@ -53,7 +53,7 @@
 
   let target = $derived(accountGuid ?? (pickedAccountGuid || null));
 
-  // Years are limited to the book's transaction range, plus one year ahead so
+  // Years are limited to the book’s transaction range, plus one year ahead so
   // budgets can be planned for the next year.
   const by = useBudgetYear(() => dateRange, {
     plusOne: true,
@@ -105,7 +105,7 @@
       .catch((e: unknown) => {
         if (cancelled) return;
         existingYears = null;
-        const msg = errMsg(e, "We couldn't load your budgets. Please try again");
+        const msg = errMsg(e, 'We couldn’t load your budgets. Please try again');
         fetchError = msg;
         onError?.(msg);
       })
@@ -135,9 +135,7 @@
       amount > 0 &&
       !yearError
   );
-  let saveDisabled = $derived(
-    loading || yearsLoading || (target !== null && existingYears === null) || noFreeYears
-  );
+  let saveDisabled = $derived(!canSave);
 
   function retryFetchYears() {
     existingYears = null;
@@ -158,7 +156,7 @@
       })
       .catch((e: unknown) => {
         existingYears = null;
-        const msg = errMsg(e, "We couldn't load your budgets. Please try again");
+        const msg = errMsg(e, 'We couldn’t load your budgets. Please try again');
         fetchError = msg;
         onError?.(msg);
       })
@@ -181,9 +179,7 @@
       open = false;
       onSave?.(target, y);
     } catch (e: unknown) {
-      const msg = errMsg(e, "We couldn't save this budget. Please try again");
-      formError = msg;
-      onError?.(msg);
+      formError = errMsg(e, 'We couldn’t save this budget. Please try again');
     } finally {
       loading = false;
     }
@@ -301,7 +297,7 @@
         {:else if yearsLoading}
           Checking which years are taken…
         {:else if existingYears === null}
-          We couldn't load your budgets. Retry to see which years are taken.
+          We couldn’t load your budgets. Retry to see which years are taken.
         {:else if noFreeYears}
           Every available year already has a budget for this account.
         {:else}

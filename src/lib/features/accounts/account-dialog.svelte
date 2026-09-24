@@ -123,7 +123,7 @@
     }
   }
 
-  /** GUID of the book's report currency, or '' when the list isn't loaded yet. */
+  /** GUID of the book’s report currency, or '' when the list isn’t loaded yet. */
   function reportCurrencyGuid(): string {
     const code = sessionCurrency();
     return currencies.find((c) => c.mnemonic === code)?.guid ?? '';
@@ -158,7 +158,7 @@
       })
       .catch((e: unknown) => {
         if (cancelled) return;
-        onError?.(errMsg(e, "We couldn't load your accounts. Please try again"));
+        onError?.(errMsg(e, 'We couldn’t load your accounts. Please try again'));
       })
       .finally(() => {
         if (!cancelled) loading = false;
@@ -207,9 +207,7 @@
         onSaved?.(newGuid);
       }
     } catch (e: unknown) {
-      const msg = errMsg(e, "We couldn't save this account. Please try again");
-      formError = msg;
-      onError?.(msg);
+      formError = errMsg(e, 'We couldn’t save this account. Please try again');
     } finally {
       saving = false;
     }
@@ -228,9 +226,7 @@
       open = false;
       onDeleted?.();
     } catch (e: unknown) {
-      const msg = errMsg(e, "We couldn't delete this account. Please try again");
-      formError = msg;
-      onError?.(msg);
+      formError = errMsg(e, 'We couldn’t delete this account. Please try again');
     } finally {
       deleting = false;
     }
@@ -246,7 +242,7 @@
           Moving this also moves {descendantCount}
           {descendantCount === 1 ? 'sub-account' : 'sub-accounts'} with it.
         {:else}
-          Sibling accounts can't share a name.
+          Sibling accounts can’t share a name.
         {/if}
       </Dialog.Description>
     </Dialog.Header>
@@ -260,9 +256,10 @@
           placeholder="e.g. Groceries"
           maxlength={200}
           aria-invalid={showErrors && !!nameError}
+          aria-describedby={showErrors && nameError ? 'acct-name-error' : undefined}
         />
         {#if showErrors && nameError}
-          <p role="alert" class="text-xs text-destructive">{nameError}</p>
+          <p id="acct-name-error" role="alert" class="text-xs text-destructive">{nameError}</p>
         {/if}
       </div>
 
@@ -270,7 +267,12 @@
         <div class="flex flex-col gap-1.5">
           <label for="acct-type" class="text-sm font-medium">Type</label>
           <Select.Root type="single" bind:value={accountType}>
-            <Select.Trigger id="acct-type" class="w-full" aria-invalid={showErrors && !!typeError}>
+            <Select.Trigger
+              id="acct-type"
+              class="w-full"
+              aria-invalid={showErrors && !!typeError}
+              aria-describedby={showErrors && typeError ? 'acct-type-error' : undefined}
+            >
               <SelectPrimitive.Value placeholder="Select a type" />
             </Select.Trigger>
             <Select.Content>
@@ -280,7 +282,7 @@
             </Select.Content>
           </Select.Root>
           {#if showErrors && typeError}
-            <p role="alert" class="text-xs text-destructive">{typeError}</p>
+            <p id="acct-type-error" role="alert" class="text-xs text-destructive">{typeError}</p>
           {/if}
         </div>
         <div class="flex flex-col gap-1.5">
@@ -290,6 +292,7 @@
               id="acct-currency"
               class="w-full"
               aria-invalid={showErrors && !!currencyError}
+              aria-describedby={showErrors && currencyError ? 'acct-currency-error' : undefined}
             >
               <SelectPrimitive.Value placeholder="None" />
             </Select.Trigger>
@@ -301,7 +304,9 @@
             </Select.Content>
           </Select.Root>
           {#if showErrors && currencyError}
-            <p role="alert" class="text-xs text-destructive">{currencyError}</p>
+            <p id="acct-currency-error" role="alert" class="text-xs text-destructive">
+              {currencyError}
+            </p>
           {/if}
         </div>
       </div>
@@ -313,6 +318,7 @@
           bind:value={parentGuid}
           options={parentOptions}
           placeholder={loading ? 'Loading accounts…' : 'Top level'}
+          noneLabel="Top level"
           disabled={loading}
         />
       </div>
@@ -337,7 +343,7 @@
         <span class="text-sm">
           <span class="font-medium">Placeholder</span>
           <span class="block text-xs text-muted-foreground">
-            Just for grouping. Totals roll up from below, and it can't hold money itself.
+            Just for grouping. Totals roll up from below, and it can’t hold money itself.
           </span>
         </span>
         <Switch bind:checked={placeholder} />
@@ -364,7 +370,7 @@
       {deleting}
       {confirmDelete}
       saveLabel={mode === 'edit' ? 'Save changes' : 'Create account'}
-      saveDisabled={saving || deleting || loading}
+      saveDisabled={!canSave}
       onDelete={handleDelete}
       onSave={handleSave}
       onCancel={() => {

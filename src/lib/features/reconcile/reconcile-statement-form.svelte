@@ -1,5 +1,6 @@
 <script lang="ts">
   import * as Card from '$lib/components/ui/card';
+  import * as Dialog from '$lib/components/ui/dialog';
   import { Button } from '$lib/components/ui/button';
   import { Input } from '$lib/components/ui/input';
   import DatePicker from '$lib/components/shared/date-picker/date-picker.svelte';
@@ -45,6 +46,10 @@
   let differenceClass = $derived(
     Number.isFinite(difference) ? (balanced ? 'text-success' : signColor(difference)) : ''
   );
+
+  // Finishing promotes every cleared split and has no in-app undo, so the
+  // button opens a confirmation instead of committing straight away.
+  let confirmFinishOpen = $state(false);
 </script>
 
 <Card.Root>
@@ -100,7 +105,10 @@
       <Button variant="outline" disabled={!dirty || saving || finishing} onclick={onSave}>
         {saving ? 'Saving…' : 'Save progress'}
       </Button>
-      <Button disabled={!canFinish || saving || finishing} onclick={onFinish}>
+      <Button
+        disabled={!canFinish || saving || finishing}
+        onclick={() => (confirmFinishOpen = true)}
+      >
         {finishing ? 'Finishing…' : 'Finish reconciliation'}
       </Button>
       {#if dirty}
@@ -115,3 +123,29 @@
     </div>
   </Card.Content>
 </Card.Root>
+
+<Dialog.Root bind:open={confirmFinishOpen}>
+  <Dialog.Content class="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+    <Dialog.Header>
+      <Dialog.Title>Finish reconciliation?</Dialog.Title>
+      <Dialog.Description>
+        This saves your progress and marks the {checkedCount} ticked splits as cleared. You can’t undo
+        it from inside Spendo.
+      </Dialog.Description>
+    </Dialog.Header>
+    <Dialog.Footer>
+      <Button variant="outline" onclick={() => (confirmFinishOpen = false)} disabled={finishing}>
+        Cancel
+      </Button>
+      <Button
+        disabled={finishing}
+        onclick={() => {
+          confirmFinishOpen = false;
+          onFinish();
+        }}
+      >
+        {finishing ? 'Finishing…' : 'Finish reconciliation'}
+      </Button>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>

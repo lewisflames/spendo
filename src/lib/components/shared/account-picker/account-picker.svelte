@@ -15,7 +15,8 @@
     disabled = false,
     invalid = false,
     describedBy = undefined,
-    emptyText = 'Nothing matches that search.'
+    emptyText = 'Nothing matches that search.',
+    noneLabel = null
   }: {
     value?: string;
     options?: PickerAccount[];
@@ -25,6 +26,8 @@
     invalid?: boolean;
     describedBy?: string | undefined;
     emptyText?: string;
+    /** When set, offers an item that clears the selection (e.g. "Top level"). */
+    noneLabel?: string | null;
   } = $props();
 
   let open = $state(false);
@@ -80,6 +83,15 @@
       <Command.List>
         <Command.Empty>{emptyText}</Command.Empty>
         <Command.Group>
+          {#if noneLabel !== null}
+            <Command.Item value="__none__" keywords={[noneLabel]} onSelect={() => select('')}>
+              <Check
+                aria-hidden="true"
+                class={cn('mr-1 size-4', value === '' ? 'opacity-100' : 'opacity-0')}
+              />
+              <span class="min-w-0 flex-1 truncate">{noneLabel}</span>
+            </Command.Item>
+          {/if}
           {#each options as opt (opt.guid)}
             <Command.Item
               value={opt.guid}

@@ -22,10 +22,10 @@
       if (!id) return Promise.reject(new Error('No transaction selected'));
       return fetchTransaction(id);
     },
-    label: "We couldn't load this transaction"
+    label: 'We couldn’t load this transaction'
   });
 
-  // Duplicates start from today's date with no attachments; the user edits
+  // Duplicates start from today’s date with no attachments; the user edits
   // before anything is created.
   let template = $derived(
     dupRes.data?.transaction
@@ -66,7 +66,7 @@
           <TransactionForm
             mode="create"
             title="Duplicate transaction"
-            headerDescription="Both sides should balance. Ctrl+S saves. Add Shift to jump straight to the next one."
+            headerDescription="Both sides should balance."
             initial={template}
             onSaved={handleSaved}
             onSavedAndNew={handleSavedAndNew}
@@ -80,7 +80,7 @@
         <TransactionForm
           mode="create"
           title="Duplicate transaction"
-          headerDescription="Both sides should balance. Ctrl+S saves. Add Shift to jump straight to the next one."
+          headerDescription="Both sides should balance."
           onSaved={handleSaved}
           onSavedAndNew={handleSavedAndNew}
           onCancel={() => void goto(resolve('/transactions'))}
@@ -90,7 +90,7 @@
       <TransactionForm
         mode="create"
         title="New transaction"
-        headerDescription="Both sides should balance. Ctrl+S saves. Add Shift to jump straight to the next one."
+        headerDescription="Both sides should balance."
         onSaved={handleSaved}
         onSavedAndNew={handleSavedAndNew}
         onCancel={() => void goto(resolve('/transactions'))}
