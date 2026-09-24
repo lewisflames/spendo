@@ -4,10 +4,10 @@
  * Loaded only when the SvelteKit dev server runs outside the Tauri runtime, so
  * frontend/UI work can happen in a plain browser. Raw split values balance to
  * zero; the mock derives display amounts by negating credit-normal account
- * types, mirroring the backend's `utils::signed_amount_expr`.
+ * types, mirroring the backend’s `utils::signed_amount_expr`.
  */
 
-/** Local "today" (`YYYY-MM-DD`), matching the backend's `date('now','localtime')`. */
+/** Local "today" (`YYYY-MM-DD`), matching the backend’s `date('now','localtime')`. */
 export function todayIso(): string {
   const d = new Date();
   const month = String(d.getMonth() + 1).padStart(2, '0');

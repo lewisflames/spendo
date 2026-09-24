@@ -82,7 +82,7 @@ export function formatSignedSessionCurrency(n: number): string {
 
 /**
  * Split amount for double-entry tables: an explicit '+' marks credits while
- * debits rely on the cell's sign color (GnuCash-style direction encoding).
+ * debits rely on the cell’s sign color (GnuCash-style direction encoding).
  */
 export function formatSplitAmount(n: number, currency: string): string {
   if (n === 0) return '0';

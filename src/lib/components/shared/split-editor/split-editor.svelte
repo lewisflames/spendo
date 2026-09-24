@@ -60,7 +60,7 @@
   let labelByGuid = $derived(new Map(options.map((o) => [o.guid, o.display])));
 
   // Auto-reveal quantity when the picked account carries shares. Tracked per
-  // row so a deliberate hide isn't re-opened on every render.
+  // row so a deliberate hide isn’t re-opened on every render.
   let prevAccounts: { key: number; accountGuid: string }[] = [];
   $effect(() => {
     for (const s of splits) {

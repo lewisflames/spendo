@@ -48,7 +48,7 @@
     <EmptyState card title={emptyTitle} description={emptyMessage} />
   {:else}
     <!-- Keep the previous table visible (dimmed) during refetches so the
-         page doesn't jump and expand/collapse state stays in place. -->
+         page doesn’t jump and expand/collapse state stays in place. -->
     <DimWrapper active={loading}>
       <TableShell>
         {@render header()}
@@ -64,7 +64,7 @@
   <EmptyState card title={emptyTitle} description={emptyMessage} />
 {:else}
   <!-- Keep the previous table visible (dimmed) during refetches so the
-       page doesn't jump and expand/collapse state stays in place. -->
+       page doesn’t jump and expand/collapse state stays in place. -->
   <DimWrapper active={loading}>
     <TableShell>
       {@render header()}

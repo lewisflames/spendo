@@ -30,7 +30,7 @@ function findFreeCol(headers: string[], keys: string[], taken: number[]): number
  * Guess date/description/amount columns from headers (or the first sample
  * row when the file has no header). Debit+Credit wins when both are found;
  * otherwise a single Amount column. Reference/notes columns are guessed only
- * when they don't collide with the fields above. Falls back to 0/1/last-column
+ * when they don’t collide with the fields above. Falls back to 0/1/last-column
  * positions.
  */
 export function guessMapping(headers: string[], columnCount: number): GuessedMapping {

@@ -63,7 +63,7 @@
 
   function handleHideColumn(id: ColumnId) {
     // Amount is the only hideable column that is also sortable — fall back to
-    // date so an invisible sort can't stay in effect.
+    // date so an invisible sort can’t stay in effect.
     if (id === 'amount' && sortBy === 'amount') onSort('date');
   }
 </script>
@@ -98,7 +98,7 @@
       <EmptyState
         card
         title="Nothing here yet"
-        description="Once you add transactions to this account, they'll show up here."
+        description="Once you add transactions to this account, they’ll show up here."
       >
         {#snippet icon()}
           <Receipt aria-hidden="true" class="text-muted-foreground" />
@@ -107,7 +107,7 @@
     {/if}
   {:else}
     <!-- Keep the previous table visible (dimmed) during refetches so the
-         page doesn't jump and pagination stays in place. -->
+         page doesn’t jump and pagination stays in place. -->
     <DimWrapper active={loading} class="flex flex-col gap-4">
       <TransactionTable
         transactions={ledger.transactions}

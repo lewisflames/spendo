@@ -27,7 +27,7 @@ export function isBalanced(difference: number, eps = RECONCILE_EPS): boolean {
  * Parse a statement ending-balance input. Accepts plain decimal text with an
  * optional `.`/`,` separator (`1234.56`, `-12,5`); rejects blanks,
  * thousands-grouped text (`1,000.50`) and anything non-numeric so Finish
- * can't silently round a mistyped value. Returns `null` when empty/invalid.
+ * can’t silently round a mistyped value. Returns `null` when empty/invalid.
  */
 export function parseStatementAmount(raw: string): number | null {
   const text = raw.trim().replace(/\s+/g, '');

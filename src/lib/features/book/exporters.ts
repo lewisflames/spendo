@@ -1,6 +1,6 @@
 /**
  * Locale helpers for CSV exports. The backend formats and writes the CSV
- * itself, but only the webview knows the locale's numeric date order; derive
+ * itself, but only the webview knows the locale’s numeric date order; derive
  * it once with `Intl.DateTimeFormat.formatToParts` and pass the parts +
  * separator to `export_transactions_csv`.
  */

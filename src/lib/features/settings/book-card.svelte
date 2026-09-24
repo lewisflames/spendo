@@ -54,7 +54,7 @@
       setDbSession(result.summary);
       toast.success(`Now reporting in ${v}`);
     } catch (e: unknown) {
-      toast.error(errMsg(e, "We couldn't change the currency. Please try again"));
+      toast.error(errMsg(e, 'We couldn’t change the currency. Please try again'));
     } finally {
       savingCurrency = false;
     }

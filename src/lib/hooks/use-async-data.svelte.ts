@@ -15,7 +15,7 @@ interface AsyncDataConfig<T> {
    */
   onSuccess?: (data: T) => void;
   /**
-   * Extra failure handling (e.g. a toast) for pages that don't surface the
+   * Extra failure handling (e.g. a toast) for pages that don’t surface the
    * built-in `error` state inline.
    */
   onError?: (message: string) => void;

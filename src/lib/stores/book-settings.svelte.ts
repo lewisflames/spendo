@@ -26,7 +26,7 @@ export const bookSettings = $state<{ value: BookSettings }>({
 let loaded = false;
 let inflight: Promise<BookSettings> | null = null;
 
-/** Fetch the active book's settings (placeholder returns defaults). */
+/** Fetch the active book’s settings (placeholder returns defaults). */
 export function loadBookSettings(force = false): Promise<BookSettings> {
   if (inflight && !force) return inflight;
   if (!force && loaded) return Promise.resolve(bookSettings.value);

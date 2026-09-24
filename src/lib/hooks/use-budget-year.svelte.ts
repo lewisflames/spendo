@@ -26,8 +26,8 @@ interface BudgetYear {
 /**
  * Year selection shared by the budget list/detail pages and the add dialog:
  * a Select-friendly string selection with numeric view, bounds from the
- * book's transaction window, and clamping/stepping helpers. `plusOne`
- * extends the max by a year so next year's budget can be planned ahead.
+ * book’s transaction window, and clamping/stepping helpers. `plusOne`
+ * extends the max by a year so next year’s budget can be planned ahead.
  */
 export function useBudgetYear(
   getDateRange: () => BudgetDateRange | null,

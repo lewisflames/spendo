@@ -6,8 +6,8 @@
   import PageSkeleton from '$lib/components/shared/page-skeleton.svelte';
 
   // `/` is welcome-only: an open book lands on `/transactions` instead.
-  // Gated on bootstrap (not refresh loading) so the layout's book-less guard
-  // and this redirect can't fight during cold start.
+  // Gated on bootstrap (not refresh loading) so the layout’s book-less guard
+  // and this redirect can’t fight during cold start.
   $effect(() => {
     if (!dbBootstrapping.value && dbSession.value) {
       void goto(resolve('/transactions'), { replaceState: true });

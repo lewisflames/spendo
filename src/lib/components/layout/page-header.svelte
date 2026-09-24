@@ -18,7 +18,7 @@
     {#if description !== undefined}
       {#if typeof description === 'function'}
         <!-- min-h-5 reserves the text-sm line height so an empty description
-             (e.g. before data loads) doesn't collapse and shift the page. -->
+             (e.g. before data loads) doesn’t collapse and shift the page. -->
         <p class="min-h-5 text-sm text-muted-foreground">{@render description()}</p>
       {:else}
         <p class="min-h-5 text-sm text-muted-foreground">{description}</p>

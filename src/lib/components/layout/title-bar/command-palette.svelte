@@ -20,7 +20,7 @@
   /** The layout accepts Cmd on macOS; show the chord users actually press. */
   const modKey = modKeyLabel();
 
-  // The title-bar bar is the palette's only input; `search` drives filtering
+  // The title-bar bar is the palette’s only input; `search` drives filtering
   // for both the command groups and the backend entity search below.
   let search = $state('');
   let barEl = $state<HTMLElement | null>(null);
@@ -98,7 +98,7 @@
   const results = useAsyncData({
     enabled: () => queryActive,
     fetch: () => searchGlobal(query, 5),
-    label: "We couldn't search right now"
+    label: 'We couldn’t search right now'
   });
 
   function matchesQuery(cmd: PaletteCommand, q: string): boolean {
@@ -154,7 +154,7 @@
   }
 </script>
 
-<!-- `contents` keeps the command root out of the header's flex layout; the
+<!-- `contents` keeps the command root out of the header’s flex layout; the
      bar is the only in-flow child, the panel is fixed below it. -->
 <Command.Root
   class="contents bg-transparent text-inherit"

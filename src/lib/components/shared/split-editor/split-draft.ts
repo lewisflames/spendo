@@ -216,7 +216,7 @@ function evaluateTokens(tokens: (number | string)[]): number | null {
  * simple arithmetic (`10+5`, `100/4`, `(10+2)*3`). A `,` acts as the decimal
  * separator only when it is the sole separator (`1,5`); when both `.` and
  * `,` are present the last one wins. Rejects blanks, hex (`0x10`),
- * scientific notation (`1e3`) and malformed text so a mistyped amount can't
+ * scientific notation (`1e3`) and malformed text so a mistyped amount can’t
  * silently parse as a different number. Returns `null` when empty/invalid.
  */
 export function parseAmount(raw: string): number | null {

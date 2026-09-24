@@ -55,7 +55,7 @@
       if (!id) return Promise.reject(new Error('No transaction selected'));
       return fetchTransaction(id);
     },
-    label: "We couldn't load this transaction"
+    label: 'We couldn’t load this transaction'
   });
 
   let detail = $derived(res.data?.transaction ?? null);
@@ -71,20 +71,20 @@
       await navigator.clipboard.writeText(detail.guid);
       toast.success('Copied. Paste it anywhere');
     } catch (e: unknown) {
-      toast.error(errMsg(e, "We couldn't copy that"));
+      toast.error(errMsg(e, 'We couldn’t copy that'));
     }
   }
 
   function duplicateTransaction() {
     if (!detail) return;
-    // Query strings can't go through `resolve()` — same pattern as budgets.
+    // Query strings can’t go through `resolve()` — same pattern as budgets.
     // eslint-disable-next-line svelte/no-navigation-without-resolve
     void goto(resolve('/transactions/new') + `?duplicate=${encodeURIComponent(detail.guid)}`);
   }
 
   /**
    * Native-unit line for a split ("10 AAPL", "-50 USD"): the raw quantity
-   * differs from the signed report-currency amount whenever the account's
+   * differs from the signed report-currency amount whenever the account’s
    * commodity is not the report currency unit (shares, FX).
    */
   function quantityLine(split: SplitDetail): string | null {
@@ -187,7 +187,7 @@
       </div>
 
       <!-- Keep the previous table visible (dimmed) during prev/next refetches
-           so the page doesn't jump. -->
+           so the page doesn’t jump. -->
       <DimWrapper active={res.loading}>
         <TableShell>
           <Table.Header>

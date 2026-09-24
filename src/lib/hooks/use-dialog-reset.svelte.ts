@@ -5,7 +5,7 @@ import { untrack } from 'svelte';
  * `$effect.pre`: bits-ui only calls `onOpenChange` for its own internal
  * open/close (trigger, Escape), not when `open` is set programmatically via
  * `bind:open` — which is the only way these dialogs are opened — so syncing
- * there never runs. `sync` runs untracked so writes to form state can't
+ * there never runs. `sync` runs untracked so writes to form state can’t
  * re-trigger the effect.
  */
 export function useDialogReset(open: () => boolean, sync: () => void): void {

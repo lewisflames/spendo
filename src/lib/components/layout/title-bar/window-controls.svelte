@@ -4,7 +4,7 @@
   import { Minus, Square, Copy, X } from '@lucide/svelte';
 
   // Synchronous runtime check (prerender-safe). getCurrentWindow() never
-  // throws, so try/catch can't tell plain-browser dev apart from Tauri —
+  // throws, so try/catch can’t tell plain-browser dev apart from Tauri —
   // without this gate every IPC below fails in the browser with console spam.
   const inTauri = isTauri();
 
