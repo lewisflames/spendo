@@ -1,4 +1,4 @@
-/** Mirrors the open dialog's filter: only the app's own book files qualify. */
+/** Mirrors the open dialog’s filter: only the app’s own book files qualify. */
 const BOOK_EXTENSIONS = ['.spendo', '.db', '.sqlite'];
 
 export function isSpendoBookPath(path: string): boolean {

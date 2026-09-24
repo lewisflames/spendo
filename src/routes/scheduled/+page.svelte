@@ -30,7 +30,7 @@
   const res = useAsyncData({
     enabled: () => !!dbSession.value,
     fetch: fetchSchedules,
-    label: "We couldn't load your schedules"
+    label: 'We couldn’t load your schedules'
   });
 
   let busyGuid = $state<string | null>(null);
@@ -46,11 +46,11 @@
     busyGuid = schedule.guid;
     try {
       const txGuid = await postScheduleOccurrence(schedule.guid);
-      toast.success(`Added "${schedule.name}" to your ledger`);
+      toast.success(`Added “${schedule.name}” to your ledger`);
       await refreshAfterMutation();
       await openTransaction(txGuid);
     } catch (e: unknown) {
-      toast.error(errMsg(e, "We couldn't post that occurrence"));
+      toast.error(errMsg(e, 'We couldn’t post that occurrence'));
     } finally {
       busyGuid = null;
     }
@@ -63,12 +63,12 @@
       const next = await skipScheduleOccurrence(schedule.guid);
       toast.success(
         next
-          ? `Skipped "${schedule.name}". Next due ${formatDate(next)}`
-          : `Skipped "${schedule.name}"`
+          ? `Skipped “${schedule.name}”. Next due ${formatDate(next)}`
+          : `Skipped “${schedule.name}”`
       );
       await refreshAfterMutation();
     } catch (e: unknown) {
-      toast.error(errMsg(e, "We couldn't skip that occurrence"));
+      toast.error(errMsg(e, 'We couldn’t skip that occurrence'));
     } finally {
       busyGuid = null;
     }
@@ -79,10 +79,10 @@
     busyGuid = schedule.guid;
     try {
       await setScheduleActive(schedule.guid, !schedule.active);
-      toast.success(schedule.active ? `Paused "${schedule.name}"` : `Resumed "${schedule.name}"`);
+      toast.success(schedule.active ? `Paused “${schedule.name}”` : `Resumed “${schedule.name}”`);
       res.reload();
     } catch (e: unknown) {
-      toast.error(errMsg(e, "We couldn't update that schedule"));
+      toast.error(errMsg(e, 'We couldn’t update that schedule'));
     } finally {
       busyGuid = null;
     }

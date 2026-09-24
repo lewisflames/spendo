@@ -2,7 +2,7 @@ import { CalendarDate } from '@internationalized/date';
 import { daysInMonth } from '$lib/utils/date-utils.svelte';
 import { formatDate, yearOf } from '$lib/utils/format.svelte';
 
-/** Year bounds for the picker, from the book's transaction window with a fallback. */
+/** Year bounds for the picker, from the book’s transaction window with a fallback. */
 export function getReportYearBounds(
   earliestDate: string | null,
   latestDate: string | null
@@ -139,7 +139,7 @@ export function shiftPeriodRange(
   };
 }
 
-/** True when the period starts at or before the book's earliest month. */
+/** True when the period starts at or before the book’s earliest month. */
 export function isAtBookStart(start: CalendarDate, earliestDate: string | null): boolean {
   if (!earliestDate) return false;
   const year = Number(earliestDate.slice(0, 4));

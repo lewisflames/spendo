@@ -78,6 +78,6 @@
   </div>
 
   {#if inTauri}
-    <p class="text-xs text-muted-foreground">or just drop a .spendo file anywhere here</p>
+    <p class="text-xs text-muted-foreground">or drop a Spendo book anywhere here</p>
   {/if}
 </div>

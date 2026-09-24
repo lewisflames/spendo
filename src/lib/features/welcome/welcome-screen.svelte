@@ -76,7 +76,7 @@
       if (paths.some((p) => p.toLowerCase().endsWith('.gnucash'))) {
         toast.error('Start a book first, then we can bring in that GnuCash file');
       } else {
-        toast.error('That’s not a .spendo book. Pick one of those to open');
+        toast.error('That’s not a Spendo book. Pick one of those to open');
       }
       return;
     }
@@ -155,7 +155,7 @@
           </p>
         {:else}
           <FileWarning aria-hidden="true" class="size-7 text-muted-foreground" />
-          <p class="max-w-xs text-sm font-medium">Only .spendo books open here</p>
+          <p class="max-w-xs text-sm font-medium">Only Spendo books open here</p>
         {/if}
       </div>
     </div>

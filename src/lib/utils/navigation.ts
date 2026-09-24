@@ -16,7 +16,7 @@ export function openHolding(commodityGuid: string): Promise<void> {
   return goto(resolve('/portfolio/[holding]', { holding: commodityGuid }));
 }
 
-/** Navigate to an account's budget page, preserving the selected year. */
+/** Navigate to an account’s budget page, preserving the selected year. */
 export function openBudget(accountGuid: string, year?: number): Promise<void> {
   const base = resolve('/budgets/[accountGuid]', { accountGuid });
   // Query-only year suffix on top of a resolved route.
@@ -24,7 +24,7 @@ export function openBudget(accountGuid: string, year?: number): Promise<void> {
   return goto(year !== undefined ? `${base}?year=${year}` : base);
 }
 
-/** Navigate to an account's reconciliation session. */
+/** Navigate to an account’s reconciliation session. */
 export function openReconcile(guid: string): Promise<void> {
   return goto(resolve('/reconcile/[guid]', { guid }));
 }

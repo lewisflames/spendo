@@ -3,7 +3,7 @@ import { invoke as tauriInvoke, isTauri } from '@tauri-apps/api/core';
 /**
  * Dev-only fixture backend: when `bun run dev` is opened in a plain browser
  * (no Tauri runtime) calls resolve against `$lib/dev/mock-invoke.ts` so
- * frontend/UI work doesn't need the desktop shell. `import.meta.env.DEV` is a
+ * frontend/UI work doesn’t need the desktop shell. `import.meta.env.DEV` is a
  * build-time constant, so the mock and its fixtures are dropped from production
  * bundles.
  */
@@ -183,12 +183,12 @@ export interface DetailTransaction {
   num?: string | null;
   notes?: string | null;
   splits: SplitInfo[];
-  /** Other accounts involved, outside the viewed account's subtree. */
+  /** Other accounts involved, outside the viewed account’s subtree. */
   counterAccounts: string[];
   /** Signed effect on the viewed subtree, in report currency at the tx date. */
   amount: number;
   runningBalance: number;
-  /** GnuCash reconcile state of the viewed subtree's splits: 'n'/'c'/'y'. */
+  /** GnuCash reconcile state of the viewed subtree’s splits: 'n'/'c'/'y'. */
   reconcileState?: string | null;
 }
 
@@ -221,7 +221,7 @@ export interface AccountDetailInfo {
   childAccounts: ChildAccountInfo[];
 }
 
-/** The viewed account's parent; `null` for top-level accounts. */
+/** The viewed account’s parent; `null` for top-level accounts. */
 export interface ParentAccountInfo {
   guid: string;
   name: string;
@@ -245,7 +245,7 @@ export interface AccountDetailResult {
   totalPages: number;
   /** The account node with its full subtree (tree-consistent balances). */
   subtree: AccountNode | null;
-  /** The viewed account's parent, for the pie's parent-ratio label. */
+  /** The viewed account’s parent, for the pie’s parent-ratio label. */
   parent: ParentAccountInfo | null;
 }
 
@@ -337,7 +337,7 @@ export interface GnuCashPreview {
   schedulesAdded: number;
   schedulesUpdated: number;
   orphanAccountNames: string[];
-  /** Source schedules Spendo can't represent, with readable reasons. */
+  /** Source schedules Spendo can’t represent, with readable reasons. */
   skippedSchedules: { name: string; reason: string }[];
 }
 
@@ -712,7 +712,7 @@ export interface GnuCashExportResult {
   schedules: number;
   futureDated: number;
   attachmentsSkipped: number;
-  /** Splits with more decimals than GnuCash's smallest unit (it rounds them). */
+  /** Splits with more decimals than GnuCash’s smallest unit (it rounds them). */
   roundedAmounts: number;
 }
 

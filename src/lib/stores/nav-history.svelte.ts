@@ -50,7 +50,7 @@ export function initNavHistory() {
     if (navHistory.value.stack[navHistory.value.index] === href) return;
 
     navHistory.value.stack = [...navHistory.value.stack.slice(0, navHistory.value.index + 1), href];
-    // Trim old entries so a long session can't grow the stack unboundedly.
+    // Trim old entries so a long session can’t grow the stack unboundedly.
     if (navHistory.value.stack.length > MAX_STACK) {
       navHistory.value.stack = navHistory.value.stack.slice(
         navHistory.value.stack.length - MAX_STACK

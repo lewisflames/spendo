@@ -29,7 +29,7 @@ export function clampYear(y: number, minYear: number | null, maxYear: number | n
   return y;
 }
 
-/** Transaction-range bounds as years. `plusOne` extends max by a year for planning next year's budget. */
+/** Transaction-range bounds as years. `plusOne` extends max by a year for planning next year’s budget. */
 export function budgetYearBounds(
   dateRange: BudgetDateRange | null,
   plusOne = false
@@ -94,7 +94,7 @@ export interface BudgetTotals {
   expectedYtd: number;
   delta: number;
   remaining: number;
-  /** Weighted across rows: spent ÷ expected. Mirrors the backend's guard. */
+  /** Weighted across rows: spent ÷ expected. Mirrors the backend’s guard. */
   pacingPercentage: number;
   /** Uniform per year; 0 for an empty selection. */
   elapsedMonths: number;

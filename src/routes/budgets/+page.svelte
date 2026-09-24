@@ -78,7 +78,7 @@
     // Keep the selection within the transaction date range once the range
     // (and the URL-driven selection) is known.
     onSuccess: () => by.clampSelection(),
-    label: "We couldn't load your budgets"
+    label: 'We couldn’t load your budgets'
   });
 
   // Only accounts with a budget for the selected year are listed.

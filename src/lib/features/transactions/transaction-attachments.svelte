@@ -38,7 +38,7 @@
   const res = useAsyncData({
     enabled: () => !!txGuid,
     fetch: () => fetchAttachments(txGuid ?? ''),
-    label: "We couldn't load the attachments"
+    label: 'We couldn’t load the attachments'
   });
 
   let adding = $state(false);
@@ -69,7 +69,7 @@
         filters: [{ name: 'Documents', extensions: ATTACHMENT_EXTENSIONS }]
       });
     } catch (e: unknown) {
-      toast.error(errMsg(e, "We couldn't open the file picker"));
+      toast.error(errMsg(e, 'We couldn’t open the file picker'));
       return;
     }
     if (!selected) return;
@@ -88,7 +88,7 @@
           : `${added.length} files tucked into your book`
       );
     } catch (e: unknown) {
-      toast.error(errMsg(e, "We couldn't attach that file"));
+      toast.error(errMsg(e, 'We couldn’t attach that file'));
     } finally {
       adding = false;
     }
@@ -100,7 +100,7 @@
     try {
       await openAttachment(item.guid);
     } catch (e: unknown) {
-      toast.error(errMsg(e, "We couldn't open that file"));
+      toast.error(errMsg(e, 'We couldn’t open that file'));
     } finally {
       openBusy = false;
     }
@@ -112,7 +112,7 @@
     try {
       target = await save({ defaultPath: item.filename });
     } catch (e: unknown) {
-      toast.error(errMsg(e, "We couldn't open the save dialog"));
+      toast.error(errMsg(e, 'We couldn’t open the save dialog'));
       return;
     }
     if (!target) return;
@@ -121,7 +121,7 @@
       await exportAttachment(item.guid, target);
       toast.success(`Saved ${await basename(target)}`);
     } catch (e: unknown) {
-      toast.error(errMsg(e, "We couldn't save that file"));
+      toast.error(errMsg(e, 'We couldn’t save that file'));
     } finally {
       saveBusy = false;
     }
@@ -140,7 +140,7 @@
       res.reload();
       toast.success('Attachment gone');
     } catch (e: unknown) {
-      toast.error(errMsg(e, "We couldn't delete that file"));
+      toast.error(errMsg(e, 'We couldn’t delete that file'));
     } finally {
       deleting = false;
     }

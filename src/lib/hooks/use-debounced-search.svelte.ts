@@ -24,7 +24,7 @@ export function useDebouncedSearch<T = string>(
       return committed;
     },
     set(value: string) {
-      // Commit immediately and drop any in-flight debounce timer so it can't
+      // Commit immediately and drop any in-flight debounce timer so it can’t
       // re-commit a stale transform of the raw input later.
       if (pendingTimer !== null) {
         clearTimeout(pendingTimer);

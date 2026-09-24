@@ -20,7 +20,7 @@
     enabled: () => !!dbSession.value && !!guid,
     // Reads `guid`, so navigating between accounts refetches automatically.
     fetch: () => fetchAccountBalanceTrend(guid),
-    label: "We couldn't load the balance chart"
+    label: 'We couldn’t load the balance chart'
   });
 
   let data = $derived(res.data ?? []);
