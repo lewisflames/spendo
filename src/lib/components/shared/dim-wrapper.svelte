@@ -17,6 +17,8 @@
   class="transition-opacity {className}"
   class:opacity-50={active}
   class:pointer-events-none={active}
+  inert={active}
+  aria-busy={active}
 >
   {@render children()}
 </div>

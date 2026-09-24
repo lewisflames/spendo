@@ -6,7 +6,7 @@
   import { ArrowLeft, CalendarDays, CircleCheck } from '@lucide/svelte';
   import { toast } from '$lib/components/ui/sonner';
   import { Button } from '$lib/components/ui/button';
-  import { dbSession, refreshSession } from '$lib/stores/db.svelte';
+  import { dbSession, dbBootstrapping, refreshSession } from '$lib/stores/db.svelte';
   import {
     fetchReconcileInfo,
     finishReconciliation,
@@ -76,7 +76,7 @@
       if (!g) return Promise.reject(new Error('No account selected'));
       return fetchReconcileInfo(g, statementDate);
     },
-    label: "We couldn't load this reconciliation"
+    label: 'We couldn’t load this reconciliation'
   });
 
   let candidates = $derived(res.data?.candidates ?? []);
@@ -181,13 +181,13 @@
     saving = true;
     try {
       await markReconcileSplits(g, updates);
-      // Saving progress doesn't move the summary counters; refresh the session
+      // Saving progress doesn’t move the summary counters; refresh the session
       // so nav roots and badges pick up any changes.
       refreshSession();
       toast.success('Saved. Pick up where you left off');
       res.reload();
     } catch (e) {
-      toast.error(errMsg(e, "We couldn't save your progress"));
+      toast.error(errMsg(e, 'We couldn’t save your progress'));
     } finally {
       saving = false;
     }
@@ -208,7 +208,7 @@
       toast.success(`All matched. Reconciled ${plural(out.reconciledCount, 'split')}`);
       void goto(resolve('/reconcile'));
     } catch (e) {
-      toast.error(errMsg(e, "We couldn't finish reconciling"));
+      toast.error(errMsg(e, 'We couldn’t finish reconciling'));
     } finally {
       finishing = false;
     }
@@ -239,7 +239,7 @@
       </Button>
     </PageHeader>
 
-    {#if res.loading && !res.data && !res.error}
+    {#if (res.loading || dbBootstrapping.value) && !res.data && !res.error}
       <PageSkeleton variant="reconcile-detail" />
     {:else if res.data}
       {#if res.error}

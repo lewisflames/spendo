@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Scale } from '@lucide/svelte';
-  import { dbSession } from '$lib/stores/db.svelte';
+  import { dbSession, dbBootstrapping } from '$lib/stores/db.svelte';
   import { fetchAccounts } from '$lib/tauri';
   import { resolve } from '$app/paths';
   import { plural } from '$lib/utils/format.svelte';
@@ -38,7 +38,7 @@
   const res = useAsyncData({
     enabled: () => !!dbSession.value,
     fetch: () => fetchAccounts(),
-    label: "We couldn't load your accounts"
+    label: 'We couldn’t load your accounts'
   });
 
   let rows = $derived(flattenReconcilableAccounts(res.data?.trees));
@@ -86,7 +86,7 @@
       {/if}
     </FilterBar>
 
-    {#if res.loading && !res.data}
+    {#if (res.loading || dbBootstrapping.value) && !res.data}
       <PageSkeleton variant="reconcile" />
     {:else if res.data}
       {#if res.error}
