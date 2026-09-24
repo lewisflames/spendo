@@ -1,11 +1,22 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
+  import { getVersion } from '@tauri-apps/api/app';
   import { Badge } from '$lib/components/ui/badge';
   import { Button } from '$lib/components/ui/button';
   import * as Card from '$lib/components/ui/card';
   import { Wallet, Terminal, Palette, Component, Paintbrush, CloudDownload } from '@lucide/svelte';
   import { dbSession } from '$lib/stores/db.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
+
+  let appVersion = $state<string | null>(null);
+
+  $effect(() => {
+    void getVersion()
+      .then((v) => (appVersion = v))
+      .catch(() => {
+        // Decorative; omit on failure (plain-browser dev).
+      });
+  });
 </script>
 
 <svelte:head>
@@ -35,12 +46,15 @@
         interactive dashboards. Coming from GnuCash? Import your
         <code>.gnucash</code> file into the open book. All data stays local on your machine.
       </p>
+      {#if appVersion}
+        <p class="font-mono text-xs text-muted-foreground">Version {appVersion}</p>
+      {/if}
     </Card.Content>
   </Card.Root>
 
   <Card.Root>
     <Card.Header>
-      <Card.Title>Tech Stack</Card.Title>
+      <Card.Title>Tech stack</Card.Title>
     </Card.Header>
     <Card.Content>
       <ul class="flex flex-col gap-3">
@@ -48,7 +62,7 @@
           <Wallet aria-hidden="true" class="size-5 shrink-0 text-primary" />
           <div class="flex flex-1 items-center justify-between gap-2">
             <span class="text-sm font-medium">Tauri v2</span>
-            <Badge variant="secondary">Desktop Shell</Badge>
+            <Badge variant="secondary">Desktop shell</Badge>
           </div>
         </li>
         <li class="flex items-center gap-3">
@@ -69,7 +83,7 @@
           <Component aria-hidden="true" class="size-5 shrink-0 text-primary" />
           <div class="flex flex-1 items-center justify-between gap-2">
             <span class="text-sm font-medium">shadcn-svelte (Nova)</span>
-            <Badge variant="secondary">UI Components</Badge>
+            <Badge variant="secondary">UI components</Badge>
           </div>
         </li>
         <li class="flex items-center gap-3">
@@ -83,7 +97,7 @@
           <CloudDownload aria-hidden="true" class="size-5 shrink-0 text-primary" />
           <div class="flex flex-1 items-center justify-between gap-2">
             <span class="text-sm font-medium">Yahoo Finance API (reqwest)</span>
-            <Badge variant="secondary">Live Prices</Badge>
+            <Badge variant="secondary">Live prices</Badge>
           </div>
         </li>
       </ul>
