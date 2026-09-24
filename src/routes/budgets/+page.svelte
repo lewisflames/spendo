@@ -7,6 +7,7 @@
   import {
     sessionCurrency,
     formatSessionCurrency,
+    formatSignedCurrency,
     clampZero,
     signColor,
     plural
@@ -164,7 +165,7 @@
       <PageSkeleton variant="budgets" />
     {:else if rows !== null}
       <DimWrapper active={yearLoading} class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-        <KpiCard title="Effective budget" value={fmt(clampZero(totalEffective))}>
+        <KpiCard title="Effective Budget" value={fmt(clampZero(totalEffective))}>
           {#snippet icon()}
             <Wallet aria-hidden="true" class="size-4 text-muted-foreground" />
           {/snippet}
@@ -176,7 +177,7 @@
         </KpiCard>
         <KpiCard
           title="Remaining"
-          value={fmt(clampZero(totalRemaining))}
+          value={formatSignedCurrency(clampZero(totalRemaining), currency)}
           valueClass={signColor(clampZero(totalRemaining))}
         >
           {#snippet icon()}

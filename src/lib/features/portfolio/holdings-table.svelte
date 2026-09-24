@@ -129,9 +129,10 @@
 
   let skeletonCols = $derived(visibleColumns.length + 1);
 
-  // Don't leave an invisible sort in effect (default back to market value).
+  // Hiding the active sort column would leave an invisible sort in effect;
+  // fall back to the always-visible name column.
   function handleHideColumn(id: ColumnId) {
-    if (sortBy === id) sort.toggle('marketValue');
+    if (sortBy === id) sort.toggle('name');
   }
 
   let sortedHoldings = $derived.by(() => {
@@ -239,7 +240,7 @@
     {/snippet}
   </EmptyState>
 {:else}
-  <!-- One wrapper so the page-level flex gap doesn't open up between toolbar and table. -->
+  <!-- One wrapper so the page-level flex gap doesn’t open up between toolbar and table. -->
   <div class="flex flex-col gap-4">
     <FilterBar>
       {#snippet extra()}
@@ -311,7 +312,9 @@
                   class="flex flex-col gap-0.5 focus-visible:outline-2 focus-visible:outline-ring"
                 >
                   <span class="flex items-center gap-2 font-medium">
-                    <span class="truncate">{h.fullName ?? h.mnemonic}</span>
+                    <span class="truncate" title={h.fullName ?? h.mnemonic}
+                      >{h.fullName ?? h.mnemonic}</span
+                    >
                     {#if isClosed}
                       <Badge variant="outline" class="shrink-0 text-[10px] leading-none"
                         >Closed</Badge
@@ -367,7 +370,11 @@
                 </Table.Cell>
               {/if}
               {#if cols.isVisible('xirr')}
-                <Table.Cell class="py-2.5 text-right tabular-nums {signColor(h.xirr ?? 0)}">
+                <Table.Cell
+                  class="py-2.5 text-right tabular-nums {h.xirr !== null
+                    ? signColor(h.xirr)
+                    : 'text-muted-foreground'}"
+                >
                   {fmtPct(h.xirr)}
                 </Table.Cell>
               {/if}
@@ -409,7 +416,7 @@
             >
             {#each COLUMNS as col (col.id)}
               {#if cols.isVisible(col.id)}
-                <Table.Cell class="py-2.5 text-right font-medium tabular-nums">
+                <Table.Cell class="py-2.5 text-right tabular-nums">
                   {#if col.id === 'marketValue'}
                     {fmt(totals.marketValue)}
                   {:else if col.id === 'costBasis'}
@@ -419,7 +426,7 @@
                       {formatSignedCurrency(totals.gainLoss, currency)}
                     </span>
                   {:else if col.id === 'xirr'}
-                    <!-- Rates don't sum: the portfolio XIRR lives on the KPI card. -->
+                    <!-- Rates don’t sum: the portfolio XIRR lives on the KPI card. -->
                     <EmptyValue />
                   {:else if col.id === 'alloc'}
                     {formatAllocPct(totals.alloc)}

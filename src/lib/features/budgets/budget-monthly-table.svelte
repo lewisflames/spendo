@@ -31,7 +31,7 @@
       <Table.Head class="text-muted-foreground">Month</Table.Head>
       <Table.Head class="text-right text-muted-foreground">Spent</Table.Head>
       <Table.Head class="text-right text-muted-foreground">Cumulative</Table.Head>
-      <Table.Head class="text-right text-muted-foreground">Expected</Table.Head>
+      <Table.Head class="text-right text-muted-foreground">Expected YTD</Table.Head>
       <Table.Head class="text-right text-muted-foreground">Ahead / Behind</Table.Head>
       <Table.Head class="text-muted-foreground">Pacing</Table.Head>
     </Table.Row>

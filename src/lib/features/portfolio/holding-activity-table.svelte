@@ -31,8 +31,7 @@
     formatSignedCurrency,
     formatCurrency,
     formatDate,
-    formatShares,
-    EMPTY_DASH
+    formatShares
   } from '$lib/utils/format.svelte';
   import NavRow from '$lib/components/shared/nav-row.svelte';
   import { openTransaction } from '$lib/utils/navigation';
@@ -85,7 +84,7 @@
   </EmptyState>
 {:else}
   <!-- Keep the previous page visible (dimmed) during refetches so the
-       page doesn't jump and pagination stays in place. -->
+       page doesn’t jump and pagination stays in place. -->
   <DimWrapper active={loading} class="flex flex-col gap-4">
     <TableShell>
       <Table.Header>
@@ -121,14 +120,18 @@
             <Table.Cell class="max-w-md py-2.5 font-medium">
               <!-- Accessible link target for keyboard/middle-click; the row click
                      is a convenience shortcut. Its event must keep bubbling so
-                     SvelteKit's router can intercept it. -->
+                     SvelteKit’s router can intercept it. -->
               <a
                 class="block truncate focus-visible:outline-2 focus-visible:outline-ring"
                 href={resolve('/transactions/[guid]', { guid: t.guid })}
                 title={t.description ?? undefined}
               >
                 {#if t.num}<span class="mr-1 text-muted-foreground">#{t.num}</span>{/if}
-                {t.description || EMPTY_DASH}
+                {#if t.description}
+                  {t.description}
+                {:else}
+                  <EmptyValue />
+                {/if}
               </a>
               {#if t.notes}
                 <p class="truncate text-xs font-normal text-muted-foreground" title={t.notes}>
@@ -148,7 +151,9 @@
             {/if}
             {#if cols.isVisible('account')}
               <Table.Cell class="max-w-48 truncate py-2.5 text-xs text-muted-foreground">
-                {t.accountDescription || t.accountName}
+                <span title={t.accountDescription || t.accountName}
+                  >{t.accountDescription || t.accountName}</span
+                >
               </Table.Cell>
             {/if}
             {#if cols.isVisible('shares')}

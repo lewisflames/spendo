@@ -43,7 +43,7 @@
     currency?: string;
     sortBy?: TxSortKey | null;
     sortDir?: 'asc' | 'desc';
-    /** Direction handling lives with the caller's sort state; just report the key. */
+    /** Direction handling lives with the caller’s sort state; just report the key. */
     onSort?: (key: TxSortKey) => void;
     /** `account` adds Transfer/Status/Amount/Balance columns for the ledger view. */
     variant?: 'all' | 'account';
@@ -152,14 +152,14 @@
     {#each transactions as txn (txn.guid)}
       <NavRow onNavigate={() => openTransaction(txn.guid)}>
         {#if showDate}
-          <Table.Cell class="py-2.5 whitespace-nowrap text-muted-foreground">
+          <Table.Cell class="py-2.5 whitespace-nowrap text-muted-foreground tabular-nums">
             {fmtDate(txn.postDate)}
           </Table.Cell>
         {/if}
         <Table.Cell class="max-w-md py-2.5 font-medium">
           <!-- Accessible link target for keyboard/middle-click; the row click
                is a convenience shortcut. Its event must keep bubbling so
-               SvelteKit's router can intercept it. -->
+               SvelteKit’s router can intercept it. -->
           <a
             class="block truncate focus-visible:outline-2 focus-visible:outline-ring"
             href={resolve('/transactions/[guid]', { guid: txn.guid })}

@@ -6,7 +6,7 @@
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import SortHead from '$lib/components/shared/sort-head.svelte';
   import EmptyValue from '$lib/components/shared/empty-value.svelte';
-  import { handleRowClick } from '$lib/utils/navigation';
+  import NavRow from '$lib/components/shared/nav-row.svelte';
   import { formatDate as fmtDate, formatSignedCurrency, signColor } from '$lib/utils/format.svelte';
   import { selectionState } from '$lib/features/reconcile/math';
   import type { ReconcileCandidate, TxSortKey } from '$lib/tauri';
@@ -69,18 +69,14 @@
         active={sortBy === 'amount'}
         dir={sortDir}
         onclick={() => onSort('amount')}
-        class="text-right"
+        align="right"
       />
     </Table.Row>
   </Table.Header>
   <Table.Body>
     {#each rows as row (row.splitGuid)}
       {@const isChecked = checked.has(row.splitGuid)}
-      <Table.Row
-        data-checked={isChecked}
-        class="cursor-pointer hover:bg-muted/50"
-        onclick={(e) => handleRowClick(e, () => onToggle(row.splitGuid, !isChecked))}
-      >
+      <NavRow onNavigate={() => onToggle(row.splitGuid, !isChecked)}>
         <Table.Cell class="py-2.5">
           <Checkbox
             checked={isChecked}
@@ -88,7 +84,7 @@
             onCheckedChange={(v) => onToggle(row.splitGuid, v === true)}
           />
         </Table.Cell>
-        <Table.Cell class="py-2.5 whitespace-nowrap text-muted-foreground">
+        <Table.Cell class="py-2.5 whitespace-nowrap text-muted-foreground tabular-nums">
           {fmtDate(row.postDate)}
         </Table.Cell>
         <Table.Cell class="max-w-md py-2.5 font-medium">
@@ -122,7 +118,7 @@
         >
           {formatSignedCurrency(row.amount, currency)}
         </Table.Cell>
-      </Table.Row>
+      </NavRow>
     {/each}
   </Table.Body>
 </TableShell>
