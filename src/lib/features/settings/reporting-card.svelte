@@ -4,7 +4,6 @@
   import { Switch } from '$lib/components/ui/switch';
   import { Select as SelectPrimitive } from 'bits-ui';
   import IconCardHeader from '$lib/components/shared/icon-card-header.svelte';
-  import ErrorCard from '$lib/components/shared/error-card.svelte';
   import SettingSelectRow from './setting-select-row.svelte';
   import { CalendarDays } from '@lucide/svelte';
   import { appSettings } from '$lib/stores/settings.svelte';
@@ -14,8 +13,6 @@
   import { toast } from '$lib/components/ui/sonner';
   import type { BookSettings, PnlPeriodId } from '$lib/tauri';
   import { monthName } from '$lib/utils/date-utils.svelte';
-
-  let { error, onRetry }: { error: string | null; onRetry: () => void } = $props();
 
   const pnlPeriods: { value: PnlPeriodId; label: string }[] = [
     { value: 'this_month', label: 'This month' },
@@ -41,7 +38,7 @@
     try {
       await saveBookSetting(field, value);
     } catch (e: unknown) {
-      toast.error(errMsg(e, "We couldn't save that setting. Please try again"));
+      toast.error(errMsg(e, 'We couldn’t save that setting. Please try again'));
     } finally {
       savingBookKey = false;
     }
@@ -58,12 +55,10 @@
     {/snippet}
   </IconCardHeader>
   <Card.Content class="flex flex-col gap-4">
-    {#if error}
-      <ErrorCard message={error} {onRetry} />
-    {/if}
     <SettingSelectRow
       label="Fiscal year starts"
       description="Sets what This-year means in P&amp;L; more grouping options are next"
+      labelFor="setting-fy-start"
     >
       {#if dbSession.value}
         <Select.Root
@@ -77,7 +72,7 @@
           items={fyMonths}
           disabled={savingBookKey}
         >
-          <Select.Trigger class="w-36">
+          <Select.Trigger id="setting-fy-start" class="w-36">
             <SelectPrimitive.Value placeholder="Select month" />
           </Select.Trigger>
           <Select.Content>
@@ -93,6 +88,7 @@
     <SettingSelectRow
       label="Default P&amp;L period"
       description="Where Profit &amp; Loss starts when the link has no dates"
+      labelFor="setting-pnl-period"
     >
       {#if dbSession.value}
         <Select.Root
@@ -110,7 +106,7 @@
           items={pnlPeriods}
           disabled={savingBookKey}
         >
-          <Select.Trigger class="w-44">
+          <Select.Trigger id="setting-pnl-period" class="w-44">
             <SelectPrimitive.Value placeholder="Select period" />
           </Select.Trigger>
           <Select.Content>

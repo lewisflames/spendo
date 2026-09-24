@@ -23,13 +23,13 @@
   const rulesRes = useAsyncData({
     enabled: () => true,
     fetch: fetchImportRules,
-    label: "We couldn't load your import rules"
+    label: 'We couldn’t load your import rules'
   });
 
   const accountsRes = useAsyncData({
     enabled: () => true,
     fetch: fetchAccounts,
-    label: "We couldn't load your accounts"
+    label: 'We couldn’t load your accounts'
   });
 
   const rules = $derived(rulesRes.data ?? []);
@@ -67,7 +67,7 @@
     const current = rules[index];
     const adjacent = rules[index + direction];
     if (!current || !adjacent) return;
-    // Equal priorities fall back to the id tie-break, so a swap wouldn't move.
+    // Equal priorities fall back to the id tie-break, so a swap wouldn’t move.
     if (current.priority === adjacent.priority) return;
     movingId = current.id;
     try {
@@ -75,7 +75,7 @@
       await updateImportRule(adjacent.id, ruleInput(adjacent, current.priority));
       rulesRes.reload();
     } catch (e: unknown) {
-      toast.error(errMsg(e, "We couldn't reorder your rules. Please try again"));
+      toast.error(errMsg(e, 'We couldn’t reorder your rules. Please try again'));
     } finally {
       movingId = null;
     }
@@ -94,7 +94,7 @@
       rulesRes.reload();
       toast.success('Import rule deleted');
     } catch (e: unknown) {
-      toast.error(errMsg(e, "We couldn't delete this rule. Please try again"));
+      toast.error(errMsg(e, 'We couldn’t delete this rule. Please try again'));
     } finally {
       deletingId = null;
     }
@@ -125,6 +125,10 @@
       </Button>
     </div>
 
+    {#if accountsRes.error}
+      <ErrorCard message={accountsRes.error} onRetry={() => accountsRes.reload()} />
+    {/if}
+
     {#if rulesRes.loading && !rulesRes.data}
       <p class="py-2 text-sm text-muted-foreground">Finding your rules…</p>
     {:else if rulesRes.error}
@@ -137,7 +141,7 @@
               {rule.pattern}
             </span>
             <Badge variant="outline" class="shrink-0">
-              {rule.matchType === 'equals' ? 'exact' : 'contains'}
+              {rule.matchType === 'equals' ? 'Exact match' : 'Contains'}
             </Badge>
             <span
               class="max-w-40 min-w-0 truncate text-sm text-muted-foreground"
