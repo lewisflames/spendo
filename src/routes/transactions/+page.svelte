@@ -18,6 +18,7 @@
   import PageSkeleton from '$lib/components/shared/page-skeleton.svelte';
   import BookGate from '$lib/components/shared/book-gate.svelte';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
+  import EmptyBookPrompt from '$lib/components/shared/empty-book-prompt.svelte';
   import FilteredEmptyState from '$lib/components/shared/filtered-empty-state.svelte';
   import { ColumnsMenu } from '$lib/components/shared/columns-menu';
   import { useDebouncedSearch } from '$lib/hooks/use-debounced-search.svelte';
@@ -180,6 +181,8 @@
         {@const isFiltered = !!(search.value || dateFrom || dateTo)}
         {#if isFiltered}
           <FilteredEmptyState title="No matching transactions" onClear={clearFilters} />
+        {:else if dbSession.value?.summary.totalAccounts === 0}
+          <EmptyBookPrompt />
         {:else}
           <EmptyState
             card
