@@ -67,7 +67,7 @@ Frontend work is done when `bun run check`, `bun run lint` and `bun run test` pa
 - URL state composes factories from `use-url-params.svelte.ts` (`pageParam`, `debouncedSearchParam`, `dateParam`, `yearParam`); free-form specs only when none fits.
 - Search inputs debounce through `useDebouncedSearch`.
 - Dates parse through `parseLocalDate` (date-only strings are local, not UTC); counts use `plural(n, 'word')`; ranges use `formatDateRange`.
-- Dialog form reset uses `useDialogReset(() => open, sync)` (bits-ui never fires `onOpenChange` for programmatic `bind:open`); create/edit footers use `<SaveFooter layout=…>`.
+- Dialog form reset uses `useDialogReset(() => open, sync)` (bits-ui never fires `onOpenChange` for programmatic `bind:open`); create/edit footers use `<SaveFooter>`.
 - `index.ts` barrels use named exports only.
 - `tauri.ts`: leaf payload types are module-private; export only what other modules import.
 - localStorage keys are stable and unversioned (e.g. `spendo-settings`, `cols:budgets`) — no `:v2` suffixes or legacy branches; drop unknown or invalid stored values instead. A stored selection always wins: new default columns appear only with no stored state or after "Reset to default".
