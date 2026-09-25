@@ -47,8 +47,9 @@
     Number.isFinite(difference) ? (balanced ? 'text-success' : signColor(difference)) : ''
   );
 
-  // Finishing promotes every cleared split and has no in-app undo, so the
-  // button opens a confirmation instead of committing straight away.
+  // Finishing promotes every cleared split, so the button opens a confirmation
+  // instead of committing straight away. Transactions stay editable later:
+  // saving one asks before putting its splits back to New.
   let confirmFinishOpen = $state(false);
 </script>
 
@@ -129,8 +130,8 @@
     <Dialog.Header>
       <Dialog.Title>Finish reconciliation?</Dialog.Title>
       <Dialog.Description>
-        This saves your progress and marks the {checkedCount} ticked splits as cleared. You can’t undo
-        it from inside Spendo.
+        This saves your progress and marks the {checkedCount} ticked splits as reconciled. Editing a transaction
+        later will ask before putting its splits back to New.
       </Dialog.Description>
     </Dialog.Header>
     <Dialog.Footer>

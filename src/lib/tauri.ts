@@ -531,6 +531,8 @@ export interface TxInput {
   num?: string | null;
   notes?: string | null;
   splits: SplitInput[];
+  /** Edit form only: the user confirmed putting cleared/reconciled splits back to New. */
+  unreconcile?: boolean;
 }
 
 export const createTransaction = (input: TxInput): Promise<string> =>
@@ -539,8 +541,8 @@ export const createTransaction = (input: TxInput): Promise<string> =>
 export const updateTransaction = (guid: string, input: TxInput): Promise<void> =>
   invoke<void>('update_transaction', { guid, input });
 
-export const deleteTransaction = (guid: string): Promise<void> =>
-  invoke<void>('delete_transaction', { guid });
+export const deleteTransaction = (guid: string, unreconcile = false): Promise<void> =>
+  invoke<void>('delete_transaction', { guid, unreconcile });
 
 export const fetchTransactions = (
   page: number,

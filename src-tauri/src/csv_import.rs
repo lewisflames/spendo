@@ -931,6 +931,7 @@ fn parse_file_rows(
             description: if description.is_empty() { None } else { Some(description.clone()) },
             num: num.clone(),
             notes: notes.clone(),
+            unreconcile: false,
             splits: vec![
                 transactions::SplitInput {
                     account_guid: target_guid.to_string(),

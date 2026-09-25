@@ -39,6 +39,11 @@ pub struct TxInput {
     pub num: Option<String>,
     pub notes: Option<String>,
     pub splits: Vec<SplitInput>,
+    /// Set by the edit form once the user confirms the unreconcile warning.
+    /// Skips the cleared/reconciled guard: the update re-creates every split
+    /// as `'n'`, which is the unreconcile. Create ignores the flag.
+    #[serde(default)]
+    pub unreconcile: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -848,7 +853,7 @@ fn reject_when_reconciled(conn: &Connection, tx_guid: &str, action: &str) -> Res
     )?;
     if locked > 0 {
         return Err(AppError::Validation(format!(
-            "Cannot {action}. This transaction has cleared or reconciled splits. Adjust them on the reconcile page first"
+            "Cannot {action}. This transaction has cleared or reconciled splits. Unreconcile it first"
         )));
     }
     Ok(())
@@ -894,10 +899,13 @@ fn update_transaction_inner(
     if !exists {
         return Err(AppError::NotFound("Transaction not found. It may have been deleted or replaced".to_string()));
     }
-    // Manual edits delete + re-insert splits as `'n'`, which would silently
-    // wipe reconciliation state. Block edits while any split is cleared or
-    // reconciled — the reconcile page owns those transitions.
-    reject_when_reconciled(conn, guid, "edit")?;
+    // Manual edits delete + re-insert splits as `'n'`, so saving a cleared or
+    // reconciled transaction wipes its reconciliation state. The edit form
+    // confirms that consequence and sets `unreconcile`; callers that skip the
+    // confirmation stay blocked.
+    if !input.unreconcile {
+        reject_when_reconciled(conn, guid, "edit")?;
+    }
 
     with_tx_err(conn, || {
         conn.execute(
@@ -919,7 +927,11 @@ fn update_transaction_inner(
     })
 }
 
-fn delete_transaction_inner(conn: &Connection, guid: &str) -> Result<(), AppError> {
+fn delete_transaction_inner(
+    conn: &Connection,
+    guid: &str,
+    unreconcile: bool,
+) -> Result<(), AppError> {
     let exists = conn
         .query_row(
             "SELECT 1 FROM transactions WHERE guid = ?1",
@@ -932,7 +944,9 @@ fn delete_transaction_inner(conn: &Connection, guid: &str) -> Result<(), AppErro
     if !exists {
         return Err(AppError::NotFound("Transaction not found. It may have been deleted or replaced".to_string()));
     }
-    reject_when_reconciled(conn, guid, "delete")?;
+    if !unreconcile {
+        reject_when_reconciled(conn, guid, "delete")?;
+    }
 
     with_tx_err(conn, || {
         conn.execute("DELETE FROM splits WHERE tx_guid = ?1", params![guid])
@@ -967,9 +981,14 @@ pub async fn update_transaction(
 }
 
 #[tauri::command]
-pub async fn delete_transaction(state: State<'_, AppState>, guid: String) -> Result<(), String> {
+pub async fn delete_transaction(
+    state: State<'_, AppState>,
+    guid: String,
+    unreconcile: Option<bool>,
+) -> Result<(), String> {
+    let unreconcile = unreconcile.unwrap_or(false);
     run_blocking(state.db.clone(), move |conn| {
-        delete_transaction_inner(conn, &guid).map_err(String::from)
+        delete_transaction_inner(conn, &guid, unreconcile).map_err(String::from)
     })
     .await
 }
@@ -1090,6 +1109,7 @@ mod tests {
                     memo: Some("food".to_string()),
                 },
             ],
+            unreconcile: false,
         }
     }
 
@@ -1233,7 +1253,7 @@ mod tests {
         assert_eq!(detail.transaction.description.as_deref(), Some("Edited"));
         assert_eq!(detail.transaction.splits.len(), 2);
 
-        delete_transaction_inner(&conn, &guid).expect("delete runs");
+        delete_transaction_inner(&conn, &guid, false).expect("delete runs");
         assert!(fetch_transaction_inner(&conn, &guid).expect("query runs").is_none());
     }
 
@@ -1334,12 +1354,82 @@ mod tests {
             set_state(state);
             let err = update_transaction_inner(&conn, &guid, balanced_input()).unwrap_err();
             assert!(err.to_string().contains("reconcile"), "unexpected: {err}");
-            let err = delete_transaction_inner(&conn, &guid).unwrap_err();
+            let err = delete_transaction_inner(&conn, &guid, false).unwrap_err();
             assert!(err.to_string().contains("reconcile"), "unexpected: {err}");
         }
 
         set_state("n");
         update_transaction_inner(&conn, &guid, balanced_input()).expect("unlocked edit runs");
-        delete_transaction_inner(&conn, &guid).expect("unlocked delete runs");
+        delete_transaction_inner(&conn, &guid, false).expect("unlocked delete runs");
+    }
+
+    #[test]
+    fn confirmed_unreconcile_save_resets_split_states() {
+        let conn = setup_two_accounts();
+        let guid = create_transaction_inner(&conn, balanced_input()).unwrap();
+        conn.execute(
+            "UPDATE splits SET reconcile_state = 'y', reconciled = 1 WHERE tx_guid = ?1",
+            params![guid],
+        )
+        .unwrap();
+
+        let mut edited = balanced_input();
+        edited.description = Some("Fixed description".to_string());
+        edited.unreconcile = true;
+        update_transaction_inner(&conn, &guid, edited).expect("confirmed edit runs");
+
+        let detail = fetch_transaction_inner(&conn, &guid)
+            .expect("query runs")
+            .expect("tx exists");
+        assert_eq!(
+            detail.transaction.description.as_deref(),
+            Some("Fixed description")
+        );
+        for split in &detail.transaction.splits {
+            assert_eq!(split.reconcile_state.as_deref(), Some("n"));
+            assert!(!split.reconciled);
+        }
+        let cached: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM splits WHERE tx_guid = ?1 AND reconciled != 0",
+                params![guid],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(cached, 0);
+
+        // Delete takes the same confirmation flag.
+        conn.execute(
+            "UPDATE splits SET reconcile_state = 'c', reconciled = 1 WHERE tx_guid = ?1",
+            params![guid],
+        )
+        .unwrap();
+        delete_transaction_inner(&conn, &guid, true).expect("confirmed delete runs");
+    }
+
+    #[test]
+    fn failed_confirmed_save_keeps_reconciliation_state() {
+        let conn = setup_two_accounts();
+        let guid = create_transaction_inner(&conn, balanced_input()).unwrap();
+        conn.execute(
+            "UPDATE splits SET reconcile_state = 'y', reconciled = 1 WHERE tx_guid = ?1",
+            params![guid],
+        )
+        .unwrap();
+
+        let mut edited = balanced_input();
+        edited.unreconcile = true;
+        // Break the balance check so the save fails before writing anything.
+        edited.splits[0].amount = -1.0;
+        update_transaction_inner(&conn, &guid, edited).unwrap_err();
+
+        let locks: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM splits WHERE tx_guid = ?1 AND reconcile_state = 'y'",
+                params![guid],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(locks, 2);
     }
 }
