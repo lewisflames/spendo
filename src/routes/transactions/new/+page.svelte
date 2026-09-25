@@ -67,6 +67,7 @@
             mode="create"
             title="Duplicate transaction"
             headerDescription="Both sides should balance."
+            saveLabel="Create duplicate"
             initial={template}
             onSaved={handleSaved}
             onSavedAndNew={handleSavedAndNew}
@@ -81,6 +82,7 @@
           mode="create"
           title="Duplicate transaction"
           headerDescription="Both sides should balance."
+          saveLabel="Create duplicate"
           onSaved={handleSaved}
           onSavedAndNew={handleSavedAndNew}
           onCancel={() => void goto(resolve('/transactions'))}

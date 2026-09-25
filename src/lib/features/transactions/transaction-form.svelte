@@ -6,8 +6,7 @@
   import * as Card from '$lib/components/ui/card';
   import * as Dialog from '$lib/components/ui/dialog';
   import IconCardHeader from '$lib/components/shared/icon-card-header.svelte';
-  import { CopyPlus, Info, Plus, Trash2 } from '@lucide/svelte';
-  import * as ButtonGroup from '$lib/components/ui/button-group';
+  import { Info } from '@lucide/svelte';
   import { DatePicker } from '$lib/components/shared/date-picker';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import TransactionAttachments from '$lib/features/transactions/transaction-attachments.svelte';
@@ -45,6 +44,7 @@
     initial = null,
     title,
     headerDescription,
+    saveLabel,
     onSaved,
     onSavedAndNew,
     onDeleted,
@@ -56,6 +56,8 @@
     initial?: TransactionDetail | null;
     title: string;
     headerDescription: string;
+    /** Overrides the primary action label in create mode (e.g. "Create duplicate"). */
+    saveLabel?: string;
     onSaved?: (guid: string) => void;
     onSavedAndNew?: (guid: string) => void;
     onDeleted?: () => void;
@@ -135,6 +137,10 @@
       : `${modKey}+S saves.`
   );
   let headerText = $derived(headerDescription ? `${headerDescription} ${saveHint}` : saveHint);
+
+  let primaryLabel = $derived(
+    saveLabel ?? (mode === 'edit' ? 'Save changes' : 'Create transaction')
+  );
   let formError = $state('');
   let showErrors = $state(false);
   let didPrefillAccounts = $state(false);
@@ -362,7 +368,8 @@
   }
 
   function requestCancel() {
-    if (!dirty || saving || savingAndNew || deleting) {
+    if (saving || savingAndNew || deleting) return;
+    if (!dirty) {
       onCancel();
       return;
     }
@@ -405,57 +412,54 @@
 
 <div class="flex w-full flex-col gap-6">
   <PageHeader {title} description={headerText}>
-    <Button type="button" variant="outline" onclick={requestCancel}>Cancel</Button>
     {#if mode === 'edit'}
-      <ButtonGroup.Root>
-        {#if onDuplicate}
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            onclick={onDuplicate}
-            disabled={saving || savingAndNew || deleting}
-            aria-label="Duplicate transaction"
-            title="Duplicate transaction"
-          >
-            <CopyPlus aria-hidden="true" class="size-4" />
-          </Button>
-        {/if}
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          onclick={() => (deleteDialogOpen = true)}
-          disabled={saving || savingAndNew || deleting}
-          aria-label="Delete transaction"
-          title="Delete transaction"
-        >
-          <Trash2 aria-hidden="true" class="size-4" />
-        </Button>
-      </ButtonGroup.Root>
-    {/if}
-    <ButtonGroup.Root>
-      {#if mode === 'create' && onSavedAndNew}
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          onclick={() => void handleSaveAndNew()}
-          disabled={!canSave || saving || savingAndNew || deleting}
-          aria-label="Save & add another"
-          title={`Save & add another (Shift+${modKey}+S)`}
-        >
-          <Plus aria-hidden="true" class="size-4" />
-        </Button>
-      {/if}
       <Button
         type="button"
-        onclick={() => void handleSave()}
-        disabled={saving || savingAndNew || deleting || !canSave}
+        variant="outline"
+        onclick={() => (deleteDialogOpen = true)}
+        disabled={saving || savingAndNew || deleting}
+        title="Delete transaction"
       >
-        {saving ? 'Saving…' : mode === 'edit' ? 'Save changes' : 'Create transaction'}
+        Delete
       </Button>
-    </ButtonGroup.Root>
+      {#if onDuplicate}
+        <Button
+          type="button"
+          variant="outline"
+          onclick={onDuplicate}
+          disabled={saving || savingAndNew || deleting}
+          title="Duplicate transaction"
+        >
+          Duplicate
+        </Button>
+      {/if}
+    {/if}
+    <Button
+      type="button"
+      variant="outline"
+      onclick={requestCancel}
+      disabled={saving || savingAndNew || deleting}
+    >
+      Cancel
+    </Button>
+    {#if mode === 'create' && onSavedAndNew}
+      <Button
+        type="button"
+        variant="outline"
+        onclick={() => void handleSaveAndNew()}
+        disabled={!canSave || saving || savingAndNew || deleting}
+        title={`Save & add another (${modKey}+Shift+S)`}
+      >
+        {savingAndNew ? 'Saving…' : 'Save & add another'}
+      </Button>
+    {/if}
+    <Button
+      type="button"
+      onclick={() => void handleSave()}
+      disabled={saving || savingAndNew || deleting || !canSave}
+    >
+      {saving ? 'Saving…' : primaryLabel}
+    </Button>
   </PageHeader>
 
   <Card.Root>
