@@ -19,7 +19,7 @@
   }: {
     variant:
       | 'welcome'
-      | 'accounts'
+      | 'balance-sheet'
       | 'transactions'
       | 'transaction-detail'
       | 'form'
@@ -52,9 +52,26 @@
       <Skeleton class="h-3 w-36" />
     </div>
   </div>
-{:else if variant === 'accounts'}
-  <KpiCardRow count={4} />
-  <!-- Mirrors the balance tree card between the KPI row and the account table. -->
+{:else if variant === 'balance-sheet'}
+  <!-- Two statement columns; each line mirrors an account row with its amount. -->
+  <div class="grid grid-cols-1 gap-6 xl:grid-cols-2">
+    {#each [0, 1] as col (col)}
+      <Card.Root>
+        <Card.Header>
+          <Skeleton class="h-4 w-28" />
+        </Card.Header>
+        <Card.Content class="flex flex-col gap-3">
+          {#each [0, 1, 2, 3, 4, 5, 6] as row (row)}
+            <div class="flex items-center justify-between gap-4">
+              <Skeleton class="h-4 w-40" />
+              <Skeleton class="h-4 w-20" />
+            </div>
+          {/each}
+        </Card.Content>
+      </Card.Root>
+    {/each}
+  </div>
+  <!-- Mirrors the balance tree card below the statement. -->
   <Card.Root>
     <Card.Header>
       <Skeleton class="h-5 w-40" />
@@ -63,7 +80,6 @@
       <Skeleton class="mx-auto h-120 w-full max-w-160" />
     </Card.Content>
   </Card.Root>
-  <TableSkeleton cols={3} />
 {:else if variant === 'transactions'}
   <div class="flex flex-col gap-4">
     <TableSkeleton cols={3} />

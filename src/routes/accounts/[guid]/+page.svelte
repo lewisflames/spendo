@@ -32,6 +32,7 @@
   import AccountKpiCards from '$lib/features/accounts/account-kpi-cards.svelte';
   import AccountLedger from '$lib/features/accounts/account-ledger.svelte';
   import { isReconcilable } from '$lib/features/reconcile/math';
+  import { openAccount } from '$lib/utils/navigation';
 
   let guid = $derived(page.params.guid);
   let pageSize = $derived(appSettings.value.pageSize);
@@ -173,10 +174,15 @@
     {:else if res.data}
       <AccountDetailHeader account={res.data.account} summary={res.data.summary}>
         {#if dbSession.value}
-          <Button variant="outline" href={resolve('/accounts')}>
-            <ArrowLeft aria-hidden="true" class="size-4" />
-            Accounts
-          </Button>
+          {#if res.data.parent}
+            <Button
+              variant="outline"
+              href={resolve('/accounts/[guid]', { guid: res.data.parent.guid })}
+            >
+              <ArrowLeft aria-hidden="true" class="size-4" />
+              Parent
+            </Button>
+          {/if}
           {#if guid && res.data && isReconcilable(res.data.account.accountType, res.data.account.placeholder)}
             <Button variant="outline" href={resolve('/reconcile/[guid]', { guid })}>
               <CircleCheck aria-hidden="true" class="size-4" />
@@ -206,7 +212,8 @@
           }}
           onDeleted={() => {
             toast.success('Account deleted');
-            void goto(resolve('/accounts'));
+            if (res.data?.parent) void openAccount(res.data.parent.guid);
+            else void goto(resolve('/reports/balance-sheet'));
           }}
           onError={(msg) => toast.error(msg)}
         />
