@@ -7,9 +7,8 @@
   import { Button } from '$lib/components/ui/button';
   import * as Card from '$lib/components/ui/card';
   import * as Dialog from '$lib/components/ui/dialog';
-  import * as ButtonGroup from '$lib/components/ui/button-group';
   import IconCardHeader from '$lib/components/shared/icon-card-header.svelte';
-  import { Info, Repeat, Trash2 } from '@lucide/svelte';
+  import { Info, Repeat } from '@lucide/svelte';
   import { DatePicker } from '$lib/components/shared/date-picker';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import {
@@ -274,7 +273,8 @@
   }
 
   function requestCancel() {
-    if (!dirty || saving || deleting) {
+    if (saving || deleting) return;
+    if (!dirty) {
       onCancel();
       return;
     }
@@ -303,31 +303,27 @@
 
 <div class="flex w-full flex-col gap-6">
   <PageHeader {title} description={headerText}>
-    <Button type="button" variant="outline" onclick={requestCancel}>Cancel</Button>
     {#if mode === 'edit'}
-      <ButtonGroup.Root>
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          onclick={() => (deleteDialogOpen = true)}
-          disabled={saving || deleting}
-          aria-label="Delete schedule"
-          title="Delete schedule"
-        >
-          <Trash2 aria-hidden="true" class="size-4" />
-        </Button>
-      </ButtonGroup.Root>
-    {/if}
-    <ButtonGroup.Root>
       <Button
         type="button"
-        onclick={() => void handleSave()}
-        disabled={saving || deleting || !canSave}
+        variant="outline"
+        onclick={() => (deleteDialogOpen = true)}
+        disabled={saving || deleting}
+        title="Delete schedule"
       >
-        {saving ? 'Saving…' : mode === 'edit' ? 'Save changes' : 'Create schedule'}
+        Delete
       </Button>
-    </ButtonGroup.Root>
+    {/if}
+    <Button type="button" variant="outline" onclick={requestCancel} disabled={saving || deleting}>
+      Cancel
+    </Button>
+    <Button
+      type="button"
+      onclick={() => void handleSave()}
+      disabled={saving || deleting || !canSave}
+    >
+      {saving ? 'Saving…' : mode === 'edit' ? 'Save changes' : 'Create schedule'}
+    </Button>
   </PageHeader>
 
   <Card.Root>
