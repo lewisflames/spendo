@@ -5,10 +5,12 @@
   import * as Table from '$lib/components/ui/table';
   import { Badge } from '$lib/components/ui/badge';
   import { Button } from '$lib/components/ui/button';
+  import * as ButtonGroup from '$lib/components/ui/button-group';
   import {
     ArrowLeft,
     ArrowLeftRight,
-    ArrowRight,
+    ChevronLeft,
+    ChevronRight,
     CircleCheck,
     Copy,
     CopyPlus,
@@ -119,7 +121,7 @@
           <ArrowLeft aria-hidden="true" class="size-4" />
           Transactions
         </Button>
-        <div class="flex items-center gap-1">
+        <ButtonGroup.Root>
           <Button
             variant="outline"
             size="icon"
@@ -130,7 +132,7 @@
               if (prevGuid) void openTransaction(prevGuid);
             }}
           >
-            <ArrowLeft aria-hidden="true" class="size-4" />
+            <ChevronLeft aria-hidden="true" class="size-4" />
           </Button>
           <Button
             variant="outline"
@@ -142,9 +144,9 @@
               if (nextGuid) void openTransaction(nextGuid);
             }}
           >
-            <ArrowRight aria-hidden="true" class="size-4" />
+            <ChevronRight aria-hidden="true" class="size-4" />
           </Button>
-        </div>
+        </ButtonGroup.Root>
         <Button
           variant="outline"
           size="icon"
