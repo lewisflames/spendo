@@ -1021,6 +1021,8 @@ export interface ReconcileCandidate {
   amount: number;
   /** Normalized 'n' | 'c' (source NULL reads as 'n'). */
   reconcileState: string;
+  /** Counter-account labels of the transaction, largest magnitude first. */
+  counterAccounts: string[];
 }
 
 interface ReconcileInfo {
@@ -1033,6 +1035,21 @@ interface ReconcileInfo {
   startingBalance: number;
   /** Unreconciled splits at or before the statement date, oldest first. */
   candidates: ReconcileCandidate[];
+  /** Post date of the most recent reconciled batch; null when never reconciled. */
+  lastReconciledDate: string | null;
+  /** Splits in that batch, what `reopenLastReconciliation` returns to cleared. */
+  lastReconciledCount: number;
+}
+
+export interface ReconcileAccountSummary {
+  accountGuid: string;
+  /** Splits still 'n' (never cleared) in the visibility window. */
+  unreconciledCount: number;
+  /** Splits saved as 'c' (progress not yet finished). */
+  clearedCount: number;
+  /** Signed display total of the 'n' splits, in the account's commodity. */
+  unclearedTotal: number;
+  lastReconciledDate: string | null;
 }
 
 interface SplitStateUpdate {
@@ -1042,6 +1059,7 @@ interface SplitStateUpdate {
 
 interface MarkReconcileInput {
   accountGuid: string;
+  statementDate: string;
   updates: SplitStateUpdate[];
 }
 
@@ -1053,12 +1071,20 @@ interface FinishReconcileInput {
   accountGuid: string;
   statementDate: string;
   endingBalance: number;
+  updates: SplitStateUpdate[];
 }
 
 interface FinishReconcileResult {
   reconciledCount: number;
   startingBalance: number;
   endingBalance: number;
+}
+
+export interface ReopenReconcileResult {
+  reopenedCount: number;
+  /** Post date of the batch before the reopened one; null for a first reconcile. */
+  fromDate: string | null;
+  throughDate: string;
 }
 
 export const fetchReconcileInfo = (
@@ -1069,20 +1095,28 @@ export const fetchReconcileInfo = (
 
 export const markReconcileSplits = (
   accountGuid: string,
+  statementDate: string,
   updates: { splitGuid: string; state: string }[]
 ): Promise<MarkReconcileResult> =>
   invoke<MarkReconcileResult>('mark_reconcile_splits', {
-    input: { accountGuid, updates } satisfies MarkReconcileInput
+    input: { accountGuid, statementDate, updates } satisfies MarkReconcileInput
   });
 
 export const finishReconciliation = (
   accountGuid: string,
   statementDate: string,
-  endingBalance: number
+  endingBalance: number,
+  updates: { splitGuid: string; state: string }[]
 ): Promise<FinishReconcileResult> =>
   invoke<FinishReconcileResult>('finish_reconciliation', {
-    input: { accountGuid, statementDate, endingBalance } satisfies FinishReconcileInput
+    input: { accountGuid, statementDate, endingBalance, updates } satisfies FinishReconcileInput
   });
+
+export const reopenLastReconciliation = (accountGuid: string): Promise<ReopenReconcileResult> =>
+  invoke<ReopenReconcileResult>('reopen_last_reconciliation', { accountGuid });
+
+export const fetchReconcileSummaries = (): Promise<ReconcileAccountSummary[]> =>
+  invoke<ReconcileAccountSummary[]>('fetch_reconcile_summaries');
 
 // ── Global search (Ctrl+K palette) ──
 
@@ -1175,6 +1209,7 @@ export type MockPayloads = {
   fetch_pnl_trend: PnlTrendPoint[];
   fetch_portfolio_data: PortfolioData;
   fetch_reconcile_info: ReconcileInfo;
+  fetch_reconcile_summaries: ReconcileAccountSummary[];
   fetch_schedule: Schedule;
   fetch_schedules: Schedule[];
   fetch_symbol_overrides: SymbolOverride[];
@@ -1190,6 +1225,7 @@ export type MockPayloads = {
   post_schedule_occurrence: string;
   preview_gnucash_import: GnuCashPreview;
   refresh_prices: PricesResult;
+  reopen_last_reconciliation: ReopenReconcileResult;
   save_allocation_targets: AllocationTarget[];
   save_book_as: EmptyBookResult;
   search_global: GlobalSearchResult;

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Plus, Scale } from '@lucide/svelte';
   import { dbSession, dbBootstrapping } from '$lib/stores/db.svelte';
-  import { fetchAccounts } from '$lib/tauri';
+  import { fetchAccounts, fetchReconcileSummaries } from '$lib/tauri';
   import { plural } from '$lib/utils/format.svelte';
   import BookGate from '$lib/components/shared/book-gate.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
@@ -37,11 +37,16 @@
 
   const res = useAsyncData({
     enabled: () => !!dbSession.value,
-    fetch: () => fetchAccounts(),
+    fetch: async () => {
+      const [accounts, summaries] = await Promise.all([fetchAccounts(), fetchReconcileSummaries()]);
+      return { accounts, summaries };
+    },
     label: 'We couldn’t load your accounts'
   });
 
-  let rows = $derived(flattenReconcilableAccounts(res.data?.trees));
+  let rows = $derived(
+    flattenReconcilableAccounts(res.data?.accounts.trees, res.data?.summaries ?? [])
+  );
   let filtered = $derived.by(() => {
     const q = search.value.trim().toLowerCase();
     if (!q) return rows;
@@ -52,6 +57,17 @@
         (r.code?.toLowerCase().includes(q) ?? false)
     );
   });
+  // Accounts with something to do (or saved progress) — the rest are quiet.
+  let attentionCount = $derived(
+    filtered.filter((r) => r.stats.unreconciledCount > 0 || r.stats.clearedCount > 0).length
+  );
+
+  let description = $derived.by(() => {
+    if (!res.data) return 'Match your books to the bank';
+    const base = `Match your books to the bank · ${plural(filtered.length, 'account')} you can reconcile`;
+    if (search.value || attentionCount === 0) return base;
+    return `${base} · ${plural(attentionCount, 'account')} needing attention`;
+  });
 </script>
 
 <svelte:head>
@@ -61,12 +77,7 @@
 
 <BookGate title="Reconcile" description="Match your books to the bank">
   <div class="flex flex-col gap-6">
-    <PageHeader
-      title="Reconcile"
-      description={res.data
-        ? `Match your books to the bank · ${plural(filtered.length, 'account you can reconcile')}`
-        : 'Match your books to the bank'}
-    ></PageHeader>
+    <PageHeader title="Reconcile" {description}></PageHeader>
 
     <FilterBar>
       <SearchInput

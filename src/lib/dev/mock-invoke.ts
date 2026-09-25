@@ -1215,18 +1215,140 @@ function reconcileState(split: FixtureSplit): string {
   return split.reconcileState ?? 'n';
 }
 
+/** Account label (description falling back to name), as the ledger shows it. */
+function accountLabel(guid: string): string {
+  const acc = account(guid);
+  return acc?.description ?? acc?.name ?? guid;
+}
+
+/** Counter-account labels for one transaction, largest magnitude first. */
+function counterAccountsFor(tx: FixtureTx, accountGuid: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const split of [...tx.splits].sort((a, b) => Math.abs(b.raw) - Math.abs(a.raw))) {
+    if (split.accountGuid === accountGuid || seen.has(split.accountGuid)) continue;
+    seen.add(split.accountGuid);
+    out.push(accountLabel(split.accountGuid));
+  }
+  return out;
+}
+
+interface MockReconcileBatch {
+  fromDate: string | null;
+  throughDate: string;
+  guids: string[];
+}
+
+/** Last reconciled batch: `'y'` splits dated after the previous batch's last date. */
+function lastReconciledBatch(accountGuid: string): MockReconcileBatch | null {
+  const dated: { guid: string; date: string }[] = [];
+  visibleTxs().forEach((tx) => {
+    tx.splits.forEach((split, index) => {
+      if (split.accountGuid !== accountGuid || reconcileState(split) !== 'y') return;
+      dated.push({ guid: `${tx.guid}-${index}`, date: tx.postDate });
+    });
+  });
+  if (dated.length === 0) return null;
+  const throughDate = dated.reduce((max, d) => (d.date > max ? d.date : max), dated[0].date);
+  const earlier = dated.filter((d) => d.date < throughDate);
+  const fromDate = earlier.length
+    ? earlier.reduce((max, d) => (d.date > max ? d.date : max), earlier[0].date)
+    : null;
+  const guids = dated.filter((d) => fromDate === null || d.date > fromDate).map((d) => d.guid);
+  return { fromDate, throughDate, guids };
+}
+
+function reconcileSummary(accountGuid: string): MockPayloads['fetch_reconcile_summaries'][number] {
+  let unreconciledCount = 0;
+  let clearedCount = 0;
+  let unclearedTotal = 0;
+  for (const tx of visibleTxs()) {
+    for (const split of tx.splits) {
+      if (split.accountGuid !== accountGuid) continue;
+      const state = reconcileState(split);
+      if (state === 'n') {
+        unreconciledCount += 1;
+        unclearedTotal += splitAmount(split);
+      } else if (state === 'c') {
+        clearedCount += 1;
+      }
+    }
+  }
+  const batch = lastReconciledBatch(accountGuid);
+  return {
+    accountGuid,
+    unreconciledCount,
+    clearedCount,
+    unclearedTotal: round2(unclearedTotal),
+    lastReconciledDate: batch?.throughDate ?? null
+  };
+}
+
+/** Apply `'n'`/`'c'` updates with the same guards as the Rust backend. */
+function applyMockUpdates(
+  updates: { splitGuid: string; state: string }[],
+  accountGuid: string,
+  statementDate: string
+): number {
+  let updated = 0;
+  for (const change of updates) {
+    if (change.state !== 'n' && change.state !== 'c') {
+      throw new Error(`[mock] Invalid reconcile state '${change.state}'. Expected 'n' or 'c'`);
+    }
+    const found = findSplit(change.splitGuid);
+    if (!found) throw new Error('A split was not found. It may have been removed');
+    if (found.split.accountGuid !== accountGuid) {
+      throw new Error(`Split ${change.splitGuid} does not belong to this account`);
+    }
+    if (reconcileState(found.split) === 'y') {
+      throw new Error('Reconciled splits are locked here. Head back to reconcile to change them');
+    }
+    if (found.tx.postDate > statementDate) {
+      throw new Error('That split is dated after the statement. Pick a later statement date first');
+    }
+    if (reconcileState(found.split) !== change.state) {
+      found.split.reconcileState = change.state;
+      updated += 1;
+    }
+  }
+  return updated;
+}
+
+/** Snapshot/restore lets Finish roll back pending updates when unbalanced. */
+function snapshotReconcileStates(
+  accountGuid: string
+): { split: FixtureSplit; state: string | null | undefined }[] {
+  const out: { split: FixtureSplit; state: string | null | undefined }[] = [];
+  for (const tx of state.transactions) {
+    for (const split of tx.splits) {
+      if (split.accountGuid === accountGuid) {
+        out.push({ split, state: split.reconcileState });
+      }
+    }
+  }
+  return out;
+}
+
+function restoreReconcileStates(
+  snapshot: { split: FixtureSplit; state: string | null | undefined }[]
+): void {
+  for (const entry of snapshot) entry.split.reconcileState = entry.state;
+}
+
 function reconcileInfo(args: Record<string, unknown>): MockPayloads['fetch_reconcile_info'] {
   const accountGuid = String(args.accountGuid);
   const statementDate = String(args.statementDate);
   const acc = account(accountGuid);
   if (!acc) throw new Error(`[mock] Unknown account ${accountGuid}`);
-  const inSubtree = subtreeGuids(accountGuid);
+  if (statementDate > todayIso()) {
+    throw new Error('That statement date is in the future. Use today or earlier');
+  }
   let startingBalance = 0;
   const candidates: MockPayloads['fetch_reconcile_info']['candidates'] = [];
   for (const tx of visibleTxs()) {
     if (tx.postDate > statementDate) continue;
     tx.splits.forEach((split, index) => {
-      if (!inSubtree.has(split.accountGuid)) return;
+      if (split.accountGuid !== accountGuid) return;
       if (reconcileState(split) === 'y') {
         startingBalance += splitAmount(split);
       } else {
@@ -1238,12 +1360,14 @@ function reconcileInfo(args: Record<string, unknown>): MockPayloads['fetch_recon
           num: tx.num ?? null,
           memo: split.memo ?? null,
           amount: splitAmount(split),
-          reconcileState: reconcileState(split)
+          reconcileState: reconcileState(split),
+          counterAccounts: counterAccountsFor(tx, accountGuid)
         });
       }
     });
   }
   candidates.sort((a, b) => a.postDate.localeCompare(b.postDate));
+  const batch = lastReconciledBatch(accountGuid);
   return {
     accountGuid,
     accountName: acc.name,
@@ -1251,7 +1375,9 @@ function reconcileInfo(args: Record<string, unknown>): MockPayloads['fetch_recon
     commodity: acc.commodity,
     statementDate,
     startingBalance: round2(startingBalance),
-    candidates
+    candidates,
+    lastReconciledDate: batch?.throughDate ?? null,
+    lastReconciledCount: batch?.guids.length ?? 0
   };
 }
 
@@ -1267,7 +1393,20 @@ const mimeFor = (filename: string): string => {
 
 // ── seed reconcile states ──────────────────────────────────────────────────
 
-const RECONCILE_TYPES = new Set(['ASSET', 'BANK', 'CASH', 'CREDIT', 'LIABILITY', 'PAYABLE']);
+const RECONCILE_TYPES = new Set([
+  'ASSET',
+  'BANK',
+  'CASH',
+  'CURRENCY',
+  'RECEIVABLE',
+  'LIABILITY',
+  'CREDIT',
+  'PAYABLE'
+]);
+
+function isReconcilableFixture(acc: FixtureAccount | undefined): acc is FixtureAccount {
+  return !!acc && !acc.placeholder && RECONCILE_TYPES.has(acc.accountType);
+}
 
 function daysAgo(date: string): number {
   const then = new Date(`${date}T00:00:00`);
@@ -1574,42 +1713,86 @@ const handlers: HandlerMap = {
 
   // Reconcile
   fetch_reconcile_info: (args) => reconcileInfo(args),
+  fetch_reconcile_summaries: () =>
+    state.accounts
+      .filter((acc) => isReconcilableFixture(acc))
+      .map((acc) => reconcileSummary(acc.guid)),
   mark_reconcile_splits: (args) => {
-    const input = args.input as { updates: { splitGuid: string; state: string }[] };
-    let updated = 0;
-    for (const change of input.updates) {
-      const found = findSplit(change.splitGuid);
-      if (found) {
-        found.split.reconcileState = change.state;
-        updated += 1;
-      }
-    }
-    return { updated };
+    const input = args.input as {
+      accountGuid: string;
+      statementDate: string;
+      updates: { splitGuid: string; state: string }[];
+    };
+    return {
+      updated: applyMockUpdates(input.updates, input.accountGuid, input.statementDate)
+    };
   },
   finish_reconciliation: (args) => {
     const input = args.input as {
       accountGuid: string;
       statementDate: string;
       endingBalance: number;
+      updates: { splitGuid: string; state: string }[];
     };
-    const inSubtree = subtreeGuids(input.accountGuid);
+    const snapshot = snapshotReconcileStates(input.accountGuid);
+    applyMockUpdates(input.updates ?? [], input.accountGuid, input.statementDate);
+
     let startingBalance = 0;
+    let clearedTotal = 0;
+    for (const tx of visibleTxs()) {
+      if (tx.postDate > input.statementDate) continue;
+      for (const split of tx.splits) {
+        if (split.accountGuid !== input.accountGuid) continue;
+        const state = reconcileState(split);
+        if (state === 'y') startingBalance += splitAmount(split);
+        else if (state === 'c') clearedTotal += splitAmount(split);
+      }
+    }
+    const diff = input.endingBalance - (startingBalance + clearedTotal);
+    if (Math.abs(diff) > 0.005) {
+      restoreReconcileStates(snapshot);
+      throw new Error(
+        `Out of balance by ${diff.toFixed(2)}. Tick off what cleared the bank until it hits zero`
+      );
+    }
+
     let reconciledCount = 0;
     for (const tx of visibleTxs()) {
       if (tx.postDate > input.statementDate) continue;
       for (const split of tx.splits) {
-        if (!inSubtree.has(split.accountGuid)) continue;
-        if (reconcileState(split) === 'y') startingBalance += splitAmount(split);
-        else if (reconcileState(split) === 'c') {
+        if (split.accountGuid !== input.accountGuid) continue;
+        if (reconcileState(split) === 'c') {
           split.reconcileState = 'y';
           reconciledCount += 1;
         }
       }
     }
+    if (reconciledCount === 0) {
+      restoreReconcileStates(snapshot);
+      throw new Error('Nothing ticked off yet. Mark what cleared first');
+    }
     return {
       reconciledCount,
       startingBalance: round2(startingBalance),
       endingBalance: input.endingBalance
+    };
+  },
+  reopen_last_reconciliation: (args) => {
+    const accountGuid = String(args.accountGuid);
+    const batch = lastReconciledBatch(accountGuid);
+    if (!batch || batch.guids.length === 0) {
+      throw new Error('Nothing is reconciled yet. Finish a statement first');
+    }
+    const guids = new Set(batch.guids);
+    for (const tx of state.transactions) {
+      tx.splits.forEach((split, index) => {
+        if (guids.has(`${tx.guid}-${index}`)) split.reconcileState = 'c';
+      });
+    }
+    return {
+      reopenedCount: batch.guids.length,
+      fromDate: batch.fromDate,
+      throughDate: batch.throughDate
     };
   },
 
