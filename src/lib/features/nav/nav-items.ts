@@ -6,11 +6,11 @@ import {
   CalendarClock,
   Coins,
   CreditCard,
-  FolderTree,
   Landmark,
   PiggyBank,
   Receipt,
   Scale,
+  ScrollText,
   TrendingDown,
   TrendingUp
 } from '@lucide/svelte';
@@ -22,7 +22,7 @@ export type NavBadgeKey = 'reconcile' | 'scheduled';
 export const NAV_CHORD_TARGETS = {
   t: '/transactions',
   r: '/reconcile',
-  a: '/accounts',
+  a: '/reports/balance-sheet',
   s: '/scheduled',
   b: '/budgets',
   p: '/reports/pnl',
@@ -94,15 +94,6 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Accounts',
     items: [
-      {
-        id: 'all-accounts',
-        label: 'All accounts',
-        icon: FolderTree,
-        keywords: ['accounts', 'balance sheet', 'balances', 'overview'],
-        href: '/accounts',
-        chord: 'a',
-        match: (pathname) => pathname === '/accounts'
-      },
       {
         id: 'assets',
         label: 'Assets',
@@ -180,6 +171,15 @@ export const NAV_GROUPS: NavGroup[] = [
         href: '/reports/pnl',
         chord: 'p',
         match: (pathname) => pathname === '/reports/pnl'
+      },
+      {
+        id: 'balance-sheet',
+        label: 'Balance Sheet',
+        icon: ScrollText,
+        keywords: ['balance sheet', 'accounts', 'assets', 'liabilities', 'equity', 'net worth'],
+        href: '/reports/balance-sheet',
+        chord: 'a',
+        match: (pathname) => pathname === '/reports/balance-sheet'
       },
       {
         id: 'portfolio',
