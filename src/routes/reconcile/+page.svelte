@@ -1,8 +1,7 @@
 <script lang="ts">
-  import { Scale } from '@lucide/svelte';
+  import { Plus, Scale } from '@lucide/svelte';
   import { dbSession, dbBootstrapping } from '$lib/stores/db.svelte';
   import { fetchAccounts } from '$lib/tauri';
-  import { resolve } from '$app/paths';
   import { plural } from '$lib/utils/format.svelte';
   import BookGate from '$lib/components/shared/book-gate.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
@@ -20,6 +19,7 @@
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import ReconcileAccountTable from '$lib/features/reconcile/reconcile-account-table.svelte';
   import { flattenReconcilableAccounts } from '$lib/features/reconcile/reconcile-accounts';
+  import { openAccountDialog } from '$lib/features/accounts/account-dialog-state.svelte';
 
   let searchInput = $state('');
   let search = useDebouncedSearch(() => searchInput);
@@ -111,7 +111,10 @@
               <Scale aria-hidden="true" class="text-muted-foreground" />
             {/snippet}
             {#snippet action()}
-              <Button variant="outline" href={resolve('/accounts')}>Accounts</Button>
+              <Button variant="outline" onclick={openAccountDialog}>
+                <Plus aria-hidden="true" class="size-4" />
+                New account
+              </Button>
             {/snippet}
           </EmptyState>
         {/if}
