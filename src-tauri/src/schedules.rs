@@ -339,6 +339,7 @@ fn validate_schedule_input_with(
         num: input.num.clone(),
         notes: input.notes.clone(),
         splits: input.splits.clone(),
+        unreconcile: false,
     };
     crate::transactions::validate_tx_body_with(&probe, lookup)?;
     Ok(ValidatedSchedule {
@@ -888,6 +889,7 @@ fn post_schedule_occurrence_inner(
         description: template.description.clone(),
         num: template.num.clone(),
         notes: template.notes.clone(),
+        unreconcile: false,
         splits: template
             .splits
             .iter()

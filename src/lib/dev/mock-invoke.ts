@@ -63,6 +63,7 @@ interface TxInputLike {
     quantity?: number | null;
     memo?: string | null;
   }[];
+  unreconcile?: boolean;
 }
 
 interface AccountInputLike {
@@ -655,11 +656,20 @@ function createTransaction(input: TxInputLike): string {
   return guid;
 }
 
+function hasLockedSplits(tx: FixtureTx): boolean {
+  return tx.splits.some((s) => reconcileState(s) === 'c' || reconcileState(s) === 'y');
+}
+
 function updateTransaction(args: Record<string, unknown>): void {
   const guid = String(args.guid);
   const input = args.input as TxInputLike;
   const tx = state.transactions.find((t) => t.guid === guid);
   if (!tx) throw new Error(`[mock] Unknown transaction ${guid}`);
+  if (!input.unreconcile && hasLockedSplits(tx)) {
+    throw new Error(
+      'Cannot edit. This transaction has cleared or reconciled splits. Unreconcile it first'
+    );
+  }
   tx.postDate = input.postDate;
   tx.description = input.description ?? '';
   tx.num = input.num ?? null;
@@ -675,9 +685,14 @@ function updateTransaction(args: Record<string, unknown>): void {
   });
 }
 
-function deleteTransaction(guid: string): void {
+function deleteTransaction(guid: string, unreconcile = false): void {
   const index = state.transactions.findIndex((t) => t.guid === guid);
   if (index === -1) throw new Error(`[mock] Unknown transaction ${guid}`);
+  if (!unreconcile && hasLockedSplits(state.transactions[index])) {
+    throw new Error(
+      'Cannot delete. This transaction has cleared or reconciled splits. Unreconcile it first'
+    );
+  }
   state.transactions.splice(index, 1);
   state.attachments = state.attachments.filter((a) => a.txGuid !== guid);
 }
@@ -1359,7 +1374,7 @@ const handlers: HandlerMap = {
   fetch_transaction: (args) => transactionDetail(String(args.guid)),
   create_transaction: (args) => createTransaction(args.input as TxInputLike),
   update_transaction: (args) => updateTransaction(args),
-  delete_transaction: (args) => deleteTransaction(String(args.guid)),
+  delete_transaction: (args) => deleteTransaction(String(args.guid), Boolean(args.unreconcile)),
 
   // Books
   open_book: () => emptyBookResult(),

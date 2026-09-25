@@ -126,6 +126,7 @@
   let savingAndNew = $state(false);
   let deleting = $state(false);
   let deleteDialogOpen = $state(false);
+  let confirmUnreconcileOpen = $state(false);
   let discardDialogOpen = $state(false);
 
   const modKey = modKeyLabel();
@@ -198,11 +199,12 @@
   let balance = $derived(splitBalance(splits));
   let balanced = $derived(isBalanced(balance));
 
-  // The backend rejects edits/deletes on cleared/reconciled splits — the
-  // reconcile page owns those transitions.
-  let hasLockedSplits = $derived(
-    initial?.splits.some((s) => s.reconcileState === 'c' || s.reconcileState === 'y') ?? false
+  // Saving re-creates every split as 'n', so edits and deletes of cleared or
+  // reconciled transactions need the user's confirmation first.
+  let lockedSplitCount = $derived(
+    initial?.splits.filter((s) => s.reconcileState === 'c' || s.reconcileState === 'y').length ?? 0
   );
+  let hasLockedSplits = $derived(lockedSplitCount > 0);
 
   // Receipts are deleted permanently with their transaction.
   let attachmentCount = $derived(initial?.attachmentCount ?? 0);
@@ -298,10 +300,21 @@
       showErrors = true;
       return;
     }
+    // Saving a cleared or reconciled transaction re-creates its splits as 'n';
+    // confirm that consequence before writing anything.
+    if (mode === 'edit' && hasLockedSplits) {
+      confirmUnreconcileOpen = true;
+      return;
+    }
+    await saveNow(false);
+  }
+
+  async function saveNow(unreconcile: boolean) {
+    if (saving || savingAndNew || deleting) return;
     saving = true;
     formError = '';
     try {
-      const input = buildInput();
+      const input = { ...buildInput(), unreconcile };
       if (mode === 'edit' && guid) {
         await updateTransaction(guid, input);
         rememberForNextTime(
@@ -381,7 +394,7 @@
     deleting = true;
     formError = '';
     try {
-      await deleteTransaction(guid);
+      await deleteTransaction(guid, hasLockedSplits);
       deleteDialogOpen = false;
       onDeleted?.();
     } catch (e: unknown) {
@@ -397,8 +410,9 @@
     const mod = e.ctrlKey || e.metaKey;
     if (!mod || e.key.toLowerCase() !== 's') return;
     // Don’t hijack the browser save dialog when a native dialog has focus,
-    // and never save behind the delete/discard confirmations.
-    if (e.defaultPrevented || deleteDialogOpen || discardDialogOpen) return;
+    // and never save behind the delete/unreconcile/discard confirmations.
+    if (e.defaultPrevented || deleteDialogOpen || confirmUnreconcileOpen || discardDialogOpen)
+      return;
     e.preventDefault();
     if (e.shiftKey && mode === 'create' && onSavedAndNew) {
       void handleSaveAndNew();
@@ -542,8 +556,8 @@
       role="note"
       class="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300"
     >
-      Some splits are already cleared or reconciled, so this one is locked for now. Head to the
-      reconcile page to unreconcile them first.
+      {plural(lockedSplitCount, 'split')} here {lockedSplitCount === 1 ? 'is' : 'are'} cleared or reconciled.
+      Saving puts them back to New; you’ll be asked to confirm.
     </p>
   {/if}
 
@@ -569,6 +583,37 @@
 
   <TransactionAttachments txGuid={mode === 'edit' ? guid : null} />
 
+  <Dialog.Root bind:open={confirmUnreconcileOpen}>
+    <Dialog.Content class="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+      <Dialog.Header>
+        <Dialog.Title>Save and unreconcile?</Dialog.Title>
+        <Dialog.Description>
+          Saving re-creates this transaction’s splits, so every cleared or reconciled split goes
+          back to New. Reconciled splits also drop out of the account’s starting balance for its
+          next reconciliation, and all of them show up again as candidates.
+        </Dialog.Description>
+      </Dialog.Header>
+      <Dialog.Footer>
+        <Button
+          variant="outline"
+          onclick={() => (confirmUnreconcileOpen = false)}
+          disabled={saving}
+        >
+          Cancel
+        </Button>
+        <Button
+          onclick={() => {
+            confirmUnreconcileOpen = false;
+            void saveNow(true);
+          }}
+          disabled={saving}
+        >
+          {saving ? 'Saving…' : 'Save anyway'}
+        </Button>
+      </Dialog.Footer>
+    </Dialog.Content>
+  </Dialog.Root>
+
   <Dialog.Root bind:open={deleteDialogOpen}>
     <Dialog.Content class="max-h-[90vh] overflow-y-auto sm:max-w-lg">
       <Dialog.Header>
@@ -580,6 +625,15 @@
           {/if}
         </Dialog.Description>
       </Dialog.Header>
+      {#if hasLockedSplits}
+        <p
+          role="note"
+          class="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300"
+        >
+          {plural(lockedSplitCount, 'split')} here {lockedSplitCount === 1 ? 'is' : 'are'} cleared or
+          reconciled. Deleting removes them from the account’s reconciliation history.
+        </p>
+      {/if}
       <Dialog.Footer>
         <Button variant="outline" onclick={() => (deleteDialogOpen = false)} disabled={deleting}>
           Cancel
