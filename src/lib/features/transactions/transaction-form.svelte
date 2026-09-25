@@ -32,7 +32,6 @@
   import { errMsg } from '$lib/utils/error';
   import { modKeyLabel } from '$lib/utils/platform';
   import { isIsoDate, today as sharedToday, todayStr } from '$lib/utils/date-utils.svelte';
-  import { parseLocalDate } from '$lib/utils/format.svelte';
   import { plural } from '$lib/utils/format.svelte';
   import { flattenAccountsForPicker } from '$lib/features/accounts/account-picker-utils';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
@@ -69,15 +68,6 @@
   function nextKey(): number {
     keySeq += 1;
     return keySeq;
-  }
-
-  function offsetDateStr(base: string, deltaDays: number): string {
-    const d = parseLocalDate(base);
-    if (Number.isNaN(d.getTime())) return todayStr();
-    d.setDate(d.getDate() + deltaDays);
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${d.getFullYear()}-${m}-${day}`;
   }
 
   function readStoredArray(key: string): string[] {
@@ -190,7 +180,6 @@
   // Shared local date; the guard re-evaluates after midnight (same comparison
   // as `isFutureDate`, but against the reactive clock).
   let today = $derived(sharedToday.value);
-  let yesterday = $derived(offsetDateStr(today, -1));
   let dateError = $derived.by(() => {
     if (!postDate) return 'Pick a date for this transaction';
     if (!isIsoDate(postDate)) return 'Pick a valid date';
@@ -506,26 +495,6 @@
             invalid={!!dateError}
             describedBy={dateError ? 'tx-date-error' : 'tx-date-hint'}
           />
-          <div class="flex gap-1.5">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onclick={() => (postDate = today)}
-              disabled={postDate === today}
-            >
-              Today
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onclick={() => (postDate = yesterday)}
-              disabled={postDate === yesterday}
-            >
-              Yesterday
-            </Button>
-          </div>
           {#if dateError}
             <p id="tx-date-error" role="alert" class="text-xs text-destructive">{dateError}</p>
           {:else}
