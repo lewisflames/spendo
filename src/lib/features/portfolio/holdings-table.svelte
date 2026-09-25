@@ -14,10 +14,11 @@
   import FilterBar from '$lib/components/shared/filter-bar.svelte';
   import FilterClearButton from '$lib/components/shared/filter-clear-button.svelte';
   import { Button } from '$lib/components/ui/button';
-  import { TrendingUp } from '@lucide/svelte';
+  import { Plus, TrendingUp } from '@lucide/svelte';
   import type { PortfolioHolding } from '$lib/tauri';
   import { STALE_PRICE_DAYS, priceStaleDays } from './price-utils';
   import { openHolding } from '$lib/utils/navigation';
+  import { openAccountDialog } from '$lib/features/accounts/account-dialog-state.svelte';
   import { useDebouncedSearch } from '$lib/hooks/use-debounced-search.svelte';
   import { useTableSort } from '$lib/hooks/use-table-sort.svelte';
   import { useColumnVisibility } from '$lib/hooks/use-column-visibility.svelte';
@@ -236,7 +237,10 @@
       <TrendingUp aria-hidden="true" class="text-muted-foreground" />
     {/snippet}
     {#snippet action()}
-      <Button variant="outline" href={resolve('/accounts')}>Accounts</Button>
+      <Button variant="outline" onclick={openAccountDialog}>
+        <Plus aria-hidden="true" class="size-4" />
+        New account
+      </Button>
     {/snippet}
   </EmptyState>
 {:else}

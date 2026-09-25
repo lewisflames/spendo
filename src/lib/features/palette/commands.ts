@@ -12,6 +12,7 @@ import {
   FolderOpen,
   FolderPlus,
   Info,
+  Landmark,
   LogOut,
   PanelLeft,
   Plus,
@@ -39,6 +40,7 @@ import {
   openCsvImport
 } from '$lib/features/book/import-export-actions';
 import { goBack, goForward, navHistory } from '$lib/stores/nav-history.svelte';
+import { openAccountDialog } from '$lib/features/accounts/account-dialog-state.svelte';
 
 type PaletteGroup = 'Go to' | 'Actions';
 
@@ -97,6 +99,17 @@ export const PALETTE_COMMANDS: PaletteCommand[] = [
     keywords: ['new', 'add', 'transaction', 'expense', 'income', 'spend'],
     when: () => dbSession.value !== null,
     run: () => goto(resolve('/transactions/new'))
+  },
+  {
+    id: 'new-account',
+    title: 'New account',
+    group: 'Actions',
+    icon: Landmark,
+    keywords: ['new', 'add', 'account', 'bank', 'cash', 'asset', 'liability'],
+    when: () => dbSession.value !== null,
+    run: () => {
+      openAccountDialog();
+    }
   },
   {
     id: 'new-schedule',

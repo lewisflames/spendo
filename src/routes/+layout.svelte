@@ -18,15 +18,18 @@
     dbSession,
     dbBootstrapping,
     ensureDbSessionLoaded,
-    loadActiveBook
+    loadActiveBook,
+    refreshSession
   } from '$lib/stores/db.svelte';
   import { NAV_CHORD_TARGETS } from '$lib/features/nav/nav-items';
   import { refreshNav } from '$lib/stores/nav.svelte';
   import { TitleBar } from '$lib/components/layout/title-bar';
   import { cn } from '$lib/utils';
-  import { Sonner } from '$lib/components/ui/sonner';
+  import { Sonner, toast } from '$lib/components/ui/sonner';
   import KeyboardShortcutsDialog from '$lib/components/layout/keyboard-shortcuts-dialog.svelte';
   import GnuCashImportDialog from '$lib/features/book/gnucash-import-dialog.svelte';
+  import AccountDialog from '$lib/features/accounts/account-dialog.svelte';
+  import { accountDialog } from '$lib/features/accounts/account-dialog-state.svelte';
   import {
     keyboardShortcutsDialog as shortcutsDialog,
     commandPalette
@@ -184,3 +187,13 @@
 <KeyboardShortcutsDialog />
 
 <GnuCashImportDialog />
+
+<AccountDialog
+  bind:open={accountDialog.value}
+  mode="create"
+  onSaved={() => {
+    refreshSession();
+    toast.success('Account created');
+  }}
+  onError={(msg) => toast.error(msg)}
+/>
