@@ -127,6 +127,8 @@ pub fn run() {
             reconcile::fetch_reconcile_info,
             reconcile::mark_reconcile_splits,
             reconcile::finish_reconciliation,
+            reconcile::reopen_last_reconciliation,
+            reconcile::fetch_reconcile_summaries,
             export::export_transactions_csv,
             export::export_accounts_csv,
             gnucash_export::export_gnucash,

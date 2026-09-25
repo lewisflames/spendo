@@ -15,7 +15,9 @@
     invalid = false,
     disabled = false,
     describedBy = undefined,
-    clearable = false
+    clearable = false,
+    /** Latest selectable date (`YYYY-MM-DD`); later days are disabled. */
+    max = undefined
   }: {
     value?: string;
     placeholder?: string;
@@ -26,6 +28,7 @@
     describedBy?: string;
     /** Shows a clear button once a value is set (for optional dates). */
     clearable?: boolean;
+    max?: string;
   } = $props();
 
   let open = $state(false);
@@ -34,6 +37,15 @@
     if (!value) return undefined;
     try {
       return parseDate(value);
+    } catch {
+      return undefined;
+    }
+  });
+
+  let maxValue = $derived.by(() => {
+    if (!max) return undefined;
+    try {
+      return parseDate(max);
     } catch {
       return undefined;
     }
@@ -73,6 +85,7 @@
         value={calendarValue}
         {onValueChange}
         {locale}
+        {maxValue}
         class="bg-transparent p-2 [--cell-size:--spacing(7)]"
       />
     </Popover.Content>

@@ -15,20 +15,24 @@
     rows,
     checked,
     currency,
+    duplicates,
     sortBy,
     sortDir,
     onSort,
     onToggle,
-    onToggleAll
+    onToggleAll,
+    onRangeSelect
   }: {
     rows: ReconcileCandidate[];
     checked: Set<string>;
     currency: string;
+    duplicates: Set<string>;
     sortBy: TxSortKey | null;
     sortDir: 'asc' | 'desc';
     onSort: (key: TxSortKey) => void;
     onToggle: (splitGuid: string, next: boolean) => void;
     onToggleAll: (next: boolean) => void;
+    onRangeSelect: (splitGuid: string) => void;
   } = $props();
 
   let select = $derived(selectionState(checked, rows));
@@ -63,6 +67,7 @@
         dir={sortDir}
         onclick={() => onSort('description')}
       />
+      <Table.Head class="hidden text-muted-foreground md:table-cell">Counter account</Table.Head>
       <Table.Head class="text-muted-foreground">Status</Table.Head>
       <SortHead
         label="Amount"
@@ -76,8 +81,26 @@
   <Table.Body>
     {#each rows as row (row.splitGuid)}
       {@const isChecked = checked.has(row.splitGuid)}
-      <NavRow onNavigate={() => onToggle(row.splitGuid, !isChecked)}>
-        <Table.Cell class="py-2.5">
+      {@const isDuplicate = duplicates.has(row.splitGuid)}
+      <NavRow
+        onNavigate={(e) => {
+          if (e.shiftKey) onRangeSelect(row.splitGuid);
+          else onToggle(row.splitGuid, !isChecked);
+        }}
+      >
+        <Table.Cell
+          class="py-2.5"
+          title="Click to toggle · Shift-click for a range"
+          onclickcapture={(e) => {
+            // Capture stops the checkbox's own toggle before it runs, so a
+            // shift-click stays a range selection either way.
+            if (e.shiftKey) {
+              e.preventDefault();
+              e.stopPropagation();
+              onRangeSelect(row.splitGuid);
+            }
+          }}
+        >
           <Checkbox
             checked={isChecked}
             aria-label="Mark {row.description ?? row.postDate} cleared"
@@ -106,10 +129,29 @@
             </p>
           {/if}
         </Table.Cell>
+        <Table.Cell
+          class="hidden max-w-40 truncate py-2.5 text-sm text-muted-foreground md:table-cell"
+        >
+          {#if row.counterAccounts.length > 0}
+            <span title={row.counterAccounts.join(', ')}>{row.counterAccounts.join(', ')}</span>
+          {:else}
+            <EmptyValue />
+          {/if}
+        </Table.Cell>
         <Table.Cell class="py-2.5">
-          <Badge variant={isChecked ? 'warning' : 'secondary'}>
-            {isChecked ? 'Cleared' : 'New'}
-          </Badge>
+          <div class="flex flex-wrap items-center gap-1">
+            <Badge variant={isChecked ? 'warning' : 'secondary'}>
+              {isChecked ? 'Cleared' : 'New'}
+            </Badge>
+            {#if isDuplicate}
+              <Badge
+                variant="outline"
+                title="Shares a date and amount with another candidate — check for a duplicate import"
+              >
+                Duplicate?
+              </Badge>
+            {/if}
+          </div>
         </Table.Cell>
         <Table.Cell
           class="py-2.5 text-right font-medium whitespace-nowrap tabular-nums {signColor(

@@ -32,12 +32,33 @@ describe('flattenReconcilableAccounts', () => {
       }),
       node({ guid: 'card', name: 'Card', accountType: 'CREDIT', balance: -20, txCount: 1 })
     ];
-    const rows = flattenReconcilableAccounts(trees);
+    const rows = flattenReconcilableAccounts(trees, [
+      {
+        accountGuid: 'checking',
+        unreconciledCount: 2,
+        clearedCount: 1,
+        unclearedTotal: -30,
+        lastReconciledDate: '2024-01-10'
+      }
+    ]);
     expect(rows.map((r) => r.guid)).toEqual(['checking', 'card']);
     expect(rows.map((r) => r.display)).toEqual(['Checking', 'Card']);
     expect(rows.find((r) => r.guid === 'checking')?.label).toBe('Assets › Checking');
     expect(rows.find((r) => r.guid === 'card')?.label).toBe('Card');
     expect(rows.every((r) => r.parentPath === null)).toBe(true);
+    expect(rows.find((r) => r.guid === 'checking')?.stats).toEqual({
+      unreconciledCount: 2,
+      clearedCount: 1,
+      unclearedTotal: -30,
+      lastReconciledDate: '2024-01-10'
+    });
+    // Accounts without a summary row read as pristine.
+    expect(rows.find((r) => r.guid === 'card')?.stats).toEqual({
+      unreconciledCount: 0,
+      clearedCount: 0,
+      unclearedTotal: 0,
+      lastReconciledDate: null
+    });
   });
 
   it('detects duplicate display names among reconcilable rows only', () => {

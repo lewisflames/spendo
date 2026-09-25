@@ -1,3 +1,5 @@
+use std::collections::{HashMap, HashSet};
+
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -25,6 +27,9 @@ const RECONCILABLE_TYPES: [&str; 8] = [
 /// `clampZero` threshold on the frontend.
 const BALANCE_EPS: f64 = 0.005;
 
+/// Cap on state changes accepted in one save/finish call.
+const MAX_SPLIT_UPDATES: usize = 2000;
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReconcileCandidate {
@@ -34,10 +39,15 @@ pub struct ReconcileCandidate {
     pub description: Option<String>,
     pub num: Option<String>,
     pub memo: Option<String>,
-    /// Signed display amount (credit-normal accounts negated).
+    /// Signed display amount (credit-normal accounts negated) in the
+    /// reconciled account's commodity.
     pub amount: f64,
     /// Normalized `'n'`/`'c'` (source `NULL` reads as `'n'`).
     pub reconcile_state: String,
+    /// Distinct descriptions (falling back to names) of the transaction's
+    /// other splits, largest magnitude first. Helps identify a statement line
+    /// when the description is empty.
+    pub counter_accounts: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -53,6 +63,37 @@ pub struct ReconcileInfo {
     /// Unreconciled (`'n'`/`'c'`) splits at or before the statement date,
     /// oldest first.
     pub candidates: Vec<ReconcileCandidate>,
+    /// Post date of the most recent reconciled batch (`None` when the account
+    /// has never been reconciled).
+    pub last_reconciled_date: Option<String>,
+    /// Splits in that batch — what `reopen_last_reconciliation` returns to
+    /// cleared. Zero when the account has never been reconciled.
+    pub last_reconciled_count: i64,
+}
+
+/// One reconcilable account's progress, merged into the `/reconcile` index so
+/// accounts with work (or saved progress) stand out without opening each one.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReconcileAccountSummary {
+    pub account_guid: String,
+    /// Splits still in `'n'` (never cleared) in the visibility window.
+    pub unreconciled_count: i64,
+    /// Splits saved as `'c'` (progress not yet finished).
+    pub cleared_count: i64,
+    /// Signed display total of the `'n'` splits, in the account's commodity.
+    pub uncleared_total: f64,
+    pub last_reconciled_date: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReopenReconcileResult {
+    pub reopened_count: i64,
+    /// Post date of the batch before the reopened one (exclusive lower bound);
+    /// `None` when the reopened batch was the first reconciliation.
+    pub from_date: Option<String>,
+    pub through_date: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -66,6 +107,9 @@ pub struct SplitStateUpdate {
 #[serde(rename_all = "camelCase")]
 pub struct MarkReconcileInput {
     pub account_guid: String,
+    /// Statement date the candidates were loaded for; updates outside it are
+    /// rejected so the write path matches what the UI offered.
+    pub statement_date: String,
     pub updates: Vec<SplitStateUpdate>,
 }
 
@@ -81,6 +125,10 @@ pub struct FinishReconcileInput {
     pub account_guid: String,
     pub statement_date: String,
     pub ending_balance: f64,
+    /// Unsaved marks from the page, applied in the same transaction as the
+    /// balance check and promotion so Finish is atomic.
+    #[serde(default)]
+    pub updates: Vec<SplitStateUpdate>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -170,6 +218,279 @@ fn sum_by_state(
     Ok(total)
 }
 
+/// Validate a batch of `'n'`/`'c'` state updates and return the ones that
+/// actually change a split, in input order (last write wins for duplicates).
+/// Rejects foreign splits, `'y'` splits and anything dated after the statement
+/// so callers cannot write outside the window the form showed.
+fn pending_split_updates(
+    conn: &Connection,
+    account_guid: &str,
+    statement_date: &str,
+    updates: &[SplitStateUpdate],
+) -> Result<Vec<(String, String)>, AppError> {
+    if updates.len() > MAX_SPLIT_UPDATES {
+        return Err(AppError::Validation(format!(
+            "That's a lot at once. Keep it to {MAX_SPLIT_UPDATES} changes"
+        )));
+    }
+    for u in updates {
+        if u.state != "n" && u.state != "c" {
+            return Err(AppError::Validation(format!(
+                "Invalid reconcile state '{}'. Expected 'n' or 'c'",
+                u.state
+            )));
+        }
+        if u.split_guid.trim().is_empty() {
+            return Err(AppError::Validation("We’re missing a split id. Please try again".to_string()));
+        }
+    }
+    // De-dupe by split guid, preserving first-seen order; last write wins.
+    let mut deduped: Vec<(String, String)> = Vec::new();
+    let mut index: HashMap<String, usize> = HashMap::new();
+    for u in updates {
+        match index.get(&u.split_guid) {
+            Some(&i) => deduped[i].1 = u.state.clone(),
+            None => {
+                index.insert(u.split_guid.clone(), deduped.len());
+                deduped.push((u.split_guid.clone(), u.state.clone()));
+            }
+        }
+    }
+    if deduped.is_empty() {
+        return Ok(Vec::new());
+    }
+    let guids: Vec<String> = deduped.iter().map(|(g, _)| g.clone()).collect();
+    // `?1` is the statement date; guids follow from `?2` on, chunked to stay
+    // under SQLite's bound-parameter cap.
+    let mut rows: Vec<(String, String, Option<String>, i64)> = Vec::new();
+    for chunk in guids.chunks(sql::MAX_IN_PARAMS) {
+        let placeholders = (2..2 + chunk.len())
+            .map(|i| format!("?{i}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut stmt = conn.prepare(&format!(
+            "SELECT s.guid, s.account_guid, s.reconcile_state,
+                    (t.post_date < date(?1, '+1 day')) AS in_window
+             FROM splits s
+             JOIN transactions t ON t.guid = s.tx_guid
+             WHERE s.guid IN ({placeholders})"
+        ))?;
+        let mut bound: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::with_capacity(chunk.len() + 1);
+        bound.push(Box::new(statement_date.to_string()));
+        for guid in chunk {
+            bound.push(Box::new(guid.clone()));
+        }
+        let refs = sql::param_refs(&bound);
+        rows.extend(
+            stmt.query_map(refs.as_slice(), |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?,
+        );
+    }
+    if rows.len() != guids.len() {
+        return Err(AppError::NotFound("A split was not found. It may have been removed".to_string()));
+    }
+    let by_guid: HashMap<&str, &(String, String, Option<String>, i64)> =
+        rows.iter().map(|row| (row.0.as_str(), row)).collect();
+    let mut pending = Vec::with_capacity(deduped.len());
+    for (guid, want) in &deduped {
+        let row = by_guid[guid.as_str()];
+        if row.1 != account_guid {
+            return Err(AppError::Validation(format!(
+                "Split {guid} does not belong to this account"
+            )));
+        }
+        if row.2.as_deref() == Some("y") {
+            return Err(AppError::Validation(
+                "Reconciled splits are locked here. Head back to reconcile to change them".to_string(),
+            ));
+        }
+        if row.3 == 0 {
+            return Err(AppError::Validation(
+                "That split is dated after the statement. Pick a later statement date first".to_string(),
+            ));
+        }
+        let have = row.2.clone().unwrap_or_else(|| "n".to_string());
+        if have != *want {
+            pending.push((guid.clone(), want.clone()));
+        }
+    }
+    Ok(pending)
+}
+
+/// Apply validated `(split_guid, state)` pairs. Caller owns the transaction:
+/// `mark` wraps this in its own `with_tx_err`, `finish` reuses the one that
+/// also checks the balance and promotes.
+fn apply_split_updates(conn: &Connection, pending: &[(String, String)]) -> Result<(), AppError> {
+    for (guid, want) in pending {
+        let reconciled = if want == "c" { 1 } else { 0 };
+        conn.execute(
+            "UPDATE splits SET reconcile_state = ?1, reconciled = ?2 WHERE guid = ?3",
+            params![want, reconciled, guid],
+        )?;
+    }
+    Ok(())
+}
+
+/// Most recent reconciled batch: the `'y'` splits dated after the previous
+/// batch's last date. Returns `(from_exclusive, through, count)` where
+/// `from_exclusive` is the preceding batch's post date (the last statement
+/// date), or `None` when everything reconciled so far is one batch.
+fn last_reconciled_batch(
+    conn: &Connection,
+    account_guid: &str,
+) -> Result<Option<(Option<String>, String, i64)>, AppError> {
+    let through: Option<String> = conn
+        .query_row(
+            &format!(
+                "SELECT MAX(t.post_date) FROM splits s
+                 JOIN transactions t ON t.guid = s.tx_guid
+                 WHERE s.account_guid = ?1 AND s.reconcile_state = 'y' AND {}",
+                utils::VISIBLE_TX_FILTER
+            ),
+            params![account_guid],
+            |row| row.get(0),
+        )
+        .map_err(AppError::from)?;
+    let Some(through) = through else {
+        return Ok(None);
+    };
+    let from_date: Option<String> = conn
+        .query_row(
+            &format!(
+                "SELECT MAX(t.post_date) FROM splits s
+                 JOIN transactions t ON t.guid = s.tx_guid
+                 WHERE s.account_guid = ?1 AND s.reconcile_state = 'y'
+                   AND t.post_date < ?2 AND {}",
+                utils::VISIBLE_TX_FILTER
+            ),
+            params![account_guid, &through],
+            |row| row.get(0),
+        )
+        .map_err(AppError::from)?;
+    let count: i64 = match from_date.as_deref() {
+        Some(from) => conn.query_row(
+            &format!(
+                "SELECT COUNT(*) FROM splits s
+                 JOIN transactions t ON t.guid = s.tx_guid
+                 WHERE s.account_guid = ?1 AND s.reconcile_state = 'y'
+                   AND t.post_date > ?2 AND {}",
+                utils::VISIBLE_TX_FILTER
+            ),
+            params![account_guid, from],
+            |row| row.get(0),
+        )?,
+        None => conn.query_row(
+            &format!(
+                "SELECT COUNT(*) FROM splits s
+                 JOIN transactions t ON t.guid = s.tx_guid
+                 WHERE s.account_guid = ?1 AND s.reconcile_state = 'y' AND {}",
+                utils::VISIBLE_TX_FILTER
+            ),
+            params![account_guid],
+            |row| row.get(0),
+        )?,
+    };
+    Ok(Some((from_date, through, count)))
+}
+
+/// Currency-priced `'y'` split guids in the last reconciled batch.
+fn reconciled_batch_guids(
+    conn: &Connection,
+    account_guid: &str,
+    from_date: Option<&str>,
+) -> Result<Vec<String>, AppError> {
+    let sql_text = match from_date {
+        Some(_) => format!(
+            "SELECT s.guid FROM splits s
+             JOIN transactions t ON t.guid = s.tx_guid
+             WHERE s.account_guid = ?1 AND s.reconcile_state = 'y'
+               AND t.post_date > ?2 AND {}",
+            utils::VISIBLE_TX_FILTER
+        ),
+        None => format!(
+            "SELECT s.guid FROM splits s
+             JOIN transactions t ON t.guid = s.tx_guid
+             WHERE s.account_guid = ?1 AND s.reconcile_state = 'y' AND {}",
+            utils::VISIBLE_TX_FILTER
+        ),
+    };
+    let mut stmt = conn.prepare(&sql_text)?;
+    let mut guids: Vec<String> = Vec::new();
+    match from_date {
+        Some(from) => {
+            let rows = stmt.query_map(params![account_guid, from], |row| row.get(0))?;
+            for row in rows {
+                guids.push(row?);
+            }
+        }
+        None => {
+            let rows = stmt.query_map(params![account_guid], |row| row.get(0))?;
+            for row in rows {
+                guids.push(row?);
+            }
+        }
+    }
+    Ok(guids)
+}
+
+/// Counter-account labels for each candidate's transaction: distinct
+/// descriptions (falling back to names) of splits outside the reconciled
+/// account, largest magnitude first (mirrors the ledger's counter column).
+fn attach_counter_accounts(
+    conn: &Connection,
+    account_guid: &str,
+    candidates: &mut [ReconcileCandidate],
+) -> Result<(), AppError> {
+    if candidates.is_empty() {
+        return Ok(());
+    }
+    let mut tx_guids: Vec<String> = Vec::new();
+    let mut seen_tx: HashSet<&str> = HashSet::new();
+    for c in candidates.iter() {
+        if seen_tx.insert(c.tx_guid.as_str()) {
+            tx_guids.push(c.tx_guid.clone());
+        }
+    }
+    let mut labels_by_tx: HashMap<String, Vec<String>> = HashMap::new();
+    let mut seen_accounts: HashMap<String, HashSet<String>> = HashMap::new();
+    for chunk in tx_guids.chunks(sql::MAX_IN_PARAMS) {
+        let mut stmt = conn.prepare(&format!(
+            "SELECT s.tx_guid, s.account_guid, COALESCE(a.description, a.name)
+             FROM splits s
+             JOIN accounts a ON a.guid = s.account_guid
+             WHERE s.tx_guid IN ({})
+             ORDER BY s.tx_guid, ABS(s.value_num) DESC",
+            sql::in_clause(chunk.len())
+        ))?;
+        let rows = stmt
+            .query_map(sql::string_param_refs(chunk).as_slice(), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        for (tx_guid, split_account_guid, label) in rows {
+            if split_account_guid == account_guid {
+                continue;
+            }
+            let accounts = seen_accounts.entry(tx_guid.clone()).or_default();
+            if accounts.insert(split_account_guid) {
+                labels_by_tx.entry(tx_guid).or_default().push(label);
+            }
+        }
+    }
+    for c in candidates.iter_mut() {
+        if let Some(labels) = labels_by_tx.remove(&c.tx_guid) {
+            c.counter_accounts = labels;
+        }
+    }
+    Ok(())
+}
+
 fn fetch_reconcile_info_inner(
     conn: &Connection,
     account_guid: &str,
@@ -193,7 +514,7 @@ fn fetch_reconcile_info_inner(
          ORDER BY t.post_date ASC, s.guid ASC",
         utils::VISIBLE_TX_FILTER
     ))?;
-    let candidates = stmt
+    let mut candidates = stmt
         .query_map(params![account_guid, statement_date], |row| {
             Ok(ReconcileCandidate {
                 split_guid: row.get(0)?,
@@ -204,9 +525,17 @@ fn fetch_reconcile_info_inner(
                 memo: row.get(5)?,
                 amount: row.get(6)?,
                 reconcile_state: row.get(7)?,
+                counter_accounts: Vec::new(),
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
+    attach_counter_accounts(conn, account_guid, &mut candidates)?;
+
+    let (last_reconciled_date, last_reconciled_count) =
+        match last_reconciled_batch(conn, account_guid)? {
+            Some((_, through, count)) => (Some(through), count),
+            None => (None, 0),
+        };
 
     Ok(ReconcileInfo {
         account_guid: account_guid.to_string(),
@@ -216,6 +545,8 @@ fn fetch_reconcile_info_inner(
         statement_date,
         starting_balance,
         candidates,
+        last_reconciled_date,
+        last_reconciled_count,
     })
 }
 
@@ -223,79 +554,19 @@ fn mark_reconcile_splits_inner(
     conn: &Connection,
     input: MarkReconcileInput,
 ) -> Result<MarkReconcileResult, AppError> {
+    let statement_date = validate_statement_date(&input.statement_date)?;
     // Validate the target is a real, reconcilable account before touching rows.
     load_reconcilable_account(conn, &input.account_guid)?;
     if input.updates.is_empty() {
         return Err(AppError::Validation("Nothing changed yet. Tick something off first".to_string()));
     }
-    if input.updates.len() > 2000 {
-        return Err(AppError::Validation("That's a lot at once. Keep it to 2000 changes".to_string()));
-    }
-    for u in &input.updates {
-        if u.state != "n" && u.state != "c" {
-            return Err(AppError::Validation(format!(
-                "Invalid reconcile state '{}'. Expected 'n' or 'c'",
-                u.state
-            )));
-        }
-        if u.split_guid.trim().is_empty() {
-            return Err(AppError::Validation("We’re missing a split id. Please try again".to_string()));
-        }
-    }
-    // De-dupe by split guid; last write wins for repeated entries.
-    let mut deduped: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-    for u in input.updates {
-        deduped.insert(u.split_guid, u.state);
-    }
-    let guids: Vec<String> = deduped.keys().cloned().collect();
-
-    let select_sql = format!(
-        "SELECT guid, account_guid, tx_guid, reconcile_state FROM splits WHERE guid IN ({})",
-        sql::in_clause(guids.len())
-    );
-    let mut select_stmt = conn.prepare(&select_sql)?;
-    let select_refs = sql::string_param_refs(&guids);
-    let rows: Vec<(String, String, String, Option<String>)> = select_stmt
-        .query_map(select_refs.as_slice(), |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-    if rows.len() != guids.len() {
-        return Err(AppError::NotFound("A split was not found. It may have been removed".to_string()));
-    }
-    for (guid, owner, _, current) in &rows {
-        if owner != &input.account_guid {
-            return Err(AppError::Validation(format!(
-                "Split {guid} does not belong to this account"
-            )));
-        }
-        if current.as_deref() == Some("y") {
-            return Err(AppError::Validation(
-                "Reconciled splits are locked here. Head back to reconcile to change them".to_string(),
-            ));
-        }
-    }
-    // No-op when every target already has the requested state.
-    let pending: Vec<(String, String)> = rows
-        .iter()
-        .filter_map(|(guid, _, _, current)| {
-            let want = deduped.get(guid).cloned().unwrap_or_default();
-            let have = current.clone().unwrap_or_else(|| "n".to_string());
-            (have != want).then(|| (guid.clone(), want))
-        })
-        .collect();
+    let pending = pending_split_updates(conn, &input.account_guid, &statement_date, &input.updates)?;
     if pending.is_empty() {
         return Ok(MarkReconcileResult { updated: 0 });
     }
     let updated = pending.len() as i64;
     with_tx_err(conn, || -> Result<(), AppError> {
-        for (guid, want) in &pending {
-            let reconciled = if want == "c" { 1 } else { 0 };
-            conn.execute(
-                "UPDATE splits SET reconcile_state = ?1, reconciled = ?2 WHERE guid = ?3",
-                params![want, reconciled, guid],
-            )?;
-        }
+        apply_split_updates(conn, &pending)?;
         Ok(())
     })?;
     Ok(MarkReconcileResult { updated })
@@ -333,36 +604,156 @@ fn finish_reconciliation_inner(
     let statement_date = validate_statement_date(&input.statement_date)?;
     // Validate the target is a real, reconcilable account before touching rows.
     load_reconcilable_account(conn, &input.account_guid)?;
+    // Validated up front; applied inside the transaction below so an
+    // out-of-balance statement leaves the saved marks untouched.
+    let pending = pending_split_updates(conn, &input.account_guid, &statement_date, &input.updates)?;
 
-    let starting_balance = sum_by_state(conn, &input.account_guid, "y", &statement_date)?;
-    let cleared_total = sum_by_state(conn, &input.account_guid, "c", &statement_date)?;
-    let diff = input.ending_balance - (starting_balance + cleared_total);
-    if diff.abs() > BALANCE_EPS {
-        return Err(AppError::Validation(format!(
-            "Out of balance by {diff:.2}. Tick off what cleared the bank until it hits zero"
-        )));
-    }
-    let guids = cleared_split_guids(conn, &input.account_guid, &statement_date)?;
-    if guids.is_empty() {
-        return Err(AppError::Validation("Nothing ticked off yet. Mark what cleared first".to_string()));
-    }
-    let reconciled_count = guids.len() as i64;
+    with_tx_err(conn, || -> Result<FinishReconcileResult, AppError> {
+        apply_split_updates(conn, &pending)?;
 
-    with_tx_err(conn, || -> Result<(), AppError> {
+        let starting_balance = sum_by_state(conn, &input.account_guid, "y", &statement_date)?;
+        let cleared_total = sum_by_state(conn, &input.account_guid, "c", &statement_date)?;
+        let diff = input.ending_balance - (starting_balance + cleared_total);
+        if diff.abs() > BALANCE_EPS {
+            return Err(AppError::Validation(format!(
+                "Out of balance by {diff:.2}. Tick off what cleared the bank until it hits zero"
+            )));
+        }
+        let guids = cleared_split_guids(conn, &input.account_guid, &statement_date)?;
+        if guids.is_empty() {
+            return Err(AppError::Validation("Nothing ticked off yet. Mark what cleared first".to_string()));
+        }
+        let reconciled_count = guids.len() as i64;
+
         for guid in &guids {
             conn.execute(
                 "UPDATE splits SET reconcile_state = 'y', reconciled = 1 WHERE guid = ?1",
                 params![guid],
             )?;
         }
+
+        Ok(FinishReconcileResult {
+            reconciled_count,
+            starting_balance,
+            ending_balance: input.ending_balance,
+        })
+    })
+}
+
+fn reopen_last_reconciliation_inner(
+    conn: &Connection,
+    account_guid: &str,
+) -> Result<ReopenReconcileResult, AppError> {
+    load_reconcilable_account(conn, account_guid)?;
+    let Some((from_date, through_date, _)) = last_reconciled_batch(conn, account_guid)? else {
+        return Err(AppError::Validation(
+            "Nothing is reconciled yet. Finish a statement first".to_string(),
+        ));
+    };
+    let guids = reconciled_batch_guids(conn, account_guid, from_date.as_deref())?;
+    if guids.is_empty() {
+        return Err(AppError::Validation(
+            "Nothing is reconciled yet. Finish a statement first".to_string(),
+        ));
+    }
+    let reopened_count = guids.len() as i64;
+    with_tx_err(conn, || -> Result<(), AppError> {
+        for guid in &guids {
+            // `'c'` keeps the GnuCash `reconciled = 1` convention used by
+            // `apply_split_updates`, so the transaction editor still warns.
+            conn.execute(
+                "UPDATE splits SET reconcile_state = 'c', reconciled = 1 WHERE guid = ?1",
+                params![guid],
+            )?;
+        }
         Ok(())
     })?;
-
-    Ok(FinishReconcileResult {
-        reconciled_count,
-        starting_balance,
-        ending_balance: input.ending_balance,
+    Ok(ReopenReconcileResult {
+        reopened_count,
+        from_date,
+        through_date,
     })
+}
+
+fn fetch_reconcile_summaries_inner(
+    conn: &Connection,
+) -> Result<Vec<ReconcileAccountSummary>, AppError> {
+    let signed = utils::signed_amount_expr(utils::RAW_AMOUNT, "a.account_type");
+    let mut summaries: HashMap<String, ReconcileAccountSummary> = HashMap::new();
+    {
+        let mut stmt = conn.prepare(&format!(
+            "SELECT s.account_guid,
+                    SUM(CASE WHEN COALESCE(s.reconcile_state, 'n') = 'n' THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN s.reconcile_state = 'c' THEN 1 ELSE 0 END),
+                    COALESCE(SUM(CASE WHEN COALESCE(s.reconcile_state, 'n') = 'n' THEN {signed} END), 0)
+             FROM splits s
+             JOIN transactions t ON t.guid = s.tx_guid
+             JOIN accounts a ON a.guid = s.account_guid
+             WHERE a.placeholder = 0
+               AND a.account_type IN ({}, {})
+               AND {}
+             GROUP BY s.account_guid",
+            utils::cash_like_types_sql(),
+            utils::liability_types_sql(),
+            utils::VISIBLE_TX_FILTER
+        ))?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, f64>(3)?,
+            ))
+        })?;
+        for row in rows {
+            let (account_guid, unreconciled_count, cleared_count, uncleared_total) = row?;
+            summaries.insert(
+                account_guid.clone(),
+                ReconcileAccountSummary {
+                    account_guid,
+                    unreconciled_count,
+                    cleared_count,
+                    uncleared_total,
+                    last_reconciled_date: None,
+                },
+            );
+        }
+    }
+    {
+        let mut stmt = conn.prepare(&format!(
+            "SELECT s.account_guid, MAX(t.post_date)
+             FROM splits s
+             JOIN transactions t ON t.guid = s.tx_guid
+             JOIN accounts a ON a.guid = s.account_guid
+             WHERE s.reconcile_state = 'y'
+               AND a.placeholder = 0
+               AND a.account_type IN ({}, {})
+               AND {}
+             GROUP BY s.account_guid",
+            utils::cash_like_types_sql(),
+            utils::liability_types_sql(),
+            utils::VISIBLE_TX_FILTER
+        ))?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+        })?;
+        for row in rows {
+            let (account_guid, last) = row?;
+            summaries
+                .entry(account_guid.clone())
+                .or_insert(ReconcileAccountSummary {
+                    account_guid,
+                    unreconciled_count: 0,
+                    cleared_count: 0,
+                    uncleared_total: 0.0,
+                    last_reconciled_date: None,
+                })
+                .last_reconciled_date = last;
+        }
+    }
+    let mut out: Vec<ReconcileAccountSummary> = summaries.into_values().collect();
+    out.sort_by(|a, b| a.account_guid.cmp(&b.account_guid));
+    Ok(out)
 }
 
 #[tauri::command]
@@ -395,6 +786,27 @@ pub async fn finish_reconciliation(
 ) -> Result<FinishReconcileResult, String> {
     run_blocking(state.db.clone(), move |conn| {
         finish_reconciliation_inner(conn, input).map_err(String::from)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn reopen_last_reconciliation(
+    state: State<'_, AppState>,
+    account_guid: String,
+) -> Result<ReopenReconcileResult, String> {
+    run_blocking(state.db.clone(), move |conn| {
+        reopen_last_reconciliation_inner(conn, &account_guid).map_err(String::from)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn fetch_reconcile_summaries(
+    state: State<'_, AppState>,
+) -> Result<Vec<ReconcileAccountSummary>, String> {
+    run_blocking(state.db.clone(), |conn| {
+        fetch_reconcile_summaries_inner(conn).map_err(String::from)
     })
     .await
 }
@@ -461,6 +873,42 @@ mod tests {
         add_split(conn, "t3", "2024-03-01", "checking", 5_000, "n");
     }
 
+    fn mark(
+        conn: &Connection,
+        split_guid: &str,
+        state: &str,
+        statement_date: &str,
+    ) -> Result<MarkReconcileResult, AppError> {
+        mark_reconcile_splits_inner(
+            conn,
+            MarkReconcileInput {
+                account_guid: "checking".into(),
+                statement_date: statement_date.into(),
+                updates: vec![SplitStateUpdate {
+                    split_guid: split_guid.into(),
+                    state: state.into(),
+                }],
+            },
+        )
+    }
+
+    fn finish(
+        conn: &Connection,
+        statement_date: &str,
+        ending_balance: f64,
+        updates: Vec<SplitStateUpdate>,
+    ) -> Result<FinishReconcileResult, AppError> {
+        finish_reconciliation_inner(
+            conn,
+            FinishReconcileInput {
+                account_guid: "checking".into(),
+                statement_date: statement_date.into(),
+                ending_balance,
+                updates,
+            },
+        )
+    }
+
     #[test]
     fn info_returns_starting_and_candidates_capped_by_date() {
         let conn = setup();
@@ -473,6 +921,8 @@ mod tests {
         assert_eq!(info.candidates.len(), 1);
         assert_eq!(info.candidates[0].split_guid, "s-t2");
         assert_eq!(info.candidates[0].amount, -30.0);
+        assert_eq!(info.last_reconciled_date.as_deref(), Some("2024-01-10"));
+        assert_eq!(info.last_reconciled_count, 1);
     }
 
     #[test]
@@ -487,20 +937,37 @@ mod tests {
     }
 
     #[test]
+    fn info_attaches_counter_accounts() {
+        let conn = setup();
+        conn.execute(
+            "INSERT INTO accounts (guid, name, account_type, parent_guid, placeholder, commodity_guid)
+             VALUES ('groceries', 'Groceries', 'EXPENSE', 'root', 0, 'c-eur')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO transactions (guid, post_date) VALUES ('t9', '2024-03-02')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO splits (guid, tx_guid, account_guid, value_num, value_denom,
+                                 quantity_num, quantity_denom, reconcile_state, reconciled)
+             VALUES ('s-t9a', 't9', 'checking', -1_000, 100, -1_000, 100, 'n', 0),
+                    ('s-t9b', 't9', 'groceries', 1_000, 100, 1_000, 100, 'n', 0)",
+            [],
+        )
+        .unwrap();
+        let info = fetch_reconcile_info_inner(&conn, "checking", "2024-03-31").unwrap();
+        let candidate = info.candidates.iter().find(|c| c.tx_guid == "t9").unwrap();
+        assert_eq!(candidate.counter_accounts, vec!["Groceries".to_string()]);
+    }
+
+    #[test]
     fn mark_flips_n_to_c() {
         let conn = setup();
         seed(&conn);
-        let out = mark_reconcile_splits_inner(
-            &conn,
-            MarkReconcileInput {
-                account_guid: "checking".into(),
-                updates: vec![SplitStateUpdate {
-                    split_guid: "s-t3".into(),
-                    state: "c".into(),
-                }],
-            },
-        )
-        .expect("mark runs");
+        let out = mark(&conn, "s-t3", "c", "2024-03-31").expect("mark runs");
         assert_eq!(out.updated, 1);
         let state: String = conn
             .query_row("SELECT reconcile_state FROM splits WHERE guid = 's-t3'", [], |r| r.get(0))
@@ -509,34 +976,17 @@ mod tests {
     }
 
     #[test]
-    fn mark_rejects_y_and_foreign_splits() {
+    fn mark_rejects_y_foreign_and_after_statement_splits() {
         let conn = setup();
         seed(&conn);
         add_split(&conn, "tx", "2024-02-06", "broker", 1_000, "n");
-        let err = mark_reconcile_splits_inner(
-            &conn,
-            MarkReconcileInput {
-                account_guid: "checking".into(),
-                updates: vec![SplitStateUpdate {
-                    split_guid: "s-t1".into(),
-                    state: "n".into(),
-                }],
-            },
-        )
-        .unwrap_err();
+        let err = mark(&conn, "s-t1", "n", "2024-03-31").unwrap_err();
         assert!(err.to_string().contains("Reconciled"));
-        let err = mark_reconcile_splits_inner(
-            &conn,
-            MarkReconcileInput {
-                account_guid: "checking".into(),
-                updates: vec![SplitStateUpdate {
-                    split_guid: "s-tx".into(),
-                    state: "c".into(),
-                }],
-            },
-        )
-        .unwrap_err();
+        let err = mark(&conn, "s-tx", "c", "2024-03-31").unwrap_err();
         assert!(err.to_string().contains("does not belong"));
+        // t3 is dated after a February statement.
+        let err = mark(&conn, "s-t3", "c", "2024-02-15").unwrap_err();
+        assert!(err.to_string().contains("after the statement"));
     }
 
     #[test]
@@ -544,26 +994,10 @@ mod tests {
         let conn = setup();
         seed(&conn);
         // Starting 100 + cleared -30 = 70.
-        let err = finish_reconciliation_inner(
-            &conn,
-            FinishReconcileInput {
-                account_guid: "checking".into(),
-                statement_date: "2024-02-15".into(),
-                ending_balance: 0.0,
-            },
-        )
-        .unwrap_err();
+        let err = finish(&conn, "2024-02-15", 0.0, vec![]).unwrap_err();
         assert!(err.to_string().contains("Out of balance"));
 
-        let out = finish_reconciliation_inner(
-            &conn,
-            FinishReconcileInput {
-                account_guid: "checking".into(),
-                statement_date: "2024-02-15".into(),
-                ending_balance: 70.0,
-            },
-        )
-        .expect("finish runs");
+        let out = finish(&conn, "2024-02-15", 70.0, vec![]).expect("finish runs");
         assert_eq!(out.reconciled_count, 1);
         let state: String = conn
             .query_row("SELECT reconcile_state FROM splits WHERE guid = 's-t2'", [], |r| r.get(0))
@@ -574,6 +1008,89 @@ mod tests {
             .query_row("SELECT reconcile_state FROM splits WHERE guid = 's-t3'", [], |r| r.get(0))
             .unwrap();
         assert_eq!(state, "n");
+    }
+
+    #[test]
+    fn finish_applies_pending_updates_atomically() {
+        let conn = setup();
+        seed(&conn);
+        // 100 - 30 + 50 = 120 with s-t3 cleared in the same call.
+        let out = finish(
+            &conn,
+            "2024-03-31",
+            120.0,
+            vec![SplitStateUpdate { split_guid: "s-t3".into(), state: "c".into() }],
+        )
+        .expect("finish runs");
+        assert_eq!(out.reconciled_count, 2);
+        let state: String = conn
+            .query_row("SELECT reconcile_state FROM splits WHERE guid = 's-t3'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(state, "y");
+    }
+
+    #[test]
+    fn finish_rolls_back_pending_updates_when_out_of_balance() {
+        let conn = setup();
+        seed(&conn);
+        let err = finish(
+            &conn,
+            "2024-03-31",
+            0.0,
+            vec![SplitStateUpdate { split_guid: "s-t3".into(), state: "c".into() }],
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("Out of balance"));
+        // The update was applied inside the rolled-back transaction.
+        let state: String = conn
+            .query_row("SELECT reconcile_state FROM splits WHERE guid = 's-t3'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(state, "n");
+    }
+
+    #[test]
+    fn reopen_returns_only_the_last_batch_to_cleared() {
+        let conn = setup();
+        seed(&conn);
+        add_split(&conn, "t4", "2024-03-15", "checking", 2_000, "y");
+        let out =
+            reopen_last_reconciliation_inner(&conn, "checking").expect("reopen runs");
+        assert_eq!(out.reopened_count, 1);
+        assert_eq!(out.from_date.as_deref(), Some("2024-01-10"));
+        assert_eq!(out.through_date, "2024-03-15");
+        let reopened: String = conn
+            .query_row("SELECT reconcile_state FROM splits WHERE guid = 's-t4'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(reopened, "c");
+        let kept: String = conn
+            .query_row("SELECT reconcile_state FROM splits WHERE guid = 's-t1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(kept, "y");
+    }
+
+    #[test]
+    fn reopen_rejects_accounts_without_reconciliations() {
+        let conn = setup();
+        seed(&conn);
+        let err = reopen_last_reconciliation_inner(&conn, "checking")
+            .and_then(|_| reopen_last_reconciliation_inner(&conn, "checking"))
+            .unwrap_err();
+        assert!(err.to_string().contains("Nothing is reconciled"));
+    }
+
+    #[test]
+    fn summaries_report_counts_and_last_reconciled() {
+        let conn = setup();
+        seed(&conn);
+        add_split(&conn, "t4", "2024-03-15", "checking", 2_000, "y");
+        let rows = fetch_reconcile_summaries_inner(&conn).expect("summaries run");
+        let checking = rows.iter().find(|r| r.account_guid == "checking").unwrap();
+        assert_eq!(checking.unreconciled_count, 1);
+        assert_eq!(checking.cleared_count, 1);
+        assert_eq!(checking.uncleared_total, 50.0);
+        assert_eq!(checking.last_reconciled_date.as_deref(), Some("2024-03-15"));
+        // Investment accounts are never reconciled.
+        assert!(rows.iter().all(|r| r.account_guid != "broker"));
     }
 
     #[test]

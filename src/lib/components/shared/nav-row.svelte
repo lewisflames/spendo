@@ -15,7 +15,7 @@
     class: className = 'cursor-pointer hover:bg-muted/50',
     children
   }: {
-    onNavigate?: (() => void) | null;
+    onNavigate?: ((event: MouseEvent) => void) | null;
     class?: string;
     children: Snippet;
   } = $props();
@@ -23,7 +23,7 @@
 
 <Table.Row
   class={className}
-  onclick={onNavigate ? (e) => handleRowClick(e, onNavigate) : undefined}
+  onclick={onNavigate ? (e) => handleRowClick(e, () => onNavigate(e)) : undefined}
 >
   {@render children()}
 </Table.Row>

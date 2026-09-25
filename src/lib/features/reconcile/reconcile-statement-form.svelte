@@ -4,42 +4,60 @@
   import { Button } from '$lib/components/ui/button';
   import { Input } from '$lib/components/ui/input';
   import DatePicker from '$lib/components/shared/date-picker/date-picker.svelte';
-  import { formatSessionCurrency as fmt, signColor, EMPTY_DASH } from '$lib/utils/format.svelte';
-  import { plural } from '$lib/utils/format.svelte';
+  import {
+    formatCurrency,
+    formatDate,
+    signColor,
+    EMPTY_DASH,
+    plural
+  } from '$lib/utils/format.svelte';
 
   let {
     statementDate = $bindable(),
     endingBalanceInput = $bindable(),
+    currency,
     startingBalance,
     cleared,
     target,
     difference,
     balanced,
+    balanceIssue,
     checkedCount,
     totalCount,
     dirty,
     saving,
     finishing,
     canFinish,
+    lastReconciledDate,
+    maxDate,
     onSave,
-    onFinish
+    onFinish,
+    onFindDifference
   }: {
     statementDate: string;
     endingBalanceInput: string;
+    currency: string;
     startingBalance: number;
     cleared: number;
     target: number;
     difference: number;
     balanced: boolean;
+    /** Why the ending balance can’t be used yet (drives the hint + aria state). */
+    balanceIssue: 'empty' | 'invalid' | 'none';
     checkedCount: number;
     totalCount: number;
     dirty: boolean;
     saving: boolean;
     finishing: boolean;
     canFinish: boolean;
+    lastReconciledDate: string | null;
+    maxDate: string;
     onSave: () => void;
     onFinish: () => void;
+    onFindDifference: () => void;
   } = $props();
+
+  const fmt = (n: number) => formatCurrency(n, currency);
 
   // `difference` is NaN while the ending balance is empty or invalid; keep the
   // color class off in that case so `signColor` never sees a non-finite value.
@@ -59,6 +77,9 @@
     <Card.Description>
       Type in the ending balance and date from your statement, then tick off what cleared the bank.
       {checkedCount} of {plural(totalCount, 'candidate')} cleared.
+      {#if lastReconciledDate}
+        Last reconciled through {formatDate(lastReconciledDate)}.
+      {/if}
     </Card.Description>
   </Card.Header>
   <Card.Content class="flex flex-col gap-4">
@@ -68,6 +89,7 @@
         <DatePicker
           id="reconcile-statement-date"
           bind:value={statementDate}
+          max={maxDate}
           placeholder="Pick a date"
         />
       </div>
@@ -78,8 +100,19 @@
           type="text"
           inputmode="decimal"
           placeholder="0.00"
+          aria-invalid={balanceIssue === 'invalid' ? true : undefined}
+          aria-describedby={balanceIssue !== 'none' ? 'reconcile-ending-hint' : undefined}
           bind:value={endingBalanceInput}
         />
+        {#if balanceIssue === 'invalid'}
+          <p id="reconcile-ending-hint" class="text-xs text-destructive">
+            Enter a number like 1,234.56.
+          </p>
+        {:else if balanceIssue === 'empty'}
+          <p id="reconcile-ending-hint" class="text-xs text-muted-foreground">
+            From your bank statement.
+          </p>
+        {/if}
       </div>
     </div>
     <dl class="grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
@@ -97,13 +130,31 @@
       </div>
       <div>
         <dt class="text-muted-foreground">Difference</dt>
-        <dd class="font-medium tabular-nums {differenceClass}">
-          {Number.isFinite(difference) ? fmt(difference) : EMPTY_DASH}
+        <dd class="font-medium tabular-nums {differenceClass}" aria-live="polite">
+          {#if !Number.isFinite(difference)}
+            {EMPTY_DASH}
+          {:else if !balanced}
+            <button
+              type="button"
+              class="rounded-sm underline decoration-dotted underline-offset-4 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+              title="Show the candidates matching this amount"
+              onclick={onFindDifference}
+            >
+              {fmt(difference)}
+            </button>
+          {:else}
+            {fmt(difference)}
+          {/if}
         </dd>
       </div>
     </dl>
     <div class="flex flex-wrap items-center gap-2">
-      <Button variant="outline" disabled={!dirty || saving || finishing} onclick={onSave}>
+      <Button
+        variant="outline"
+        disabled={!dirty || saving || finishing}
+        title="Save progress (Ctrl+S)"
+        onclick={onSave}
+      >
         {saving ? 'Saving…' : 'Save progress'}
       </Button>
       <Button
@@ -114,11 +165,21 @@
       </Button>
       {#if dirty}
         <p class="text-sm text-muted-foreground">
-          You’ve got unsaved changes. Save now, or we’ll save them when you finish.
+          You’ve got unsaved changes. Save now, or we’ll save them when you finish. Ctrl+S saves.
         </p>
+      {:else if balanceIssue === 'empty'}
+        <p class="text-sm text-muted-foreground">
+          Enter the ending balance from your bank statement.
+        </p>
+      {:else if balanceIssue === 'invalid'}
+        <p class="text-sm text-muted-foreground">
+          That balance doesn’t look like a number. Try something like 1,234.56.
+        </p>
+      {:else if checkedCount === 0}
+        <p class="text-sm text-muted-foreground">Tick at least one transaction to finish.</p>
       {:else if !balanced}
         <p class="text-sm text-muted-foreground">
-          Get the difference to zero to finish. Tick off what cleared the bank.
+          The difference isn’t zero yet. Tick off what cleared the bank.
         </p>
       {/if}
     </div>
