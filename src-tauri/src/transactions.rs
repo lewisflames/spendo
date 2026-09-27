@@ -240,6 +240,17 @@ pub(crate) fn validate_tx_input(conn: &Connection, input: &TxInput) -> Result<St
     Ok(post_date)
 }
 
+/// [`validate_tx_input`] with the account lookup injected, so bulk callers
+/// (e.g. CSV parsing) can memoize account facts across thousands of rows.
+pub(crate) fn validate_tx_input_with(
+    input: &TxInput,
+    lookup: &dyn Fn(&str) -> Result<Option<SplitAccountInfo>, AppError>,
+) -> Result<String, AppError> {
+    let post_date = validate_post_date(&input.post_date)?;
+    validate_tx_body_with(input, lookup)?;
+    Ok(post_date)
+}
+
 /// The account facts split validation needs. Resolved through a lookup so the
 /// GnuCash schedule preview can validate template splits against a set of
 /// accounts that will exist only after the merge (source ∪ destination).
@@ -376,6 +387,20 @@ fn build_filter_conditions(
 /// Per-transaction split rows plus the FX-converted transaction total.
 type SplitMaps = (std::collections::HashMap<String, Vec<SplitData>>, std::collections::HashMap<String, f64>);
 
+/// Report currency + FX history shared by one list/detail command (loading the
+/// full history once instead of once per helper).
+struct FxContext {
+    report_currency: String,
+    history: fx::FxHistory,
+}
+
+fn load_fx_context(conn: &Connection) -> Result<FxContext, String> {
+    Ok(FxContext {
+        report_currency: fx::get_report_currency_mnemonic(conn)?.unwrap_or_default(),
+        history: fx::FxHistory::load(conn)?,
+    })
+}
+
 /// SQLite caps bound parameters per statement; chunk large GUID lists so a
 /// full-width transaction page (or export) can never hit "too many SQL
 /// variables". Each chunk holds whole transaction GUIDs, so per-transaction
@@ -383,6 +408,15 @@ type SplitMaps = (std::collections::HashMap<String, Vec<SplitData>>, std::collec
 const MAX_IN_PARAMS: usize = sql::MAX_IN_PARAMS;
 
 fn fetch_splits_for_txns(conn: &Connection, guids: &[String]) -> Result<SplitMaps, String> {
+    let ctx = load_fx_context(conn)?;
+    fetch_splits_for_txns_with(conn, guids, &ctx)
+}
+
+fn fetch_splits_for_txns_with(
+    conn: &Connection,
+    guids: &[String],
+    ctx: &FxContext,
+) -> Result<SplitMaps, String> {
     if guids.is_empty() {
         return Ok((
             std::collections::HashMap::new(),
@@ -390,8 +424,8 @@ fn fetch_splits_for_txns(conn: &Connection, guids: &[String]) -> Result<SplitMap
         ));
     }
 
-    let report_currency = fx::get_report_currency_mnemonic(conn)?.unwrap_or_default();
-    let fx_history = fx::FxHistory::load(conn)?;
+    let report_currency = &ctx.report_currency;
+    let fx_history = &ctx.history;
 
     let mut map: std::collections::HashMap<String, Vec<SplitData>> =
         std::collections::HashMap::new();
@@ -412,7 +446,7 @@ fn fetch_splits_for_txns(conn: &Connection, guids: &[String]) -> Result<SplitMap
                     a.code as account_code
              FROM splits s
              JOIN accounts a ON a.guid = s.account_guid
-             JOIN commodities c ON c.guid = a.commodity_guid
+             LEFT JOIN commodities c ON c.guid = a.commodity_guid
              JOIN transactions t ON t.guid = s.tx_guid
              WHERE s.tx_guid IN ({})
              ORDER BY s.tx_guid,
@@ -463,8 +497,8 @@ fn fetch_splits_for_txns(conn: &Connection, guids: &[String]) -> Result<SplitMap
             // currency at the transaction date's FX.
             totals.entry(tx_guid.clone()).or_insert_with(|| {
                 let fx_at = fx_history.map_for_date(&post_date);
-                let currency = split.commodity.as_deref().unwrap_or(&report_currency);
-                fx::convert(signed_amount, currency, &report_currency, &fx_at)
+                let currency = split.commodity.as_deref().unwrap_or(report_currency);
+                fx::convert(signed_amount, currency, report_currency, &fx_at)
             });
             map.entry(tx_guid).or_default().push(split);
         }
@@ -482,8 +516,17 @@ struct TxRow {
 }
 
 fn map_tx_rows(conn: &Connection, rows: Vec<TxRow>) -> Result<Vec<TransactionRow>, String> {
+    let ctx = load_fx_context(conn)?;
+    map_tx_rows_with(conn, rows, &ctx)
+}
+
+fn map_tx_rows_with(
+    conn: &Connection,
+    rows: Vec<TxRow>,
+    ctx: &FxContext,
+) -> Result<Vec<TransactionRow>, String> {
     let guids: Vec<String> = rows.iter().map(|r| r.guid.clone()).collect();
-    let (split_map, total_map) = fetch_splits_for_txns(conn, &guids)?;
+    let (split_map, total_map) = fetch_splits_for_txns_with(conn, &guids, ctx)?;
 
     Ok(rows
         .into_iter()
@@ -498,6 +541,63 @@ fn map_tx_rows(conn: &Connection, rows: Vec<TxRow>) -> Result<Vec<TransactionRow
             description: r.description,
             num: r.num,
             notes: r.notes,
+        })
+        .collect())
+}
+
+/// FX-converted total per transaction, matching the totals computed by
+/// [`fetch_splits_for_txns_with`] (leading split = largest rational magnitude,
+/// then signed ascending, then guid) but returning one row per transaction
+/// instead of every split. Used to sort by amount before paginating.
+fn fetch_tx_totals(
+    conn: &Connection,
+    where_clause: &str,
+    params: &[Box<dyn rusqlite::types::ToSql>],
+    ctx: &FxContext,
+) -> Result<Vec<(String, f64)>, String> {
+    let signed = utils::signed_amount_expr(utils::RAW_AMOUNT, "a.account_type");
+    let sql = format!(
+        "SELECT guid, post_date, signed_amount, commodity FROM (
+             SELECT t.guid, t.post_date,
+                    {signed} AS signed_amount,
+                    c.mnemonic AS commodity,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY t.guid
+                        ORDER BY ABS({raw}) DESC, {signed} ASC, s.guid ASC
+                    ) AS rn
+             FROM transactions t
+             LEFT JOIN splits s ON s.tx_guid = t.guid
+             LEFT JOIN accounts a ON a.guid = s.account_guid
+             LEFT JOIN commodities c ON c.guid = a.commodity_guid
+             {where_clause}
+         ) WHERE rn = 1",
+        raw = utils::RAW_AMOUNT,
+    );
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let refs = sql::param_refs(params);
+    let rows: Vec<(String, String, Option<f64>, Option<String>)> = stmt
+        .query_map(refs.as_slice(), |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(guid, post_date, signed_amount, commodity)| {
+            let amount = signed_amount.unwrap_or(0.0);
+            let currency = commodity.as_deref().unwrap_or(&ctx.report_currency);
+            let fx_at = ctx.history.map_for_date(&post_date);
+            (
+                guid,
+                fx::convert(amount, currency, &ctx.report_currency, &fx_at),
+            )
         })
         .collect())
 }
@@ -523,35 +623,16 @@ fn fetch_transactions_inner(
 
     let (page_size, total_pages, safe_page, offset) = utils::paginate(total, page, page_size);
 
-    // Amount sorting needs the FX-converted totals, which are computed in Rust,
-    // so fetch all matching rows, sort, then paginate.
+    // Amount sorting needs the FX-converted totals, which are computed in
+    // Rust. Fetch one lightweight total row per matching transaction, sort,
+    // paginate, then enrich only the page's transactions.
     if sort_by == Some("amount") {
-        let query_sql = format!(
-            "SELECT guid, post_date, description, num, notes FROM transactions t{where_clause} ORDER BY post_date DESC"
-        );
-        let mut query_stmt = conn.prepare(&query_sql).map_err(|e| e.to_string())?;
-        let all_refs = sql::param_refs(&w.params);
-        let rows: Vec<TxRow> = query_stmt
-            .query_map(all_refs.as_slice(), |row| {
-                Ok(TxRow {
-                    guid: row.get(0)?,
-                    post_date: row.get(1)?,
-                    description: row.get(2)?,
-                    num: row.get(3)?,
-                    notes: row.get(4)?,
-                })
-            })
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?;
+        let ctx = load_fx_context(conn)?;
+        let mut totals = fetch_tx_totals(conn, &where_clause, &w.params, &ctx)?;
 
-        let mut all_txns = map_tx_rows(conn, rows)?;
         let ascending = sort_dir == Some("asc");
-        all_txns.sort_by(|a, b| {
-            let cmp = a
-                .total_amount
-                .total_cmp(&b.total_amount)
-                .then_with(|| a.guid.cmp(&b.guid));
+        totals.sort_by(|a, b| {
+            let cmp = a.1.total_cmp(&b.1).then_with(|| a.0.cmp(&b.0));
             if ascending {
                 cmp
             } else {
@@ -559,11 +640,48 @@ fn fetch_transactions_inner(
             }
         });
 
-        let transactions = all_txns
+        let page_guids: Vec<String> = totals
             .into_iter()
             .skip(offset as usize)
             .take(page_size as usize)
+            .map(|(guid, _)| guid)
             .collect();
+
+        // Fetch the page's transaction headers, preserving the sorted order.
+        let mut rows_by_guid: std::collections::HashMap<String, TxRow> =
+            std::collections::HashMap::new();
+        for chunk in page_guids.chunks(MAX_IN_PARAMS) {
+            let sql = format!(
+                "SELECT guid, post_date, description, num, notes
+                 FROM transactions
+                 WHERE guid IN ({})",
+                sql::in_clause(chunk.len())
+            );
+            let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+            let param_refs = sql::string_param_refs(chunk);
+            let rows = stmt
+                .query_map(param_refs.as_slice(), |row| {
+                    Ok(TxRow {
+                        guid: row.get(0)?,
+                        post_date: row.get(1)?,
+                        description: row.get(2)?,
+                        num: row.get(3)?,
+                        notes: row.get(4)?,
+                    })
+                })
+                .map_err(|e| e.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?;
+            for row in rows {
+                rows_by_guid.insert(row.guid.clone(), row);
+            }
+        }
+        let page_rows: Vec<TxRow> = page_guids
+            .iter()
+            .filter_map(|guid| rows_by_guid.remove(guid))
+            .collect();
+
+        let transactions = map_tx_rows_with(conn, page_rows, &ctx)?;
 
         return Ok(TransactionsResult {
             transactions,
@@ -821,28 +939,30 @@ pub(crate) fn insert_split_rows(
         }
     }
 
+    // One prepared statement reused for every split (and across calls through
+    // the connection-level cache), instead of re-preparing per leg.
+    let mut insert = conn
+        .prepare_cached(
+            "INSERT INTO splits
+              (guid, tx_guid, account_guid, value_num, value_denom,
+               quantity_num, quantity_denom, reconcile_state, reconciled, memo)
+              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'n', 0, ?8)",
+        )?;
     let mut guids = Vec::with_capacity(splits.len());
     for (s, (value_num, value_denom, quantity_num, quantity_denom)) in
         splits.iter().zip(converted)
     {
         let split_guid = uuid::Uuid::new_v4().to_string();
-        conn.execute(
-            "INSERT INTO splits
-              (guid, tx_guid, account_guid, value_num, value_denom,
-               quantity_num, quantity_denom, reconcile_state, reconciled, memo)
-              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'n', 0, ?8)",
-            params![
-                split_guid,
-                tx_guid,
-                s.account_guid,
-                value_num,
-                value_denom,
-                quantity_num,
-                quantity_denom,
-                opt_text(&s.memo),
-            ],
-        )
-        ?;
+        insert.execute(params![
+            split_guid,
+            tx_guid,
+            s.account_guid,
+            value_num,
+            value_denom,
+            quantity_num,
+            quantity_denom,
+            opt_text(&s.memo),
+        ])?;
         guids.push(split_guid);
     }
     Ok(guids)
@@ -1345,6 +1465,18 @@ mod tests {
         let desc =
             fetch_transactions_inner(&conn, 1, 50, None, Some("amount"), Some("desc")).unwrap();
         assert_eq!(desc.transactions[0].guid, "t1");
+
+        // Amount-sorted pagination slices the sorted list and still enriches
+        // only the page's transactions with their totals.
+        let amount_page_1 =
+            fetch_transactions_inner(&conn, 1, 1, None, Some("amount"), Some("desc")).unwrap();
+        assert_eq!(amount_page_1.total_pages, 2);
+        assert_eq!(amount_page_1.transactions[0].guid, "t1");
+        assert_eq!(amount_page_1.transactions[0].total_amount, 50.0);
+        let amount_page_2 =
+            fetch_transactions_inner(&conn, 2, 1, None, Some("amount"), Some("desc")).unwrap();
+        assert_eq!(amount_page_2.transactions[0].guid, "t2");
+        assert_eq!(amount_page_2.transactions[0].total_amount, -15.0);
     }
 
     #[test]
