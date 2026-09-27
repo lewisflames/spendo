@@ -884,6 +884,23 @@ fn parse_file_rows(
     // the mapping step's offset account stays the fallback.
     let rules = import_rules::RuleMatcher::load(conn)?;
 
+    // Account facts are shared by every row (target, offset, and any
+    // rule-matched category); memoize lookups instead of querying per row.
+    let account_cache: std::cell::RefCell<
+        HashMap<String, Option<transactions::SplitAccountInfo>>,
+    > = std::cell::RefCell::new(HashMap::new());
+    let account_lookup =
+        |guid: &str| -> Result<Option<transactions::SplitAccountInfo>, AppError> {
+            if let Some(cached) = account_cache.borrow().get(guid).cloned() {
+                return Ok(cached);
+            }
+            let info = transactions::account_info_lookup(conn, guid)?;
+            account_cache
+                .borrow_mut()
+                .insert(guid.to_string(), info.clone());
+            Ok(info)
+        };
+
     let mut rows = Vec::with_capacity(data.len());
     for (i, cells) in data.iter().enumerate() {
         let key = i as i64;
@@ -957,7 +974,7 @@ fn parse_file_rows(
                 },
             ],
         };
-        if let Err(e) = transactions::validate_tx_input(conn, &tx) {
+        if let Err(e) = transactions::validate_tx_input_with(&tx, &account_lookup) {
             rows.push(ParsedRow::invalid(
                 key,
                 cells,
@@ -1482,23 +1499,23 @@ fn insert_staged_rows(
     let label = format!("CSV import {filename} ({} transactions)", to_insert.len());
 
     with_tx_err(conn, || -> Result<(), AppError> {
+        let mut insert_tx = conn.prepare_cached(
+            "INSERT INTO transactions (guid, post_date, description, num, notes)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+        )?;
         for row in to_insert {
             let tx_guid = uuid::Uuid::new_v4().to_string();
             let description = {
                 let t = row.description.trim();
                 if t.is_empty() { None } else { Some(t.to_string()) }
             };
-            conn.execute(
-                "INSERT INTO transactions (guid, post_date, description, num, notes)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![
-                    tx_guid,
-                    row.post_date,
-                    description,
-                    row.num.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()),
-                    row.notes.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()),
-                ],
-            )?;
+            insert_tx.execute(params![
+                tx_guid,
+                row.post_date,
+                description,
+                row.num.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()),
+                row.notes.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()),
+            ])?;
             let splits = vec![
                 transactions::SplitInput {
                     account_guid: target_guid.to_string(),
