@@ -347,6 +347,9 @@ pub async fn export_attachment(
     guid: String,
     dest_path: String,
 ) -> Result<(), String> {
+    state
+        .ensure_not_active_book(Path::new(dest_path.trim()))
+        .map_err(String::from)?;
     let (_, _, data) = run_blocking(state.db.clone(), move |conn| {
         fetch_blob(conn, &guid).map_err(String::from)
     })

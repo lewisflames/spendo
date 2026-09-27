@@ -100,10 +100,12 @@ fn escape_path_for_sql(path: &Path) -> String {
 /// overwrite) plus any stale WAL sidecars (`<file>-wal`/`<file>-shm`).
 fn remove_target(path: &Path) {
     std::fs::remove_file(path).ok();
-    let name = format!("{}-wal", path.display());
-    std::fs::remove_file(name).ok();
-    let name = format!("{}-shm", path.display());
-    std::fs::remove_file(name).ok();
+    for suffix in ["-wal", "-shm"] {
+        // Append to the OsString so non-UTF-8 paths keep their exact bytes.
+        let mut name = path.as_os_str().to_os_string();
+        name.push(suffix);
+        std::fs::remove_file(PathBuf::from(name)).ok();
+    }
 }
 
 /// Copy the live book into a fresh stamped file at `new_path`. The caller
@@ -226,13 +228,15 @@ pub async fn save_book_as(
     path: String,
 ) -> Result<HomeDataResult, String> {
     let new_path = PathBuf::from(&path);
-    // Saving onto the open file is a no-op: just re-report its summary.
+    // Saving onto the open file is a no-op: just re-report its summary. Compare
+    // canonical forms too: `sub/../book.spendo` aliases the live file, and the
+    // stale-target sweep below would otherwise delete it before copying.
     let is_same = state
         .db_path
         .lock()
         .map_err(|e| e.to_string())?
         .as_ref()
-        .is_some_and(|p| p == &new_path);
+        .is_some_and(|p| crate::utils::same_path(p, &new_path));
     if is_same {
         return db::run_blocking(state.db.clone(), move |conn| {
             Ok(HomeDataResult {

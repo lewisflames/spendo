@@ -1,13 +1,18 @@
 use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
+use std::sync::atomic::Ordering;
 use tauri::State;
 
 use crate::db::{clear_db, run_blocking, AppState};
 
 #[tauri::command]
 pub async fn clear_app_db(state: State<'_, AppState>) -> Result<(), String> {
-    run_blocking(state.db.clone(), |conn| {
+    // Clearing the book invalidates any in-flight price refresh (which checks
+    // only the generation before writing), so bump it under the DB lock.
+    let generation = state.book_generation.clone();
+    run_blocking(state.db.clone(), move |conn| {
         clear_db(conn).map_err(|e| e.to_string())?;
+        generation.fetch_add(1, Ordering::SeqCst);
         Ok(())
     })
     .await

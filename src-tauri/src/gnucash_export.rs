@@ -1478,15 +1478,6 @@ fn write_schedules(conn: &Connection, data: &ExportData) -> Result<(), AppError>
 
 // ── Command ──────────────────────────────────────────────────────────────────
 
-/// Whether two paths resolve to the same file. Falls back to a literal
-/// comparison for paths that don't exist yet (the common case for the target).
-fn same_path(a: &Path, b: &Path) -> bool {
-    match (a.canonicalize(), b.canonicalize()) {
-        (Ok(a), Ok(b)) => a == b,
-        _ => a == b,
-    }
-}
-
 /// Full-book GnuCash SQLite export written straight to the chosen path: the
 /// read happens under the DB lock, the file write on `run_io` without it.
 #[tauri::command]
@@ -1498,14 +1489,11 @@ pub async fn export_gnucash(
     if path.as_os_str().is_empty() {
         return Err("Pick where to save that export".to_string());
     }
-
-    let active = state.db_path.lock().map_err(|e| e.to_string())?.clone();
-    let Some(active) = active else {
+    if state.db_path.lock().map_err(|e| e.to_string())?.is_none() {
         return Err("No book is open".to_string());
-    };
-    if same_path(&active, &path) {
-        return Err("Choose a file other than the open book".to_string());
     }
+
+    state.ensure_not_active_book(&path).map_err(String::from)?;
 
     let data = run_blocking(state.db.clone(), |conn| {
         fetch_export_data_inner(conn).map_err(String::from)
@@ -2185,8 +2173,8 @@ mod tests {
         let file = dir.join("a.gnucash");
         std::fs::write(&file, b"x").unwrap();
         let dotted = dir.join(".").join("a.gnucash");
-        assert!(same_path(&file, &dotted));
-        assert!(!same_path(&file, &dir.join("b.gnucash")));
+        assert!(crate::utils::same_path(&file, &dotted));
+        assert!(!crate::utils::same_path(&file, &dir.join("b.gnucash")));
     }
 
     #[test]
