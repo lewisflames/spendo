@@ -318,6 +318,14 @@ CREATE TABLE IF NOT EXISTS recurring_schedules (
 
 CREATE INDEX IF NOT EXISTS idx_schedules_active_due ON recurring_schedules(active, next_due_date);
 
+-- Skip counter for recurring schedules, in a side table so the core row keeps
+-- its GnuCash-shaped columns and older books pick this up on open. A missing
+-- row means nothing has been skipped; rows cascade with their schedule.
+CREATE TABLE IF NOT EXISTS schedule_skips (
+	schedule_guid TEXT PRIMARY KEY REFERENCES recurring_schedules(guid) ON DELETE CASCADE,
+	skipped_count INTEGER NOT NULL DEFAULT 0
+);
+
 -- Finished reconciliation batches. Persisting the membership (not inferring it
 -- from transaction dates) is what lets Undo last statement reopen exactly the
 -- splits a Finish promoted, even when one was dated before the previous
@@ -487,6 +495,7 @@ pub fn clear_db(conn: &Connection) -> Result<()> {
           DROP TABLE IF EXISTS change_log;
            DROP TABLE IF EXISTS refresh_log;
            DROP TABLE IF EXISTS symbol_overrides;
+           DROP TABLE IF EXISTS schedule_skips;
            DROP TABLE IF EXISTS recurring_schedules;
            DROP TABLE IF EXISTS app_settings;",
     );
@@ -602,6 +611,7 @@ mod tests {
             "reconcile_batch_splits",
             "reconcile_batches",
             "refresh_log",
+            "schedule_skips",
             "splits",
             "symbol_overrides",
             "transactions",

@@ -773,6 +773,7 @@ function buildSchedule(def: FixtureScheduleDef): Schedule {
     endDate: def.endDate,
     maxOccurrences: def.maxOccurrences,
     occurrencesPosted: 0,
+    skippedCount: 0,
     nextDueDate: def.startDate,
     active: def.active,
     description: def.description,
@@ -816,14 +817,17 @@ function skipScheduleOccurrence(guid: string): string | null {
   if (!schedule || schedule.nextDueDate === null) {
     throw new Error(`[mock] Schedule ${guid} has no due occurrence`);
   }
-  Object.assign(
-    schedule,
-    advanceSchedule({
-      ...schedule,
-      nextDueDate: stepDate(schedule.nextDueDate, schedule.frequency, schedule.intervalMult)
-    })
-  );
-  return schedule.nextDueDate;
+  const skippedCount = schedule.skippedCount + 1;
+  const candidate = stepDate(schedule.nextDueDate, schedule.frequency, schedule.intervalMult);
+  const passed = schedule.occurrencesPosted + skippedCount;
+  const next =
+    schedule.maxOccurrences !== null && passed >= schedule.maxOccurrences
+      ? null
+      : schedule.endDate !== null && candidate > schedule.endDate
+        ? null
+        : candidate;
+  Object.assign(schedule, { nextDueDate: next, skippedCount });
+  return next;
 }
 
 // ── budgets ────────────────────────────────────────────────────────────────

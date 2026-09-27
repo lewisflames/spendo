@@ -69,9 +69,12 @@ export function isPostable(nextDueDate: string, today: string): boolean {
   return nextDueDate <= today;
 }
 
-/** "3 of 12" / "3 posted" / "—" occurrence progress for table rows. */
+/** "3 of 12" / "3 posted" / "2 skipped" / "3 posted · 1 skipped" progress. */
 export function occurrenceLabel(schedule: Schedule): string {
-  if (schedule.maxOccurrences) return `${schedule.occurrencesPosted} of ${schedule.maxOccurrences}`;
-  if (schedule.occurrencesPosted > 0) return `${schedule.occurrencesPosted} posted`;
-  return '—';
+  const passed = schedule.occurrencesPosted + schedule.skippedCount;
+  if (schedule.maxOccurrences) return `${passed} of ${schedule.maxOccurrences}`;
+  const parts: string[] = [];
+  if (schedule.occurrencesPosted > 0) parts.push(`${schedule.occurrencesPosted} posted`);
+  if (schedule.skippedCount > 0) parts.push(`${schedule.skippedCount} skipped`);
+  return parts.length > 0 ? parts.join(' · ') : '—';
 }

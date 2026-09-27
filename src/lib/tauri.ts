@@ -635,6 +635,8 @@ export interface Schedule {
   endDate: string | null;
   maxOccurrences: number | null;
   occurrencesPosted: number;
+  /** Occurrences skipped; counts toward `maxOccurrences` like posted ones. */
+  skippedCount: number;
   /** YYYY-MM-DD, or null when completed. */
   nextDueDate: string | null;
   active: boolean;

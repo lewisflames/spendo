@@ -12,6 +12,7 @@ function schedule(partial: Partial<Schedule> = {}): Schedule {
     endDate: null,
     maxOccurrences: null,
     occurrencesPosted: 0,
+    skippedCount: 0,
     nextDueDate: '2024-02-01',
     active: true,
     description: 'Monthly rent',
@@ -64,9 +65,17 @@ describe('isPostable', () => {
 });
 
 describe('occurrenceLabel', () => {
-  it('shows cap progress, posted counts, or a dash', () => {
+  it('shows cap progress, posted/skipped counts, or a dash', () => {
     expect(occurrenceLabel(schedule({ maxOccurrences: 12, occurrencesPosted: 3 }))).toBe('3 of 12');
+    // Skipped occurrences consume the cap too.
+    expect(
+      occurrenceLabel(schedule({ maxOccurrences: 12, occurrencesPosted: 3, skippedCount: 2 }))
+    ).toBe('5 of 12');
     expect(occurrenceLabel(schedule({ occurrencesPosted: 3 }))).toBe('3 posted');
+    expect(occurrenceLabel(schedule({ skippedCount: 2 }))).toBe('2 skipped');
+    expect(occurrenceLabel(schedule({ occurrencesPosted: 3, skippedCount: 1 }))).toBe(
+      '3 posted · 1 skipped'
+    );
     expect(occurrenceLabel(schedule())).toBe('—');
   });
 });

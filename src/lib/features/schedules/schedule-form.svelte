@@ -394,6 +394,7 @@
           <Select.Root
             type="single"
             value={frequency}
+            items={FREQUENCY_OPTIONS}
             onValueChange={(v) => {
               if (FREQUENCY_OPTIONS.some((o) => o.value === v)) frequency = v as ScheduleFrequency;
             }}
@@ -471,12 +472,16 @@
           {/if}
         </div>
       </div>
-      {#if mode === 'edit' && initial && initial.occurrencesPosted > 0}
+      {#if mode === 'edit' && initial && initial.occurrencesPosted + initial.skippedCount > 0}
         <p class="text-xs text-muted-foreground">
-          Already posted {initial.occurrencesPosted === 1
-            ? 'once'
-            : `${initial.occurrencesPosted} times`}. Changing the start date won’t move what’s due
-          next.
+          {initial.occurrencesPosted > 0
+            ? `Already posted ${initial.occurrencesPosted === 1 ? 'once' : `${initial.occurrencesPosted} times`}.`
+            : 'No occurrences have been posted yet.'}
+          {#if initial.skippedCount > 0}
+            {initial.skippedCount}
+            {initial.skippedCount === 1 ? 'occurrence was skipped' : 'occurrences were skipped'}.
+          {/if}
+          Changing the start date won’t move what’s due next.
         </p>
       {/if}
     </Card.Content>
