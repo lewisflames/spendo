@@ -13,7 +13,7 @@
 </script>
 
 <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
-  <div class="flex min-w-0 flex-1 flex-col gap-1">
+  <div class="flex min-w-0 shrink grow basis-80 flex-col gap-1">
     <h1 class="text-3xl font-bold tracking-tight break-words">{title}</h1>
     {#if description !== undefined}
       {#if typeof description === 'function'}
@@ -26,7 +26,7 @@
     {/if}
   </div>
   {#if children}
-    <div class="flex shrink-0 flex-wrap items-center gap-2">
+    <div class="ml-auto flex shrink-0 flex-wrap items-center gap-2">
       {@render children()}
     </div>
   {/if}
