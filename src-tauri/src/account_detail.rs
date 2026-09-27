@@ -830,7 +830,7 @@ fn subtree_deltas_by_day(
 ) -> Result<Vec<(String, String, String, f64)>, String> {
     let n = sub_guids.len();
     let sql = format!(
-        "SELECT t.post_date, c.guid, c.mnemonic, COALESCE(SUM({}), 0)
+        "SELECT substr(t.post_date, 1, 10) as day, c.guid, c.mnemonic, COALESCE(SUM({}), 0)
          FROM splits s
          JOIN accounts a ON a.guid = s.account_guid
          JOIN commodities c ON c.guid = a.commodity_guid
@@ -838,8 +838,8 @@ fn subtree_deltas_by_day(
          WHERE s.account_guid IN ({}) {}
            AND t.post_date >= ?{}
            AND t.post_date < min(date(?{}, '+1 day'), {})
-         GROUP BY t.post_date, c.guid, c.mnemonic
-         ORDER BY t.post_date ASC",
+         GROUP BY day, c.guid, c.mnemonic
+         ORDER BY day ASC",
         amount_expr,
         sql::in_clause(n),
         type_filter,
@@ -1108,6 +1108,29 @@ mod tests {
         let last = trend.last().unwrap();
         assert_eq!(last.date, "2024-02-20");
         assert_eq!(last.balance, 30.0);
+    }
+
+    /// Regression: imported books keep `HH:MM:SS` in `post_date`; the trend
+    /// must group by calendar day, not by timestamp.
+    #[test]
+    fn trend_groups_timed_imported_rows_by_day() {
+        let conn = setup();
+        add_split(&conn, "t-timed", "2024-01-10 14:30:00", "checking", 2_500);
+
+        let trend = fetch_account_balance_trend_inner(&conn, "checking").unwrap();
+        assert_eq!(
+            trend,
+            vec![
+                AccountBalancePoint {
+                    date: "2024-01-10".into(),
+                    balance: 125.0
+                },
+                AccountBalancePoint {
+                    date: "2024-02-05".into(),
+                    balance: 95.0
+                },
+            ]
+        );
     }
 
     #[test]
