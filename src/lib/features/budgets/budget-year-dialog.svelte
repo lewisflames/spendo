@@ -10,6 +10,7 @@
   import { errMsg } from '$lib/utils/error';
   import type { AccountsResult, BudgetDateRange } from '$lib/tauri';
   import { flattenExpenseAccounts } from './budget-utils';
+  import AccountLabel from '$lib/features/accounts/account-label.svelte';
   import { useBudgetYear } from '$lib/hooks/use-budget-year.svelte';
 
   let {
@@ -205,7 +206,7 @@
             bind:value={pickedAccountGuid}
             items={expenseAccounts.map((a) => ({
               value: a.guid,
-              label: a.description || a.name
+              label: a.name
             }))}
           >
             <Select.Trigger
@@ -218,9 +219,9 @@
             </Select.Trigger>
             <Select.Content>
               {#each expenseAccounts as a (a.guid)}
-                <Select.Item value={a.guid} label={a.description || a.name}
-                  >{a.description || a.name}</Select.Item
-                >
+                <Select.Item value={a.guid} label={a.name}>
+                  <AccountLabel name={a.name} description={a.description} code={a.code} />
+                </Select.Item>
               {/each}
             </Select.Content>
           </Select.Root>

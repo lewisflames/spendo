@@ -6,6 +6,7 @@
   import { Check, ChevronsUpDown } from '@lucide/svelte';
   import { cn } from '$lib/utils.js';
   import type { PickerAccount } from '$lib/features/accounts/account-picker-utils';
+  import AccountLabel from '$lib/features/accounts/account-label.svelte';
 
   let {
     value = $bindable(''),
@@ -95,7 +96,14 @@
           {#each options as opt (opt.guid)}
             <Command.Item
               value={opt.guid}
-              keywords={[opt.label, opt.display, opt.accountType, opt.commodity ?? '']}
+              keywords={[
+                opt.label,
+                opt.display,
+                opt.description ?? '',
+                opt.code ?? '',
+                opt.accountType,
+                opt.commodity ?? ''
+              ]}
               title={opt.label}
               onSelect={() => select(opt.guid)}
             >
@@ -103,10 +111,12 @@
                 aria-hidden="true"
                 class={cn('mr-1 size-4', value === opt.guid ? 'opacity-100' : 'opacity-0')}
               />
-              <span class="min-w-0 flex-1 truncate">
-                {opt.display}
+              <span class="flex min-w-0 flex-1 items-start gap-1">
+                <AccountLabel name={opt.display} description={opt.description} code={opt.code} />
                 {#if opt.parentPath}
-                  <span class="text-muted-foreground">· {opt.parentPath}</span>
+                  <span class="min-w-0 truncate pt-0.5 text-xs text-muted-foreground">
+                    · {opt.parentPath}
+                  </span>
                 {/if}
               </span>
               <Badge variant="outline" class="shrink-0 text-[10px] leading-none">

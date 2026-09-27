@@ -21,6 +21,7 @@ pub struct Budget {
     pub account_guid: String,
     pub account_name: String,
     pub account_description: Option<String>,
+    pub account_code: Option<String>,
     pub account_type: String,
     pub year: i32,
     pub amount: f64,
@@ -41,6 +42,7 @@ pub struct BudgetActualRow {
     pub account_guid: String,
     pub account_name: String,
     pub account_description: Option<String>,
+    pub account_code: Option<String>,
     pub account_type: String,
     pub budget_amount: f64,
     pub actual_amount: f64,
@@ -96,10 +98,11 @@ fn row_to_budget(row: &rusqlite::Row) -> rusqlite::Result<Budget> {
         account_guid: row.get(1)?,
         account_name: row.get(2)?,
         account_description: row.get(3)?,
-        account_type: row.get(4)?,
-        year: row.get(5)?,
-        amount: row.get(6)?,
-        created_at: row.get(7)?,
+        account_code: row.get(4)?,
+        account_type: row.get(5)?,
+        year: row.get(6)?,
+        amount: row.get(7)?,
+        created_at: row.get(8)?,
     })
 }
 
@@ -159,7 +162,7 @@ fn full_year_percentage(actual: f64, effective: f64) -> f64 {
 }
 
 fn budget_select_sql() -> &'static str {
-    "SELECT b.guid, b.account_guid, a.name, a.description, a.account_type,
+    "SELECT b.guid, b.account_guid, a.name, a.description, a.code, a.account_type,
 	        b.year, b.amount, b.created_at
 	 FROM budgets b
 	 JOIN accounts a ON a.guid = b.account_guid
@@ -434,11 +437,12 @@ fn compute_cumulative_carryovers(
     Ok(carryovers)
 }
 
-/// (guid, account_guid, name, description, type, budget, commodity, actual)
+/// (guid, account_guid, name, description, code, type, budget, commodity, actual)
 type RawBudgetRow = (
     String,
     String,
     String,
+    Option<String>,
     Option<String>,
     String,
     f64,
@@ -452,6 +456,7 @@ struct BudgetAgg {
     account_guid: String,
     account_name: String,
     account_description: Option<String>,
+    account_code: Option<String>,
     account_type: String,
     budget_amount: f64,
     actual_amount: f64,
@@ -468,7 +473,7 @@ fn fetch_budget_actual_raw_rows(
     let mut stmt = conn
         .prepare(&format!(
             "{}
-			 SELECT b.guid, b.account_guid, a.name, a.description, a.account_type,
+			 SELECT b.guid, b.account_guid, a.name, a.description, a.code, a.account_type,
 			        b.amount,
 			        c.mnemonic,
 			        COALESCE(SUM(ps.value), 0) as actual_amount
@@ -502,10 +507,11 @@ fn fetch_budget_actual_raw_rows(
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
                     row.get::<_, Option<String>>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, f64>(5)?,
-                    row.get::<_, Option<String>>(6)?,
-                    row.get::<_, f64>(7)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, f64>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                    row.get::<_, f64>(8)?,
                 ))
             },
         )
@@ -529,6 +535,7 @@ fn aggregate_budget_actuals(
         account_guid,
         account_name,
         account_description,
+        account_code,
         account_type,
         budget_amount,
         commodity,
@@ -548,6 +555,7 @@ fn aggregate_budget_actuals(
                         account_guid,
                         account_name,
                         account_description,
+                        account_code,
                         account_type,
                         budget_amount,
                         actual_amount: converted,
@@ -581,6 +589,7 @@ fn build_budget_actual_rows(
                 account_guid: agg.account_guid.clone(),
                 account_name: agg.account_name.clone(),
                 account_description: agg.account_description.clone(),
+                account_code: agg.account_code.clone(),
                 account_type: agg.account_type.clone(),
                 budget_amount: agg.budget_amount,
                 actual_amount: agg.actual_amount,

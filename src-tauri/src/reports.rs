@@ -14,6 +14,7 @@ pub struct ProfitLossRow {
     pub account_guid: String,
     pub account_name: String,
     pub account_description: Option<String>,
+    pub account_code: Option<String>,
     pub indent: i32,
     pub current_amount: f64,
     pub previous_amount: f64,
@@ -46,6 +47,7 @@ struct RawAccountBalance {
     guid: String,
     name: String,
     description: Option<String>,
+    code: Option<String>,
     account_type: String,
     parent_guid: Option<String>,
     placeholder: bool,
@@ -55,6 +57,7 @@ struct RawAccountBalance {
 struct AccountMeta {
     name: String,
     description: Option<String>,
+    code: Option<String>,
     account_type: String,
     parent_guid: Option<String>,
     placeholder: bool,
@@ -67,7 +70,7 @@ struct AccountMeta {
 fn fetch_account_meta(conn: &Connection) -> Result<HashMap<String, AccountMeta>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT guid, name, description, account_type, parent_guid, placeholder
+            "SELECT guid, name, description, code, account_type, parent_guid, placeholder
              FROM accounts WHERE account_type != 'ROOT'",
         )
         .map_err(|e| e.to_string())?;
@@ -78,9 +81,10 @@ fn fetch_account_meta(conn: &Connection) -> Result<HashMap<String, AccountMeta>,
                 AccountMeta {
                     name: row.get(1)?,
                     description: row.get(2)?,
-                    account_type: row.get(3)?,
-                    parent_guid: row.get(4)?,
-                    placeholder: row.get::<_, i64>(5)? != 0,
+                    code: row.get(3)?,
+                    account_type: row.get(4)?,
+                    parent_guid: row.get(5)?,
+                    placeholder: row.get::<_, i64>(6)? != 0,
                 },
             ))
         })
@@ -147,6 +151,7 @@ fn augment_pnl_rows(
                             guid: guid.clone(),
                             name: m.name.clone(),
                             description: m.description.clone(),
+                            code: m.code.clone(),
                             account_type: m.account_type.clone(),
                             parent_guid: m.parent_guid.clone(),
                             placeholder: m.placeholder,
@@ -197,6 +202,7 @@ struct MonthlyBucket {
     guid: String,
     name: String,
     description: Option<String>,
+    code: Option<String>,
     account_type: String,
     parent_guid: Option<String>,
     placeholder: bool,
@@ -218,8 +224,8 @@ fn fetch_monthly_buckets(
     let visible_now = utils::VISIBLE_NOW_EXPR;
     let mut stmt = conn
         .prepare(&format!(
-            "SELECT a.guid, a.name, a.description, a.account_type, a.parent_guid, a.placeholder,
-                    c.mnemonic as commodity, strftime('%Y-%m', t.post_date) as month,
+            "SELECT a.guid, a.name, a.description, a.code, a.account_type, a.parent_guid,
+                    a.placeholder, c.mnemonic as commodity, strftime('%Y-%m', t.post_date) as month,
                     SUM({amount}) as total
              FROM splits s
              JOIN transactions t ON t.guid = s.tx_guid
@@ -228,7 +234,7 @@ fn fetch_monthly_buckets(
              WHERE a.account_type != 'ROOT'
                AND t.post_date >= ?1
                AND t.post_date < min(date(?2, '+1 day'), {visible_now})
-             GROUP BY a.guid, a.name, a.description, a.account_type, a.parent_guid,
+             GROUP BY a.guid, a.name, a.description, a.code, a.account_type, a.parent_guid,
                       a.placeholder, c.mnemonic, month
              ORDER BY month, a.name"
         ))
@@ -239,12 +245,13 @@ fn fetch_monthly_buckets(
                 guid: row.get(0)?,
                 name: row.get(1)?,
                 description: row.get(2)?,
-                account_type: row.get(3)?,
-                parent_guid: row.get(4)?,
-                placeholder: row.get::<_, i64>(5)? != 0,
-                commodity: row.get(6)?,
-                month: row.get(7)?,
-                raw: row.get(8)?,
+                code: row.get(3)?,
+                account_type: row.get(4)?,
+                parent_guid: row.get(5)?,
+                placeholder: row.get::<_, i64>(6)? != 0,
+                commodity: row.get(7)?,
+                month: row.get(8)?,
+                raw: row.get(9)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -258,6 +265,7 @@ struct ConvertedBucket {
     guid: String,
     name: String,
     description: Option<String>,
+    code: Option<String>,
     account_type: String,
     parent_guid: Option<String>,
     placeholder: bool,
@@ -296,6 +304,7 @@ fn convert_buckets(
             guid: b.guid.clone(),
             name: b.name.clone(),
             description: b.description.clone(),
+            code: b.code.clone(),
             account_type: b.account_type.clone(),
             parent_guid: b.parent_guid.clone(),
             placeholder: b.placeholder,
@@ -315,6 +324,7 @@ fn roll_up_buckets(buckets: &[ConvertedBucket]) -> Vec<RawAccountBalance> {
     struct Acc<'a> {
         name: &'a str,
         description: Option<&'a str>,
+        code: Option<&'a str>,
         account_type: &'a str,
         parent_guid: Option<&'a str>,
         placeholder: bool,
@@ -325,6 +335,7 @@ fn roll_up_buckets(buckets: &[ConvertedBucket]) -> Vec<RawAccountBalance> {
         let entry = map.entry(b.guid.as_str()).or_insert(Acc {
             name: b.name.as_str(),
             description: b.description.as_deref(),
+            code: b.code.as_deref(),
             account_type: b.account_type.as_str(),
             parent_guid: b.parent_guid.as_deref(),
             placeholder: b.placeholder,
@@ -338,6 +349,7 @@ fn roll_up_buckets(buckets: &[ConvertedBucket]) -> Vec<RawAccountBalance> {
             guid: guid.to_string(),
             name: a.name.to_string(),
             description: a.description.map(|d| d.to_string()),
+            code: a.code.map(|c| c.to_string()),
             account_type: a.account_type.to_string(),
             parent_guid: a.parent_guid.map(|p| p.to_string()),
             placeholder: a.placeholder,
@@ -517,6 +529,7 @@ fn fetch_pnl_report_inner(
             account_guid: r.guid.clone(),
             account_name: r.name.clone(),
             account_description: r.description.clone(),
+            account_code: r.code.clone(),
             indent,
             current_amount: total,
             previous_amount: 0.0,

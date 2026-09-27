@@ -358,7 +358,8 @@ function toSplitDetail(tx: FixtureTx, split: FixtureSplit, index: number): Split
     commodity: acc?.commodity ?? null,
     reconciled: split.reconcileState === 'y',
     reconcileState: split.reconcileState ?? 'n',
-    accountDescription: acc?.description ?? null
+    accountDescription: acc?.description ?? null,
+    accountCode: acc?.code ?? null
   };
 }
 
@@ -864,6 +865,7 @@ function budgetActualRows(year: number): MockPayloads['fetch_budget_vs_actual'] 
         accountGuid: b.accountGuid,
         accountName: acc?.name ?? b.accountGuid,
         accountDescription: acc?.description ?? undefined,
+        accountCode: acc?.code ?? null,
         accountType: acc?.accountType ?? 'EXPENSE',
         budgetAmount: b.amount,
         actualAmount: round2(actual),
@@ -914,6 +916,7 @@ function budgetDetail(accountGuid: string, year: number): MockPayloads['fetch_bu
       accountGuid,
       accountName: acc.name,
       accountDescription: acc.description ?? undefined,
+      accountCode: acc.code,
       accountType: acc.accountType,
       year,
       amount: plan.amount,
@@ -982,6 +985,7 @@ function holdingFor(acc: FixtureAccount) {
         accountGuid: acc.guid,
         accountName: acc.name,
         accountDescription: acc.description,
+        accountCode: acc.code,
         shares: round2(shares),
         costBasis: round2(cost)
       }
@@ -1060,6 +1064,7 @@ function holdingDetail(args: Record<string, unknown>): MockPayloads['fetch_holdi
       notes: tx.notes ?? null,
       accountName: acc.name,
       accountDescription: acc.description,
+      accountCode: acc.code,
       sharesDelta: round2(sharesDelta),
       valueDelta: round2(relevant.reduce((sum, s) => sum + splitAmount(s), 0)),
       runningShares: round2(runningShares)
@@ -1119,6 +1124,7 @@ function pnlRows(
         accountGuid: a.guid,
         accountName: a.name,
         accountDescription: a.description ?? undefined,
+        accountCode: a.code,
         indent: 0,
         currentAmount,
         previousAmount,
@@ -1371,6 +1377,7 @@ function reconcileInfo(args: Record<string, unknown>): MockPayloads['fetch_recon
   return {
     accountGuid,
     accountName: acc.name,
+    accountDescription: acc.description ?? null,
     accountType: acc.accountType,
     commodity: acc.commodity,
     statementDate,
@@ -1652,6 +1659,7 @@ const handlers: HandlerMap = {
       accountGuid,
       accountName: acc?.name ?? accountGuid,
       accountDescription: acc?.description ?? undefined,
+      accountCode: acc?.code ?? null,
       accountType: acc?.accountType ?? 'EXPENSE',
       year,
       amount,
@@ -2023,19 +2031,34 @@ const handlers: HandlerMap = {
 
   // Import rules
   fetch_import_rules: () =>
-    state.importRules.map((r) => ({ ...r, accountName: account(r.accountGuid)?.name ?? '' })),
+    state.importRules.map((r) => ({
+      ...r,
+      accountName: account(r.accountGuid)?.name ?? '',
+      accountDescription: account(r.accountGuid)?.description ?? null,
+      accountCode: account(r.accountGuid)?.code ?? null
+    })),
   create_import_rule: (args) => {
     const input = args.input as Omit<ImportRuleLike, 'id'>;
     const rule = { id: state.nextImportRuleId++, ...input };
     state.importRules.push(rule);
-    return { ...rule, accountName: account(rule.accountGuid)?.name ?? '' };
+    return {
+      ...rule,
+      accountName: account(rule.accountGuid)?.name ?? '',
+      accountDescription: account(rule.accountGuid)?.description ?? null,
+      accountCode: account(rule.accountGuid)?.code ?? null
+    };
   },
   update_import_rule: (args) => {
     const input = args.input as Omit<ImportRuleLike, 'id'>;
     const rule = state.importRules.find((r) => r.id === Number(args.id));
     if (!rule) throw new Error('[mock] Unknown import rule');
     Object.assign(rule, input);
-    return { ...rule, accountName: account(rule.accountGuid)?.name ?? '' };
+    return {
+      ...rule,
+      accountName: account(rule.accountGuid)?.name ?? '',
+      accountDescription: account(rule.accountGuid)?.description ?? null,
+      accountCode: account(rule.accountGuid)?.code ?? null
+    };
   },
   delete_import_rule: (args) => {
     state.importRules = state.importRules.filter((r) => r.id !== Number(args.id));
@@ -2070,7 +2093,9 @@ const handlers: HandlerMap = {
       .filter(
         (a) =>
           a.accountType !== 'ROOT' &&
-          (a.name.toLowerCase().includes(query) || accountPath(a).toLowerCase().includes(query))
+          (a.name.toLowerCase().includes(query) ||
+            (a.description ?? '').toLowerCase().includes(query) ||
+            accountPath(a).toLowerCase().includes(query))
       )
       .slice(0, limit)
       .map((a) => ({
@@ -2078,7 +2103,8 @@ const handlers: HandlerMap = {
         name: a.name,
         fullPath: accountPath(a),
         accountType: a.accountType,
-        code: a.code
+        code: a.code,
+        description: a.description
       }));
     const transactions = visibleTxs()
       .filter(

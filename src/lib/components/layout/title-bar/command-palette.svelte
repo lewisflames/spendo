@@ -1,6 +1,7 @@
 <script lang="ts">
   import * as Command from '$lib/components/ui/command';
   import Kbd from '$lib/components/shared/kbd.svelte';
+  import AccountLabel from '$lib/features/accounts/account-label.svelte';
   import {
     PALETTE_COMMANDS,
     PALETTE_GROUPS,
@@ -238,13 +239,19 @@
                 {#each results.data.accounts as a (a.guid)}
                   <Command.Item
                     value={`account-${a.guid}`}
-                    keywords={[a.name, a.fullPath]}
+                    keywords={[a.name, a.fullPath, a.description ?? '']}
+                    title={a.description ? `${a.fullPath} · ${a.description}` : a.fullPath}
                     onSelect={() => selectAccount(a.guid)}
                   >
                     <FolderTree aria-hidden="true" />
-                    <span class="flex min-w-0 flex-1 flex-col">
-                      <span class="truncate">{a.name}</span>
-                      <span class="truncate text-xs text-muted-foreground">{a.fullPath}</span>
+                    <span class="min-w-0 flex-1">
+                      <AccountLabel
+                        name={a.name}
+                        code={a.code}
+                        description={a.description
+                          ? `${a.fullPath} · ${a.description}`
+                          : a.fullPath}
+                      />
                     </span>
                   </Command.Item>
                 {/each}

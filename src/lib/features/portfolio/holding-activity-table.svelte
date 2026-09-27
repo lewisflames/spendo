@@ -22,6 +22,7 @@
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
   import EmptyValue from '$lib/components/shared/empty-value.svelte';
+  import AccountLabel from '$lib/features/accounts/account-label.svelte';
   import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
   import { PaginationNav } from '$lib/components/shared/pagination-nav';
   import { appSettings } from '$lib/stores/settings.svelte';
@@ -150,10 +151,14 @@
               </Table.Cell>
             {/if}
             {#if cols.isVisible('account')}
-              <Table.Cell class="max-w-48 truncate py-2.5 text-xs text-muted-foreground">
-                <span title={t.accountDescription || t.accountName}
-                  >{t.accountDescription || t.accountName}</span
-                >
+              <Table.Cell class="py-2.5 text-xs text-muted-foreground">
+                <span class="block max-w-48 min-w-0">
+                  <AccountLabel
+                    name={t.accountName}
+                    description={t.accountDescription}
+                    code={t.accountCode}
+                  />
+                </span>
               </Table.Cell>
             {/if}
             {#if cols.isVisible('shares')}

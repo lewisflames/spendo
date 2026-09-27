@@ -13,6 +13,7 @@
     updateImportRule,
     type ImportRule
   } from '$lib/tauri';
+  import AccountLabel from '$lib/features/accounts/account-label.svelte';
   import { flattenAccountsForPicker } from '$lib/features/accounts/account-picker-utils';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import { errMsg } from '$lib/utils/error';
@@ -143,11 +144,12 @@
             <Badge variant="outline" class="shrink-0">
               {rule.matchType === 'equals' ? 'Exact match' : 'Contains'}
             </Badge>
-            <span
-              class="max-w-40 min-w-0 truncate text-sm text-muted-foreground"
-              title={rule.accountName}
-            >
-              {rule.accountName}
+            <span class="max-w-40 min-w-0 text-sm">
+              <AccountLabel
+                name={rule.accountName}
+                description={rule.accountDescription}
+                code={rule.accountCode}
+              />
             </span>
             <div class="flex shrink-0 items-center gap-0.5">
               <Button

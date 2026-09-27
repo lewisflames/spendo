@@ -414,10 +414,13 @@
   description="Check off cleared transactions until the difference is zero, then finish."
 >
   <div class="flex flex-col gap-6">
-    <PageHeader
-      title={res.data ? `Reconcile ${res.data.accountName}` : 'Reconcile'}
-      description="Check off cleared transactions until the difference is zero, then finish."
-    >
+    <PageHeader title={res.data ? `Reconcile ${res.data.accountName}` : 'Reconcile'}>
+      {#snippet description()}
+        {#if res.data?.accountDescription}
+          {res.data.accountDescription} &middot;
+        {/if}
+        Check off cleared transactions until the difference is zero, then finish.
+      {/snippet}
       <Button variant="outline" href={resolve('/reconcile')}>
         <ArrowLeft aria-hidden="true" class="size-4" />
         Reconcile

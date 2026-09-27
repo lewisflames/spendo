@@ -8,6 +8,7 @@
   import { dbSession } from '$lib/stores/db.svelte';
   import type { AccountNode, ChildAccountInfo } from '$lib/tauri';
   import CommodityBadge from './commodity-badge.svelte';
+  import AccountLabel from './account-label.svelte';
 
   type Row = Pick<
     AccountNode,
@@ -49,15 +50,9 @@
           <a
             class="block min-w-0 focus-visible:outline-2 focus-visible:outline-ring"
             href={resolve('/accounts/[guid]', { guid: node.guid })}
-            title={node.description ?? undefined}
           >
             <span class="flex min-w-0 items-center gap-1">
-              <span class="min-w-0 truncate font-medium">{node.description || node.name}</span>
-              {#if node.code}
-                <span class="hidden truncate text-xs text-muted-foreground lg:inline"
-                  >{node.code}</span
-                >
-              {/if}
+              <AccountLabel name={node.name} description={node.description} code={node.code} />
               <CommodityBadge commodity={node.commodity ?? null} {reportCurrency} />
             </span>
           </a>

@@ -19,6 +19,8 @@ export interface BalanceSheetRow {
   accountGuid: string;
   name: string;
   description: string | null;
+  /** Optional account code, shown as a chip next to the name. */
+  code: string | null;
   /** Depth-first indent level within its section. */
   depth: number;
   /** Placeholder-aware subtree total in the report currency. */
@@ -74,6 +76,7 @@ function flattenRows(nodes: AccountNode[], depth = 0): BalanceSheetRow[] {
               accountGuid: node.guid,
               name: node.name,
               description: node.description,
+              code: node.code,
               depth,
               amount: subtreeTotal(node)
             }
@@ -107,6 +110,7 @@ export function buildBalanceSheet(data: AccountsResult): BalanceSheet {
     accountGuid: '',
     name,
     description: null,
+    code: null,
     depth: 0,
     amount
   });

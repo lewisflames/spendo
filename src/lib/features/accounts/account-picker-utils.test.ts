@@ -31,14 +31,11 @@ const trees = [
 ];
 
 describe('flattenAccountsForPicker', () => {
-  it('exposes leaf display names with full display path labels', () => {
+  it('exposes leaf account names with full path labels and descriptions', () => {
     const opts = flattenAccountsForPicker(trees);
-    expect(opts.map((o) => o.display)).toEqual(['Expenses', 'Groceries', 'Savings']);
-    expect(opts.map((o) => o.label)).toEqual([
-      'Expenses',
-      'Expenses › Groceries',
-      'Expenses › Savings'
-    ]);
+    expect(opts.map((o) => o.display)).toEqual(['Expenses', 'Food', 'Savings']);
+    expect(opts.map((o) => o.label)).toEqual(['Expenses', 'Expenses › Food', 'Expenses › Savings']);
+    expect(opts.find((o) => o.guid === 'food')?.description).toBe('Groceries');
     expect(opts.every((o) => o.parentPath === null)).toBe(true);
   });
 

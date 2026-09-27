@@ -69,6 +69,8 @@ struct SplitData {
     reconcile_state: Option<String>,
     /// Description of the split's account (falls back to its name in the UI).
     account_description: Option<String>,
+    /// Optional code of the split's account, shown as a chip in the detail view.
+    account_code: Option<String>,
     /// Mnemonic of the split account's commodity. Drives FX conversion of the
     /// transaction total and quantity display on the detail page.
     commodity: Option<String>,
@@ -88,6 +90,7 @@ impl SplitData {
             reconciled: self.reconciled,
             reconcile_state: self.reconcile_state.clone(),
             account_description: self.account_description.clone(),
+            account_code: self.account_code.clone(),
         }
     }
 }
@@ -106,6 +109,7 @@ pub struct SplitDetail {
     pub reconciled: bool,
     pub reconcile_state: Option<String>,
     pub account_description: Option<String>,
+    pub account_code: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -404,7 +408,8 @@ fn fetch_splits_for_txns(conn: &Connection, guids: &[String]) -> Result<SplitMap
                     {} as quantity,
                     s.reconciled,
                     a.description as account_description,
-                    s.reconcile_state
+                    s.reconcile_state,
+                    a.code as account_code
              FROM splits s
              JOIN accounts a ON a.guid = s.account_guid
              JOIN commodities c ON c.guid = a.commodity_guid
@@ -440,6 +445,7 @@ fn fetch_splits_for_txns(conn: &Connection, guids: &[String]) -> Result<SplitMap
                         quantity: row.get(10)?,
                         reconciled: row.get::<_, i64>(11)? != 0,
                         account_description: row.get::<_, Option<String>>(12)?,
+                        account_code: row.get::<_, Option<String>>(14)?,
                         reconcile_state: row.get::<_, Option<String>>(13)?,
                     },
                     row.get::<_, f64>(7)?,    // signed_amount

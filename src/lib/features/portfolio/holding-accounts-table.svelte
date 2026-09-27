@@ -5,6 +5,7 @@
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
   import EmptyValue from '$lib/components/shared/empty-value.svelte';
+  import AccountLabel from '$lib/features/accounts/account-label.svelte';
   import {
     signColor,
     formatSignedCurrency,
@@ -46,10 +47,13 @@
           <Table.Cell class="py-2.5">
             <a
               href={resolve('/accounts/[guid]', { guid: acct.accountGuid })}
-              class="font-medium focus-visible:outline-2 focus-visible:outline-ring"
-              title={acct.accountName}
+              class="focus-visible:outline-2 focus-visible:outline-ring"
             >
-              {acct.accountDescription || acct.accountName}
+              <AccountLabel
+                name={acct.accountName}
+                description={acct.accountDescription}
+                code={acct.accountCode}
+              />
             </a>
           </Table.Cell>
           <Table.Cell class="py-2.5 text-right tabular-nums">

@@ -39,6 +39,7 @@
   import EmptyState from '$lib/components/shared/empty-state.svelte';
   import FilteredEmptyState from '$lib/components/shared/filtered-empty-state.svelte';
   import EmptyValue from '$lib/components/shared/empty-value.svelte';
+  import AccountLabel from '$lib/features/accounts/account-label.svelte';
   import { formatCurrency, formatSignedCurrency, signColor } from '$lib/utils/format.svelte';
   import NavRow from '$lib/components/shared/nav-row.svelte';
   import { openBudget } from '$lib/utils/navigation';
@@ -139,12 +140,16 @@
             <!-- Accessible link target for keyboard/middle-click; the row click
                  is a convenience shortcut. -->
             <a
-              class="block min-w-0 font-medium focus-visible:outline-2 focus-visible:outline-ring"
+              class="block min-w-0 focus-visible:outline-2 focus-visible:outline-ring"
               href="{resolve('/budgets/[accountGuid]', {
                 accountGuid: item.accountGuid
               })}?year={year}"
             >
-              {item.accountDescription ?? item.accountName}
+              <AccountLabel
+                name={item.accountName}
+                description={item.accountDescription ?? null}
+                code={item.accountCode}
+              />
             </a>
           </Table.Cell>
           {#if cols.isVisible('budget')}

@@ -16,6 +16,7 @@
   import { openReconcile } from '$lib/utils/navigation';
   import { dbSession } from '$lib/stores/db.svelte';
   import CommodityBadge from '$lib/features/accounts/commodity-badge.svelte';
+  import AccountLabel from '$lib/features/accounts/account-label.svelte';
   import type { ReconcilableAccount } from './reconcile-accounts';
 
   let { rows = [] }: { rows?: ReconcilableAccount[] } = $props();
@@ -45,18 +46,12 @@
           <a
             class="block min-w-0 focus-visible:outline-2 focus-visible:outline-ring"
             href={resolve('/reconcile/[guid]', { guid: row.guid })}
-            title={row.label}
           >
             <span class="flex min-w-0 items-center gap-1">
-              <span class="min-w-0 truncate font-medium">{row.display}</span>
+              <AccountLabel name={row.name} description={row.description} code={row.code} />
               {#if row.parentPath}
                 <span class="min-w-0 truncate text-xs text-muted-foreground"
                   >· {row.parentPath}</span
-                >
-              {/if}
-              {#if row.code}
-                <span class="hidden truncate text-xs text-muted-foreground lg:inline"
-                  >{row.code}</span
                 >
               {/if}
               <CommodityBadge commodity={row.commodity ?? null} {reportCurrency} />

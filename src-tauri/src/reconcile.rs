@@ -55,6 +55,7 @@ pub struct ReconcileCandidate {
 pub struct ReconcileInfo {
     pub account_guid: String,
     pub account_name: String,
+    pub account_description: Option<String>,
     pub account_type: String,
     pub commodity: Option<String>,
     pub statement_date: String,
@@ -141,6 +142,7 @@ pub struct FinishReconcileResult {
 
 struct ReconcilableAccount {
     name: String,
+    description: Option<String>,
     account_type: String,
     commodity: Option<String>,
 }
@@ -163,16 +165,24 @@ fn validate_statement_date(raw: &str) -> Result<String, AppError> {
 }
 
 fn load_reconcilable_account(conn: &Connection, guid: &str) -> Result<ReconcilableAccount, AppError> {
-    let row: Option<(String, String, i64, Option<String>)> = conn
+    let row: Option<(String, Option<String>, String, i64, Option<String>)> = conn
         .query_row(
-            "SELECT a.name, a.account_type, a.placeholder, c.mnemonic
+            "SELECT a.name, a.description, a.account_type, a.placeholder, c.mnemonic
              FROM accounts a LEFT JOIN commodities c ON c.guid = a.commodity_guid
              WHERE a.guid = ?1",
             params![guid],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
         )
         .optional()?;
-    let Some((name, account_type, placeholder, commodity)) = row else {
+    let Some((name, description, account_type, placeholder, commodity)) = row else {
         return Err(AppError::NotFound("Account not found. It may have been removed".to_string()));
     };
     if account_type == "ROOT" {
@@ -186,7 +196,7 @@ fn load_reconcilable_account(conn: &Connection, guid: &str) -> Result<Reconcilab
             "Only cash-like accounts can be reconciled. This one is {account_type}"
         )));
     }
-    Ok(ReconcilableAccount { name, account_type, commodity })
+    Ok(ReconcilableAccount { name, description, account_type, commodity })
 }
 
 /// Sum of signed split amounts for one reconcile state up to `statement_date`
@@ -540,6 +550,7 @@ fn fetch_reconcile_info_inner(
     Ok(ReconcileInfo {
         account_guid: account_guid.to_string(),
         account_name: account.name,
+        account_description: account.description,
         account_type: account.account_type,
         commodity: account.commodity,
         statement_date,

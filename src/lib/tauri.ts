@@ -134,6 +134,7 @@ export interface SplitDetail extends SplitInfo {
   /** GnuCash reconcile state: 'n' new, 'c' cleared, 'y' reconciled. */
   reconcileState?: string | null;
   accountDescription?: string | null;
+  accountCode?: string | null;
 }
 
 export interface TransactionDetail {
@@ -464,6 +465,8 @@ export interface ImportRule {
   pattern: string;
   accountGuid: string;
   accountName: string;
+  accountDescription: string | null;
+  accountCode: string | null;
 }
 
 export interface ImportRuleInput {
@@ -753,6 +756,7 @@ export interface ProfitLossRow {
   accountGuid: string;
   accountName: string;
   accountDescription?: string;
+  accountCode: string | null;
   indent: number;
   currentAmount: number;
   previousAmount: number;
@@ -831,6 +835,7 @@ interface Budget {
   accountGuid: string;
   accountName: string;
   accountDescription?: string;
+  accountCode: string | null;
   accountType: string;
   year: number;
   amount: number;
@@ -842,6 +847,7 @@ export interface BudgetActualRow {
   accountGuid: string;
   accountName: string;
   accountDescription?: string;
+  accountCode: string | null;
   accountType: string;
   budgetAmount: number;
   actualAmount: number;
@@ -918,6 +924,7 @@ interface HoldingAccount {
   accountGuid: string;
   accountName: string;
   accountDescription: string | null;
+  accountCode: string | null;
   shares: number;
   costBasis: number;
 }
@@ -964,6 +971,7 @@ export interface HoldingTransaction {
   notes?: string | null;
   accountName: string;
   accountDescription: string | null;
+  accountCode: string | null;
   sharesDelta: number;
   valueDelta: number;
   runningShares: number;
@@ -1028,6 +1036,7 @@ export interface ReconcileCandidate {
 interface ReconcileInfo {
   accountGuid: string;
   accountName: string;
+  accountDescription: string | null;
   accountType: string;
   commodity: string | null;
   statementDate: string;
@@ -1126,6 +1135,7 @@ interface SearchAccount {
   fullPath: string;
   accountType: string;
   code: string | null;
+  description: string | null;
 }
 
 interface SearchTransaction {

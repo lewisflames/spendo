@@ -23,7 +23,7 @@ export interface ReconcilableAccount {
   guid: string;
   /** Full display path, e.g. `Assets › Checking`. */
   label: string;
-  /** Leaf display name, e.g. `Checking`. */
+  /** Leaf account name, e.g. `Checking`. */
   display: string;
   /** Ancestor display path; set only when `display` is shared by several rows. */
   parentPath: string | null;
@@ -38,7 +38,7 @@ export interface ReconcilableAccount {
 }
 
 /** Flatten account trees to reconcilable accounts (cash-like, non-placeholder)
- * with leaf display names, sorted by full path, merging per-account reconcile
+ * with leaf account names, sorted by full path, merging per-account reconcile
  * progress from `fetchReconcileSummaries`. */
 export function flattenReconcilableAccounts(
   trees: AccountNode[] | null | undefined,
@@ -49,7 +49,7 @@ export function flattenReconcilableAccounts(
   const out: ReconcilableAccount[] = [];
   function walk(nodes: AccountNode[], ancestors: string[]) {
     for (const n of nodes) {
-      const display = n.description ?? n.name;
+      const display = n.name;
       const path = [...ancestors, display];
       if (isReconcilable(n.accountType, n.placeholder)) {
         const summary = statsByGuid.get(n.guid);

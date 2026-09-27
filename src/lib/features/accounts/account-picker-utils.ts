@@ -4,8 +4,12 @@ export interface PickerAccount {
   guid: string;
   /** Full display path, e.g. `Expenses › Groceries` (search, sort, tooltips). */
   label: string;
-  /** Leaf display name, e.g. `Groceries`. */
+  /** Leaf account name, e.g. `Groceries`. */
   display: string;
+  /** Optional note shown under the name; never used as the display label. */
+  description: string | null;
+  /** Optional account code, shown as a chip next to the name. */
+  code: string | null;
   /** Ancestor display path; set only when `display` is shared by several options. */
   parentPath: string | null;
   accountType: string;
@@ -35,13 +39,15 @@ export function flattenAccountsForPicker(
   const out: PickerAccount[] = [];
   function walk(nodes: AccountNode[], ancestors: string[]) {
     for (const n of nodes) {
-      const display = n.description ?? n.name;
+      const display = n.name;
       const path = [...ancestors, display];
       if (!excluded.has(n.guid) && !(hidePlaceholders && n.placeholder)) {
         out.push({
           guid: n.guid,
           label: path.join(' › '),
           display,
+          description: n.description,
+          code: n.code,
           parentPath: path.slice(0, -1).join(' › ') || null,
           accountType: n.accountType,
           placeholder: n.placeholder,

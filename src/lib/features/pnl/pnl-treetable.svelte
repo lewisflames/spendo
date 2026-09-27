@@ -74,6 +74,7 @@
         guid={row.accountGuid}
         name={row.accountName}
         description={row.accountDescription}
+        code={row.accountCode}
       />
       <Table.Cell class="py-2.5 text-right font-medium whitespace-nowrap tabular-nums">
         {fmt(row.currentAmount)}

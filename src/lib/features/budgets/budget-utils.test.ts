@@ -31,6 +31,7 @@ function budgetRow(partial: Partial<BudgetActualRow>): BudgetActualRow {
     accountGuid: 'food',
     accountName: 'Food',
     accountDescription: undefined,
+    accountCode: null,
     accountType: 'EXPENSE',
     budgetAmount: 0,
     actualAmount: 0,
@@ -93,20 +94,21 @@ describe('accountPathMap / accountNameMap', () => {
   const trees = [
     node({
       guid: 'exp',
-      description: 'Expenses',
+      name: 'Expenses',
+      description: 'Everyday spending',
       children: [node({ guid: 'food', name: 'Food', description: 'Meals' })]
     })
   ];
 
-  it('prefers descriptions and builds full paths', () => {
+  it('builds full paths from account names', () => {
     expect(accountPathMap(trees)).toEqual({
       exp: ['Expenses'],
-      food: ['Expenses', 'Meals']
+      food: ['Expenses', 'Food']
     });
   });
 
-  it('maps display names by guid', () => {
-    expect(accountNameMap(trees)).toEqual({ exp: 'Expenses', food: 'Meals' });
+  it('maps account names by guid', () => {
+    expect(accountNameMap(trees)).toEqual({ exp: 'Expenses', food: 'Food' });
   });
 
   it('returns empty maps without trees', () => {

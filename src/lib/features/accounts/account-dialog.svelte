@@ -333,7 +333,7 @@
           <Input
             id="acct-desc"
             bind:value={description}
-            placeholder="Display name"
+            placeholder="Optional note shown under the name"
             maxlength={500}
           />
         </div>
