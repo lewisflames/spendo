@@ -318,6 +318,26 @@ CREATE TABLE IF NOT EXISTS recurring_schedules (
 
 CREATE INDEX IF NOT EXISTS idx_schedules_active_due ON recurring_schedules(active, next_due_date);
 
+-- Finished reconciliation batches. Persisting the membership (not inferring it
+-- from transaction dates) is what lets Undo last statement reopen exactly the
+-- splits a Finish promoted, even when one was dated before the previous
+-- batch's last transaction. Older books without rows fall back to the date
+-- heuristic. Rows are deleted by reopen; ON DELETE CASCADE clears mappings.
+CREATE TABLE IF NOT EXISTS reconcile_batches (
+	guid TEXT PRIMARY KEY,
+	account_guid TEXT NOT NULL REFERENCES accounts(guid) ON DELETE CASCADE,
+	finished_at TEXT NOT NULL,
+	through_date TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_reconcile_batches_account ON reconcile_batches(account_guid, finished_at);
+
+CREATE TABLE IF NOT EXISTS reconcile_batch_splits (
+	batch_guid TEXT NOT NULL REFERENCES reconcile_batches(guid) ON DELETE CASCADE,
+	split_guid TEXT NOT NULL REFERENCES splits(guid) ON DELETE CASCADE,
+	PRIMARY KEY (batch_guid, split_guid)
+);
+
 -- Saved CSV import mapping presets, keyed by a hash of the normalized header
 -- row. Book-scoped convenience config, dropped by `clear_db` like any other
 -- table.
@@ -456,6 +476,8 @@ pub fn clear_db(conn: &Connection) -> Result<()> {
           DROP TABLE IF EXISTS budgets;
           DROP TABLE IF EXISTS csv_import_presets;
           DROP TABLE IF EXISTS import_rules;
+          DROP TABLE IF EXISTS reconcile_batch_splits;
+          DROP TABLE IF EXISTS reconcile_batches;
           DROP TABLE IF EXISTS prices;
           DROP TABLE IF EXISTS splits;
           DROP TABLE IF EXISTS transactions;
@@ -577,6 +599,8 @@ mod tests {
             "commodities",
             "prices",
             "recurring_schedules",
+            "reconcile_batch_splits",
+            "reconcile_batches",
             "refresh_log",
             "splits",
             "symbol_overrides",

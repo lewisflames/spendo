@@ -83,24 +83,18 @@
       {@const isChecked = checked.has(row.splitGuid)}
       {@const isDuplicate = duplicates.has(row.splitGuid)}
       <NavRow
-        onNavigate={(e) => {
-          if (e.shiftKey) onRangeSelect(row.splitGuid);
-          else onToggle(row.splitGuid, !isChecked);
+        onclickcapture={(e) => {
+          // Capture before anything inside the row acts: shift-click marks a
+          // contiguous range from the last selection, on any cell.
+          if (e.shiftKey) {
+            e.preventDefault();
+            e.stopPropagation();
+            onRangeSelect(row.splitGuid);
+          }
         }}
+        onNavigate={() => onToggle(row.splitGuid, !isChecked)}
       >
-        <Table.Cell
-          class="py-2.5"
-          title="Click to toggle · Shift-click for a range"
-          onclickcapture={(e) => {
-            // Capture stops the checkbox's own toggle before it runs, so a
-            // shift-click stays a range selection either way.
-            if (e.shiftKey) {
-              e.preventDefault();
-              e.stopPropagation();
-              onRangeSelect(row.splitGuid);
-            }
-          }}
-        >
+        <Table.Cell class="py-2.5" title="Click to toggle · Shift-click for a range">
           <Checkbox
             checked={isChecked}
             aria-label="Mark {row.description ?? row.postDate} cleared"
