@@ -62,6 +62,8 @@ pub struct Schedule {
     pub end_date: Option<String>,
     pub max_occurrences: Option<i64>,
     pub occurrences_posted: i64,
+    /// Occurrences skipped (kept in a side table; part of the cap count).
+    pub skipped_count: i64,
     pub next_due_date: Option<String>,
     pub active: bool,
     pub description: Option<String>,
@@ -105,6 +107,7 @@ struct ScheduleRow {
     end_date: Option<String>,
     max_occurrences: Option<i64>,
     occurrences_posted: i64,
+    skipped_count: i64,
     next_due_date: Option<String>,
     active: bool,
     template_json: String,
@@ -112,7 +115,9 @@ struct ScheduleRow {
 }
 
 const SELECT_COLS: &str = "guid, name, frequency, interval_mult, start_date, end_date, \
-    max_occurrences, occurrences_posted, next_due_date, active, template_json, created_at";
+    max_occurrences, occurrences_posted, \
+    COALESCE((SELECT skipped_count FROM schedule_skips k WHERE k.schedule_guid = recurring_schedules.guid), 0), \
+    next_due_date, active, template_json, created_at";
 
 fn read_row(row: &rusqlite::Row) -> rusqlite::Result<ScheduleRow> {
     Ok(ScheduleRow {
@@ -124,10 +129,11 @@ fn read_row(row: &rusqlite::Row) -> rusqlite::Result<ScheduleRow> {
         end_date: row.get(5)?,
         max_occurrences: row.get(6)?,
         occurrences_posted: row.get(7)?,
-        next_due_date: row.get(8)?,
-        active: row.get::<_, i64>(9)? != 0,
-        template_json: row.get(10)?,
-        created_at: row.get(11)?,
+        skipped_count: row.get(8)?,
+        next_due_date: row.get(9)?,
+        active: row.get::<_, i64>(10)? != 0,
+        template_json: row.get(11)?,
+        created_at: row.get(12)?,
     })
 }
 
@@ -267,6 +273,22 @@ fn parse_stored_date(raw: &str) -> Result<NaiveDate, AppError> {
         .map_err(|_| AppError::Validation(format!("Corrupt schedule date: {raw}")))
 }
 
+/// Advance a date by `steps` occurrences (the pointer position after `steps`
+/// posted/skipped occurrences). Used to resume a completed schedule at the
+/// first occurrence it never passed, instead of replaying from the start.
+fn advance_occurrences(
+    from: NaiveDate,
+    frequency: &str,
+    interval_mult: i64,
+    steps: i64,
+) -> Result<NaiveDate, AppError> {
+    let mut date = from;
+    for _ in 0..steps.max(0) {
+        date = next_occurrence(date, frequency, interval_mult)?;
+    }
+    Ok(date)
+}
+
 struct ValidatedSchedule {
     name: String,
     frequency: String,
@@ -370,15 +392,16 @@ fn validate_schedule_input_with(
 // ── Pointer helpers ──────────────────────────────────────────────────────────
 
 /// Re-apply the end-date / occurrence-count caps to a candidate pointer.
-/// Returns `None` when the schedule is completed.
+/// `passed_occurrences` is posted + skipped: a skipped occurrence consumes the
+/// same capacity as a posted one. Returns `None` when the schedule is complete.
 fn apply_caps(
     next: Option<String>,
     max_occurrences: Option<i64>,
-    occurrences_posted: i64,
+    passed_occurrences: i64,
     end_date: Option<&str>,
 ) -> Option<String> {
     if max_occurrences
-        .map(|m| occurrences_posted >= m)
+        .map(|m| passed_occurrences >= m)
         .unwrap_or(false)
     {
         return None;
@@ -393,12 +416,12 @@ fn apply_caps(
 /// an edit that extended the count cap or end date.
 fn has_room_again(
     max_occurrences: Option<i64>,
-    occurrences_posted: i64,
+    passed_occurrences: i64,
     end_date: Option<&str>,
     start_date: &str,
 ) -> bool {
     if max_occurrences
-        .map(|m| occurrences_posted >= m)
+        .map(|m| passed_occurrences >= m)
         .unwrap_or(false)
     {
         return false;
@@ -479,6 +502,7 @@ fn to_schedule_with_names(
         end_date: row.end_date,
         max_occurrences: row.max_occurrences,
         occurrences_posted: row.occurrences_posted,
+        skipped_count: row.skipped_count,
         next_due_date: row.next_due_date,
         active: row.active,
         description: template.description,
@@ -561,27 +585,41 @@ fn update_schedule_inner(
 ) -> Result<Schedule, AppError> {
     let existing = fetch_row(conn, guid)?;
     let v = validate_schedule_input(conn, &input)?;
-    // Pointer rules: never-posted schedules follow a start-date edit;
-    // otherwise the pointer is untouched (a start edit must not rewrite
-    // history-in-progress). Completed schedules restart at the new start when
-    // the edit makes room again (extended cap/end). Caps always re-apply.
+    // Pointer rules: never-touched schedules (nothing posted, nothing skipped)
+    // follow a start-date edit; otherwise the pointer is untouched (a start
+    // edit must not rewrite history-in-progress). Completed schedules restart
+    // at the new start when the edit makes room again (extended cap/end).
+    // Caps always re-apply.
+    let passed = existing.occurrences_posted + existing.skipped_count;
     let mut next = existing.next_due_date.clone();
-    if existing.occurrences_posted == 0 {
+    if passed == 0 {
         next = Some(v.start_date.clone());
     }
     if next.is_none()
         && has_room_again(
             v.max_occurrences,
-            existing.occurrences_posted,
+            passed,
             v.end_date.as_deref(),
             &v.start_date,
-        ) {
-        next = Some(v.start_date.clone());
+        )
+    {
+        // Resume at the first occurrence never passed (posted or skipped);
+        // replaying from `start_date` would duplicate history.
+        next = Some(
+            advance_occurrences(
+                parse_stored_date(&v.start_date)?,
+                &v.frequency,
+                v.interval_mult,
+                passed,
+            )?
+            .format("%Y-%m-%d")
+            .to_string(),
+        );
     }
     next = apply_caps(
         next,
         v.max_occurrences,
-        existing.occurrences_posted,
+        passed,
         v.end_date.as_deref(),
     );
     let template_json = serde_json::to_string(&v.template)
@@ -710,11 +748,13 @@ fn definition_differs(row: &ScheduleRow, v: &ValidatedSchedule) -> Result<bool, 
 
 /// Pointer rule for re-imports: forward-only, never revive a locally completed
 /// schedule, complete when the source is exhausted, and always re-apply caps.
+/// Skipped occurrences count toward the caps like posted ones.
 fn import_next_due(
     existing_next: Option<&str>,
     imported_next: Option<&str>,
     max_occurrences: Option<i64>,
     occurrences_posted: i64,
+    skipped_count: i64,
     end_date: Option<&str>,
 ) -> Option<String> {
     let candidate = match (existing_next, imported_next) {
@@ -727,7 +767,12 @@ fn import_next_due(
             }
         }
     };
-    apply_caps(Some(candidate), max_occurrences, occurrences_posted, end_date)
+    apply_caps(
+        Some(candidate),
+        max_occurrences,
+        occurrences_posted + skipped_count,
+        end_date,
+    )
 }
 
 fn schedule_merge_state(
@@ -743,6 +788,7 @@ fn schedule_merge_state(
         imported.next_due_date.as_deref(),
         v.max_occurrences,
         row.occurrences_posted,
+        row.skipped_count,
         v.end_date.as_deref(),
     );
     let changed = definition_differs(row, v)? || next != row.next_due_date;
@@ -790,6 +836,7 @@ pub(crate) fn apply_imported_schedule(
                 imported.next_due_date.as_deref(),
                 v.max_occurrences,
                 row.occurrences_posted,
+                row.skipped_count,
                 v.end_date.as_deref(),
             );
             conn.execute(
@@ -927,7 +974,7 @@ fn post_schedule_occurrence_inner(
         let next = apply_caps(
             Some(advanced),
             row.max_occurrences,
-            posted,
+            posted + row.skipped_count,
             row.end_date.as_deref(),
         );
         conn.execute(
@@ -960,16 +1007,25 @@ fn skip_schedule_occurrence_inner(
         next_occurrence(parse_stored_date(&due)?, &row.frequency, row.interval_mult)?
             .format("%Y-%m-%d")
             .to_string();
+    let skipped = row.skipped_count + 1;
     let next = apply_caps(
         Some(advanced),
         row.max_occurrences,
-        row.occurrences_posted,
+        row.occurrences_posted + skipped,
         row.end_date.as_deref(),
     );
-    conn.execute(
-        "UPDATE recurring_schedules SET next_due_date = ?1 WHERE guid = ?2",
-        params![next, guid],
-    )?;
+    with_tx_err(conn, || -> Result<(), AppError> {
+        conn.execute(
+            "INSERT INTO schedule_skips (schedule_guid, skipped_count) VALUES (?1, 1)
+             ON CONFLICT(schedule_guid) DO UPDATE SET skipped_count = skipped_count + 1",
+            params![guid],
+        )?;
+        conn.execute(
+            "UPDATE recurring_schedules SET next_due_date = ?1 WHERE guid = ?2",
+            params![next, guid],
+        )?;
+        Ok(())
+    })?;
     Ok(next)
 }
 
@@ -1271,6 +1327,53 @@ mod tests {
         let after = fetch_schedule_inner(&conn, &s.guid).unwrap();
         assert_eq!(after.next_due_date.as_deref(), Some("2024-02-01"));
         assert_eq!(after.occurrences_posted, 1);
+    }
+
+    #[test]
+    fn skips_count_toward_caps_and_survive_edits() {
+        let conn = setup();
+        let mut input = balanced_input();
+        input.max_occurrences = Some(2);
+        let s = create_schedule_inner(&conn, input.clone()).unwrap();
+
+        // First occurrence skipped: pointer advances, counter records it.
+        let next = skip_schedule_occurrence_inner(&conn, &s.guid).unwrap();
+        assert_eq!(next.as_deref(), Some("2024-02-01"));
+        let after = fetch_schedule_inner(&conn, &s.guid).unwrap();
+        assert_eq!(after.skipped_count, 1);
+        assert_eq!(after.occurrences_posted, 0);
+
+        // Second skip consumes the cap: the schedule completes.
+        let next = skip_schedule_occurrence_inner(&conn, &s.guid).unwrap();
+        assert_eq!(next, None);
+
+        // Editing without extending the cap must not replay skipped occurrences.
+        let updated = update_schedule_inner(&conn, &s.guid, input.clone()).unwrap();
+        assert_eq!(updated.next_due_date, None);
+        assert_eq!(updated.skipped_count, 2);
+
+        // Raising the cap resumes at the first unpassed occurrence (March), not
+        // at the original start date.
+        input.max_occurrences = Some(3);
+        let updated = update_schedule_inner(&conn, &s.guid, input).unwrap();
+        assert_eq!(updated.next_due_date.as_deref(), Some("2024-03-01"));
+        assert_eq!(updated.skipped_count, 2);
+    }
+
+    #[test]
+    fn posted_and_skipped_occurrences_share_the_cap() {
+        let conn = setup();
+        let mut input = balanced_input();
+        input.max_occurrences = Some(2);
+        let s = create_schedule_inner(&conn, input).unwrap();
+
+        post_schedule_occurrence_inner(&conn, &s.guid).unwrap();
+        let next = skip_schedule_occurrence_inner(&conn, &s.guid).unwrap();
+        assert_eq!(next, None);
+        assert_eq!(
+            fetch_schedule_inner(&conn, &s.guid).unwrap().skipped_count,
+            1
+        );
     }
 
     #[test]
