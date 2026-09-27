@@ -1538,7 +1538,7 @@ const handlers: HandlerMap = {
   },
   close_book: () => {
     state.bookPath = null;
-    return { hasData: false, summary: dataSummary() };
+    return { hasData: false, summary: null };
   },
   set_base_currency: (args) => {
     state.baseCurrency = String(args.currency);
@@ -2024,7 +2024,6 @@ const handlers: HandlerMap = {
       created,
       skippedDuplicates: keys.includes(1) ? 1 : 0,
       skippedErrors: 0,
-      entryId: nextId++,
       label: 'CSV import'
     };
   },

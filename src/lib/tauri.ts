@@ -285,6 +285,12 @@ interface EmptyBookResult {
   summary: DataSummary;
 }
 
+/** Closing returns no summary: the session is book-less afterwards. */
+interface CloseBookResult {
+  hasData: boolean;
+  summary: DataSummary | null;
+}
+
 export const openBook = (path: string): Promise<EmptyBookResult> =>
   invoke<EmptyBookResult>('open_book', { path });
 
@@ -295,7 +301,7 @@ export const saveBookAs = (path: string): Promise<EmptyBookResult> =>
   invoke<EmptyBookResult>('save_book_as', { path });
 
 /** Close the active book and return to the book-less placeholder. */
-export const closeBook = (): Promise<EmptyBookResult> => invoke<EmptyBookResult>('close_book');
+export const closeBook = (): Promise<CloseBookResult> => invoke<CloseBookResult>('close_book');
 
 // ── Book-scoped settings (travel with the `.spendo` file) ──
 
@@ -1183,7 +1189,7 @@ export const searchGlobal = (query: string, limitPerGroup?: number): Promise<Glo
 export type MockPayloads = {
   add_attachments: AttachmentInfo[];
   clear_app_db: void;
-  close_book: EmptyBookResult;
+  close_book: CloseBookResult;
   create_account: string;
   create_book_at: EmptyBookResult;
   create_import_rule: ImportRule;

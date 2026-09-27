@@ -19,14 +19,18 @@ export const dbBootstrapping = $state<{ value: boolean }>({ value: true });
 /**
  * Single write path for the session so every flow (bootstrap, open/new/save,
  * import, reimport) goes through one place. Pass `null` to return to the empty
- * state.
+ * state. Bumps the sequence so in-flight refreshes from the previous book are
+ * discarded instead of overwriting this state when they resolve.
  */
 export function setDbSession(summary: DataSummary | null) {
+  sessionSeq += 1;
   dbSession.value = summary ? { summary } : null;
 }
 
 let bootstrapped = false;
 let inflight: Promise<void> | null = null;
+/** Bumped by every `setDbSession`; stale async results compare against it. */
+let sessionSeq = 0;
 
 /**
  * Populate `dbSession` from the backend. Called by the layout once at startup
@@ -48,8 +52,13 @@ export function ensureDbSessionLoaded(force = false): Promise<void> {
   if (isBootstrap) {
     dbBootstrapping.value = true;
   }
+  const seq = sessionSeq;
   const p = fetchHomeData()
     .then((result) => {
+      // A book switch or close landed while this fetch was in flight; its
+      // summary belongs to the previous book and must not overwrite the new
+      // session (or revive a closed one).
+      if (seq !== sessionSeq) return;
       // A summary exists whenever a book is open, even an empty one — the
       // shell must stay so pages can show their empty states.
       setDbSession(result.summary);
@@ -85,8 +94,11 @@ export function refreshSession() {
 /** Refresh `activeBookPath` from the backend. Failures keep the previous
  * value; pages that need the path surface their own errors. */
 export async function loadActiveBook(): Promise<void> {
+  const seq = sessionSeq;
   try {
-    activeBookPath.value = (await fetchActiveBook()).path;
+    const path = (await fetchActiveBook()).path;
+    if (seq !== sessionSeq) return;
+    activeBookPath.value = path;
   } catch {
     // ignore — a later navigation retries
   }

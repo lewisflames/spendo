@@ -154,13 +154,15 @@
       <!-- KPI summary cards -->
       <HoldingKpiCards {holding} {priceCurrency} />
 
-      <SymbolOverrideDialog
-        bind:open={symbolDialogOpen}
-        commodityGuid={holdingGuid ?? ''}
-        mnemonic={holding.mnemonic}
-        currentSymbol={overrideSymbol}
-        onSave={() => void handleSymbolSave()}
-      />
+      {#key holdingGuid}
+        <SymbolOverrideDialog
+          bind:open={symbolDialogOpen}
+          commodityGuid={holdingGuid ?? ''}
+          mnemonic={holding.mnemonic}
+          currentSymbol={overrideSymbol}
+          onSave={() => void handleSymbolSave()}
+        />
+      {/key}
 
       <!-- Charts (previous data stays visible, dimmed, while refetching) -->
       <DimWrapper active={res.loading} class="grid grid-cols-1 gap-6 xl:grid-cols-2">

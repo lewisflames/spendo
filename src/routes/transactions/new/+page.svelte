@@ -77,16 +77,9 @@
       {:else}
         {#if dupRes.error}
           <ErrorCard message={dupRes.error} onRetry={() => dupRes.reload()} />
+        {:else}
+          <PageSkeleton variant="form" />
         {/if}
-        <TransactionForm
-          mode="create"
-          title="Duplicate transaction"
-          headerDescription="Both sides should balance."
-          saveLabel="Create duplicate"
-          onSaved={handleSaved}
-          onSavedAndNew={handleSavedAndNew}
-          onCancel={() => void goto(resolve('/transactions'))}
-        />
       {/if}
     {:else}
       <TransactionForm

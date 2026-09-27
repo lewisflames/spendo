@@ -10,6 +10,8 @@
       (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
     var root = document.documentElement;
     root.classList.toggle('dark', dark);
+    // Compact is the only density toggle; keep in sync with applyDensity().
+    root.classList.toggle('compact', stored.density === 'compact');
     root.style.colorScheme = dark ? 'dark' : 'light';
     if (typeof stored.locale === 'string' && stored.locale) root.lang = stored.locale;
     var accents = ['zinc', 'blue', 'emerald', 'amber', 'rose', 'violet', 'custom'];
