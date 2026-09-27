@@ -166,6 +166,66 @@ fn delete_import_rule_inner(conn: &Connection, id: i64) -> Result<(), AppError> 
     Ok(())
 }
 
+/// Move one rule one slot up (-1) or down (+1) in priority order, swapping
+/// priorities in a single transaction. Moving past either end is a no-op.
+/// Equal priorities (possible in books created before the UI guarded them) are
+/// normalized to dense 1..=n first so the move is visible.
+fn move_import_rule_inner(
+    conn: &Connection,
+    id: i64,
+    direction: i64,
+) -> Result<Vec<ImportRule>, AppError> {
+    if direction != -1 && direction != 1 {
+        return Err(AppError::Validation(
+            "Pick up or down to move a rule".to_string(),
+        ));
+    }
+    let mut indexed: Vec<(i64, i64)> = {
+        let mut stmt = conn.prepare("SELECT id, priority FROM import_rules ORDER BY priority ASC, id ASC")?;
+        let rows = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<Result<Vec<_>, _>>()?;
+        rows
+    };
+    let Some(index) = indexed.iter().position(|(rule_id, _)| *rule_id == id) else {
+        return Err(AppError::NotFound(
+            "Import rule not found. It may have been deleted".to_string(),
+        ));
+    };
+    let target = index as i64 + direction;
+    if target < 0 || target as usize >= indexed.len() {
+        return fetch_import_rules_inner(conn);
+    }
+    let target = target as usize;
+
+    with_tx_err(conn, || -> Result<(), AppError> {
+        if indexed[index].1 == indexed[target].1 {
+            for (position, (rule_id, _)) in indexed.iter().enumerate() {
+                conn.execute(
+                    "UPDATE import_rules SET priority = ?1 WHERE id = ?2",
+                    params![position as i64 + 1, rule_id],
+                )?;
+            }
+            for (position, entry) in indexed.iter_mut().enumerate() {
+                entry.1 = position as i64 + 1;
+            }
+        }
+        let current_priority = indexed[index].1;
+        let target_priority = indexed[target].1;
+        conn.execute(
+            "UPDATE import_rules SET priority = ?1 WHERE id = ?2",
+            params![target_priority, indexed[index].0],
+        )?;
+        conn.execute(
+            "UPDATE import_rules SET priority = ?1 WHERE id = ?2",
+            params![current_priority, indexed[target].0],
+        )?;
+        Ok(())
+    })?;
+
+    fetch_import_rules_inner(conn)
+}
+
 /// Snapshot of the rules, ordered by priority. Load once per CSV parse and
 /// call [`RuleMatcher::resolve`] per row instead of querying per row.
 pub(crate) struct RuleMatcher {
@@ -282,6 +342,18 @@ pub async fn delete_import_rule(state: State<'_, AppState>, id: i64) -> Result<(
     .await
 }
 
+#[tauri::command]
+pub async fn move_import_rule(
+    state: State<'_, AppState>,
+    id: i64,
+    direction: i64,
+) -> Result<Vec<ImportRule>, String> {
+    run_blocking(state.db.clone(), move |conn| {
+        move_import_rule_inner(conn, id, direction).map_err(String::from)
+    })
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -364,6 +436,47 @@ mod tests {
         assert!(create_import_rule_inner(&conn, &rule(1, "contains", "x", "reserved")).is_err());
         assert!(create_import_rule_inner(&conn, &rule(1, "contains", "x", "missing")).is_err());
         assert!(create_import_rule_inner(&conn, &rule(1, "contains", "x", "root")).is_err());
+    }
+
+    #[test]
+    fn move_swaps_priorities_and_handles_ties() {
+        let conn = setup();
+        let first = create_import_rule_inner(&conn, &rule(1, "contains", "a", "coffee")).unwrap();
+        let second =
+            create_import_rule_inner(&conn, &rule(2, "contains", "b", "groceries")).unwrap();
+        let third = create_import_rule_inner(&conn, &rule(3, "contains", "c", "coffee")).unwrap();
+
+        // Move the last rule up one slot: priorities swap, order changes.
+        let moved = move_import_rule_inner(&conn, third.id, -1).unwrap();
+        assert_eq!(
+            moved.iter().map(|r| r.id).collect::<Vec<_>>(),
+            vec![first.id, third.id, second.id]
+        );
+        assert_eq!(moved[1].priority, 2);
+        assert_eq!(moved[2].priority, 3);
+
+        // Moving the bottom rule down is a no-op, not an error.
+        let unchanged = move_import_rule_inner(&conn, second.id, 1).unwrap();
+        assert_eq!(
+            unchanged.iter().map(|r| r.id).collect::<Vec<_>>(),
+            vec![first.id, third.id, second.id]
+        );
+
+        // A legacy tie is normalized before the swap so the move is visible.
+        // Id order (first, second, third) beats the old swapped priorities.
+        conn.execute("UPDATE import_rules SET priority = 1", []).unwrap();
+        let tied = move_import_rule_inner(&conn, second.id, -1).unwrap();
+        assert_eq!(
+            tied.iter().map(|r| r.id).collect::<Vec<_>>(),
+            vec![second.id, first.id, third.id]
+        );
+        assert_eq!(
+            tied.iter().map(|r| r.priority).collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+
+        assert!(move_import_rule_inner(&conn, 999, 1).is_err());
+        assert!(move_import_rule_inner(&conn, first.id, 2).is_err());
     }
 
     #[test]

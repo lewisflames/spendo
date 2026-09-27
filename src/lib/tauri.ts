@@ -488,6 +488,10 @@ export const updateImportRule = (id: number, input: ImportRuleInput): Promise<Im
 export const deleteImportRule = (id: number): Promise<void> =>
   invoke<void>('delete_import_rule', { id });
 
+/** Move a rule one slot up (-1) or down (1); returns the reordered list. */
+export const moveImportRule = (id: number, direction: -1 | 1): Promise<ImportRule[]> =>
+  invoke<ImportRule[]>('move_import_rule', { id, direction });
+
 export const setBaseCurrency = (currency: string): Promise<EmptyBookResult> =>
   invoke<EmptyBookResult>('set_base_currency', { currency });
 
@@ -1216,6 +1220,7 @@ export type MockPayloads = {
   fetch_home_data: HomeDataResult;
   fetch_import_rules: ImportRule[];
   fetch_nav_badges: NavBadges;
+  move_import_rule: ImportRule[];
   fetch_nav_roots: NavRoot[];
   fetch_pnl_report: ProfitLossReport;
   fetch_pnl_trend: PnlTrendPoint[];

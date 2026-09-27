@@ -10,7 +10,7 @@
     deleteImportRule,
     fetchAccounts,
     fetchImportRules,
-    updateImportRule,
+    moveImportRule,
     type ImportRule
   } from '$lib/tauri';
   import AccountLabel from '$lib/features/accounts/account-label.svelte';
@@ -54,26 +54,16 @@
     dialogOpen = true;
   }
 
-  function ruleInput(rule: ImportRule, priority: number) {
-    return {
-      priority,
-      matchType: rule.matchType,
-      pattern: rule.pattern,
-      accountGuid: rule.accountGuid
-    };
-  }
-
   async function moveRule(index: number, direction: -1 | 1) {
     if (movingId !== null || deletingId !== null) return;
     const current = rules[index];
     const adjacent = rules[index + direction];
     if (!current || !adjacent) return;
-    // Equal priorities fall back to the id tie-break, so a swap wouldn’t move.
-    if (current.priority === adjacent.priority) return;
     movingId = current.id;
     try {
-      await updateImportRule(current.id, ruleInput(current, adjacent.priority));
-      await updateImportRule(adjacent.id, ruleInput(adjacent, current.priority));
+      // One transactional backend swap: a half-applied pair can no longer
+      // leave both rules at the same priority.
+      await moveImportRule(current.id, direction);
       rulesRes.reload();
     } catch (e: unknown) {
       toast.error(errMsg(e, 'We couldn’t reorder your rules. Please try again'));
@@ -233,6 +223,6 @@
   bind:open={dialogOpen}
   options={pickerOptions}
   rule={editingRule}
-  nextPriority={rules.length + 1}
+  nextPriority={rules.reduce((max, rule) => Math.max(max, rule.priority), 0) + 1}
   onSaved={() => rulesRes.reload()}
 />

@@ -2068,6 +2068,24 @@ const handlers: HandlerMap = {
     state.importRules = state.importRules.filter((r) => r.id !== Number(args.id));
     return undefined;
   },
+  move_import_rule: (args) => {
+    const ordered = [...state.importRules].sort((a, b) => a.priority - b.priority || a.id - b.id);
+    const index = ordered.findIndex((r) => r.id === Number(args.id));
+    if (index < 0) throw new Error('[mock] Unknown import rule');
+    const target = index + Number(args.direction);
+    if (target >= 0 && target < ordered.length) {
+      const current = ordered[index];
+      const adjacent = ordered[target];
+      if (current.priority === adjacent.priority) {
+        ordered.forEach((r, i) => (r.priority = i + 1));
+      }
+      const swap = current.priority;
+      current.priority = adjacent.priority;
+      adjacent.priority = swap;
+    }
+    state.importRules = ordered;
+    return handlers.fetch_import_rules({});
+  },
 
   // Exports (written straight to disk by the backend). CSV files are no-ops in
   // the browser mock; the GnuCash export reports fixture counts so its toast
