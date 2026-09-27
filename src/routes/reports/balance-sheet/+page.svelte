@@ -9,8 +9,7 @@
   import PageSkeleton from '$lib/components/shared/page-skeleton.svelte';
   import MissingFxWarning from '$lib/features/reports/missing-fx-warning.svelte';
   import BalanceSheetStatement from '$lib/features/reports/balance-sheet-statement.svelte';
-  import BalanceTree from '$lib/features/accounts/balance-tree.svelte';
-  import { balanceSheetTrees, buildBalanceSheet } from '$lib/features/reports/balance-sheet';
+  import { buildBalanceSheet } from '$lib/features/reports/balance-sheet';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import { formatSessionCurrency } from '$lib/utils/format.svelte';
 
@@ -21,7 +20,6 @@
   });
 
   let sheet = $derived(res.data ? buildBalanceSheet(res.data) : null);
-  let trees = $derived(balanceSheetTrees(res.data?.trees ?? []));
   let balanced = $derived(res.data !== null && Math.abs(res.data.balanceCheck) < 0.005);
 </script>
 
@@ -52,10 +50,6 @@
       {:else}
         <DimWrapper active={res.loading}>
           <BalanceSheetStatement {sheet} />
-        </DimWrapper>
-
-        <DimWrapper active={res.loading}>
-          <BalanceTree data={trees} loading={res.loading} />
         </DimWrapper>
 
         {#if !res.loading && !res.error}

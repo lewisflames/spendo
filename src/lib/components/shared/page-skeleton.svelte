@@ -71,15 +71,6 @@
       </Card.Root>
     {/each}
   </div>
-  <!-- Mirrors the balance tree card below the statement. -->
-  <Card.Root>
-    <Card.Header>
-      <Skeleton class="h-5 w-40" />
-    </Card.Header>
-    <Card.Content>
-      <Skeleton class="mx-auto h-120 w-full max-w-160" />
-    </Card.Content>
-  </Card.Root>
 {:else if variant === 'transactions'}
   <div class="flex flex-col gap-4">
     <TableSkeleton cols={3} />
