@@ -22,6 +22,27 @@ pub struct AppState {
 /// books (which share table names like `accounts`/`splits`) and random SQLite.
 pub const SPENDO_APP_ID: i32 = 0x5350_4e44; // 'SPND'
 
+impl AppState {
+    /// Reject an export/attachment target that resolves to the active book.
+    /// Those writes use `std::fs::write`, which truncates — exporting onto the
+    /// live `.spendo` file would destroy the book.
+    pub fn ensure_not_active_book(&self, target: &Path) -> Result<(), AppError> {
+        let active = self
+            .db_path
+            .lock()
+            .map_err(|e| AppError::Validation(e.to_string()))?
+            .clone();
+        if let Some(active) = active {
+            if crate::utils::same_path(&active, target) {
+                return Err(AppError::Validation(
+                    "Choose a file other than the open book".to_string(),
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
 /// User-data tables whose names may be interpolated into SQL by the import
 /// orphan sweep. Interpolating table names into SQL is only safe through this
 /// allowlist — never inline a table name without `validate_data_table`.

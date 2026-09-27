@@ -1,6 +1,7 @@
 use rusqlite::Connection;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use tauri::State;
 
 use crate::db::{run_blocking, run_io, AppError, AppState};
@@ -475,6 +476,9 @@ pub async fn export_transactions_csv(
 ) -> Result<(), String> {
     let delimiter = validate_delimiter(&input.delimiter).map_err(String::from)?;
     validate_export_path(&input.path).map_err(String::from)?;
+    state
+        .ensure_not_active_book(&PathBuf::from(input.path.trim()))
+        .map_err(String::from)?;
     let locale = validate_date_options(
         &input.date_format,
         input.date_parts.as_deref(),
@@ -502,6 +506,9 @@ pub async fn export_accounts_csv(
 ) -> Result<(), String> {
     let delimiter = validate_delimiter(&input.delimiter).map_err(String::from)?;
     validate_export_path(&input.path).map_err(String::from)?;
+    state
+        .ensure_not_active_book(&PathBuf::from(input.path.trim()))
+        .map_err(String::from)?;
 
     let rows = run_blocking(state.db.clone(), fetch_export_accounts_inner).await?;
     let cells: Vec<Vec<String>> = rows.iter().map(account_row_cells).collect();

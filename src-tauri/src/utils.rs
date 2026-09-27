@@ -290,6 +290,17 @@ pub fn validate_iso_date(value: &str) -> Result<String, String> {
     Ok(normalized)
 }
 
+/// Whether two paths resolve to the same file. Falls back to a literal
+/// comparison for paths that don't exist yet (the common case for an export
+/// target). Used before any truncating write to refuse overwriting the live
+/// `.spendo` book.
+pub fn same_path(a: &std::path::Path, b: &std::path::Path) -> bool {
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
+}
+
 /// Validate that a path points at an existing `.gnucash` file.
 pub fn validate_gnucash_path(path: &str) -> Result<(), String> {
     let p = std::path::Path::new(path);

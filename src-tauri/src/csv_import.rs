@@ -170,11 +170,19 @@ fn validate_csv_path(path: &str) -> Result<PathBuf, AppError> {
 
 fn read_file_bytes(path: &str) -> Result<Vec<u8>, AppError> {
     let p = validate_csv_path(path)?;
-    let bytes = std::fs::read(&p).map_err(|e| {
-        AppError::Validation(format!("We couldn't read that CSV file: {}", e))
-    })?;
+    // Read at most one byte past the cap so an oversized file is rejected
+    // without materializing it in memory (`std::fs::read` allocates first).
+    let file = std::fs::File::open(&p)
+        .map_err(|e| AppError::Validation(format!("We couldn't read that CSV file: {}", e)))?;
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    file.take(MAX_FILE_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| AppError::Validation(format!("We couldn't read that CSV file: {}", e)))?;
     if bytes.is_empty() {
-        return Err(AppError::Validation("That CSV file is empty. Pick one with rows in it".to_string()));
+        return Err(AppError::Validation(
+            "That CSV file is empty. Pick one with rows in it".to_string(),
+        ));
     }
     if bytes.len() > MAX_FILE_BYTES {
         return Err(AppError::Validation(
@@ -324,16 +332,18 @@ fn parse_records(text: &str, delimiter: u8) -> Result<Vec<Vec<String>>, AppError
             continue;
         }
         out.push(cells);
+        // Stop consuming the reader as soon as the cap is exceeded instead of
+        // materializing every remaining record first.
+        if out.len() > MAX_ROWS + 1 {
+            return Err(AppError::Validation(format!(
+                "Too many rows (max {MAX_ROWS})"
+            )));
+        }
     }
     if out.is_empty() {
         return Err(AppError::Validation(
             "CSV has no data rows".to_string(),
         ));
-    }
-    if out.len() > MAX_ROWS + 1 {
-        return Err(AppError::Validation(format!(
-            "Too many rows (max {MAX_ROWS})"
-        )));
     }
     Ok(out)
 }
