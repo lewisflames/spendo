@@ -22,6 +22,7 @@ pub struct HoldingAccount {
     pub account_guid: String,
     pub account_name: String,
     pub account_description: Option<String>,
+    pub account_code: Option<String>,
     pub shares: f64,
     pub cost_basis: f64,
 }
@@ -92,6 +93,7 @@ pub struct HoldingTransaction {
     pub notes: Option<String>,
     pub account_name: String,
     pub account_description: Option<String>,
+    pub account_code: Option<String>,
     pub shares_delta: f64,
     pub value_delta: f64,
     /// Cumulative share balance after this transaction (ascending date order),
@@ -120,6 +122,7 @@ struct HoldingSplit {
     account_guid: String,
     account_name: String,
     account_description: Option<String>,
+    account_code: Option<String>,
     shares: f64,
     cost: f64,
 }
@@ -160,6 +163,7 @@ fn load_holding_splits(
     let mut sql = format!(
         "SELECT a.commodity_guid, c.mnemonic, c.fullname, c.namespace,
 				s.account_guid, a.name AS account_name, a.description AS account_description,
+				a.code AS account_code,
 				SUM(CAST(s.quantity_num AS REAL) / CAST(s.quantity_denom AS REAL)) AS shares,
 				SUM(CAST(s.value_num AS REAL) / CAST(s.value_denom AS REAL)) AS cost
 		 FROM splits s
@@ -190,8 +194,9 @@ fn load_holding_splits(
                 account_guid: row.get(4)?,
                 account_name: row.get(5)?,
                 account_description: row.get(6)?,
-                shares: row.get(7)?,
-                cost: row.get(8)?,
+                account_code: row.get(7)?,
+                shares: row.get(8)?,
+                cost: row.get(9)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -353,6 +358,7 @@ fn build_commodity_groups(
             account_guid: r.account_guid.clone(),
             account_name: r.account_name.clone(),
             account_description: r.account_description.clone(),
+            account_code: r.account_code.clone(),
             shares: r.shares,
             cost_basis: cost_converted,
         });
@@ -1187,6 +1193,7 @@ struct HoldingTxRow {
     notes: Option<String>,
     account_name: String,
     account_description: Option<String>,
+    account_code: Option<String>,
     shares_delta: f64,
     value_delta: f64,
 }
@@ -1204,9 +1211,10 @@ fn fetch_holding_transactions(
     let mut sql = format!(
         "SELECT t.guid, t.post_date, t.description, t.num, t.notes,
 					MIN(a.name) AS account_name,
-					-- Description of the MIN(name) account: ordering by the combined
-					-- key picks the same row, so name and description stay paired.
-					MIN(a.name || CHAR(31) || IFNULL(a.description, '')) AS account_key,
+					-- Description and code of the MIN(name) account: ordering by the
+					-- combined key picks the same row, so name, description and code
+					-- stay paired.
+					MIN(a.name || CHAR(31) || IFNULL(a.description, '') || CHAR(31) || IFNULL(a.code, '')) AS account_key,
 					SUM({}) AS shares_delta,
 					SUM({}) AS value_delta
 			 FROM splits s
@@ -1240,10 +1248,16 @@ fn fetch_holding_transactions(
         .query_map(sql::param_refs(&params).as_slice(), |row| {
             let account_name: String = row.get(5)?;
             let account_key: String = row.get(6)?;
-            let account_description = account_key
-                .split_once('\u{1f}')
-                .map(|(_, d)| d.to_string())
-                .filter(|d| !d.is_empty());
+            let mut key_parts = account_key.split('\u{1f}');
+            let _name = key_parts.next();
+            let account_description = key_parts
+                .next()
+                .filter(|d| !d.is_empty())
+                .map(|d| d.to_string());
+            let account_code = key_parts
+                .next()
+                .filter(|c| !c.is_empty())
+                .map(|c| c.to_string());
             Ok(HoldingTxRow {
                 guid: row.get(0)?,
                 post_date: row.get(1)?,
@@ -1252,6 +1266,7 @@ fn fetch_holding_transactions(
                 notes: row.get(4)?,
                 account_name,
                 account_description,
+                account_code,
                 shares_delta: row.get(7)?,
                 value_delta: row.get(8)?,
             })
@@ -1294,6 +1309,7 @@ fn fetch_holding_transactions(
                 notes: r.notes,
                 account_name: r.account_name,
                 account_description: r.account_description,
+                account_code: r.account_code,
                 shares_delta: r.shares_delta,
                 value_delta: r.value_delta,
                 running_shares,

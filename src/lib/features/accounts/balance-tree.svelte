@@ -66,7 +66,12 @@
   }
 
   function nodeLabel(node: HierarchyPointNode<TreeDatum>): string {
-    return node.data.description || node.data.name;
+    return node.data.name;
+  }
+
+  function nodeAriaLabel(node: HierarchyPointNode<TreeDatum>): string {
+    const { name, description } = node.data;
+    return description ? `${name} — ${description}` : name;
   }
 
   function nodeBalance(node: HierarchyNode<TreeDatum>): number {
@@ -114,7 +119,7 @@
                         {#each nodes as node (node.data.guid ?? 'root')}
                           {@const r = 10}
                           {@const color = nodeColor(node)}
-                          {@const label = nodeLabel(node)}
+                          {@const label = nodeAriaLabel(node)}
                           {@const x = node.y * Math.sin(node.x) - r}
                           {@const y = -node.y * Math.cos(node.x) - r}
                           <Group
@@ -151,12 +156,17 @@
                 <ChartTooltip.Root variant="none">
                   {#snippet children({ data: node })}
                     <div
-                      class="flex gap-2 rounded-lg bg-popover p-2.5 text-xs text-popover-foreground shadow-md ring-1 ring-foreground/10"
+                      class="flex flex-col gap-0.5 rounded-lg bg-popover p-2.5 text-xs text-popover-foreground shadow-md ring-1 ring-foreground/10"
                     >
-                      <div class="font-medium text-muted-foreground">{nodeLabel(node)}</div>
-                      <span class="font-medium tabular-nums"
-                        >{fmt(clampZero(nodeBalance(node)))}</span
-                      >
+                      <div class="flex gap-2">
+                        <div class="font-medium text-muted-foreground">{nodeLabel(node)}</div>
+                        <span class="font-medium tabular-nums"
+                          >{fmt(clampZero(nodeBalance(node)))}</span
+                        >
+                      </div>
+                      {#if node.data.description && node.data.description !== node.data.name}
+                        <div class="text-muted-foreground">{node.data.description}</div>
+                      {/if}
                     </div>
                   {/snippet}
                 </ChartTooltip.Root>

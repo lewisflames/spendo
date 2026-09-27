@@ -2,18 +2,22 @@
   import * as Table from '$lib/components/ui/table';
   import { resolve } from '$app/paths';
   import { treeIndentStyle } from '$lib/utils';
+  import AccountLabel from '$lib/features/accounts/account-label.svelte';
 
   let {
     depth,
     guid,
     name,
-    description
+    description,
+    code
   }: {
     depth: number;
     /** Empty for synthetic rows (renders plain text, no account link). */
     guid: string;
     name: string;
     description?: string | null;
+    /** Optional account code, shown as a small chip after the name. */
+    code?: string | null;
   } = $props();
 </script>
 
@@ -22,14 +26,13 @@
     {#if guid}
       <a
         href={resolve('/accounts/[guid]', { guid })}
-        title={description ?? name}
-        class="block min-w-0 truncate text-sm font-medium focus-visible:outline-2 focus-visible:outline-ring"
+        class="block min-w-0 text-sm focus-visible:outline-2 focus-visible:outline-ring"
       >
-        {description ?? name}
+        <AccountLabel {name} {description} {code} />
       </a>
     {:else}
-      <span title={description ?? name} class="min-w-0 truncate text-sm font-medium">
-        {description ?? name}
+      <span class="min-w-0 text-sm">
+        <AccountLabel {name} {description} {code} />
       </span>
     {/if}
   </div>

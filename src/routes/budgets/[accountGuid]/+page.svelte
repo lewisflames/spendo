@@ -83,11 +83,9 @@
   let accountNames = $derived(accountNameMap(accountsData?.trees));
 
   let accountName = $derived(
-    budget?.accountDescription ??
-      budget?.accountName ??
-      (accountGuid ? accountNames[accountGuid] : undefined) ??
-      'Budget'
+    budget?.accountName ?? (accountGuid ? accountNames[accountGuid] : undefined) ?? 'Budget'
   );
+  let accountDescription = $derived(budget?.accountDescription ?? null);
 
   function handleSaveSuccess(message = 'Annual budget saved') {
     res.reload();
@@ -110,7 +108,10 @@
 
 <BookGate title="Budget" description="Yearly budget for this account">
   <div class="flex flex-col gap-6">
-    <PageHeader title={accountName} description="Yearly budget for this account">
+    <PageHeader
+      title={accountName}
+      description={accountDescription ?? 'Yearly budget for this account'}
+    >
       <Button variant="outline" href={resolve('/budgets')}>
         <ArrowLeft aria-hidden="true" class="size-4" />
         Budgets

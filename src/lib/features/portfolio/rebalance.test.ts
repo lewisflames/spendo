@@ -27,6 +27,7 @@ function holding(
         accountGuid: `${commodityGuid}-account`,
         accountName: 'Broker',
         accountDescription: null,
+        accountCode: null,
         shares: marketValue / 10,
         costBasis: marketValue
       }

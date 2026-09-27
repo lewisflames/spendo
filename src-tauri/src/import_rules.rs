@@ -17,6 +17,8 @@ pub struct ImportRule {
     pub pattern: String,
     pub account_guid: String,
     pub account_name: String,
+    pub account_description: Option<String>,
+    pub account_code: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -52,7 +54,7 @@ fn validate_rule_input(conn: &Connection, input: &ImportRuleInput) -> Result<(),
 fn fetch_rule(conn: &Connection, id: i64) -> Result<ImportRule, AppError> {
     conn.query_row(
         "SELECT r.id, r.priority, r.match_type, r.pattern, r.account_guid,
-                COALESCE(a.name, '')
+                COALESCE(a.name, ''), a.description, a.code
          FROM import_rules r
          LEFT JOIN accounts a ON a.guid = r.account_guid
          WHERE r.id = ?1",
@@ -65,6 +67,8 @@ fn fetch_rule(conn: &Connection, id: i64) -> Result<ImportRule, AppError> {
                 pattern: row.get(3)?,
                 account_guid: row.get(4)?,
                 account_name: row.get(5)?,
+                account_description: row.get(6)?,
+                account_code: row.get(7)?,
             })
         },
     )
@@ -77,7 +81,7 @@ fn fetch_import_rules_inner(conn: &Connection) -> Result<Vec<ImportRule>, AppErr
     let mut stmt = conn
         .prepare(
             "SELECT r.id, r.priority, r.match_type, r.pattern, r.account_guid,
-                    COALESCE(a.name, '')
+                    COALESCE(a.name, ''), a.description, a.code
              FROM import_rules r
              LEFT JOIN accounts a ON a.guid = r.account_guid
              ORDER BY r.priority ASC, r.id ASC",
@@ -92,6 +96,8 @@ fn fetch_import_rules_inner(conn: &Connection) -> Result<Vec<ImportRule>, AppErr
                 pattern: row.get(3)?,
                 account_guid: row.get(4)?,
                 account_name: row.get(5)?,
+                account_description: row.get(6)?,
+                account_code: row.get(7)?,
             })
         })
         .map_err(AppError::from)?

@@ -45,6 +45,7 @@
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import NavRow from '$lib/components/shared/nav-row.svelte';
   import TransactionAttachments from '$lib/features/transactions/transaction-attachments.svelte';
+  import AccountLabel from '$lib/features/accounts/account-label.svelte';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import { openAccount, openTransaction } from '$lib/utils/navigation';
 
@@ -208,10 +209,13 @@
                 <Table.Cell class="py-2.5 font-medium">
                   <a
                     href={resolve('/accounts/[guid]', { guid: split.accountGuid })}
-                    class="focus-visible:outline-2 focus-visible:outline-ring"
-                    title={split.accountName}
+                    class="inline-flex items-center focus-visible:outline-2 focus-visible:outline-ring"
                   >
-                    {split.accountDescription || split.accountName}
+                    <AccountLabel
+                      name={split.accountName}
+                      description={split.accountDescription}
+                      code={split.accountCode}
+                    />
                   </a>
                   <Badge variant="outline" class="ml-1.5 text-[10px] leading-none">
                     {split.accountType}

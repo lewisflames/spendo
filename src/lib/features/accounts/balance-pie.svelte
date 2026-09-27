@@ -26,7 +26,7 @@
         const abs = Math.abs(clampZero(c.balance));
         return {
           key: c.guid,
-          label: c.description ?? c.name,
+          label: c.name,
           value: abs,
           color: TYPE_COLOR[c.accountType] ?? 'var(--color-muted-foreground)',
           sharePct: accountBalance > 0 ? (abs / accountBalance) * 100 : null
@@ -39,8 +39,8 @@
     return (accountBalance / Math.abs(clampZero(parent.balance))) * 100;
   });
 
-  let parentLabel = $derived(parent?.description ?? parent?.name ?? '');
-  let selfLabel = $derived(node?.description ?? node?.name ?? '');
+  let parentLabel = $derived(parent?.name ?? '');
+  let selfLabel = $derived(node?.name ?? '');
   // Top-level accounts have no parent: show 100% relative to itself so the
   // donut hole is never empty for a meaningful balance.
   let centerLabel = $derived(

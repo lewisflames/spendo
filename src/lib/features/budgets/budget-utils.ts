@@ -42,12 +42,13 @@ export function budgetYearBounds(
 
 export function flattenExpenseAccounts(
   nodes: AccountNode[]
-): { guid: string; name: string; description: string | null }[] {
-  const result: { guid: string; name: string; description: string | null }[] = [];
+): { guid: string; name: string; description: string | null; code: string | null }[] {
+  const result: { guid: string; name: string; description: string | null; code: string | null }[] =
+    [];
   function walk(list: AccountNode[]) {
     for (const n of list) {
       if (!n.placeholder && n.accountType === 'EXPENSE') {
-        result.push({ guid: n.guid, name: n.name, description: n.description });
+        result.push({ guid: n.guid, name: n.name, description: n.description, code: n.code });
       }
       if (n.children.length > 0) walk(n.children);
     }
@@ -56,14 +57,13 @@ export function flattenExpenseAccounts(
   return result;
 }
 
-/** Full display path per account guid, e.g. `['Expenses','Food']`. */
+/** Full account path per guid, e.g. `['Expenses','Food']`. */
 export function accountPathMap(trees: AccountNode[] | undefined): Record<string, string[]> {
   const map: Record<string, string[]> = {};
   if (!trees) return map;
   function walk(nodes: AccountNode[], ancestors: string[]) {
     for (const n of nodes) {
-      const display = n.description ?? n.name;
-      const path = [...ancestors, display];
+      const path = [...ancestors, n.name];
       map[n.guid] = path;
       walk(n.children, path);
     }
@@ -72,13 +72,13 @@ export function accountPathMap(trees: AccountNode[] | undefined): Record<string,
   return map;
 }
 
-/** Display name per account guid (description preferred). */
+/** Account name per guid. */
 export function accountNameMap(trees: AccountNode[] | undefined): Record<string, string> {
   const map: Record<string, string> = {};
   if (!trees) return map;
   function walk(nodes: AccountNode[]) {
     for (const n of nodes) {
-      map[n.guid] = n.description ?? n.name;
+      map[n.guid] = n.name;
       walk(n.children);
     }
   }

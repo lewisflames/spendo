@@ -20,6 +20,7 @@ pub struct SearchAccount {
     pub full_path: String,
     pub account_type: String,
     pub code: Option<String>,
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -74,7 +75,7 @@ fn search_accounts_inner(
 ) -> Result<Vec<SearchAccount>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT guid, name, account_type, code
+            "SELECT guid, name, account_type, code, description
              FROM accounts
              WHERE account_type != 'ROOT'
                AND (name LIKE '%' || ?1 || '%' ESCAPE '\\'
@@ -84,9 +85,15 @@ fn search_accounts_inner(
              LIMIT ?2",
         )
         .map_err(|e| e.to_string())?;
-    let rows: Vec<(String, String, String, Option<String>)> = stmt
+    let rows: Vec<(String, String, String, Option<String>, Option<String>)> = stmt
         .query_map(rusqlite::params![like, limit], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+            ))
         })
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
@@ -95,7 +102,7 @@ fn search_accounts_inner(
     let metas = tree::load_account_metas(conn)?;
     Ok(rows
         .into_iter()
-        .map(|(guid, name, account_type, code)| {
+        .map(|(guid, name, account_type, code, description)| {
             let full_path = tree::full_account_path(&guid, &metas, " : ");
             SearchAccount {
                 guid,
@@ -103,6 +110,7 @@ fn search_accounts_inner(
                 full_path,
                 account_type,
                 code,
+                description,
             }
         })
         .collect())

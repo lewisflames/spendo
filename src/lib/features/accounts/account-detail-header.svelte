@@ -15,8 +15,13 @@
   } = $props();
 </script>
 
-<PageHeader title={account.description ?? account.name}>
+<PageHeader title={account.name}>
   {#snippet description()}
+    {#if account.description}
+      {account.description} ·
+    {/if}
+    {#if account.code}{account.code} ·
+    {/if}
     {account.accountType}
     {#if account.placeholder}· Placeholder{/if}
     {#if account.descendantsCount > 0}

@@ -39,6 +39,7 @@
       guid={row.accountGuid}
       name={row.name}
       description={row.description}
+      code={row.code}
     />
     <Table.Cell class="py-2.5 text-right font-medium whitespace-nowrap tabular-nums">
       {fmt(clampZero(row.amount))}
@@ -48,7 +49,13 @@
 
 {#snippet syntheticRow(row: BalanceSheetRow)}
   <Table.Row class="hover:bg-transparent">
-    <ReportAccountCell depth={row.depth} guid="" name={row.name} description={row.description} />
+    <ReportAccountCell
+      depth={row.depth}
+      guid=""
+      name={row.name}
+      description={row.description}
+      code={row.code}
+    />
     <Table.Cell class="py-2.5 text-right font-medium whitespace-nowrap tabular-nums">
       {fmt(clampZero(row.amount))}
     </Table.Cell>

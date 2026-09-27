@@ -159,11 +159,7 @@
 </script>
 
 <svelte:head>
-  <title
-    >{res.data
-      ? `${res.data.account.description ?? res.data.account.name} · Spendo`
-      : 'Account · Spendo'}</title
-  >
+  <title>{res.data ? `${res.data.account.name} · Spendo` : 'Account · Spendo'}</title>
   <meta name="description" content="What’s come and gone for this account." />
 </svelte:head>
 
