@@ -1476,6 +1476,9 @@ fn apply_merge(
 
 // ── Import ──────────────────────────────────────────────────────────────────
 
+/// Path-based import for tests; the `#[tauri::command]` reads the source
+/// before taking the DB lock and calls [`import_source_inner`].
+#[cfg(test)]
 pub(crate) fn import_gnucash_inner(
     dest_conn: &Connection,
     source_path: &str,
@@ -1485,10 +1488,19 @@ pub(crate) fn import_gnucash_inner(
 ) -> Result<ImportResult, AppError> {
     let source = connect_source_db(&std::path::PathBuf::from(source_path))
         .map_err(|e| format!("Failed to open source DB: {}", e))?;
-
-    init_db(dest_conn).map_err(|e| format!("Failed to init dest DB: {}", e))?;
-
     let src = read_source_data(&source)?;
+    import_source_inner(dest_conn, src, _filename, delete_orphans)
+}
+
+/// Merge an already-read source into the destination. Callers read the source
+/// **before** taking the destination DB lock; this is the lock-holding half.
+fn import_source_inner(
+    dest_conn: &Connection,
+    src: SourceData,
+    _filename: &str,
+    delete_orphans: bool,
+) -> Result<ImportResult, AppError> {
+    init_db(dest_conn).map_err(|e| format!("Failed to init dest DB: {}", e))?;
 
     // The orphan sweep treats the source as authoritative and deletes rows it
     // doesn't cover, so an empty source set (`NOT IN (empty)`) would wipe the
@@ -1657,20 +1669,30 @@ pub async fn preview_gnucash_import(
     filename: String,
 ) -> Result<GnuCashPreview, String> {
     let generation = state.book_generation.load(std::sync::atomic::Ordering::SeqCst);
-    let hash_path = path.clone();
-    let sha256 = db::run_io(move || {
-        utils::validate_gnucash_path(&hash_path)?;
-        file_sha256(&hash_path)
+    // Hash and read the source on a blocking thread before the DB lock: the
+    // digest and the data come from the same file state, and a slow source
+    // book cannot stall other commands.
+    let read_path = path.clone();
+    let (sha256, src) = db::run_io(move || {
+        utils::validate_gnucash_path(&read_path)?;
+        let sha = file_sha256(&read_path)?;
+        let source = connect_source_db(&std::path::PathBuf::from(&read_path))
+            .map_err(|e| format!("Failed to open source DB: {}", e))?;
+        let src = read_source_data(&source)?;
+        Ok((sha, src))
     })
     .await?;
     let generation_handle = state.book_generation.clone();
     db::run_blocking(state.db.clone(), move |conn| {
         db::ensure_same_book(&generation_handle, generation)?;
-        preview_gnucash_inner(conn, &path, &filename, &sha256).map_err(String::from)
+        preview_source_inner(conn, src, &path, &filename, &sha256).map_err(String::from)
     })
     .await
 }
 
+/// Path-based preview for tests; the command reads the source before taking
+/// the DB lock and calls [`preview_source_inner`].
+#[cfg(test)]
 fn preview_gnucash_inner(
     dest_conn: &Connection,
     source_path: &str,
@@ -1680,6 +1702,16 @@ fn preview_gnucash_inner(
     let source = connect_source_db(&std::path::PathBuf::from(source_path))
         .map_err(|e| format!("Failed to open source DB: {}", e))?;
     let src = read_source_data(&source)?;
+    preview_source_inner(dest_conn, src, source_path, filename, sha256)
+}
+
+fn preview_source_inner(
+    dest_conn: &Connection,
+    src: SourceData,
+    source_path: &str,
+    filename: &str,
+    sha256: &str,
+) -> Result<GnuCashPreview, AppError> {
     if src.accounts.is_empty() {
         return Err(AppError::Validation(
             "Source book has no accounts. Nothing to import".to_string(),
@@ -1719,11 +1751,17 @@ pub async fn import_gnucash(
     // Capture the active book before any await: the merge must never land in a
     // book the user switched to while the file was being hashed.
     let generation = state.book_generation.load(std::sync::atomic::Ordering::SeqCst);
-    // Validate + hash on a blocking thread, before the DB lock is touched.
-    let hash_path = input.path.clone();
-    let current_sha = db::run_io(move || {
-        utils::validate_gnucash_path(&hash_path)?;
-        file_sha256(&hash_path)
+    // Validate, hash and read the source on a blocking thread, before the DB
+    // lock is touched. Hashing and reading in one closure also closes the
+    // window where the file could change between the two.
+    let read_path = input.path.clone();
+    let (current_sha, src) = db::run_io(move || {
+        utils::validate_gnucash_path(&read_path)?;
+        let sha = file_sha256(&read_path)?;
+        let source = connect_source_db(&std::path::PathBuf::from(&read_path))
+            .map_err(|e| format!("Failed to open source DB: {}", e))?;
+        let src = read_source_data(&source)?;
+        Ok((sha, src))
     })
     .await?;
     if current_sha != input.sha256 {
@@ -1731,14 +1769,13 @@ pub async fn import_gnucash(
     }
     let generation_handle = state.book_generation.clone();
     let GnuCashImportInput {
-        path,
         filename,
-        sha256,
         delete_orphans,
+        ..
     } = input;
     let mut result = db::run_blocking(state.db.clone(), move |conn| {
         db::ensure_same_book(&generation_handle, generation)?;
-        import_gnucash_inner(conn, &path, &filename, &sha256, delete_orphans).map_err(String::from)
+        import_source_inner(conn, src, &filename, delete_orphans).map_err(String::from)
     })
     .await?;
     result.prices = fetch_prices_best_effort(
