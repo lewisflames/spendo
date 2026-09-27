@@ -105,6 +105,7 @@ pub fn run() {
             import_rules::create_import_rule,
             import_rules::update_import_rule,
             import_rules::delete_import_rule,
+            import_rules::move_import_rule,
             accounts::fetch_accounts,
             accounts::fetch_nav_roots,
             accounts::fetch_book_currencies,
