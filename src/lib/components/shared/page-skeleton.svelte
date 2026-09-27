@@ -128,6 +128,7 @@
 {:else if variant === 'reconcile'}
   <TableSkeleton cols={4} rows={8} />
 {:else if variant === 'reconcile-detail'}
+  <KpiCardRow count={4} />
   <div class="rounded-lg border p-4">
     <div class="flex flex-wrap items-baseline justify-between gap-2">
       <Skeleton class="h-4 w-52" />
