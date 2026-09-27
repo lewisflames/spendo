@@ -51,7 +51,7 @@ export const CATEGORY_LABEL_PLURAL: Record<string, string> = {
   EQUITY: 'Equity'
 };
 
-/** Per-account-type accent colors for the account hierarchy tree. */
+/** Per-account-type accent colors for charts. */
 export const TYPE_COLOR: Record<string, string> = {
   ASSET: 'var(--color-slate-500)',
   BANK: 'var(--color-blue-500)',

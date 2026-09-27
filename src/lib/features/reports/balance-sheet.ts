@@ -4,13 +4,6 @@ import { CATEGORY_LABEL_PLURAL, nodeCategory } from '$lib/features/accounts/acco
 /** Categories a balance sheet reports, in statement order. */
 export type BalanceSheetCategory = 'ASSET' | 'LIABILITY' | 'EQUITY';
 
-/** Balance-sheet categories in statement order (ASSET, LIABILITY, EQUITY). */
-export const BALANCE_SHEET_CATEGORIES: readonly BalanceSheetCategory[] = [
-  'ASSET',
-  'LIABILITY',
-  'EQUITY'
-];
-
 /** Amounts below this read as zero, matching the balanced check. */
 const EPSILON = 0.005;
 
@@ -45,8 +38,8 @@ export interface BalanceSheet {
 /**
  * Display total for one account node. The backend only rolls children into
  * placeholder parents (`propagate_placeholder`), so non-placeholders add their
- * subtree here; summing placeholders again would double count. Mirrors
- * BalanceTree's `.sum()` and the rolled-up P&L report rows.
+ * subtree here; summing placeholders again would double count. Mirrors the
+ * rolled-up P&L report rows.
  */
 export function subtreeTotal(node: AccountNode): number {
   if (node.placeholder) return node.balance;
@@ -56,11 +49,6 @@ export function subtreeTotal(node: AccountNode): number {
 /** Category roots of one balance-sheet category, in backend order. */
 export function categoryTrees(trees: AccountNode[], category: BalanceSheetCategory): AccountNode[] {
   return trees.filter((tree) => nodeCategory(tree.accountType) === category);
-}
-
-/** Every balance-sheet root (ASSET, LIABILITY, EQUITY), in statement order. */
-export function balanceSheetTrees(trees: AccountNode[]): AccountNode[] {
-  return BALANCE_SHEET_CATEGORIES.flatMap((category) => categoryTrees(trees, category));
 }
 
 function flattenRows(nodes: AccountNode[], depth = 0): BalanceSheetRow[] {

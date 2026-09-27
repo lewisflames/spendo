@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AccountNode, AccountsResult } from '$lib/tauri';
-import { balanceSheetTrees, buildBalanceSheet, subtreeTotal } from './balance-sheet';
+import { buildBalanceSheet, subtreeTotal } from './balance-sheet';
 
 function node(partial: Partial<AccountNode> & { guid: string; name: string }): AccountNode {
   return {
@@ -64,28 +64,6 @@ describe('subtreeTotal', () => {
       ]
     });
     expect(subtreeTotal(parent)).toBe(57);
-  });
-});
-
-describe('balanceSheetTrees', () => {
-  it('keeps only balance-sheet roots, in statement order', () => {
-    const trees = [
-      node({ guid: 'income', name: 'Income', accountType: 'INCOME', placeholder: true }),
-      node({ guid: 'assets', name: 'Assets', accountType: 'ASSET', placeholder: true }),
-      node({ guid: 'equity', name: 'Equity', accountType: 'EQUITY', placeholder: true }),
-      node({
-        guid: 'liabilities',
-        name: 'Liabilities',
-        accountType: 'LIABILITY',
-        placeholder: true
-      }),
-      node({ guid: 'expenses', name: 'Expenses', accountType: 'EXPENSE', placeholder: true })
-    ];
-    expect(balanceSheetTrees(trees).map((t) => t.guid)).toEqual([
-      'assets',
-      'liabilities',
-      'equity'
-    ]);
   });
 });
 
