@@ -2,6 +2,7 @@
   import { page } from '$app/state';
   import { beforeNavigate, goto } from '$app/navigation';
   import { resolve } from '$app/paths';
+  import { getCurrentWindow } from '@tauri-apps/api/window';
   import { SvelteSet } from 'svelte/reactivity';
   import { ArrowLeft, CalendarDays, CircleCheck, Undo2, X } from '@lucide/svelte';
   import { toast } from '$lib/components/ui/sonner';
@@ -281,7 +282,12 @@
 
   function clearDraft(g: string) {
     localStorage.removeItem(draftKey(g));
-    if (draftFor === g) draftFor = null;
+    // Reset to the pristine form before releasing the key: the read effect would
+    // otherwise re-seed `draftFor` and the write effect would immediately save
+    // the still-populated inputs back to storage.
+    endingBalanceInput = '';
+    statementDate = today.value;
+    draftFor = g;
   }
 
   // ── leaving with unsaved marks ────────────────────────────────────────────
@@ -289,6 +295,41 @@
   let leaveOpen = $state(false);
   let pendingLeaveUrl: string | null = null;
   let bypassGuard = $state(false);
+  /** True when the prompt came from the window close button, not navigation. */
+  let closeRequested = $state(false);
+
+  // Closing the window with unsaved marks must prompt. SvelteKit's
+  // `willUnload` has no native confirmation, so hook Tauri's close-requested
+  // event (and `beforeunload` for the browser dev shell).
+  $effect(() => {
+    if (!dirty || bypassGuard) return;
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    void getCurrentWindow()
+      .onCloseRequested((event) => {
+        event.preventDefault();
+        pendingLeaveUrl = null;
+        closeRequested = true;
+        leaveOpen = true;
+      })
+      .then((fn) => {
+        if (disposed) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {
+        // Non-Tauri host: `beforeunload` below is the fallback.
+      });
+    const beforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', beforeUnload);
+    return () => {
+      disposed = true;
+      unlisten?.();
+      window.removeEventListener('beforeunload', beforeUnload);
+    };
+  });
 
   beforeNavigate((nav) => {
     if (bypassGuard || saving || !dirty) return;
@@ -296,8 +337,8 @@
     const to = nav.to;
     if (to && to.route.id === page.route.id && to.url.pathname === page.url.pathname) return;
     if (nav.type === 'leave' || nav.willUnload) {
-      // Closing the app/tab or following an external link: let the native
-      // unload confirmation handle it.
+      // Window closes are handled by the close-requested effect; external links
+      // fall back to the browser's unload prompt.
       nav.cancel();
       return;
     }
@@ -310,6 +351,10 @@
   async function leaveWithoutSaving() {
     leaveOpen = false;
     bypassGuard = true;
+    if (closeRequested) {
+      await getCurrentWindow().destroy();
+      return;
+    }
     // The target is an already-resolved href captured from beforeNavigate.
     // eslint-disable-next-line svelte/no-navigation-without-resolve
     await goto(pendingLeaveUrl ?? resolve('/reconcile'));
@@ -320,6 +365,10 @@
     if (!ok) return; // Stay put with the error toast and the marks intact.
     leaveOpen = false;
     bypassGuard = true;
+    if (closeRequested) {
+      await getCurrentWindow().destroy();
+      return;
+    }
     // The target is an already-resolved href captured from beforeNavigate.
     // eslint-disable-next-line svelte/no-navigation-without-resolve
     await goto(pendingLeaveUrl ?? resolve('/reconcile'));
@@ -563,16 +612,26 @@
 <Dialog.Root bind:open={leaveOpen}>
   <Dialog.Content class="sm:max-w-lg">
     <Dialog.Header>
-      <Dialog.Title>Save before you go?</Dialog.Title>
+      <Dialog.Title>{closeRequested ? 'Save before closing?' : 'Save before you go?'}</Dialog.Title>
       <Dialog.Description>
-        You have unsaved cleared marks for this statement. Saving keeps them for next time.
+        {closeRequested
+          ? 'You have unsaved cleared marks for this statement. Closing without saving loses them.'
+          : 'You have unsaved cleared marks for this statement. Saving keeps them for next time.'}
       </Dialog.Description>
     </Dialog.Header>
     <Dialog.Footer>
-      <Button variant="ghost" onclick={() => (leaveOpen = false)}>Stay</Button>
-      <Button variant="outline" onclick={leaveWithoutSaving}>Leave without saving</Button>
+      <Button
+        variant="ghost"
+        onclick={() => {
+          leaveOpen = false;
+          closeRequested = false;
+        }}>Stay</Button
+      >
+      <Button variant="outline" onclick={leaveWithoutSaving}>
+        {closeRequested ? 'Close without saving' : 'Leave without saving'}
+      </Button>
       <Button onclick={saveAndLeave} disabled={saving}>
-        {saving ? 'Saving…' : 'Save and leave'}
+        {saving ? 'Saving…' : closeRequested ? 'Save and close' : 'Save and leave'}
       </Button>
     </Dialog.Footer>
   </Dialog.Content>

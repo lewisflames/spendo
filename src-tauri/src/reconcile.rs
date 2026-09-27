@@ -343,11 +343,10 @@ fn apply_split_updates(conn: &Connection, pending: &[(String, String)]) -> Resul
     Ok(())
 }
 
-/// Most recent reconciled batch: the `'y'` splits dated after the previous
-/// batch's last date. Returns `(from_exclusive, through, count)` where
-/// `from_exclusive` is the preceding batch's post date (the last statement
-/// date), or `None` when everything reconciled so far is one batch.
-fn last_reconciled_batch(
+/// Legacy fallback for books finished before `reconcile_batches` existed: the
+/// most recent reconciled batch inferred from the `'y'` splits dated after the
+/// previous batch's last date. Returns `(from_exclusive, through, count)`.
+fn legacy_last_reconciled_batch(
     conn: &Connection,
     account_guid: &str,
 ) -> Result<Option<(Option<String>, String, i64)>, AppError> {
@@ -405,8 +404,8 @@ fn last_reconciled_batch(
     Ok(Some((from_date, through, count)))
 }
 
-/// Currency-priced `'y'` split guids in the last reconciled batch.
-fn reconciled_batch_guids(
+/// Currency-priced `'y'` split guids in the legacy last batch (date-derived).
+fn legacy_reconciled_batch_guids(
     conn: &Connection,
     account_guid: &str,
     from_date: Option<&str>,
@@ -442,6 +441,47 @@ fn reconciled_batch_guids(
             }
         }
     }
+    Ok(guids)
+}
+
+/// Latest finished batch for an account:
+/// `(batch_guid, through_date, previous_through_date)`. Ordered by finish time
+/// with rowid as the tie-break so same-instant batches keep insertion order.
+fn latest_batch_row(
+    conn: &Connection,
+    account_guid: &str,
+) -> Result<Option<(String, String, Option<String>)>, AppError> {
+    let row = conn
+        .query_row(
+            "SELECT b.guid, b.through_date,
+                    (SELECT p.through_date FROM reconcile_batches p
+                     WHERE p.account_guid = b.account_guid
+                       AND (p.finished_at < b.finished_at
+                            OR (p.finished_at = b.finished_at AND p.rowid < b.rowid))
+                     ORDER BY p.finished_at DESC, p.rowid DESC LIMIT 1)
+             FROM reconcile_batches b
+             WHERE b.account_guid = ?1
+             ORDER BY b.finished_at DESC, b.rowid DESC
+             LIMIT 1",
+            params![account_guid],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()?;
+    Ok(row)
+}
+
+/// `'y'` split guids belonging to a persisted batch; splits that were deleted
+/// or already demoted are skipped.
+fn batch_split_guids(conn: &Connection, batch_guid: &str) -> Result<Vec<String>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT k.split_guid FROM reconcile_batch_splits k
+         JOIN splits s ON s.guid = k.split_guid
+         WHERE k.batch_guid = ?1 AND s.reconcile_state = 'y'
+         ORDER BY k.split_guid",
+    )?;
+    let guids = stmt
+        .query_map(params![batch_guid], |row| row.get(0))?
+        .collect::<Result<Vec<String>, _>>()?;
     Ok(guids)
 }
 
@@ -542,9 +582,14 @@ fn fetch_reconcile_info_inner(
     attach_counter_accounts(conn, account_guid, &mut candidates)?;
 
     let (last_reconciled_date, last_reconciled_count) =
-        match last_reconciled_batch(conn, account_guid)? {
-            Some((_, through, count)) => (Some(through), count),
-            None => (None, 0),
+        match latest_batch_row(conn, account_guid)? {
+            Some((batch_guid, through, _)) => (Some(through), batch_split_guids(conn, &batch_guid)?.len() as i64),
+            // Books finished before batches were persisted fall back to the
+            // date-derived heuristic.
+            None => match legacy_last_reconciled_batch(conn, account_guid)? {
+                Some((_, through, count)) => (Some(through), count),
+                None => (None, 0),
+            },
         };
 
     Ok(ReconcileInfo {
@@ -636,7 +681,25 @@ fn finish_reconciliation_inner(
         }
         let reconciled_count = guids.len() as i64;
 
+        // Persist the batch membership before promoting: "Undo last statement"
+        // reopens exactly these splits, even ones dated before the previous
+        // batch's last transaction.
+        let batch_guid = uuid::Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO reconcile_batches (guid, account_guid, finished_at, through_date)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![
+                batch_guid,
+                input.account_guid,
+                utils::iso_now(),
+                statement_date
+            ],
+        )?;
         for guid in &guids {
+            conn.execute(
+                "INSERT INTO reconcile_batch_splits (batch_guid, split_guid) VALUES (?1, ?2)",
+                params![batch_guid, guid],
+            )?;
             conn.execute(
                 "UPDATE splits SET reconcile_state = 'y', reconciled = 1 WHERE guid = ?1",
                 params![guid],
@@ -656,12 +719,50 @@ fn reopen_last_reconciliation_inner(
     account_guid: &str,
 ) -> Result<ReopenReconcileResult, AppError> {
     load_reconcilable_account(conn, account_guid)?;
-    let Some((from_date, through_date, _)) = last_reconciled_batch(conn, account_guid)? else {
+
+    // Persisted batches are authoritative; they carry exactly the splits the
+    // Finish promoted and the preceding batch's through date.
+    if let Some((batch_guid, through_date, from_date)) = latest_batch_row(conn, account_guid)? {
+        let guids = batch_split_guids(conn, &batch_guid)?;
+        if guids.is_empty() {
+            // Membership lost (e.g. its transactions were swept). Drop the
+            // empty batch and fall through to the legacy path.
+            conn.execute(
+                "DELETE FROM reconcile_batches WHERE guid = ?1",
+                params![batch_guid],
+            )?;
+        } else {
+            let reopened_count = guids.len() as i64;
+            with_tx_err(conn, || -> Result<(), AppError> {
+                for guid in &guids {
+                    // `'c'` keeps the GnuCash `reconciled = 1` convention used
+                    // by `apply_split_updates`, so the editor still warns.
+                    conn.execute(
+                        "UPDATE splits SET reconcile_state = 'c', reconciled = 1 WHERE guid = ?1",
+                        params![guid],
+                    )?;
+                }
+                conn.execute(
+                    "DELETE FROM reconcile_batches WHERE guid = ?1",
+                    params![batch_guid],
+                )?;
+                Ok(())
+            })?;
+            return Ok(ReopenReconcileResult {
+                reopened_count,
+                from_date,
+                through_date,
+            });
+        }
+    }
+
+    // Legacy date-derived fallback for books finished before batches existed.
+    let Some((from_date, through_date, _)) = legacy_last_reconciled_batch(conn, account_guid)? else {
         return Err(AppError::Validation(
             "Nothing is reconciled yet. Finish a statement first".to_string(),
         ));
     };
-    let guids = reconciled_batch_guids(conn, account_guid, from_date.as_deref())?;
+    let guids = legacy_reconciled_batch_guids(conn, account_guid, from_date.as_deref())?;
     if guids.is_empty() {
         return Err(AppError::Validation(
             "Nothing is reconciled yet. Finish a statement first".to_string(),
@@ -670,8 +771,6 @@ fn reopen_last_reconciliation_inner(
     let reopened_count = guids.len() as i64;
     with_tx_err(conn, || -> Result<(), AppError> {
         for guid in &guids {
-            // `'c'` keeps the GnuCash `reconciled = 1` convention used by
-            // `apply_split_updates`, so the transaction editor still warns.
             conn.execute(
                 "UPDATE splits SET reconcile_state = 'c', reconciled = 1 WHERE guid = ?1",
                 params![guid],
@@ -731,8 +830,46 @@ fn fetch_reconcile_summaries_inner(
         }
     }
     {
+        // Latest persisted batch per account (its through date is already a
+        // plain day, unlike possibly-timed transaction dates).
         let mut stmt = conn.prepare(&format!(
-            "SELECT s.account_guid, MAX(t.post_date)
+            "SELECT b.account_guid, b.through_date
+             FROM reconcile_batches b
+             JOIN accounts a ON a.guid = b.account_guid
+             WHERE a.placeholder = 0
+               AND a.account_type IN ({}, {})
+               AND b.rowid = (
+                   SELECT b2.rowid FROM reconcile_batches b2
+                   WHERE b2.account_guid = b.account_guid
+                   ORDER BY b2.finished_at DESC, b2.rowid DESC
+                   LIMIT 1
+               )",
+            utils::cash_like_types_sql(),
+            utils::liability_types_sql()
+        ))?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            let (account_guid, last) = row?;
+            summaries
+                .entry(account_guid.clone())
+                .or_insert(ReconcileAccountSummary {
+                    account_guid,
+                    unreconciled_count: 0,
+                    cleared_count: 0,
+                    uncleared_total: 0.0,
+                    last_reconciled_date: None,
+                })
+                .last_reconciled_date = Some(last);
+        }
+    }
+    {
+        // Legacy fallback for accounts with `'y'` splits but no batch row
+        // (books finished before batches were persisted). Truncate to the day:
+        // imported books carry `HH:MM:SS`.
+        let mut stmt = conn.prepare(&format!(
+            "SELECT s.account_guid, substr(MAX(t.post_date), 1, 10)
              FROM splits s
              JOIN transactions t ON t.guid = s.tx_guid
              JOIN accounts a ON a.guid = s.account_guid
@@ -740,6 +877,9 @@ fn fetch_reconcile_summaries_inner(
                AND a.placeholder = 0
                AND a.account_type IN ({}, {})
                AND {}
+               AND NOT EXISTS (
+                   SELECT 1 FROM reconcile_batches b WHERE b.account_guid = s.account_guid
+               )
              GROUP BY s.account_guid",
             utils::cash_like_types_sql(),
             utils::liability_types_sql(),
@@ -1057,6 +1197,87 @@ mod tests {
             .query_row("SELECT reconcile_state FROM splits WHERE guid = 's-t3'", [], |r| r.get(0))
             .unwrap();
         assert_eq!(state, "n");
+    }
+
+    #[test]
+    fn reopen_reopens_a_retroactive_batch_not_the_date_latest() {
+        let conn = setup();
+        add_split(&conn, "t-jan", "2024-01-10", "checking", 10_000, "n");
+        add_split(&conn, "t-feb", "2024-02-10", "checking", -3_000, "n");
+
+        // February statement first: only the February split clears (-30).
+        let out = finish(
+            &conn,
+            "2024-02-29",
+            -30.0,
+            vec![SplitStateUpdate {
+                split_guid: "s-t-feb".into(),
+                state: "c".into(),
+            }],
+        )
+        .unwrap();
+        assert_eq!(out.reconciled_count, 1);
+
+        // Much later, the older January split is cleared on its own statement.
+        let out = finish(
+            &conn,
+            "2024-01-31",
+            100.0,
+            vec![SplitStateUpdate {
+                split_guid: "s-t-jan".into(),
+                state: "c".into(),
+            }],
+        )
+        .unwrap();
+        assert_eq!(out.reconciled_count, 1);
+
+        // Undo reopens the January batch (the last Finish), not the February
+        // one merely because it has the latest transaction date.
+        let out = reopen_last_reconciliation_inner(&conn, "checking").unwrap();
+        assert_eq!(out.reopened_count, 1);
+        assert_eq!(out.through_date, "2024-01-31");
+        assert_eq!(out.from_date.as_deref(), Some("2024-02-29"));
+
+        let jan: String = conn
+            .query_row(
+                "SELECT reconcile_state FROM splits WHERE guid = 's-t-jan'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let feb: String = conn
+            .query_row(
+                "SELECT reconcile_state FROM splits WHERE guid = 's-t-feb'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(jan, "c");
+        assert_eq!(feb, "y");
+    }
+
+    #[test]
+    fn summaries_use_the_finished_batch_through_date() {
+        let conn = setup();
+        add_split(&conn, "t-jan", "2024-01-10 09:30:00", "checking", 10_000, "n");
+        finish(
+            &conn,
+            "2024-01-31",
+            100.0,
+            vec![SplitStateUpdate {
+                split_guid: "s-t-jan".into(),
+                state: "c".into(),
+            }],
+        )
+        .unwrap();
+
+        let summaries = fetch_reconcile_summaries_inner(&conn).unwrap();
+        let checking = summaries
+            .iter()
+            .find(|s| s.account_guid == "checking")
+            .unwrap();
+        // Batch through date, not the timed transaction date.
+        assert_eq!(checking.last_reconciled_date.as_deref(), Some("2024-01-31"));
     }
 
     #[test]
