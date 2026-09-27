@@ -2,6 +2,7 @@
   import { page } from '$app/state';
   import { beforeNavigate, goto } from '$app/navigation';
   import { resolve } from '$app/paths';
+  import { isTauri } from '@tauri-apps/api/core';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { SvelteSet } from 'svelte/reactivity';
   import { ArrowLeft, CalendarDays, CircleCheck, Undo2, X } from '@lucide/svelte';
@@ -305,20 +306,24 @@
     if (!dirty || bypassGuard) return;
     let unlisten: (() => void) | undefined;
     let disposed = false;
-    void getCurrentWindow()
-      .onCloseRequested((event) => {
-        event.preventDefault();
-        pendingLeaveUrl = null;
-        closeRequested = true;
-        leaveOpen = true;
-      })
-      .then((fn) => {
-        if (disposed) fn();
-        else unlisten = fn;
-      })
-      .catch(() => {
-        // Non-Tauri host: `beforeunload` below is the fallback.
-      });
+    // Guard the Tauri-only call: getCurrentWindow() throws synchronously on a
+    // plain-browser host, and a throwing effect corrupts Svelte's effect tree.
+    if (isTauri()) {
+      void getCurrentWindow()
+        .onCloseRequested((event) => {
+          event.preventDefault();
+          pendingLeaveUrl = null;
+          closeRequested = true;
+          leaveOpen = true;
+        })
+        .then((fn) => {
+          if (disposed) fn();
+          else unlisten = fn;
+        })
+        .catch(() => {
+          // Registration failed; the beforeunload listener below still prompts.
+        });
+    }
     const beforeUnload = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       e.returnValue = '';
