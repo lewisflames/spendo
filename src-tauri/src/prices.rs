@@ -214,25 +214,24 @@ fn normalize_symbol(input: &str) -> Result<String, AppError> {
     Ok(trimmed.to_ascii_uppercase())
 }
 
-/// commodity_guid -> override symbol. Tolerates pre-migration DBs (missing
-/// table) by returning an empty map; `init_db` creates the table on startup.
-fn symbol_override_map(conn: &Connection) -> HashMap<String, String> {
-    let mut stmt = match conn.prepare("SELECT commodity_guid, symbol FROM symbol_overrides") {
-        Ok(s) => s,
-        Err(_) => return HashMap::new(),
-    };
-    let rows = match stmt.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    }) {
-        Ok(r) => r,
-        Err(_) => return HashMap::new(),
-    };
-    rows.flatten().collect()
+/// commodity_guid -> override symbol. Errors propagate: the table is created
+/// by `init_db`, so a failure here means a real DB problem, not a legacy book.
+fn symbol_override_map(conn: &Connection) -> Result<HashMap<String, String>, String> {
+    let mut stmt = conn
+        .prepare("SELECT commodity_guid, symbol FROM symbol_overrides")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<HashMap<_, _>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 fn fetch_symbol_overrides_inner(conn: &Connection) -> Result<Vec<SymbolOverride>, String> {
     let commodities = list_commodities(conn)?;
-    let overrides = symbol_override_map(conn);
+    let overrides = symbol_override_map(conn)?;
     Ok(commodities
         .into_iter()
         .map(|c| SymbolOverride {
@@ -257,14 +256,19 @@ pub(crate) struct PriceFetchPlan {
     overrides: HashMap<String, String>,
 }
 
+/// One commodity's winning history, ready to write. Quote currency is already
+/// resolved to a book currency GUID.
+struct PendingPriceWrite {
+    commodity_guid: String,
+    currency_guid: String,
+    prices: Vec<(i64, f64)>,
+}
+
 pub(crate) struct PendingPriceWrites {
-    symbol_map: HashMap<String, String>,
-    yahoo_history: HashMap<String, YahooHistory>,
-    assigned: HashSet<String>,
+    /// Exactly one entry per commodity that fetched successfully, keyed by
+    /// GUID so same-ticker commodities can never overwrite each other.
+    writes: Vec<PendingPriceWrite>,
     report_currency_guid: Option<String>,
-    report_currency: Option<String>,
-    currency_guid_map: HashMap<String, String>,
-    commodities: Vec<CommodityInfo>,
     fx_prices: Vec<(String, Vec<(i64, f64)>)>,
 }
 
@@ -306,7 +310,7 @@ pub(crate) fn read_price_data(conn: &Connection) -> Result<PriceFetchPlan, Strin
     let currency_guid_map = fx::currency_guid_map(conn)?;
 
     let existing_live_prices = get_latest_live_prices(conn)?;
-    let overrides = symbol_override_map(conn);
+    let overrides = symbol_override_map(conn)?;
 
     Ok(PriceFetchPlan {
         commodities,
@@ -335,15 +339,16 @@ fn date_to_period1(d: &str) -> Option<i64> {
 
 /// Insert one price per day for a commodity, replacing any existing same-day rows.
 /// Single range DELETE (instead of N per-day deletes); the per-day guid
-/// (`commodity-date`) keeps the subsequent INSERTs idempotent.
+/// (`commodity-date`) keeps the subsequent INSERTs idempotent. Returns whether
+/// at least one valid row was written.
 fn write_history_prices(
     conn: &Connection,
     commodity_guid: &str,
     currency_guid: &str,
     history: &[(i64, f64)],
-) -> Result<(), String> {
+) -> Result<bool, String> {
     if history.is_empty() {
-        return Ok(());
+        return Ok(false);
     }
     // Drop points whose timestamp can't be converted instead of stamping them
     // with today's date — a fabricated date is worse than a missing quote.
@@ -355,7 +360,7 @@ fn write_history_prices(
         })
         .collect();
     if dated.is_empty() {
-        return Ok(());
+        return Ok(false);
     }
     let (min_date, max_date) = dated.iter().fold(
         (dated[0].0.clone(), dated[0].0.clone()),
@@ -373,6 +378,7 @@ fn write_history_prices(
     );
     let mut insert = conn.prepare(&insert_sql).map_err(|e| e.to_string())?;
 
+    let mut wrote = false;
     for (date_str, price) in &dated {
         // Yahoo occasionally returns 0/NaN closes; casting those to the scaled
         // integer would store `i64::MAX` (inf) or a bogus 0 and poison every
@@ -391,62 +397,29 @@ fn write_history_prices(
                 date_str
             ])
             .map_err(|e| e.to_string())?;
+        wrote = true;
     }
-    Ok(())
+    Ok(wrote)
 }
 
-pub(crate) fn write_price_data(conn: &Connection, data: &PendingPriceWrites) -> Result<(), String> {
+pub(crate) fn write_price_data(
+    conn: &Connection,
+    data: &PendingPriceWrites,
+) -> Result<bool, String> {
     let PendingPriceWrites {
-        symbol_map,
-        yahoo_history,
-        assigned,
+        writes,
         report_currency_guid,
-        report_currency,
-        currency_guid_map,
-        commodities,
         fx_prices,
     } = data;
 
-    for (sym, mnemonic) in symbol_map {
-        if !assigned.contains(mnemonic) {
-            continue;
-        }
-        let Some(history) = yahoo_history.get(sym) else {
-            continue;
-        };
-        let Some(commodity) = commodities.iter().find(|c| c.mnemonic == *mnemonic) else {
-            continue;
-        };
-
-        // Store prices in their actual quote currency so normalization at read time
-        // can convert to the report currency. Yahoo's `meta.currency` is
-        // authoritative; the symbol-shape heuristic is only a fallback. Fall back
-        // to the report currency GUID when the quote currency isn't in the book.
-        let quote = history
-            .currency
-            .clone()
-            .filter(|c| currency_guid_map.contains_key(c))
-            .unwrap_or_else(|| {
-                quote_currency_for_symbol(
-                    sym,
-                    &commodity.namespace,
-                    report_currency.as_deref().unwrap_or(""),
-                )
-            });
-        let currency_guid = currency_guid_map
-            .get(&quote)
-            .cloned()
-            .or_else(|| report_currency_guid.clone());
-        let Some(cg) = currency_guid else {
-            continue;
-        };
-
-        write_history_prices(conn, &commodity.guid, &cg, &history.prices)?;
+    let mut wrote = false;
+    for w in writes {
+        wrote |= write_history_prices(conn, &w.commodity_guid, &w.currency_guid, &w.prices)?;
     }
 
     // FX rates: each book currency quoted in the report currency.
-    let Some(report_guid) = report_currency_guid else {
-        return Ok(());
+    let Some(report_guid) = report_currency_guid.as_deref() else {
+        return Ok(wrote);
     };
     for (mnemonic, history) in fx_prices {
         let Some(commodity_guid) = conn
@@ -455,38 +428,44 @@ pub(crate) fn write_price_data(conn: &Connection, data: &PendingPriceWrites) -> 
                 [mnemonic],
                 |row| row.get::<_, String>(0),
             )
-            .ok()
+            .optional()
+            .map_err(|e| e.to_string())?
         else {
             continue;
         };
 
-        write_history_prices(conn, &commodity_guid, report_guid, history)?;
+        wrote |= write_history_prices(conn, &commodity_guid, report_guid, history)?;
     }
 
-    Ok(())
+    Ok(wrote)
 }
 
-/// Register a Yahoo symbol for a commodity, keeping the earliest `period1` across
-/// all commodities that share the symbol.
+/// Register one candidate Yahoo symbol for a commodity, keeping the earliest
+/// `period1` across every commodity that shares the symbol. Candidate order is
+/// preserved per commodity so `assemble_result` can pick a deterministic winner.
 fn register_symbol(
-    symbol_map: &mut HashMap<String, String>,
+    candidates_by_commodity: &mut HashMap<String, Vec<String>>,
     all_symbols: &mut Vec<String>,
     symbol_period1: &mut HashMap<String, Option<i64>>,
+    commodity_guid: &str,
     sym: String,
-    mnemonic: String,
     period1: Option<i64>,
 ) {
-    if !symbol_map.contains_key(&sym) {
-        symbol_map.insert(sym.clone(), mnemonic);
-        all_symbols.push(sym.clone());
-        symbol_period1.insert(sym, period1);
-    } else if let Some(entry) = symbol_period1.get_mut(&sym) {
-        match (*entry, period1) {
+    all_symbols.push(sym.clone());
+    match symbol_period1.get_mut(&sym) {
+        Some(entry) => match (*entry, period1) {
             (None, Some(p)) => *entry = Some(p),
             (Some(e), Some(p)) if p < e => *entry = Some(p),
             _ => {}
+        },
+        None => {
+            symbol_period1.insert(sym.clone(), period1);
         }
     }
+    candidates_by_commodity
+        .entry(commodity_guid.to_string())
+        .or_default()
+        .push(sym);
 }
 
 pub(crate) async fn fetch_prices_remote(
@@ -498,17 +477,19 @@ pub(crate) async fn fetch_prices_remote(
     Ok(assemble_result(pre, symbols, outcome, now))
 }
 
-/// Everything the fetch phase needs: Yahoo symbols per commodity (+FX pairs),
-/// earliest `period1` per symbol, and the shared `period2`.
+/// Everything the fetch phase needs: Yahoo symbol candidates per commodity
+/// (in preference order), plus FX pairs.
 struct SymbolPlan {
-    /// Yahoo symbol -> commodity mnemonic.
-    mnemonic_by_symbol: HashMap<String, String>,
+    /// Commodity GUID -> candidate Yahoo symbols in preference order. Keeping
+    /// this per commodity (instead of a symbol -> mnemonic map) is what makes
+    /// same-ticker commodities independent and the winning candidate
+    /// deterministic.
+    candidates_by_commodity: HashMap<String, Vec<String>>,
     all_symbols: Vec<String>,
     /// Earliest period1 per Yahoo symbol (across commodities sharing it).
     symbol_period1: HashMap<String, Option<i64>>,
     /// (symbol, currency_mnemonic, is_inverse) FX pairs.
     fx_symbols: Vec<(String, String, bool)>,
-    crypto_suffix: String,
     period2: i64,
 }
 
@@ -528,7 +509,7 @@ fn plan_symbols(pre: &PriceFetchPlan) -> Result<SymbolPlan, String> {
         .and_utc()
         .timestamp();
 
-    let mut mnemonic_by_symbol: HashMap<String, String> = HashMap::new();
+    let mut candidates_by_commodity: HashMap<String, Vec<String>> = HashMap::new();
     let mut all_symbols: Vec<String> = vec![];
     // Earliest period1 per Yahoo symbol (across all commodities sharing that symbol)
     let mut symbol_period1: HashMap<String, Option<i64>> = HashMap::new();
@@ -539,25 +520,17 @@ fn plan_symbols(pre: &PriceFetchPlan) -> Result<SymbolPlan, String> {
 
         // Per-commodity free-text override wins verbatim (single Yahoo fetch,
         // no heuristic suffix expansion).
-        if let Some(ov) = pre.overrides.get(&c.guid) {
-            register_symbol(
-                &mut mnemonic_by_symbol,
-                &mut all_symbols,
-                &mut symbol_period1,
-                ov.clone(),
-                c.mnemonic.clone(),
-                period1_for_c,
-            );
-            continue;
-        }
-        let candidates = derive_yahoo_symbols(&c.mnemonic, &c.namespace, &crypto_suffix);
+        let candidates = match pre.overrides.get(&c.guid) {
+            Some(ov) => vec![ov.clone()],
+            None => derive_yahoo_symbols(&c.mnemonic, &c.namespace, &crypto_suffix),
+        };
         for sym in candidates {
             register_symbol(
-                &mut mnemonic_by_symbol,
+                &mut candidates_by_commodity,
                 &mut all_symbols,
                 &mut symbol_period1,
+                &c.guid,
                 sym,
-                c.mnemonic.clone(),
                 period1_for_c,
             );
         }
@@ -576,12 +549,12 @@ fn plan_symbols(pre: &PriceFetchPlan) -> Result<SymbolPlan, String> {
             let inverse = format!("{}{}=X", report_mnemonic, mnemonic);
             let period1_for_currency: Option<i64> =
                 pre.latest_dates.get(guid).and_then(|d| date_to_period1(d));
-            if !mnemonic_by_symbol.contains_key(&primary) && !all_symbols.contains(&primary) {
+            if !all_symbols.contains(&primary) {
                 all_symbols.push(primary.clone());
                 symbol_period1.insert(primary.clone(), period1_for_currency);
                 fx_symbols.push((primary, mnemonic.clone(), false));
             }
-            if !mnemonic_by_symbol.contains_key(&inverse) && !all_symbols.contains(&inverse) {
+            if !all_symbols.contains(&inverse) {
                 all_symbols.push(inverse.clone());
                 symbol_period1.insert(inverse.clone(), period1_for_currency);
                 fx_symbols.push((inverse, mnemonic.clone(), true));
@@ -594,11 +567,10 @@ fn plan_symbols(pre: &PriceFetchPlan) -> Result<SymbolPlan, String> {
     all_symbols.dedup();
 
     Ok(SymbolPlan {
-        mnemonic_by_symbol,
+        candidates_by_commodity,
         all_symbols,
         symbol_period1,
         fx_symbols,
-        crypto_suffix,
         period2,
     })
 }
@@ -671,13 +643,11 @@ fn assemble_result(
         currencies,
         currency_guid_map,
         existing_live_prices,
-        overrides,
         ..
     } = pre;
     let SymbolPlan {
-        mnemonic_by_symbol,
+        candidates_by_commodity,
         fx_symbols,
-        crypto_suffix,
         ..
     } = symbols;
     let FetchOutcome {
@@ -711,34 +681,85 @@ fn assemble_result(
         }
     }
 
-    let mut assigned: HashSet<String> = HashSet::new();
+    let mut assigned_guids: HashSet<String> = HashSet::new();
     let mut latest_prices: Vec<PriceEntry> = vec![];
+    let mut writes: Vec<PendingPriceWrite> = vec![];
     let mut errors: Vec<PriceError> = vec![];
 
-    for (sym, mnemonic) in &mnemonic_by_symbol {
-        if let Some(history) = yahoo_history.get(sym) {
-            if let Some((_, latest_price)) = history.prices.last() {
-                let namespace = commodities
+    for c in &commodities {
+        let candidates = candidates_by_commodity
+            .get(&c.guid)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        // Exactly one candidate wins: the first (in declaration order) that
+        // returned a history. Writing every successful candidate would
+        // interleave two exchanges' series into one commodity.
+        let winner = candidates
+            .iter()
+            .find_map(|sym| yahoo_history.get(sym).map(|h| (sym.as_str(), h)));
+        let Some((sym, history)) = winner else {
+            if !already_fetched.contains(&c.guid) {
+                let first_error = candidates
                     .iter()
-                    .find(|c| c.mnemonic == *mnemonic)
-                    .map(|c| c.namespace.as_str())
-                    .unwrap_or("");
-                // Yahoo's meta currency beats the symbol-shape heuristic.
-                let quote = history.currency.clone().unwrap_or_else(|| {
-                    quote_currency_for_symbol(
-                        sym,
-                        namespace,
-                        report_currency.as_deref().unwrap_or(""),
-                    )
-                });
-                latest_prices.push(PriceEntry {
-                    mnemonic: mnemonic.clone(),
-                    price: *latest_price,
-                    price_date: now.clone(),
-                    currency: quote,
+                    .find_map(|sym| yahoo_errors.get(sym))
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        format!("No price found (tried: {})", candidates.join(", "))
+                    });
+                errors.push(PriceError {
+                    mnemonic: c.mnemonic.clone(),
+                    error: first_error,
                 });
             }
-            assigned.insert(mnemonic.clone());
+            continue;
+        };
+        assigned_guids.insert(c.guid.clone());
+
+        if let Some((_, latest_price)) = history.prices.last() {
+            // Yahoo's meta currency beats the symbol-shape heuristic.
+            let quote = history.currency.clone().unwrap_or_else(|| {
+                quote_currency_for_symbol(
+                    sym,
+                    &c.namespace,
+                    report_currency.as_deref().unwrap_or(""),
+                )
+            });
+            latest_prices.push(PriceEntry {
+                mnemonic: c.mnemonic.clone(),
+                price: *latest_price,
+                price_date: now.clone(),
+                currency: quote,
+            });
+        }
+
+        if history.prices.is_empty() {
+            continue;
+        }
+        // Store prices in their actual quote currency so normalization at read
+        // time can convert to the report currency. Yahoo's `meta.currency` is
+        // authoritative; the symbol-shape heuristic is only a fallback. Fall
+        // back to the report currency GUID when the quote isn't in the book.
+        let quote = history
+            .currency
+            .clone()
+            .filter(|q| currency_guid_map.contains_key(q))
+            .unwrap_or_else(|| {
+                quote_currency_for_symbol(
+                    sym,
+                    &c.namespace,
+                    report_currency.as_deref().unwrap_or(""),
+                )
+            });
+        let currency_guid = currency_guid_map
+            .get(&quote)
+            .cloned()
+            .or_else(|| report_currency_guid.clone());
+        if let Some(cg) = currency_guid {
+            writes.push(PendingPriceWrite {
+                commodity_guid: c.guid.clone(),
+                currency_guid: cg,
+                prices: history.prices.clone(),
+            });
         }
     }
 
@@ -751,11 +772,11 @@ fn assemble_result(
     }
 
     for c in &commodities {
-        if !assigned.contains(&c.mnemonic) && !already_fetched.contains(&c.guid) {
-            let candidates = match overrides.get(&c.guid) {
-                Some(ov) => vec![ov.clone()],
-                None => derive_yahoo_symbols(&c.mnemonic, &c.namespace, &crypto_suffix),
-            };
+        if !assigned_guids.contains(&c.guid) && !already_fetched.contains(&c.guid) {
+            let candidates = candidates_by_commodity
+                .get(&c.guid)
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
             let first_error = candidates
                 .iter()
                 .find_map(|sym| yahoo_errors.get(sym))
@@ -800,13 +821,8 @@ fn assemble_result(
             errors,
         },
         PendingPriceWrites {
-            symbol_map: mnemonic_by_symbol,
-            yahoo_history,
-            assigned,
+            writes,
             report_currency_guid,
-            report_currency,
-            currency_guid_map,
-            commodities,
             fx_prices,
         },
     )
@@ -820,24 +836,46 @@ pub fn get_cached_prices_map(conn: &Connection) -> Result<HashMap<String, f64>, 
         .collect())
 }
 
-pub fn get_cached_prices_with_date_map(
+/// Latest and second-latest price maps in one pass: one `nth_price_raw` scan
+/// per rank and a single `FxHistory::load` shared by both normalizations.
+pub fn get_cached_price_maps(
     conn: &Connection,
-) -> Result<HashMap<String, (f64, String)>, String> {
-    Ok(latest_prices_normalized(conn, 1)?
-        .into_iter()
-        .map(|(guid, _, price, date, _)| (guid, (price, date)))
-        .collect())
-}
-
-/// Second-latest price per commodity, normalized to the report currency at that
-/// price's own date. Powers day-change comparisons in the portfolio table.
-pub fn get_cached_prev_prices_map(
-    conn: &Connection,
-) -> Result<HashMap<String, (f64, String)>, String> {
-    Ok(latest_prices_normalized(conn, 2)?
-        .into_iter()
-        .map(|(guid, _, price, date, _)| (guid, (price, date)))
-        .collect())
+) -> Result<
+    (
+        HashMap<String, (f64, String)>,
+        HashMap<String, (f64, String)>,
+    ),
+    String,
+> {
+    let latest = nth_price_raw(conn, 1)?;
+    let prev = nth_price_raw(conn, 2)?;
+    if latest.is_empty() && prev.is_empty() {
+        return Ok((HashMap::new(), HashMap::new()));
+    }
+    let report_mnemonic = fx::get_report_currency_mnemonic(conn)?.unwrap_or_default();
+    let fx_history = fx::FxHistory::load(conn)?;
+    // One rate map per distinct price date instead of one query per commodity.
+    let mut rates_by_date: HashMap<String, HashMap<String, f64>> = HashMap::new();
+    let normalize = |rows: Vec<(String, String, f64, String, String)>,
+                     rates_by_date: &mut HashMap<String, HashMap<String, f64>>|
+     -> HashMap<String, (f64, String)> {
+        rows.into_iter()
+            .map(|(guid, _mnemonic, price, date, quote)| {
+                let normalized = if quote == report_mnemonic {
+                    price
+                } else {
+                    let rates = rates_by_date
+                        .entry(date.clone())
+                        .or_insert_with(|| fx_history.map_for_date(&date));
+                    price * rates.get(&quote).copied().unwrap_or(1.0)
+                };
+                (guid, (normalized, date))
+            })
+            .collect()
+    };
+    let latest_map = normalize(latest, &mut rates_by_date);
+    let prev_map = normalize(prev, &mut rates_by_date);
+    Ok((latest_map, prev_map))
 }
 
 /// Latest-price rows normalized to the report currency, keyed by commodity
@@ -966,17 +1004,21 @@ pub(crate) fn empty_prices_result() -> PricesResult {
 }
 
 /// Single transaction so prices + refresh_log commit atomically; a mid-write
-/// failure must not leave partial prices behind.
+/// failure must not leave partial prices behind. The log row is only stamped
+/// when at least one price actually landed — a refresh that fetched nothing
+/// (Yahoo down, no matches) must not look fresh to the 24h auto-refresh gate.
 pub(crate) fn write_prices_and_log(
     conn: &Connection,
     write_data: &PendingPriceWrites,
 ) -> Result<(), AppError> {
     db::with_tx_err(conn, || {
-        write_price_data(conn, write_data)?;
-        conn.execute(
-            "INSERT INTO refresh_log (refreshed_at) VALUES (?1)",
-            rusqlite::params![utils::iso_now()],
-        )?;
+        let wrote = write_price_data(conn, write_data)?;
+        if wrote {
+            conn.execute(
+                "INSERT INTO refresh_log (refreshed_at) VALUES (?1)",
+                rusqlite::params![utils::iso_now()],
+            )?;
+        }
         Ok(())
     })
 }
@@ -1092,7 +1134,7 @@ mod tests {
     #[test]
     fn override_map_empty_without_rows() {
         let conn = setup_commodities();
-        assert!(symbol_override_map(&conn).is_empty());
+        assert!(symbol_override_map(&conn).unwrap().is_empty());
         let list = fetch_symbol_overrides_inner(&conn).unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].commodity_guid, "c-aapl");
@@ -1104,18 +1146,18 @@ mod tests {
         let conn = setup_commodities();
         set_symbol_override_inner(&conn, "c-aapl".to_string(), "AAPL".to_string()).unwrap();
         assert_eq!(
-            symbol_override_map(&conn).get("c-aapl").cloned(),
+            symbol_override_map(&conn).unwrap().get("c-aapl").cloned(),
             Some("AAPL".to_string())
         );
 
         set_symbol_override_inner(&conn, "c-aapl".to_string(), "AAPL.DE".to_string()).unwrap();
         assert_eq!(
-            symbol_override_map(&conn).get("c-aapl").cloned(),
+            symbol_override_map(&conn).unwrap().get("c-aapl").cloned(),
             Some("AAPL.DE".to_string())
         );
 
         delete_symbol_override_inner(&conn, "c-aapl").unwrap();
-        assert!(symbol_override_map(&conn).is_empty());
+        assert!(symbol_override_map(&conn).unwrap().is_empty());
     }
 
     #[test]
@@ -1127,5 +1169,125 @@ mod tests {
         assert!(
             set_symbol_override_inner(&conn, "missing".to_string(), "AAPL".to_string()).is_err()
         );
+    }
+
+    /// Regression: the write path used to resolve the commodity by mnemonic and
+    /// write every successful candidate, so same-ticker commodities overwrote
+    /// one another and multi-candidate fetches interleaved series.
+    #[test]
+    fn write_price_data_keeps_same_mnemonic_commodities_separate() {
+        let conn = setup_commodities();
+        conn.execute(
+            "INSERT INTO commodities (guid, mnemonic, namespace, fullname) VALUES
+             ('c-bhp-us', 'BHP', 'NYSE', 'BHP NYSE'),
+             ('c-bhp-au', 'BHP', 'ASX', 'BHP ASX')",
+            [],
+        )
+        .unwrap();
+        let data = PendingPriceWrites {
+            writes: vec![
+                PendingPriceWrite {
+                    commodity_guid: "c-bhp-us".to_string(),
+                    currency_guid: "c-eur".to_string(),
+                    prices: vec![(1_700_000_000, 5.0)],
+                },
+                PendingPriceWrite {
+                    commodity_guid: "c-bhp-au".to_string(),
+                    currency_guid: "c-eur".to_string(),
+                    prices: vec![(1_700_000_000, 7.0)],
+                },
+            ],
+            report_currency_guid: None,
+            fx_prices: vec![],
+        };
+        assert!(write_price_data(&conn, &data).unwrap());
+
+        let map = get_cached_prices_map(&conn).unwrap();
+        assert!((map.get("c-bhp-us").copied().unwrap() - 5.0).abs() < 1e-9);
+        assert!((map.get("c-bhp-au").copied().unwrap() - 7.0).abs() < 1e-9);
+    }
+
+    /// Regression: every successful candidate symbol used to be written to the
+    /// commodity; exactly one (the first in declaration order) must win.
+    #[test]
+    fn assemble_result_writes_only_the_first_successful_candidate() {
+        let pre = PriceFetchPlan {
+            commodities: vec![CommodityInfo {
+                guid: "c-foo".to_string(),
+                mnemonic: "FOO".to_string(),
+                namespace: "EURONEXT".to_string(),
+                full_name: None,
+            }],
+            already_fetched: HashSet::new(),
+            latest_dates: HashMap::new(),
+            report_currency_guid: Some("c-eur".to_string()),
+            report_currency: Some("EUR".to_string()),
+            currencies: vec![],
+            currency_guid_map: HashMap::from([("EUR".to_string(), "c-eur".to_string())]),
+            existing_live_prices: vec![],
+            overrides: HashMap::new(),
+        };
+        let symbols = SymbolPlan {
+            candidates_by_commodity: HashMap::from([(
+                "c-foo".to_string(),
+                vec!["FOO.AS".to_string(), "FOO.PA".to_string()],
+            )]),
+            all_symbols: vec![],
+            symbol_period1: HashMap::new(),
+            fx_symbols: vec![],
+            period2: 0,
+        };
+        let outcome = FetchOutcome {
+            yahoo_history: HashMap::from([
+                (
+                    "FOO.AS".to_string(),
+                    YahooHistory {
+                        prices: vec![(1_700_000_000, 10.0)],
+                        currency: Some("EUR".to_string()),
+                    },
+                ),
+                (
+                    "FOO.PA".to_string(),
+                    YahooHistory {
+                        prices: vec![(1_700_000_000, 20.0)],
+                        currency: Some("EUR".to_string()),
+                    },
+                ),
+            ]),
+            yahoo_errors: HashMap::new(),
+        };
+
+        let (result, writes) = assemble_result(pre, symbols, outcome, "now".to_string());
+        assert!(result.errors.is_empty());
+        // One write, from the first candidate only.
+        assert_eq!(writes.writes.len(), 1);
+        assert_eq!(writes.writes[0].commodity_guid, "c-foo");
+        assert_eq!(writes.writes[0].prices, vec![(1_700_000_000, 10.0)]);
+        assert_eq!(result.prices.len(), 1);
+        assert!((result.prices[0].price - 10.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn write_prices_and_log_only_logs_a_nonempty_write() {
+        let conn = setup_commodities();
+        let empty = PendingPriceWrites {
+            writes: vec![],
+            report_currency_guid: Some("c-eur".to_string()),
+            fx_prices: vec![],
+        };
+        write_prices_and_log(&conn, &empty).unwrap();
+        assert_eq!(get_last_refresh_timestamp(&conn).unwrap(), None);
+
+        let with_write = PendingPriceWrites {
+            writes: vec![PendingPriceWrite {
+                commodity_guid: "c-aapl".to_string(),
+                currency_guid: "c-eur".to_string(),
+                prices: vec![(1_700_000_000, 12.5)],
+            }],
+            report_currency_guid: Some("c-eur".to_string()),
+            fx_prices: vec![],
+        };
+        write_prices_and_log(&conn, &with_write).unwrap();
+        assert!(get_last_refresh_timestamp(&conn).unwrap().is_some());
     }
 }

@@ -7,7 +7,7 @@ use tauri::State;
 use crate::db::{run_blocking, with_tx_err, AppError, AppState};
 use crate::fx;
 use crate::prices::{
-    get_cached_prev_prices_map, get_cached_prices_with_date_map, get_last_refresh_timestamp,
+    get_cached_price_maps, get_last_refresh_timestamp,
     get_price_history, latest_quote_currencies, list_commodities, PriceHistoryEntry,
 };
 use crate::sql;
@@ -135,7 +135,7 @@ struct SplitEvent {
 }
 
 struct PriceEvent {
-    mnemonic: String,
+    commodity_guid: String,
     date: String,
     price: f64,
     quote: String,
@@ -373,8 +373,7 @@ fn value_commodity_groups(
     conn: &Connection,
     commodity_map: HashMap<String, CommodityGroup>,
 ) -> Result<Vec<PortfolioHolding>, String> {
-    let prices_with_date_map = get_cached_prices_with_date_map(conn)?;
-    let prev_prices_map = get_cached_prev_prices_map(conn)?;
+    let (prices_with_date_map, prev_prices_map) = get_cached_price_maps(conn)?;
 
     let holdings: Vec<PortfolioHolding> = commodity_map
         .into_iter()
@@ -440,7 +439,6 @@ struct TrendInputs {
     price_events: Vec<PriceEvent>,
     fx_history: fx::FxHistory,
     report_currency: String,
-    guid_to_mnemonic: HashMap<String, String>,
     guid_to_quote: HashMap<String, String>,
 }
 
@@ -482,9 +480,11 @@ fn load_trend_inputs(conn: &Connection, filter: Option<&str>) -> Result<TrendInp
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
 
-    // Load price records ordered by date (with their quote currency)
+    // Load price records ordered by date (with their quote currency). Keyed by
+    // commodity GUID: mnemonics can repeat across namespaces, so the trend must
+    // never collapse two commodities onto one price.
     let mut prices_sql = format!(
-        "SELECT c.mnemonic, p.date,
+        "SELECT p.commodity_guid, p.date,
 				{} as price,
 				cur.mnemonic as quote
 		 FROM prices p
@@ -504,7 +504,7 @@ fn load_trend_inputs(conn: &Connection, filter: Option<&str>) -> Result<TrendInp
     let price_events: Vec<PriceEvent> = price_stmt
         .query_map(sql::param_refs(&price_params).as_slice(), |row| {
             Ok(PriceEvent {
-                mnemonic: row.get(0)?,
+                commodity_guid: row.get(0)?,
                 date: row.get(1)?,
                 price: row.get(2)?,
                 quote: row.get(3)?,
@@ -562,7 +562,6 @@ fn load_trend_inputs(conn: &Connection, filter: Option<&str>) -> Result<TrendInp
         price_events,
         fx_history,
         report_currency,
-        guid_to_mnemonic,
         guid_to_quote,
     })
 }
@@ -597,7 +596,6 @@ fn accumulate_trend(
     let price_events = &inputs.price_events;
     let fx_history = &inputs.fx_history;
     let report_currency = inputs.report_currency.as_str();
-    let guid_to_mnemonic = &inputs.guid_to_mnemonic;
     let guid_to_quote = &inputs.guid_to_quote;
 
     let mut running_shares: HashMap<String, f64> = HashMap::new();
@@ -630,15 +628,20 @@ fn accumulate_trend(
         // FX rates effective on this date
         let fx_at = fx_history.map_for_date(&date_str);
 
-        // Advance prices on or before this date, normalized to the report currency
-        while price_idx < price_events.len() && price_events[price_idx].date <= date_str {
+        // Advance prices on or before this date, normalized to the report
+        // currency. Compare day prefixes: stored price dates may carry a time.
+        while price_idx < price_events.len() {
             let p = &price_events[price_idx];
+            let price_day = p.date.get(..10).unwrap_or(p.date.as_str());
+            if price_day > date_str.as_str() {
+                break;
+            }
             let rate = if p.quote == report_currency {
                 1.0
             } else {
                 fx_at.get(&p.quote).copied().unwrap_or(1.0)
             };
-            running_prices.insert(p.mnemonic.clone(), p.price * rate);
+            running_prices.insert(p.commodity_guid.clone(), p.price * rate);
             price_idx += 1;
         }
 
@@ -648,10 +651,8 @@ fn accumulate_trend(
             if *shares == 0.0 {
                 continue;
             }
-            if let Some(mnemonic) = guid_to_mnemonic.get(guid) {
-                let price = running_prices.get(mnemonic).copied().unwrap_or(0.0);
-                market_value += shares * price;
-            }
+            let price = running_prices.get(guid).copied().unwrap_or(0.0);
+            market_value += shares * price;
         }
 
         // Cost basis converted to the report currency at this date's FX
@@ -1614,6 +1615,51 @@ mod tests {
         assert_eq!(data.total_cost_basis, 1700.0);
         assert_eq!(data.total_gain_loss, -200.0);
         assert!(data.total_xirr.is_some());
+    }
+
+    #[test]
+    fn value_trend_keeps_same_mnemonic_commodities_separate() {
+        let conn = setup_valued_portfolio();
+        // A second commodity with the same ticker on another exchange: its
+        // price must never be substituted for the first one's.
+        conn.execute(
+            "INSERT INTO commodities (guid, mnemonic, namespace, fullname) VALUES
+             ('c-aapl-2', 'AAPL', 'XETRA', 'Apple XETRA')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO accounts (guid, name, account_type, parent_guid, placeholder, commodity_guid) VALUES
+             ('broker2', 'Broker 2', 'STOCK', 'root', 0, 'c-aapl-2')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO transactions (guid, post_date) VALUES ('t-aapl-2', '2024-02-10')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO splits (guid, tx_guid, account_guid, value_num, value_denom, quantity_num, quantity_denom) VALUES
+             ('s-aapl-2', 't-aapl-2', 'broker2', 4000, 100, 2, 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO prices (guid, commodity_guid, currency_guid, value_num, value_denom, date)
+             VALUES ('p-aapl-2', 'c-aapl-2', 'c-eur', 2000, 100, '2024-03-01')",
+            [],
+        )
+        .unwrap();
+
+        let trend = build_value_trend(&conn, None).unwrap();
+        let last = trend.last().unwrap();
+        // 10 × c-aapl @ 150 + 2 × c-aapl-2 @ 20; XYZ stays unpriced.
+        assert!(
+            (last.market_value - 1540.0).abs() < 1e-6,
+            "got {}",
+            last.market_value
+        );
     }
 
     fn date(ymd: &str) -> NaiveDate {
