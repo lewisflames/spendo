@@ -71,18 +71,18 @@
   let currency = $derived(sessionCurrency());
 
   const priceRefresh = createPriceRefresh(() => res.reload());
-  let autoRefreshAttempted = $state(false);
+  // Book-scoped auto-refresh: once per book per page mount. Keyed by the active
+  // book path (switching books keeps this page mounted), not by mount alone.
+  // When enabled, fetch if cached prices are missing or older than a day (and
+  // there is something to price). Manual refresh stays in the header button.
+  let autoRefreshBook = $state<string | null>(null);
 
-  // Book-scoped auto-refresh: when enabled, fetch once per page mount if the
-  // cached prices are missing or older than a day (and there is something to
-  // price). Manual refresh stays available via the header button.
   $effect(() => {
-    if (!dbSession.value || autoRefreshAttempted || res.loading || !res.data) return;
-    if (res.data.holdings.length === 0) {
-      autoRefreshAttempted = true;
-      return;
-    }
-    autoRefreshAttempted = true;
+    if (!dbSession.value || res.loading || !res.data) return;
+    const book = activeBookPath.value;
+    if (autoRefreshBook === book) return;
+    autoRefreshBook = book;
+    if (res.data.holdings.length === 0) return;
     loadBookSettings()
       .then((settings) => {
         if (settings.priceAutoRefresh !== 'on_startup' || priceRefresh.refreshing) return;

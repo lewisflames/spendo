@@ -73,10 +73,10 @@ export async function importGnucashViaDialog(): Promise<boolean> {
 
 /** Runs the merge for the pending preview once the user confirms. */
 export async function confirmGnucashImport(deleteOrphans: boolean): Promise<boolean> {
-  const preview = gnucashImportDialog.preview;
+  const preview = gnucashImportDialog.value.preview;
   if (!preview || busy || !dbSession.value) return false;
   busy = true;
-  gnucashImportDialog.importing = true;
+  gnucashImportDialog.value.importing = true;
   const loading = toast.loading(`Importing ${preview.filename}…`);
   try {
     const result = await importGnucash({
@@ -115,7 +115,7 @@ export async function confirmGnucashImport(deleteOrphans: boolean): Promise<bool
     return false;
   } finally {
     toast.dismiss(loading);
-    gnucashImportDialog.importing = false;
+    gnucashImportDialog.value.importing = false;
     busy = false;
   }
 }

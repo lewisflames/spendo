@@ -173,7 +173,7 @@
 </BookGate>
 
 {#if accountGuid}
-  {#key `${showEditDialog}-${by.year}`}
+  {#key `${accountGuid}-${showEditDialog}-${by.year}`}
     <BudgetEntryDialog
       bind:open={showEditDialog}
       {accountGuid}

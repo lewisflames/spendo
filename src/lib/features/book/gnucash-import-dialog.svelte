@@ -13,13 +13,13 @@
   let deleteOrphans = $state(true);
 
   useDialogReset(
-    () => gnucashImportDialog.open,
+    () => gnucashImportDialog.value.open,
     () => {
       deleteOrphans = true;
     }
   );
 
-  const preview = $derived(gnucashImportDialog.preview);
+  const preview = $derived(gnucashImportDialog.value.preview);
   const newCount = $derived(preview ? preview.accountsAdded + preview.transactionsAdded : 0);
   const updatedCount = $derived(
     preview ? preview.accountsUpdated + preview.transactionsUpdated : 0
@@ -34,12 +34,12 @@
 </script>
 
 {#if preview}
-  <Dialog.Root bind:open={gnucashImportDialog.open}>
+  <Dialog.Root bind:open={gnucashImportDialog.value.open}>
     <Dialog.Content
       class="max-h-[90vh] overflow-y-auto sm:max-w-lg"
-      escapeKeydownBehavior={gnucashImportDialog.importing ? 'ignore' : 'close'}
-      interactOutsideBehavior={gnucashImportDialog.importing ? 'ignore' : 'close'}
-      showCloseButton={!gnucashImportDialog.importing}
+      escapeKeydownBehavior={gnucashImportDialog.value.importing ? 'ignore' : 'close'}
+      interactOutsideBehavior={gnucashImportDialog.value.importing ? 'ignore' : 'close'}
+      showCloseButton={!gnucashImportDialog.value.importing}
     >
       <Dialog.Header>
         <Dialog.Title>Import {preview.filename}?</Dialog.Title>
@@ -115,16 +115,16 @@
         <Button
           variant="outline"
           onclick={closeGnucashImportDialog}
-          disabled={gnucashImportDialog.importing}
+          disabled={gnucashImportDialog.value.importing}
         >
           Cancel
         </Button>
         <Button
           variant={hasRemovals && deleteOrphans ? 'destructive' : 'default'}
-          disabled={gnucashImportDialog.importing}
+          disabled={gnucashImportDialog.value.importing}
           onclick={() => void confirmGnucashImport(hasRemovals ? deleteOrphans : true)}
         >
-          {#if gnucashImportDialog.importing}
+          {#if gnucashImportDialog.value.importing}
             <LoaderCircle aria-hidden="true" class="size-4 animate-spin" />
             Importing…
           {:else}

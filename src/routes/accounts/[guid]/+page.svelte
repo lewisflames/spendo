@@ -196,34 +196,36 @@
         {/if}
       </AccountDetailHeader>
       {#if guid}
-        <AccountDialog
-          bind:open={editOpen}
-          mode="edit"
-          guid={res.data.account.guid}
-          initial={editInitial}
-          onSaved={() => {
-            res.reload();
-            refreshSession();
-            toast.success('Account updated');
-          }}
-          onDeleted={() => {
-            toast.success('Account deleted');
-            if (res.data?.parent) void openAccount(res.data.parent.guid);
-            else void goto(resolve('/reports/balance-sheet'));
-          }}
-          onError={(msg) => toast.error(msg)}
-        />
-        <AccountDialog
-          bind:open={createOpen}
-          mode="create"
-          parentPreset={res.data.account.guid}
-          onSaved={() => {
-            res.reload();
-            refreshSession();
-            toast.success('Account created');
-          }}
-          onError={(msg) => toast.error(msg)}
-        />
+        {#key guid}
+          <AccountDialog
+            bind:open={editOpen}
+            mode="edit"
+            guid={res.data.account.guid}
+            initial={editInitial}
+            onSaved={() => {
+              res.reload();
+              refreshSession();
+              toast.success('Account updated');
+            }}
+            onDeleted={() => {
+              toast.success('Account deleted');
+              if (res.data?.parent) void openAccount(res.data.parent.guid);
+              else void goto(resolve('/reports/balance-sheet'));
+            }}
+            onError={(msg) => toast.error(msg)}
+          />
+          <AccountDialog
+            bind:open={createOpen}
+            mode="create"
+            parentPreset={res.data.account.guid}
+            onSaved={() => {
+              res.reload();
+              refreshSession();
+              toast.success('Account created');
+            }}
+            onError={(msg) => toast.error(msg)}
+          />
+        {/key}
       {/if}
     {/if}
 
