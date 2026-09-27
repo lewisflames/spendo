@@ -40,6 +40,7 @@
   import { useUrlParams, dateParam, debouncedSearchParam } from '$lib/hooks/use-url-params.svelte';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import { useTableSort } from '$lib/hooks/use-table-sort.svelte';
+  import ReconcileKpiCards from '$lib/features/reconcile/reconcile-kpi-cards.svelte';
   import ReconcileStatementForm from '$lib/features/reconcile/reconcile-statement-form.svelte';
   import ReconcileTable from '$lib/features/reconcile/reconcile-table.svelte';
   import {
@@ -154,6 +155,9 @@
   let balanced = $derived(endingBalance !== null && isBalanced(difference));
   let saving = $state(false);
   let finishing = $state(false);
+  // Finishing promotes every cleared split, so the header button opens a
+  // confirmation instead of committing straight away.
+  let confirmFinishOpen = $state(false);
   // Finish sends unsaved marks with the same call, so dirty must not block it
   // — only a missing/invalid ending balance, an unbalanced statement, or an
   // empty selection does.
@@ -485,35 +489,48 @@
           Undo last statement
         </Button>
       {/if}
+      <Button
+        variant="outline"
+        disabled={!dirty || saving || finishing}
+        title="Save progress (Ctrl+S)"
+        onclick={() => void save()}
+      >
+        {saving ? 'Saving…' : 'Save progress'}
+      </Button>
+      <Button
+        disabled={!canFinish || saving || finishing}
+        onclick={() => (confirmFinishOpen = true)}
+      >
+        {finishing ? 'Finishing…' : 'Finish reconciliation'}
+      </Button>
     </PageHeader>
 
     {#if (res.loading || dbBootstrapping.value) && !res.data && !res.error}
       <PageSkeleton variant="reconcile-detail" />
     {:else if res.data && !res.error}
       <DimWrapper active={res.loading} class="flex flex-col gap-6">
-        <ReconcileStatementForm
-          bind:statementDate
-          bind:endingBalanceInput
+        <ReconcileKpiCards
           {currency}
           {startingBalance}
           {cleared}
           {target}
           {difference}
           {balanced}
+          onFindDifference={() => {
+            amountFilter = difference;
+          }}
+        />
+
+        <ReconcileStatementForm
+          bind:statementDate
+          bind:endingBalanceInput
           {balanceIssue}
           checkedCount={checked.size}
           totalCount={candidates.length}
           {dirty}
-          {saving}
-          {finishing}
-          {canFinish}
+          {balanced}
           lastReconciledDate={res.data.lastReconciledDate}
           maxDate={today.value}
-          onSave={save}
-          onFinish={finish}
-          onFindDifference={() => {
-            amountFilter = difference;
-          }}
         />
 
         <div class="flex flex-col gap-4">
@@ -637,6 +654,32 @@
       </Button>
       <Button onclick={saveAndLeave} disabled={saving}>
         {saving ? 'Saving…' : closeRequested ? 'Save and close' : 'Save and leave'}
+      </Button>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>
+
+<Dialog.Root bind:open={confirmFinishOpen}>
+  <Dialog.Content class="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+    <Dialog.Header>
+      <Dialog.Title>Finish reconciliation?</Dialog.Title>
+      <Dialog.Description>
+        This saves your progress and marks the {checked.size} ticked splits as reconciled. Editing a transaction
+        later will ask before putting its splits back to New.
+      </Dialog.Description>
+    </Dialog.Header>
+    <Dialog.Footer>
+      <Button variant="outline" onclick={() => (confirmFinishOpen = false)} disabled={finishing}>
+        Cancel
+      </Button>
+      <Button
+        disabled={finishing}
+        onclick={() => {
+          confirmFinishOpen = false;
+          void finish();
+        }}
+      >
+        {finishing ? 'Finishing…' : 'Finish reconciliation'}
       </Button>
     </Dialog.Footer>
   </Dialog.Content>
