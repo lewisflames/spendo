@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  autoFillIndex,
   draftFromSplit,
   formatDraftAmount,
   isBalanced,
@@ -161,6 +162,35 @@ describe('splitTotals / remainderFor', () => {
     expect(isInvestmentAccountType('mutual')).toBe(true);
     expect(isInvestmentAccountType('BANK')).toBe(false);
     expect(isInvestmentAccountType(null)).toBe(false);
+  });
+});
+
+describe('autoFillIndex', () => {
+  it('finds the only empty row once the others carry amounts', () => {
+    const splits = [
+      { ...makeSplitDraft(1), amount: '100' },
+      { ...makeSplitDraft(2), amount: '-40' },
+      { ...makeSplitDraft(3), amount: '' }
+    ];
+    expect(autoFillIndex(splits)).toBe(2);
+  });
+
+  it('returns -1 when several rows are empty or none carry an amount', () => {
+    const twoEmpty = [
+      { ...makeSplitDraft(1), amount: '100' },
+      { ...makeSplitDraft(2), amount: '' },
+      { ...makeSplitDraft(3), amount: '' }
+    ];
+    expect(autoFillIndex(twoEmpty)).toBe(-1);
+    expect(autoFillIndex([makeSplitDraft(1), makeSplitDraft(2)])).toBe(-1);
+  });
+
+  it('treats unparseable amounts as empty', () => {
+    const splits = [
+      { ...makeSplitDraft(1), amount: '10+5' },
+      { ...makeSplitDraft(2), amount: 'oops' }
+    ];
+    expect(autoFillIndex(splits)).toBe(1);
   });
 });
 

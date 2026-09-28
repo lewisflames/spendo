@@ -285,6 +285,26 @@ export function splitTotals(splits: SplitDraft[]): { debit: number; credit: numb
   return { debit, credit };
 }
 
+/**
+ * Index of the one split that still needs an amount when every other row
+ * parses and at least one row carries a value, or -1. Powers the "fill
+ * remaining" button, the ghost placeholder and Enter-to-fill.
+ */
+export function autoFillIndex(splits: SplitDraft[]): number {
+  let candidate = -1;
+  let invalid = 0;
+  let valid = 0;
+  for (let i = 0; i < splits.length; i += 1) {
+    if (parseAmount(splits[i].amount) === null) {
+      candidate = i;
+      invalid += 1;
+    } else {
+      valid += 1;
+    }
+  }
+  return invalid === 1 && valid >= 1 ? candidate : -1;
+}
+
 /** Amount that would balance the given row, or null when other rows are invalid. */
 export function remainderFor(index: number, splits: SplitDraft[]): number | null {
   let sumOthers = 0;

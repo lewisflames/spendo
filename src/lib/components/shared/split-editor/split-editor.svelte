@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import { Input } from '$lib/components/ui/input';
   import { Button } from '$lib/components/ui/button';
   import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
@@ -17,6 +18,7 @@
   import type { PickerAccount } from '$lib/features/accounts/account-picker-utils';
   import { formatSessionCurrency } from '$lib/utils/format.svelte';
   import {
+    autoFillIndex,
     formatDraftAmount,
     isBalanced,
     isInvestmentAccountType,
@@ -56,8 +58,20 @@
   let balanced = $derived(isBalanced(balance));
   let totals = $derived(splitTotals(splits));
 
+  // Exactly one row still needs an amount: offer to fill it (button, ghost
+  // placeholder and Enter) instead of making users hunt for the scale icon.
+  let autoFill = $derived(autoFillIndex(splits));
+  let showQtyColumn = $derived(splits.some((s) => s.showQuantity));
+  // Tailwind sees both class strings in this file, so either grid is generated.
+  let gridCols = $derived(
+    showQtyColumn
+      ? 'sm:grid-cols-[minmax(0,2fr)_9rem_7rem_minmax(0,1.5fr)_auto]'
+      : 'sm:grid-cols-[minmax(0,2fr)_9rem_minmax(0,1.5fr)_auto]'
+  );
+
   let typeByGuid = $derived(new Map(options.map((o) => [o.guid, o.accountType])));
   let labelByGuid = $derived(new Map(options.map((o) => [o.guid, o.display])));
+  let commodityByGuid = $derived(new Map(options.map((o) => [o.guid, o.commodity])));
 
   // Auto-reveal quantity when the picked account carries shares. Tracked per
   // row so a deliberate hide isn’t re-opened on every render.
@@ -83,9 +97,21 @@
     return labelByGuid.get(s.accountGuid) ?? `Split ${i + 1}`;
   }
 
+  function focusElement(id: string) {
+    void tick().then(() => {
+      document.getElementById(id)?.focus();
+    });
+  }
+
+  function focusAmount(key: number) {
+    focusElement(`${idPrefix}-${key}-amount`);
+  }
+
   function addSplit() {
     if (splits.length >= 50) return;
-    splits = [...splits, makeSplitDraft(makeKey())];
+    const key = makeKey();
+    splits = [...splits, makeSplitDraft(key)];
+    focusElement(`${idPrefix}-${key}-account`);
   }
 
   function removeSplit(key: number) {
@@ -122,6 +148,39 @@
     if (r === null) return;
     splits[i].amount = formatDraftAmount(r);
   }
+
+  /**
+   * Enter accepts the remainder once this is the only unfilled row; otherwise
+   * it hops to the next row that still needs an amount.
+   */
+  function handleAmountKeydown(e: KeyboardEvent, index: number) {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    if (autoFill === index) {
+      const remainder = remainderFor(index, splits);
+      if (remainder !== null) {
+        splits[index].amount = formatDraftAmount(remainder);
+        return;
+      }
+    }
+    for (let j = index + 1; j < splits.length; j += 1) {
+      if (parseAmount(splits[j].amount) === null) {
+        focusAmount(splits[j].key);
+        return;
+      }
+    }
+  }
+
+  /** Unit price for investment rows once both amount and share count parse. */
+  function unitPrice(s: SplitDraft): string | null {
+    if (!s.showQuantity) return null;
+    const amount = parseAmount(s.amount);
+    const quantity = parseAmount(s.quantity);
+    if (amount === null || quantity === null || Math.abs(quantity) < 1e-9) return null;
+    const commodity = commodityByGuid.get(s.accountGuid);
+    const price = formatSessionCurrency(Math.abs(amount / quantity));
+    return commodity ? `${price} / ${commodity}` : price;
+  }
 </script>
 
 <div class="flex flex-col gap-3">
@@ -145,11 +204,13 @@
 
   <div class="overflow-hidden rounded-lg border">
     <div
-      class="hidden gap-2 border-b bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground sm:grid sm:grid-cols-[minmax(0,2fr)_8rem_7rem_minmax(0,1.5fr)_auto]"
+      class="hidden gap-2 border-b bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground sm:grid {gridCols}"
     >
       <span>Account</span>
       <span>Amount</span>
-      <span>Quantity</span>
+      {#if showQtyColumn}
+        <span>Quantity</span>
+      {/if}
       <span>Memo</span>
       <span class="sr-only">Row actions</span>
     </div>
@@ -158,9 +219,8 @@
       {#each splits as s, i (s.key)}
         {@const label = rowLabel(s, i)}
         {@const remainder = remainderFor(i, splits)}
-        <div
-          class="grid grid-cols-2 gap-2 p-3 sm:grid-cols-[minmax(0,2fr)_8rem_7rem_minmax(0,1.5fr)_auto] sm:items-center sm:gap-2 sm:px-3 sm:py-2"
-        >
+        {@const price = unitPrice(s)}
+        <div class="grid grid-cols-2 gap-2 p-3 sm:items-center sm:gap-2 sm:px-3 sm:py-2 {gridCols}">
           <div class="col-span-2 sm:col-span-1">
             <AccountPicker
               id="{idPrefix}-{s.key}-account"
@@ -170,58 +230,55 @@
               disabled={loading}
               invalid={showErrors && !!errors[i] && !s.accountGuid}
               describedBy={showErrors && errors[i] ? `${idPrefix}-${s.key}-error` : undefined}
+              onSelect={() => focusAmount(s.key)}
             />
           </div>
-          <Input
-            id="{idPrefix}-{s.key}-amount"
-            type="text"
-            inputmode="decimal"
-            bind:value={s.amount}
-            placeholder="0.00, 1,000.00 or 10+5"
-            aria-label="{label} amount"
-            aria-invalid={showErrors && parseAmount(s.amount) === null}
-            class="col-span-1"
-          />
-          <div class="col-span-1 flex items-center gap-1">
-            {#if s.showQuantity}
-              <Input
-                id="{idPrefix}-{s.key}-qty"
-                type="text"
-                inputmode="decimal"
-                bind:value={s.quantity}
-                placeholder="Qty"
-                aria-label="{label} quantity"
-              />
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                class="size-8 shrink-0"
-                aria-label="Hide quantity for {label}"
-                title="Hide quantity"
-                onclick={() => {
-                  s.showQuantity = false;
-                  s.quantity = '';
-                }}
-              >
-                <X aria-hidden="true" class="size-3.5" />
-              </Button>
-            {:else}
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                class="size-8 shrink-0 text-muted-foreground"
-                aria-label="Add quantity to {label}"
-                title="Add quantity (investments)"
-                onclick={() => {
-                  s.showQuantity = true;
-                }}
-              >
-                <Plus aria-hidden="true" class="size-3.5" />
-              </Button>
+          <div class="col-span-1 flex flex-col gap-1">
+            <Input
+              id="{idPrefix}-{s.key}-amount"
+              type="text"
+              inputmode="decimal"
+              bind:value={s.amount}
+              placeholder={autoFill === i && remainder !== null
+                ? formatDraftAmount(remainder)
+                : '0.00'}
+              title="Accepts amounts like 1,000.00, $12.50 or 10+5"
+              aria-label="{label} amount"
+              aria-invalid={showErrors && parseAmount(s.amount) === null}
+              onkeydown={(e) => handleAmountKeydown(e, i)}
+            />
+            {#if price}
+              <p class="text-[11px] text-muted-foreground tabular-nums">{price}</p>
             {/if}
           </div>
+          {#if showQtyColumn}
+            <div class="col-span-1 flex items-center gap-1">
+              {#if s.showQuantity}
+                <Input
+                  id="{idPrefix}-{s.key}-qty"
+                  type="text"
+                  inputmode="decimal"
+                  bind:value={s.quantity}
+                  placeholder="Qty"
+                  aria-label="{label} quantity"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  class="size-8 shrink-0"
+                  aria-label="Hide quantity for {label}"
+                  title="Hide quantity"
+                  onclick={() => {
+                    s.showQuantity = false;
+                    s.quantity = '';
+                  }}
+                >
+                  <X aria-hidden="true" class="size-3.5" />
+                </Button>
+              {/if}
+            </div>
+          {/if}
           <div class="col-span-2 sm:col-span-1">
             <Input
               id="{idPrefix}-{s.key}-memo"
@@ -291,6 +348,22 @@
                   <ArrowRightLeft aria-hidden="true" />
                   Negate amount
                 </DropdownMenu.Item>
+                {#if s.showQuantity}
+                  <DropdownMenu.Item
+                    onclick={() => {
+                      s.showQuantity = false;
+                      s.quantity = '';
+                    }}
+                  >
+                    <X aria-hidden="true" />
+                    Remove quantity
+                  </DropdownMenu.Item>
+                {:else}
+                  <DropdownMenu.Item onclick={() => (s.showQuantity = true)}>
+                    <Plus aria-hidden="true" />
+                    Add quantity
+                  </DropdownMenu.Item>
+                {/if}
                 <DropdownMenu.Item
                   disabled={splits.length >= 50}
                   onclick={() => duplicateSplit(s.key)}
@@ -323,18 +396,35 @@
         : 'text-muted-foreground'}"
     role="status"
   >
-    {#if totals}
-      <span class="tabular-nums">
-        Debits {formatSessionCurrency(totals.debit)} · Credits {formatSessionCurrency(
-          totals.credit
-        )}
-      </span>
-      {#if balanced}
-        <span> · Looks good. Everything balances.</span>
-      {:else}
-        <span>
-          · Off by {formatSessionCurrency(balance ?? 0)}. The scale button can fill a row for you.
+    {#if autoFill >= 0}
+      <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <span class="tabular-nums">
+          One split left to fill. Row {autoFill + 1} balances with {formatSessionCurrency(
+            remainderFor(autoFill, splits) ?? 0
+          )}.
         </span>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          class="h-6 px-2"
+          onclick={() => fillRemainder(autoFill)}
+        >
+          Fill row {autoFill + 1}
+        </Button>
+      </div>
+    {:else if totals}
+      {#if balanced}
+        <span class="tabular-nums">Balanced · {formatSessionCurrency(totals.credit)}</span>
+      {:else}
+        <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span class="tabular-nums">
+            Money out {formatSessionCurrency(totals.debit)} · Money in {formatSessionCurrency(
+              totals.credit
+            )}
+          </span>
+          <span class="tabular-nums">· Off by {formatSessionCurrency(Math.abs(balance ?? 0))}</span>
+        </div>
       {/if}
     {:else if showErrors}
       Add an amount to every split.
