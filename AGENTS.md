@@ -73,6 +73,7 @@ Frontend work is done when `bun run check`, `bun run lint` and `bun run test` pa
 - `index.ts` barrels use named exports only.
 - `tauri.ts`: leaf payload types are module-private; export only what other modules import.
 - localStorage keys are stable and unversioned (e.g. `spendo-settings`, `cols:budgets`) — no `:v2` suffixes or legacy branches; drop unknown or invalid stored values instead. A stored selection always wins: new default columns appear only with no stored state or after "Reset to default".
+- The transaction form stages attachments picked before a create save in `pendingAttachments` and attaches them with `addAttachments` right after `createTransaction`; a failed attach leaves the transaction saved. Extension/count rules live in `$lib/features/transactions/attachment-utils.ts`, mirrored from `attachments.rs`.
 
 ## Naming glossary (do not invent synonyms)
 

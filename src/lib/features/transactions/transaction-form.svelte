@@ -9,6 +9,7 @@
   import { Info } from '@lucide/svelte';
   import { DatePicker } from '$lib/components/shared/date-picker';
   import PageHeader from '$lib/components/layout/page-header.svelte';
+  import { toast } from '$lib/components/ui/sonner';
   import TransactionAttachments from '$lib/features/transactions/transaction-attachments.svelte';
   import {
     SplitEditor,
@@ -21,6 +22,7 @@
     type SplitDraft
   } from '$lib/components/shared/split-editor';
   import {
+    addAttachments,
     createTransaction,
     deleteTransaction,
     fetchAccounts,
@@ -119,6 +121,8 @@
   let num = $state(snapshot.num);
   let notes = $state(snapshot.notes);
   let splits = $state<SplitDraft[]>(snapshot.splits);
+  // Files picked before the transaction exists; attached right after save.
+  let pendingAttachments = $state<string[]>([]);
   // Dirty baseline moves after "Save & add another" resets the form.
   let baseline = $state(snapshot);
 
@@ -211,6 +215,7 @@
 
   let dirty = $derived.by(() => {
     if (
+      pendingAttachments.length > 0 ||
       postDate !== baseline.postDate ||
       description !== baseline.description ||
       num !== baseline.num ||
@@ -282,6 +287,24 @@
     };
   }
 
+  /**
+   * Attach files the user picked before the transaction existed. Paths clear
+   * first so a later save can't re-attach them; if attaching fails the
+   * transaction is already saved, so the files can be added from its page.
+   */
+  async function attachPending(txGuid: string) {
+    if (pendingAttachments.length === 0) return;
+    const paths = pendingAttachments;
+    pendingAttachments = [];
+    try {
+      await addAttachments({ txGuid, paths });
+    } catch (e: unknown) {
+      toast.error(
+        `Saved, but couldn’t attach the files: ${errMsg(e, 'add them from the transaction page')}`
+      );
+    }
+  }
+
   function focusDescription() {
     void tick().then(() => {
       document.getElementById('tx-desc')?.focus();
@@ -328,6 +351,7 @@
           splits.map((s) => s.accountGuid),
           description
         );
+        await attachPending(newGuid);
         onSaved?.(newGuid);
       }
     } catch (e: unknown) {
@@ -352,6 +376,7 @@
         splits.map((s) => s.accountGuid),
         description
       );
+      await attachPending(newGuid);
       onSavedAndNew?.(newGuid);
       // Keep the date and accounts for fast batch entry; clear the rest.
       description = '';
@@ -581,7 +606,10 @@
     </p>
   {/if}
 
-  <TransactionAttachments txGuid={mode === 'edit' ? guid : null} />
+  <TransactionAttachments
+    txGuid={mode === 'edit' ? guid : null}
+    bind:pendingPaths={pendingAttachments}
+  />
 
   <Dialog.Root bind:open={confirmUnreconcileOpen}>
     <Dialog.Content class="max-h-[90vh] overflow-y-auto sm:max-w-lg">

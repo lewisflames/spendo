@@ -16,7 +16,8 @@
     LoaderCircle,
     Paperclip,
     Plus,
-    Trash2
+    Trash2,
+    X
   } from '@lucide/svelte';
   import {
     addAttachments,
@@ -26,14 +27,24 @@
     openAttachment,
     type AttachmentInfo
   } from '$lib/tauri';
+  import {
+    ATTACHMENT_EXTENSIONS,
+    MAX_ATTACHMENTS,
+    attachmentFileName,
+    isImageAttachment,
+    selectPendingAttachments
+  } from '$lib/features/transactions/attachment-utils';
   import { errMsg } from '$lib/utils/error';
   import { formatBytes, formatDate } from '$lib/utils/format.svelte';
 
-  let { txGuid = null }: { txGuid?: string | null } = $props();
-
-  /** Mirrors `ALLOWED_TYPES` in `src-tauri/src/attachments.rs`; the backend re-validates. */
-  const ATTACHMENT_EXTENSIONS = ['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp'];
-  const MAX_ATTACHMENTS = 10;
+  let {
+    txGuid = null,
+    pendingPaths = $bindable<string[]>([])
+  }: {
+    txGuid?: string | null;
+    /** Create mode: files held locally until the form saves the transaction. */
+    pendingPaths?: string[];
+  } = $props();
 
   const res = useAsyncData({
     enabled: () => !!txGuid,
@@ -48,11 +59,8 @@
   let confirmDeleteGuid = $state<string | null>(null);
 
   // Webview-level OS drop; anywhere on the page attaches to this transaction.
-  // Disabled until the transaction exists.
-  const drop = useFileDrop((paths) => {
-    if (!txGuid) return;
-    void addPaths(paths);
-  });
+  // In create mode files wait in `pendingPaths` until the form saves.
+  const drop = useFileDrop((paths) => handlePicked(paths));
 
   let files = $derived(res.data ?? []);
 
@@ -61,7 +69,7 @@
   }
 
   async function pickFiles() {
-    if (!txGuid || adding) return;
+    if (adding) return;
     let selected: string | string[] | null;
     try {
       selected = await open({
@@ -73,7 +81,38 @@
       return;
     }
     if (!selected) return;
-    await addPaths(Array.isArray(selected) ? selected : [selected]);
+    handlePicked(Array.isArray(selected) ? selected : [selected]);
+  }
+
+  function handlePicked(paths: string[]) {
+    if (!paths.length) return;
+    if (txGuid) {
+      void addPaths(paths);
+      return;
+    }
+    const result = selectPendingAttachments(pendingPaths, paths, MAX_ATTACHMENTS);
+    if (result.added.length > 0) pendingPaths = [...pendingPaths, ...result.added];
+    if (result.unsupported.length > 0) {
+      toast.error(
+        result.unsupported.length === 1
+          ? `${attachmentFileName(result.unsupported[0])} isn’t a PDF or image, so it was skipped`
+          : `${result.unsupported.length} files aren’t PDFs or images, so they were skipped`
+      );
+    }
+    if (result.overflow > 0) {
+      toast.error(`Keep it to at most ${MAX_ATTACHMENTS} attachments per transaction`);
+    }
+    if (result.added.length > 0) {
+      toast.success(
+        result.added.length === 1
+          ? 'Ready. It’ll attach when you save'
+          : `${result.added.length} files ready. They’ll attach when you save`
+      );
+    }
+  }
+
+  function removePending(path: string) {
+    pendingPaths = pendingPaths.filter((p) => p !== path);
   }
 
   async function addPaths(paths: string[]) {
@@ -156,13 +195,7 @@
       <Paperclip aria-hidden="true" class="size-4 text-muted-foreground" />
     {/snippet}
     {#snippet action()}
-      <Button
-        variant="outline"
-        size="sm"
-        onclick={pickFiles}
-        disabled={adding || !txGuid}
-        title={!txGuid ? 'Save the transaction first' : undefined}
-      >
+      <Button variant="outline" size="sm" onclick={pickFiles} disabled={adding}>
         {#if adding}
           <LoaderCircle aria-hidden="true" class="size-4 animate-spin" />
           Adding…
@@ -175,11 +208,42 @@
   </IconCardHeader>
   <Card.Content class="flex flex-col gap-3">
     {#if !txGuid}
-      <div class="rounded-lg border border-dashed px-4 py-6 text-center">
-        <p class="text-sm text-muted-foreground">
-          Save first. You can attach receipts on the detail page afterwards.
-        </p>
-      </div>
+      {#if pendingPaths.length > 0}
+        <ul class="flex flex-col gap-1.5">
+          {#each pendingPaths as path (path)}
+            <li class="flex items-center gap-2 rounded-lg border px-3 py-2">
+              <span class="flex min-w-0 flex-1 items-center gap-2">
+                {#if isImageAttachment(path)}
+                  <Image aria-hidden="true" class="size-4 shrink-0 text-muted-foreground" />
+                {:else}
+                  <FileText aria-hidden="true" class="size-4 shrink-0 text-muted-foreground" />
+                {/if}
+                <span class="min-w-0">
+                  <span class="block truncate text-sm font-medium">{attachmentFileName(path)}</span>
+                  <span class="block text-xs text-muted-foreground">Attaches when you save</span>
+                </span>
+              </span>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Remove file"
+                title="Remove file"
+                onclick={() => removePending(path)}
+                disabled={adding}
+              >
+                <X aria-hidden="true" class="size-4" />
+              </Button>
+            </li>
+          {/each}
+        </ul>
+      {:else}
+        <div class="rounded-lg border border-dashed px-4 py-6 text-center">
+          <p class="text-sm text-muted-foreground">
+            Drop files here, or use Add files. They’ll attach when you save (PDF or images, max 10
+            MB each, up to {MAX_ATTACHMENTS}).
+          </p>
+        </div>
+      {/if}
     {:else if res.loading && !res.data}
       <p class="py-2 text-sm text-muted-foreground">Loading attachments…</p>
     {:else if res.error}
@@ -263,7 +327,7 @@
     {/if}
   </Card.Content>
 
-  {#if txGuid && drop.dragging && !adding}
+  {#if drop.dragging && !adding}
     <div
       class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-xl border-2 border-dashed border-primary bg-background/85"
     >
