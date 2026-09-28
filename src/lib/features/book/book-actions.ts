@@ -8,6 +8,7 @@ import { activeBookPath, dbSession, setActiveBookPath, setDbSession } from '$lib
 import { resetNav } from '$lib/stores/nav.svelte';
 import { loadBookSettings, resetBookSettings } from '$lib/stores/book-settings.svelte';
 import { appSettings } from '$lib/stores/settings.svelte';
+import { confirmDiscardIfDirty, clearDiscardWaiver } from '$lib/stores/unsaved-changes.svelte';
 import { closeBook, createBookAt, openBook, saveBookAs, type DataSummary } from '$lib/tauri';
 import { ensureSpendoExtension } from '$lib/utils/book';
 import { defaultCurrencyForLocale } from '$lib/utils/currency';
@@ -43,14 +44,35 @@ async function activateBook(path: string, summary: DataSummary, message: string)
   toast.success(message);
 }
 
-/** Open a book at a known path (welcome drag-and-drop). Failures toast and
- * return false so callers can keep the user on the welcome screen. */
+/** Ask about in-flight form edits, then run the switch. A switch that fails
+ * (or is cancelled) re-arms the guard so edits stay protected. */
+async function withDiscardCheck(run: () => Promise<boolean>): Promise<boolean> {
+  if (!(await confirmDiscardIfDirty())) return false;
+  try {
+    return await run();
+  } finally {
+    clearDiscardWaiver();
+  }
+}
+
+/** Open a book at a known path (welcome drag-and-drop). Confirms before
+ * abandoning in-flight form edits; failures toast and return false so callers
+ * can keep the user on the welcome screen. */
 export async function openBookAt(path: string): Promise<boolean> {
+  return withDiscardCheck(() => openBookAtPath(path));
+}
+
+/**
+ * Swap in a book whose file has already been chosen. Content changes, so
+ * in-flight pages return home rather than holding on to stale accounts.
+ */
+async function openBookAtPath(path: string): Promise<boolean> {
   if (switching) return false;
   switching = true;
   try {
     const result = await openBook(path);
     await activateBook(path, result.summary, `Opened ${await basename(path)}`);
+    await goto(resolve('/'), { replaceState: true });
     return true;
   } catch (e: unknown) {
     toast.error(errMsg(e, 'We couldn’t open that book'));
@@ -70,7 +92,8 @@ export async function openBookViaDialog(): Promise<boolean> {
     return false;
   }
   if (!selected || Array.isArray(selected)) return false;
-  return openBookAt(selected);
+  // Ask only after a file is chosen, so canceling the picker doesn’t waive edits.
+  return withDiscardCheck(() => openBookAtPath(selected));
 }
 
 /** Create a book at a user-chosen path. `currency` defaults to the locale’s
@@ -85,19 +108,23 @@ export async function createBookViaDialog(currency?: string): Promise<boolean> {
     return false;
   }
   if (!target) return false;
+  // Ask only after a path is chosen, so canceling the picker doesn’t waive edits.
   const file = ensureSpendoExtension(target);
   const base = currency ?? defaultCurrencyForLocale(appSettings.value.locale);
-  switching = true;
-  try {
-    const result = await createBookAt(file, base);
-    await activateBook(file, result.summary, `Book created (${base})`);
-    return true;
-  } catch (e: unknown) {
-    toast.error(errMsg(e, 'We couldn’t create that book'));
-    return false;
-  } finally {
-    switching = false;
-  }
+  return withDiscardCheck(async () => {
+    switching = true;
+    try {
+      const result = await createBookAt(file, base);
+      await activateBook(file, result.summary, `Book created (${base})`);
+      await goto(resolve('/'), { replaceState: true });
+      return true;
+    } catch (e: unknown) {
+      toast.error(errMsg(e, 'We couldn’t create that book'));
+      return false;
+    } finally {
+      switching = false;
+    }
+  });
 }
 
 export async function saveBookAsViaDialog(): Promise<boolean> {
@@ -124,30 +151,33 @@ export async function saveBookAsViaDialog(): Promise<boolean> {
   }
 }
 
-/** Writes are persisted live, so closing needs no confirmation; the layout’s
- * empty-session guard would redirect anyway — `goto` makes it immediate. */
+/** Writes are persisted live, but an open form may hold unsubmitted edits, so
+ * confirm those first. The layout’s empty-session guard would redirect anyway;
+ * `goto` makes it immediate. */
 export async function closeActiveBook(): Promise<boolean> {
   if (switching) return false;
   if (!activeBookPath.value) {
     toast.error('No book open');
     return false;
   }
-  switching = true;
-  try {
-    await closeBook();
-    resetNav();
-    setDbSession(null);
-    setActiveBookPath(null);
-    resetBookSettings();
-    toast.success('Book closed');
-    await goto(resolve('/'));
-    return true;
-  } catch (e: unknown) {
-    toast.error(errMsg(e, 'We couldn’t close the book'));
-    return false;
-  } finally {
-    switching = false;
-  }
+  return withDiscardCheck(async () => {
+    switching = true;
+    try {
+      await closeBook();
+      resetNav();
+      setDbSession(null);
+      setActiveBookPath(null);
+      resetBookSettings();
+      toast.success('Book closed');
+      await goto(resolve('/'));
+      return true;
+    } catch (e: unknown) {
+      toast.error(errMsg(e, 'We couldn’t close the book'));
+      return false;
+    } finally {
+      switching = false;
+    }
+  });
 }
 
 /** The path-taking variant is the single implementation for callers that
