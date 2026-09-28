@@ -36,9 +36,19 @@
     void goto(resolve('/transactions'));
   }
 
+  /** Batch editing: Previous / Save & next swap the edit page in place. */
+  function openEdit(next: string) {
+    void goto(resolve('/transactions/[guid]/edit', { guid: next }), { replaceState: true });
+  }
+
   function handleSaved() {
     toast.success('Transaction updated');
     goBack();
+  }
+
+  function handleSavedAndNext(next: string) {
+    toast.success('Transaction updated');
+    openEdit(next);
   }
 
   function handleDeleted() {
@@ -74,11 +84,13 @@
           mode="edit"
           guid={detail.guid}
           title="Edit transaction"
-          headerDescription={detail.description
-            ? `${detail.description} · Splits use raw amounts as shown in the detail view and must sum to zero.`
-            : 'Splits use raw amounts as shown in the detail view and must sum to zero.'}
+          headerDescription="Splits use raw amounts as shown in the detail view and must sum to zero."
           initial={detail}
+          prevGuid={res.data?.prevGuid ?? null}
+          nextGuid={res.data?.nextGuid ?? null}
           onSaved={handleSaved}
+          onSavedAndNext={handleSavedAndNext}
+          onNavigateTo={openEdit}
           onDeleted={handleDeleted}
           onCancel={goBack}
           onDuplicate={handleDuplicate}

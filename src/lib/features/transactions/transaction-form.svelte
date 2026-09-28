@@ -1,18 +1,21 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
+  import { beforeNavigate, goto } from '$app/navigation';
   import { Input } from '$lib/components/ui/input';
   import { Textarea } from '$lib/components/ui/textarea';
   import { Button } from '$lib/components/ui/button';
   import * as Card from '$lib/components/ui/card';
   import * as Dialog from '$lib/components/ui/dialog';
   import IconCardHeader from '$lib/components/shared/icon-card-header.svelte';
-  import { Info } from '@lucide/svelte';
+  import { ChevronLeft, Info } from '@lucide/svelte';
   import { DatePicker } from '$lib/components/shared/date-picker';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import { toast } from '$lib/components/ui/sonner';
+  import DescriptionCombobox from '$lib/features/transactions/description-combobox.svelte';
   import TransactionAttachments from '$lib/features/transactions/transaction-attachments.svelte';
   import {
     SplitEditor,
+    autoFillIndex,
     draftFromSplit,
     isBalanced,
     makeSplitDraft,
@@ -33,12 +36,28 @@
   import { errMsg } from '$lib/utils/error';
   import { modKeyLabel } from '$lib/utils/platform';
   import { isIsoDate, today as sharedToday, todayStr } from '$lib/utils/date-utils.svelte';
-  import { plural } from '$lib/utils/format.svelte';
+  import { formatDate, plural } from '$lib/utils/format.svelte';
   import { flattenAccountsForPicker } from '$lib/features/accounts/account-picker-utils';
+  import { unsavedChanges } from '$lib/stores/unsaved-changes.svelte';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
 
   const LAST_ACCOUNTS_KEY = 'tx-last-accounts';
-  const RECENT_DESCRIPTIONS_KEY = 'tx-recent-descriptions';
+  const RECENT_RECIPES_KEY = 'tx-recent-recipes';
+  const SPLIT_ID_PREFIX = 'tx-split';
+
+  /** One remembered transaction shape, keyed by its description. */
+  interface RecipeSplit {
+    accountGuid: string;
+    amount: string;
+    quantity: string;
+    showQuantity: boolean;
+    memo: string;
+  }
+
+  interface TxRecipe {
+    description: string;
+    splits: RecipeSplit[];
+  }
 
   let {
     mode = 'create',
@@ -47,10 +66,14 @@
     title,
     headerDescription,
     saveLabel,
+    prevGuid = null,
+    nextGuid = null,
     onSaved,
     onSavedAndNew,
+    onSavedAndNext,
     onDeleted,
     onCancel,
+    onNavigateTo,
     onDuplicate
   }: {
     mode?: 'create' | 'edit';
@@ -60,10 +83,17 @@
     headerDescription: string;
     /** Overrides the primary action label in create mode (e.g. "Create duplicate"). */
     saveLabel?: string;
+    /** Edit mode: adjacent transactions for Previous / Save & next. */
+    prevGuid?: string | null;
+    nextGuid?: string | null;
     onSaved?: (guid: string) => void;
     onSavedAndNew?: (guid: string) => void;
+    /** Edit mode: save then move to the given transaction. */
+    onSavedAndNext?: (guid: string) => void;
     onDeleted?: () => void;
     onCancel: () => void;
+    /** Edit mode: open another transaction (Previous). */
+    onNavigateTo?: (guid: string) => void;
     onDuplicate?: () => void;
   } = $props();
 
@@ -88,6 +118,30 @@
   function writeStoredArray(key: string, values: string[]): void {
     try {
       localStorage.setItem(key, JSON.stringify(values.slice(0, 20)));
+    } catch {
+      // Storage full or unavailable — entry speed hints are best-effort.
+    }
+  }
+
+  function readStoredRecipes(): TxRecipe[] {
+    try {
+      const raw = localStorage.getItem(RECENT_RECIPES_KEY);
+      if (!raw) return [];
+      const parsed: unknown = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter((v): v is TxRecipe => {
+        if (!v || typeof v !== 'object') return false;
+        const r = v as { description?: unknown; splits?: unknown };
+        return typeof r.description === 'string' && Array.isArray(r.splits);
+      });
+    } catch {
+      return [];
+    }
+  }
+
+  function writeStoredRecipes(recipes: TxRecipe[]): void {
+    try {
+      localStorage.setItem(RECENT_RECIPES_KEY, JSON.stringify(recipes.slice(0, 20)));
     } catch {
       // Storage full or unavailable — entry speed hints are best-effort.
     }
@@ -149,9 +203,14 @@
   let formError = $state('');
   let showErrors = $state(false);
   let didPrefillAccounts = $state(false);
-  let recentDescriptions = $state<string[]>(
-    untrack(() => readStoredArray(RECENT_DESCRIPTIONS_KEY))
-  );
+  let recipes = $state<TxRecipe[]>(untrack(() => readStoredRecipes()));
+  let pendingSaveMode = $state<'save' | 'next'>('save');
+  // Set while a successful save/delete/discard navigates, so the
+  // beforeNavigate guard doesn’t ask a second time.
+  let suppressGuard = false;
+  // Pending answer while the discard dialog is open.
+  let discardResolve: ((leave: boolean) => void) | null = null;
+  let busy = $derived(saving || savingAndNew || deleting);
 
   const accountsRes = useAsyncData({
     enabled: () => true,
@@ -163,6 +222,17 @@
     flattenAccountsForPicker(accountsRes.data?.trees, { hidePlaceholders: true })
   );
   let knownGuids = $derived(new Set(pickerOptions.map((o) => o.guid)));
+  let labelByGuid = $derived(new Map(pickerOptions.map((o) => [o.guid, o.display])));
+  let descriptionOptions = $derived(
+    recipes.map((r) => ({
+      description: r.description,
+      hint: r.splits
+        .map((s) => labelByGuid.get(s.accountGuid))
+        .filter((name): name is string => !!name)
+        .slice(0, 3)
+        .join(' → ')
+    }))
+  );
 
   // Batch entry: prefill blank splits with the accounts used last time.
   $effect(() => {
@@ -191,6 +261,8 @@
   // Shared local date; the guard re-evaluates after midnight (same comparison
   // as `isFutureDate`, but against the reactive clock).
   let today = $derived(sharedToday.value);
+  // Imported future-dated rows are editable only by moving them into range.
+  let futureDate = $derived(mode === 'edit' && isIsoDate(postDate) && postDate > today);
   let dateError = $derived.by(() => {
     if (!postDate) return 'Pick a date for this transaction';
     if (!isIsoDate(postDate)) return 'Pick a valid date';
@@ -266,15 +338,47 @@
       balanced
   );
 
-  function rememberForNextTime(accountGuids: string[], desc: string) {
-    const valid = accountGuids.filter((g) => knownGuids.has(g));
+  function rememberForNextTime(usedSplits: SplitDraft[], desc: string) {
+    const valid = usedSplits.map((s) => s.accountGuid).filter((g) => knownGuids.has(g));
     if (valid.length > 0) writeStoredArray(LAST_ACCOUNTS_KEY, valid);
     const trimmed = desc.trim();
-    if (trimmed) {
-      const next = [trimmed, ...recentDescriptions.filter((d) => d !== trimmed)].slice(0, 20);
-      recentDescriptions = next;
-      writeStoredArray(RECENT_DESCRIPTIONS_KEY, next);
+    if (!trimmed) return;
+    const recipe: TxRecipe = {
+      description: trimmed,
+      splits: usedSplits.map((s) => ({
+        accountGuid: s.accountGuid,
+        amount: s.amount,
+        quantity: s.quantity,
+        showQuantity: s.showQuantity,
+        memo: s.memo
+      }))
+    };
+    const next = [recipe, ...recipes.filter((r) => r.description !== trimmed)];
+    recipes = next;
+    writeStoredRecipes(next);
+  }
+
+  /** Description picked a remembered transaction: restore its splits while no
+   * values have been typed, so recurring entries take one click. Prefilled
+   * accounts don’t block it — an explicit pick beats the last-used guess. */
+  function applyRecipe(desc: string) {
+    const recipe = recipes.find((r) => r.description === desc);
+    if (!recipe) return;
+    const untouched = splits.every((s) => !s.amount.trim() && !s.quantity.trim() && !s.memo.trim());
+    if (!untouched) return;
+    const restored: SplitDraft[] = [];
+    for (const s of recipe.splits) {
+      if (typeof s.accountGuid !== 'string' || !knownGuids.has(s.accountGuid)) continue;
+      restored.push({
+        key: nextKey(),
+        accountGuid: s.accountGuid,
+        amount: typeof s.amount === 'string' ? s.amount : '',
+        quantity: typeof s.quantity === 'string' ? s.quantity : '',
+        showQuantity: s.showQuantity === true,
+        memo: typeof s.memo === 'string' ? s.memo : ''
+      });
     }
+    if (restored.length >= 2) splits = restored;
   }
 
   function buildInput(): TxInput {
@@ -317,41 +421,128 @@
     });
   }
 
+  /** Move focus to the first field blocking the save, so the error summary
+   * always points at something actionable. */
+  function focusFirstIssue() {
+    void tick().then(() => {
+      if (dateError) {
+        document.getElementById('tx-date')?.focus();
+        return;
+      }
+      const badRow = errors.findIndex((e) => !!e);
+      if (badRow >= 0) {
+        const row = splits[badRow];
+        const id = row.accountGuid
+          ? `${SPLIT_ID_PREFIX}-${row.key}-amount`
+          : `${SPLIT_ID_PREFIX}-${row.key}-account`;
+        document.getElementById(id)?.focus();
+        return;
+      }
+      if (!balanced) {
+        const index = autoFillIndex(splits);
+        const key = index >= 0 ? splits[index].key : splits[0]?.key;
+        if (key !== undefined) {
+          document.getElementById(`${SPLIT_ID_PREFIX}-${key}-amount`)?.focus();
+        }
+      }
+    });
+  }
+
+  function askDiscard(): Promise<boolean> {
+    if (!dirty) return Promise.resolve(true);
+    discardDialogOpen = true;
+    return new Promise((resolve) => {
+      discardResolve = resolve;
+    });
+  }
+
+  function resolveDiscard(leave: boolean) {
+    const resolve = discardResolve;
+    discardResolve = null;
+    discardDialogOpen = false;
+    resolve?.(leave);
+  }
+
+  // Register with the shared guard so book switches can ask before dropping
+  // edits, not just the Cancel button.
+  $effect(() => {
+    unsavedChanges.value.dirty = dirty;
+    unsavedChanges.value.waived = false;
+    unsavedChanges.value.confirmLeave = askDiscard;
+    return () => {
+      unsavedChanges.value.dirty = false;
+      unsavedChanges.value.waived = false;
+      unsavedChanges.value.confirmLeave = null;
+    };
+  });
+
+  // Sidebar links, the palette and browser back all route through here.
+  beforeNavigate((navigation) => {
+    if (suppressGuard || unsavedChanges.value.waived || !dirty) return;
+    navigation.cancel();
+    const target = navigation.to?.url ?? null;
+    void askDiscard().then((leave) => {
+      if (!leave || !target) return;
+      suppressGuard = true;
+      // `target` is the resolved URL of the canceled navigation.
+      // eslint-disable-next-line svelte/no-navigation-without-resolve
+      void goto(target).finally(() => {
+        suppressGuard = false;
+      });
+    });
+  });
+
   async function handleSave() {
-    if (saving || savingAndNew || deleting) return;
+    if (busy) return;
+    // The button stays clickable so this click can reveal why it can’t save
+    // yet, and jump to the first thing that needs attention.
     if (!canSave) {
       showErrors = true;
+      focusFirstIssue();
       return;
     }
     // Saving a cleared or reconciled transaction re-creates its splits as 'n';
     // confirm that consequence before writing anything.
     if (mode === 'edit' && hasLockedSplits) {
+      pendingSaveMode = 'save';
       confirmUnreconcileOpen = true;
       return;
     }
-    await saveNow(false);
+    await saveNow(false, 'save');
   }
 
-  async function saveNow(unreconcile: boolean) {
-    if (saving || savingAndNew || deleting) return;
+  async function handleSaveAndNext() {
+    if (mode !== 'edit' || !nextGuid || !onSavedAndNext || busy) return;
+    if (!canSave) {
+      showErrors = true;
+      focusFirstIssue();
+      return;
+    }
+    if (hasLockedSplits) {
+      pendingSaveMode = 'next';
+      confirmUnreconcileOpen = true;
+      return;
+    }
+    await saveNow(false, 'next');
+  }
+
+  async function saveNow(unreconcile: boolean, saveMode: 'save' | 'next' = 'save') {
+    if (busy) return;
     saving = true;
     formError = '';
     try {
       const input = { ...buildInput(), unreconcile };
       if (mode === 'edit' && guid) {
         await updateTransaction(guid, input);
-        rememberForNextTime(
-          splits.map((s) => s.accountGuid),
-          description
-        );
-        onSaved?.(guid);
+        rememberForNextTime(splits, description);
+        suppressGuard = true;
+        if (saveMode === 'next' && nextGuid && onSavedAndNext) onSavedAndNext(nextGuid);
+        else onSaved?.(guid);
       } else {
         const newGuid = await createTransaction(input);
-        rememberForNextTime(
-          splits.map((s) => s.accountGuid),
-          description
-        );
+        rememberForNextTime(splits, description);
         await attachPending(newGuid);
+        suppressGuard = true;
         onSaved?.(newGuid);
       }
     } catch (e: unknown) {
@@ -363,19 +554,17 @@
   }
 
   async function handleSaveAndNew() {
-    if (mode !== 'create' || saving || savingAndNew || deleting) return;
+    if (mode !== 'create' || busy) return;
     if (!canSave) {
       showErrors = true;
+      focusFirstIssue();
       return;
     }
     savingAndNew = true;
     formError = '';
     try {
       const newGuid = await createTransaction(buildInput());
-      rememberForNextTime(
-        splits.map((s) => s.accountGuid),
-        description
-      );
+      rememberForNextTime(splits, description);
       await attachPending(newGuid);
       onSavedAndNew?.(newGuid);
       // Keep the date and accounts for fast batch entry; clear the rest.
@@ -406,12 +595,12 @@
   }
 
   function requestCancel() {
-    if (saving || savingAndNew || deleting) return;
-    if (!dirty) {
+    if (busy) return;
+    void askDiscard().then((leave) => {
+      if (!leave) return;
+      suppressGuard = true;
       onCancel();
-      return;
-    }
-    discardDialogOpen = true;
+    });
   }
 
   async function handleDeleteConfirm() {
@@ -421,6 +610,7 @@
     try {
       await deleteTransaction(guid, hasLockedSplits);
       deleteDialogOpen = false;
+      suppressGuard = true;
       onDeleted?.();
     } catch (e: unknown) {
       formError = errMsg(e, 'We couldn’t delete this transaction. Please try again');
@@ -439,7 +629,9 @@
     if (e.defaultPrevented || deleteDialogOpen || confirmUnreconcileOpen || discardDialogOpen)
       return;
     e.preventDefault();
-    if (e.shiftKey && mode === 'create' && onSavedAndNew) {
+    if (e.shiftKey && mode === 'edit' && nextGuid && onSavedAndNext) {
+      void handleSaveAndNext();
+    } else if (e.shiftKey && mode === 'create' && onSavedAndNew) {
       void handleSaveAndNew();
     } else {
       void handleSave();
@@ -452,11 +644,24 @@
 <div class="flex w-full flex-col gap-6">
   <PageHeader {title} description={headerText}>
     {#if mode === 'edit'}
+      {#if onNavigateTo}
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          onclick={() => prevGuid && onNavigateTo(prevGuid)}
+          disabled={!prevGuid || busy}
+          aria-label="Previous transaction"
+          title="Previous transaction"
+        >
+          <ChevronLeft aria-hidden="true" class="size-4" />
+        </Button>
+      {/if}
       <Button
         type="button"
         variant="outline"
         onclick={() => (deleteDialogOpen = true)}
-        disabled={saving || savingAndNew || deleting}
+        disabled={busy}
         title="Delete transaction"
       >
         Delete
@@ -466,36 +671,41 @@
           type="button"
           variant="outline"
           onclick={onDuplicate}
-          disabled={saving || savingAndNew || deleting}
+          disabled={busy}
           title="Duplicate transaction"
         >
           Duplicate
         </Button>
       {/if}
     {/if}
-    <Button
-      type="button"
-      variant="outline"
-      onclick={requestCancel}
-      disabled={saving || savingAndNew || deleting}
-    >
-      Cancel
-    </Button>
+    <Button type="button" variant="outline" onclick={requestCancel} disabled={busy}>Cancel</Button>
     {#if mode === 'create' && onSavedAndNew}
       <Button
         type="button"
         variant="outline"
         onclick={() => void handleSaveAndNew()}
-        disabled={!canSave || saving || savingAndNew || deleting}
+        disabled={busy}
         title={`Save & add another (${modKey}+Shift+S)`}
       >
         {savingAndNew ? 'Saving…' : 'Save & add another'}
       </Button>
     {/if}
+    {#if mode === 'edit' && nextGuid && onSavedAndNext}
+      <Button
+        type="button"
+        variant="outline"
+        onclick={() => void handleSaveAndNext()}
+        disabled={busy}
+        title={`Save & next (${modKey}+Shift+S)`}
+      >
+        Save & next
+      </Button>
+    {/if}
     <Button
       type="button"
       onclick={() => void handleSave()}
-      disabled={saving || savingAndNew || deleting || !canSave}
+      disabled={busy}
+      title={canSave ? undefined : 'Check the highlighted fields'}
     >
       {saving ? 'Saving…' : primaryLabel}
     </Button>
@@ -513,20 +723,15 @@
     <Card.Content class="flex flex-col gap-4">
       <div class="flex flex-col gap-1.5">
         <label for="tx-desc" class="text-sm font-medium">Description</label>
-        <Input
+        <DescriptionCombobox
           id="tx-desc"
           bind:value={description}
-          list="tx-desc-history"
+          options={descriptionOptions}
+          onPick={applyRecipe}
           placeholder="What was this for?"
           maxlength={500}
           autofocus
-          autocomplete="off"
         />
-        <datalist id="tx-desc-history">
-          {#each recentDescriptions as recent (recent)}
-            <option value={recent}></option>
-          {/each}
-        </datalist>
       </div>
       <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div class="flex flex-col gap-1.5">
@@ -536,13 +741,15 @@
             bind:value={postDate}
             placeholder="Pick a date"
             invalid={!!dateError}
+            max={today}
             describedBy={dateError ? 'tx-date-error' : 'tx-date-hint'}
           />
           {#if dateError}
             <p id="tx-date-error" role="alert" class="text-xs text-destructive">{dateError}</p>
           {:else}
             <p id="tx-date-hint" class="text-xs text-muted-foreground">
-              Dates after today stay out of balances, budgets and net worth.
+              Manual entries use today or earlier. Imported future-dated rows stay out of balances,
+              budgets and net worth.
             </p>
           {/if}
         </div>
@@ -567,6 +774,24 @@
     </Card.Content>
   </Card.Root>
 
+  {#if futureDate}
+    <p
+      role="note"
+      class="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300"
+    >
+      This transaction is dated {formatDate(postDate)}, in the future. It stays out of balances,
+      budgets and net worth.
+      <button
+        type="button"
+        class="font-medium underline underline-offset-2"
+        onclick={() => (postDate = today)}
+      >
+        Move it to today
+      </button>
+      to save changes.
+    </p>
+  {/if}
+
   <SplitEditor
     bind:splits
     options={pickerOptions}
@@ -574,6 +799,7 @@
     loadError={accountsRes.error ?? ''}
     showErrors={effectiveShowErrors}
     makeKey={nextKey}
+    idPrefix={SPLIT_ID_PREFIX}
   />
 
   {#if mode === 'edit' && hasLockedSplits}
@@ -586,7 +812,7 @@
     </p>
   {/if}
 
-  {#if !canSave && (dirty || showErrors)}
+  {#if !canSave && showErrors}
     <div
       role="alert"
       class="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
@@ -632,7 +858,7 @@
         <Button
           onclick={() => {
             confirmUnreconcileOpen = false;
-            void saveNow(true);
+            void saveNow(true, pendingSaveMode);
           }}
           disabled={saving}
         >
@@ -673,7 +899,12 @@
     </Dialog.Content>
   </Dialog.Root>
 
-  <Dialog.Root bind:open={discardDialogOpen}>
+  <Dialog.Root
+    bind:open={discardDialogOpen}
+    onOpenChange={(open) => {
+      if (!open) resolveDiscard(false);
+    }}
+  >
     <Dialog.Content class="max-h-[90vh] overflow-y-auto sm:max-w-lg">
       <Dialog.Header>
         <Dialog.Title>Lose your changes?</Dialog.Title>
@@ -682,16 +913,8 @@
         </Dialog.Description>
       </Dialog.Header>
       <Dialog.Footer>
-        <Button variant="outline" onclick={() => (discardDialogOpen = false)}>Keep editing</Button>
-        <Button
-          variant="destructive"
-          onclick={() => {
-            discardDialogOpen = false;
-            onCancel();
-          }}
-        >
-          Discard changes
-        </Button>
+        <Button variant="outline" onclick={() => resolveDiscard(false)}>Keep editing</Button>
+        <Button variant="destructive" onclick={() => resolveDiscard(true)}>Discard changes</Button>
       </Dialog.Footer>
     </Dialog.Content>
   </Dialog.Root>
