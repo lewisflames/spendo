@@ -2,6 +2,7 @@ import SplitEditor from './split-editor.svelte';
 
 export { SplitEditor };
 export {
+  autoFillIndex,
   draftFromSplit,
   formatDraftAmount,
   isBalanced,

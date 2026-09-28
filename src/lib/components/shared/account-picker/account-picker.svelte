@@ -17,7 +17,8 @@
     invalid = false,
     describedBy = undefined,
     emptyText = 'Nothing matches that search.',
-    noneLabel = null
+    noneLabel = null,
+    onSelect
   }: {
     value?: string;
     options?: PickerAccount[];
@@ -29,6 +30,8 @@
     emptyText?: string;
     /** When set, offers an item that clears the selection (e.g. "Top level"). */
     noneLabel?: string | null;
+    /** Called after a pick, e.g. to move focus to the amount field. */
+    onSelect?: (guid: string) => void;
   } = $props();
 
   let open = $state(false);
@@ -44,6 +47,7 @@
   function select(guid: string) {
     value = guid;
     open = false;
+    onSelect?.(guid);
   }
 </script>
 
