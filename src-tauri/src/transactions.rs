@@ -52,7 +52,6 @@ pub struct SplitInfo {
     pub guid: String,
     pub account_guid: String,
     pub account_name: String,
-    pub account_type: String,
     pub amount: f64,
     pub memo: Option<String>,
 }
@@ -82,7 +81,6 @@ impl SplitData {
             guid: self.info.guid.clone(),
             account_guid: self.info.account_guid.clone(),
             account_name: self.info.account_name.clone(),
-            account_type: self.info.account_type.clone(),
             amount: self.info.amount,
             quantity: self.quantity,
             commodity: self.commodity.clone(),
@@ -101,7 +99,6 @@ pub struct SplitDetail {
     pub guid: String,
     pub account_guid: String,
     pub account_name: String,
-    pub account_type: String,
     pub amount: f64,
     pub quantity: f64,
     pub commodity: Option<String>,
@@ -433,7 +430,7 @@ fn fetch_splits_for_txns_with(
 
     for chunk in guids.chunks(MAX_IN_PARAMS) {
         let sql = format!(
-            "SELECT s.guid, s.tx_guid, s.account_guid, a.name as account_name, a.account_type,
+            "SELECT s.guid, s.tx_guid, s.account_guid, a.name as account_name,
                     s.memo,
                     {} as amount,
                     {} as signed_amount,
@@ -471,19 +468,18 @@ fn fetch_splits_for_txns_with(
                             guid: row.get(0)?,
                             account_guid: row.get(2)?,
                             account_name: row.get(3)?,
-                            account_type: row.get(4)?,
-                            amount: row.get(6)?,
-                            memo: row.get(5)?,
+                            amount: row.get(5)?,
+                            memo: row.get(4)?,
                         },
-                        commodity: row.get::<_, Option<String>>(9)?,
-                        quantity: row.get(10)?,
-                        reconciled: row.get::<_, i64>(11)? != 0,
-                        account_description: row.get::<_, Option<String>>(12)?,
-                        account_code: row.get::<_, Option<String>>(14)?,
-                        reconcile_state: row.get::<_, Option<String>>(13)?,
+                        commodity: row.get::<_, Option<String>>(8)?,
+                        quantity: row.get(9)?,
+                        reconciled: row.get::<_, i64>(10)? != 0,
+                        account_description: row.get::<_, Option<String>>(11)?,
+                        account_code: row.get::<_, Option<String>>(13)?,
+                        reconcile_state: row.get::<_, Option<String>>(12)?,
                     },
-                    row.get::<_, f64>(7)?,    // signed_amount
-                    row.get::<_, String>(8)?, // post_date
+                    row.get::<_, f64>(6)?,    // signed_amount
+                    row.get::<_, String>(7)?, // post_date
                 ))
             })
             .map_err(|e| e.to_string())?

@@ -217,9 +217,6 @@
                       code={split.accountCode}
                     />
                   </a>
-                  <Badge variant="outline" class="ml-1.5 text-[10px] leading-none">
-                    {split.accountType}
-                  </Badge>
                 </Table.Cell>
                 <Table.Cell class="max-w-xs truncate py-2.5 text-muted-foreground">
                   {#if split.memo}
