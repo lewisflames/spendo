@@ -28,13 +28,31 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["deb", "rpm", "dmg", "nsis"],
+    "targets": ["dmg", "deb"],
+    "createUpdaterArtifacts": true,
+    "publisher": "Lewis Flames",
+    "copyright": "Copyright © 2026 Lewis Flames",
+    "category": "Finance",
+    "shortDescription": "Local-first personal finance manager",
+    "longDescription": "Spendo keeps your money organised in portable .spendo books. All data stays local on your machine.",
+    "homepage": "https://github.com/lewisflames/spendo",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "linux": {
+      "deb": {
+        "desktopTemplate": "../spendo.desktop"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDZERjBDN0M1NjRFMDkwMzAKUldRd2tPQmt4Y2Z3YlVKek5PVk5YcTdxMlhCbFdmSm44YXB3YWFocEFTMlNBTE1tQlZ1VWJIU3MK",
+      "endpoints": ["https://github.com/lewisflames/spendo/releases/latest/download/latest.json"]
+    }
   }
 }
