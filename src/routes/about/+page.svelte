@@ -7,6 +7,7 @@
   import { Wallet, Terminal, Palette, Component, Paintbrush, CloudDownload } from '@lucide/svelte';
   import { dbSession } from '$lib/stores/db.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
+  import UpdateCard from '$lib/features/updates/update-card.svelte';
 
   let appVersion = $state<string | null>(null);
 
@@ -51,6 +52,8 @@
       {/if}
     </Card.Content>
   </Card.Root>
+
+  <UpdateCard />
 
   <Card.Root>
     <Card.Header>

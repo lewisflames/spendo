@@ -4,5 +4,6 @@ Name=Spendo
 Comment=Local-first personal finance manager
 Exec=spendo
 Icon=spendo
+StartupWMClass=spendo
 Categories=Finance;Office;
 Terminal=false
