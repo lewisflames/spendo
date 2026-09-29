@@ -351,7 +351,6 @@ function toSplitDetail(tx: FixtureTx, split: FixtureSplit, index: number): Split
     guid: `${tx.guid}-${index}`,
     accountGuid: split.accountGuid,
     accountName: acc?.name ?? 'Unknown account',
-    accountType: acc?.accountType ?? 'ASSET',
     amount: splitAmount(split),
     memo: split.memo ?? null,
     quantity: split.quantity ?? splitAmount(split),
@@ -537,7 +536,6 @@ function toTransactionRow(tx: FixtureTx): TransactionRow {
         guid: `${tx.guid}-${i}`,
         accountGuid: s.accountGuid,
         accountName: acc?.name ?? 'Unknown account',
-        accountType: acc?.accountType ?? 'ASSET',
         amount: splitAmount(s),
         memo: s.memo ?? null
       };

@@ -91,7 +91,6 @@ interface SplitInfo {
   guid: string;
   accountGuid: string;
   accountName: string;
-  accountType: string;
   amount: number;
   memo?: string | null;
 }
