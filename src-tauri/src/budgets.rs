@@ -108,7 +108,9 @@ fn row_to_budget(row: &rusqlite::Row) -> rusqlite::Result<Budget> {
 
 fn validate_year(year: i32) -> Result<(), String> {
     if !(1900..=2200).contains(&year) {
-        return Err(format!("Pick a budget year between 1900 and 2200 (got {year})"));
+        return Err(format!(
+            "Pick a budget year between 1900 and 2200 (got {year})"
+        ));
     }
     Ok(())
 }
@@ -187,7 +189,9 @@ fn descendants_cte(seed_filter_sql: &str) -> String {
 }
 
 fn read_budget_year(conn: &Connection, account_guid: &str, year: i32) -> Result<Budget, String> {
-    let mut stmt = conn.prepare(budget_select_sql()).map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(budget_select_sql())
+        .map_err(|e| e.to_string())?;
     stmt.query_row(rusqlite::params![account_guid, year], row_to_budget)
         .optional()
         .map_err(|e| e.to_string())?
@@ -409,7 +413,8 @@ fn compute_cumulative_carryovers(
     let fx_map = fx::get_fx_map(conn, Some(&period_start))?;
     let mut yearly_actuals: HashMap<String, HashMap<i32, f64>> = HashMap::new();
     for (account_guid, y, commodity, total) in rows {
-        let converted = fx::convert_optional(total, commodity.as_deref(), &report_currency, &fx_map);
+        let converted =
+            fx::convert_optional(total, commodity.as_deref(), &report_currency, &fx_map);
         if let Ok(yi) = y.parse::<i32>() {
             *yearly_actuals
                 .entry(account_guid)
@@ -499,22 +504,19 @@ fn fetch_budget_actual_raw_rows(
         .map_err(|e| e.to_string())?;
 
     let raw_rows: Vec<RawBudgetRow> = stmt
-        .query_map(
-            rusqlite::params![period_start, period_end, year],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, Option<String>>(3)?,
-                    row.get::<_, Option<String>>(4)?,
-                    row.get::<_, String>(5)?,
-                    row.get::<_, f64>(6)?,
-                    row.get::<_, Option<String>>(7)?,
-                    row.get::<_, f64>(8)?,
-                ))
-            },
-        )
+        .query_map(rusqlite::params![period_start, period_end, year], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, f64>(6)?,
+                row.get::<_, Option<String>>(7)?,
+                row.get::<_, f64>(8)?,
+            ))
+        })
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
@@ -678,7 +680,10 @@ fn fetch_budget_detail_inner(
                 if let Some(amount) = yearly.get(&y) {
                     let mut actual_y = 0.0;
                     for m in 0..12 {
-                        actual_y += month_actuals.get(&(y as i64 * 12 + m)).copied().unwrap_or(0.0);
+                        actual_y += month_actuals
+                            .get(&(y as i64 * 12 + m))
+                            .copied()
+                            .unwrap_or(0.0);
                     }
                     carry += amount - actual_y;
                 }
@@ -817,7 +822,9 @@ pub async fn fetch_budget_detail(
 }
 
 #[tauri::command]
-pub async fn fetch_budget_date_range(state: State<'_, AppState>) -> Result<BudgetDateRange, String> {
+pub async fn fetch_budget_date_range(
+    state: State<'_, AppState>,
+) -> Result<BudgetDateRange, String> {
     run_blocking(state.db.clone(), fetch_budget_date_range_inner).await
 }
 
@@ -871,10 +878,7 @@ mod tests {
     }
 
     fn assert_close(a: f64, b: f64) {
-        assert!(
-            (a - b).abs() < 0.02,
-            "expected {b}, got {a}"
-        );
+        assert!((a - b).abs() < 0.02, "expected {b}, got {a}");
     }
 
     #[test]
@@ -1017,7 +1021,10 @@ mod tests {
             .unwrap();
         assert_eq!(count, 1);
         assert_close(
-            fetch_budget_detail_inner(&conn, "food", 2024).unwrap().budget.amount,
+            fetch_budget_detail_inner(&conn, "food", 2024)
+                .unwrap()
+                .budget
+                .amount,
             900.0,
         );
     }
@@ -1032,7 +1039,9 @@ mod tests {
             fetch_budget_years_inner(&conn, "food").unwrap(),
             vec![2024, 2026]
         );
-        assert!(fetch_budget_years_inner(&conn, "unused").unwrap().is_empty());
+        assert!(fetch_budget_years_inner(&conn, "unused")
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

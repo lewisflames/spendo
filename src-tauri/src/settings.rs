@@ -101,22 +101,13 @@ fn get_book_settings_inner(conn: &Connection) -> Result<BookSettings, String> {
     .unwrap_or(1);
     Ok(BookSettings {
         fiscal_year_start_month,
-        default_pnl_period: pick(
-            "default_pnl_period",
-            defaults.default_pnl_period.clone(),
-        )?,
-        price_auto_refresh: pick(
-            "price_auto_refresh",
-            defaults.price_auto_refresh.clone(),
-        )?,
+        default_pnl_period: pick("default_pnl_period", defaults.default_pnl_period.clone())?,
+        price_auto_refresh: pick("price_auto_refresh", defaults.price_auto_refresh.clone())?,
         export_csv_delimiter: pick(
             "export_csv_delimiter",
             defaults.export_csv_delimiter.clone(),
         )?,
-        export_date_format: pick(
-            "export_date_format",
-            defaults.export_date_format.clone(),
-        )?,
+        export_date_format: pick("export_date_format", defaults.export_date_format.clone())?,
     })
 }
 
@@ -166,7 +157,10 @@ mod tests {
     #[test]
     fn defaults_on_fresh_book() {
         let conn = mem_db();
-        assert_eq!(get_book_settings_inner(&conn).unwrap(), default_book_settings());
+        assert_eq!(
+            get_book_settings_inner(&conn).unwrap(),
+            default_book_settings()
+        );
     }
 
     #[test]
@@ -189,7 +183,9 @@ mod tests {
     #[test]
     fn rejects_unknown_keys_and_invalid_values() {
         let conn = mem_db();
-        assert!(set_book_setting_inner(&conn, "nope", "1").unwrap_err().contains("Unknown"));
+        assert!(set_book_setting_inner(&conn, "nope", "1")
+            .unwrap_err()
+            .contains("Unknown"));
         for (key, value) in [
             ("fiscal_year_start_month", "0"),
             ("fiscal_year_start_month", "13"),
@@ -205,7 +201,10 @@ mod tests {
             );
         }
         // Failed writes leave defaults intact.
-        assert_eq!(get_book_settings_inner(&conn).unwrap(), default_book_settings());
+        assert_eq!(
+            get_book_settings_inner(&conn).unwrap(),
+            default_book_settings()
+        );
     }
 
     #[test]
@@ -217,7 +216,9 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            get_book_settings_inner(&conn).unwrap().fiscal_year_start_month,
+            get_book_settings_inner(&conn)
+                .unwrap()
+                .fiscal_year_start_month,
             1
         );
     }
@@ -227,6 +228,9 @@ mod tests {
         let conn = mem_db();
         set_book_setting_inner(&conn, "export_csv_delimiter", ";").unwrap();
         db::clear_db(&conn).unwrap();
-        assert_eq!(get_book_settings_inner(&conn).unwrap(), default_book_settings());
+        assert_eq!(
+            get_book_settings_inner(&conn).unwrap(),
+            default_book_settings()
+        );
     }
 }

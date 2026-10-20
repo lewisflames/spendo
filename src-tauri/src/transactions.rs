@@ -1,4 +1,4 @@
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -181,24 +181,32 @@ pub struct HeatmapPoint {
 fn validate_post_date(post_date: &str) -> Result<String, AppError> {
     let trimmed = post_date.trim();
     if trimmed.is_empty() {
-        return Err(AppError::Validation("Pick a date for this transaction".to_string()));
+        return Err(AppError::Validation(
+            "Pick a date for this transaction".to_string(),
+        ));
     }
     let normalized = utils::validate_iso_date(trimmed).map_err(AppError::Validation)?;
     // Local "today" so users east of UTC can post their current day (matches
     // the frontend's `todayStr` and the visibility window).
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     if normalized > today {
-        return Err(AppError::Validation("Future dates stay out of balances. Use today or earlier".to_string()));
+        return Err(AppError::Validation(
+            "Future dates stay out of balances. Use today or earlier".to_string(),
+        ));
     }
     Ok(normalized)
 }
 
 fn to_value_rational(amount: f64) -> Result<(i64, i64), AppError> {
     if !amount.is_finite() {
-        return Err(AppError::Validation("Split amounts need to be real numbers".to_string()));
+        return Err(AppError::Validation(
+            "Split amounts need to be real numbers".to_string(),
+        ));
     }
     if amount.abs() > 1_000_000_000.0 {
-        return Err(AppError::Validation("That split amount is huge. Keep it under 1,000,000,000".to_string()));
+        return Err(AppError::Validation(
+            "That split amount is huge. Keep it under 1,000,000,000".to_string(),
+        ));
     }
     let scaled = amount * VALUE_DENOM as f64;
     let rounded = scaled.round();
@@ -216,10 +224,14 @@ fn to_value_rational(amount: f64) -> Result<(i64, i64), AppError> {
 
 fn to_quantity_rational(qty: f64) -> Result<(i64, i64), AppError> {
     if !qty.is_finite() {
-        return Err(AppError::Validation("Share counts need to be real numbers".to_string()));
+        return Err(AppError::Validation(
+            "Share counts need to be real numbers".to_string(),
+        ));
     }
     if qty.abs() > 1_000_000_000.0 {
-        return Err(AppError::Validation("That share count is huge. Keep it under 1,000,000,000".to_string()));
+        return Err(AppError::Validation(
+            "That share count is huge. Keep it under 1,000,000,000".to_string(),
+        ));
     }
     let num = (qty * QUANTITY_DENOM as f64).round() as i64;
     Ok((num, QUANTITY_DENOM))
@@ -291,16 +303,22 @@ pub(crate) fn validate_tx_body_with(
     lookup: &dyn Fn(&str) -> Result<Option<SplitAccountInfo>, AppError>,
 ) -> Result<(), AppError> {
     if input.splits.len() < 2 {
-        return Err(AppError::Validation("A transaction needs at least two splits so both sides balance".to_string()));
+        return Err(AppError::Validation(
+            "A transaction needs at least two splits so both sides balance".to_string(),
+        ));
     }
     if input.splits.len() > 50 {
-        return Err(AppError::Validation("Keep it to 50 splits or fewer".to_string()));
+        return Err(AppError::Validation(
+            "Keep it to 50 splits or fewer".to_string(),
+        ));
     }
     let mut sum = 0.0;
     for (i, s) in input.splits.iter().enumerate() {
         let n = i + 1;
         if s.account_guid.trim().is_empty() {
-            return Err(AppError::Validation(format!("Split {n}: choose an account")));
+            return Err(AppError::Validation(format!(
+                "Split {n}: choose an account"
+            )));
         }
         let account = lookup(s.account_guid.trim())?;
         let Some(SplitAccountInfo {
@@ -308,7 +326,9 @@ pub(crate) fn validate_tx_body_with(
             account_type,
         }) = account
         else {
-            return Err(AppError::NotFound(format!("Split {n}: account not found. It may have been removed")));
+            return Err(AppError::NotFound(format!(
+                "Split {n}: account not found. It may have been removed"
+            )));
         };
         // The internal ROOT is not a real account: posting to it corrupts the
         // balance-sheet identity (the picker never offers it).
@@ -318,19 +338,25 @@ pub(crate) fn validate_tx_body_with(
             )));
         }
         if placeholder != 0 {
-            return Err(AppError::Validation(format!("Split {n}: placeholder accounts just group things. Pick a real one")));
+            return Err(AppError::Validation(format!(
+                "Split {n}: placeholder accounts just group things. Pick a real one"
+            )));
         }
         if !s.amount.is_finite() {
             return Err(AppError::Validation(format!("Split {n}: enter an amount")));
         }
         if let Some(q) = s.quantity {
             if !q.is_finite() {
-                return Err(AppError::Validation(format!("Split {n}: enter the share count as a number")));
+                return Err(AppError::Validation(format!(
+                    "Split {n}: enter the share count as a number"
+                )));
             }
         }
         if let Some(ref memo) = s.memo {
             if memo.len() > 500 {
-                return Err(AppError::Validation(format!("Split {n}: keep the memo under 500 characters")));
+                return Err(AppError::Validation(format!(
+                    "Split {n}: keep the memo under 500 characters"
+                )));
             }
         }
         sum += s.amount;
@@ -342,17 +368,23 @@ pub(crate) fn validate_tx_body_with(
     }
     if let Some(ref d) = input.description {
         if d.len() > 500 {
-            return Err(AppError::Validation("Keep the description under 500 characters".to_string()));
+            return Err(AppError::Validation(
+                "Keep the description under 500 characters".to_string(),
+            ));
         }
     }
     if let Some(ref n) = input.num {
         if n.len() > 100 {
-            return Err(AppError::Validation("Keep the number under 100 characters".to_string()));
+            return Err(AppError::Validation(
+                "Keep the number under 100 characters".to_string(),
+            ));
         }
     }
     if let Some(ref n) = input.notes {
         if n.len() > 2000 {
-            return Err(AppError::Validation("Keep notes under 2000 characters".to_string()));
+            return Err(AppError::Validation(
+                "Keep notes under 2000 characters".to_string(),
+            ));
         }
     }
 
@@ -382,7 +414,10 @@ fn build_filter_conditions(
 }
 
 /// Per-transaction split rows plus the FX-converted transaction total.
-type SplitMaps = (std::collections::HashMap<String, Vec<SplitData>>, std::collections::HashMap<String, f64>);
+type SplitMaps = (
+    std::collections::HashMap<String, Vec<SplitData>>,
+    std::collections::HashMap<String, f64>,
+);
 
 /// Report currency + FX history shared by one list/detail command (loading the
 /// full history once instead of once per helper).
@@ -573,12 +608,7 @@ fn fetch_tx_totals(
     let refs = sql::param_refs(params);
     let rows: Vec<(String, String, Option<f64>, Option<String>)> = stmt
         .query_map(refs.as_slice(), |row| {
-            Ok((
-                row.get(0)?,
-                row.get(1)?,
-                row.get(2)?,
-                row.get(3)?,
-            ))
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
         })
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
@@ -902,7 +932,10 @@ pub async fn fetch_transaction(
     state: State<'_, AppState>,
     guid: String,
 ) -> Result<Option<TransactionDetailResult>, String> {
-    run_blocking(state.db.clone(), move |conn| fetch_transaction_inner(conn, &guid)).await
+    run_blocking(state.db.clone(), move |conn| {
+        fetch_transaction_inner(conn, &guid)
+    })
+    .await
 }
 
 // ── Manual editor: create / update / delete ─────────────────────────────────
@@ -937,16 +970,14 @@ pub(crate) fn insert_split_rows(
 
     // One prepared statement reused for every split (and across calls through
     // the connection-level cache), instead of re-preparing per leg.
-    let mut insert = conn
-        .prepare_cached(
-            "INSERT INTO splits
+    let mut insert = conn.prepare_cached(
+        "INSERT INTO splits
               (guid, tx_guid, account_guid, value_num, value_denom,
                quantity_num, quantity_denom, reconcile_state, reconciled, memo)
               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'n', 0, ?8)",
-        )?;
+    )?;
     let mut guids = Vec::with_capacity(splits.len());
-    for (s, (value_num, value_denom, quantity_num, quantity_denom)) in
-        splits.iter().zip(converted)
+    for (s, (value_num, value_denom, quantity_num, quantity_denom)) in splits.iter().zip(converted)
     {
         let split_guid = uuid::Uuid::new_v4().to_string();
         insert.execute(params![
@@ -996,18 +1027,13 @@ fn create_transaction_inner(conn: &Connection, input: TxInput) -> Result<String,
                 opt_text(&input.num),
                 opt_text(&input.notes),
             ],
-        )
-        ?;
+        )?;
         insert_split_rows(conn, &tx_guid, &input.splits)?;
         Ok(tx_guid.clone())
     })
 }
 
-fn update_transaction_inner(
-    conn: &Connection,
-    guid: &str,
-    input: TxInput,
-) -> Result<(), AppError> {
+fn update_transaction_inner(conn: &Connection, guid: &str, input: TxInput) -> Result<(), AppError> {
     let post_date = validate_tx_input(conn, &input)?;
     let exists: bool = conn
         .query_row(
@@ -1015,11 +1041,12 @@ fn update_transaction_inner(
             params![guid],
             |_| Ok(()),
         )
-        .optional()
-        ?
+        .optional()?
         .is_some();
     if !exists {
-        return Err(AppError::NotFound("Transaction not found. It may have been deleted or replaced".to_string()));
+        return Err(AppError::NotFound(
+            "Transaction not found. It may have been deleted or replaced".to_string(),
+        ));
     }
     // Manual edits delete + re-insert splits as `'n'`, so saving a cleared or
     // reconciled transaction wipes its reconciliation state. The edit form
@@ -1040,10 +1067,8 @@ fn update_transaction_inner(
                 opt_text(&input.notes),
                 guid,
             ],
-        )
-        ?;
-        conn.execute("DELETE FROM splits WHERE tx_guid = ?1", params![guid])
-            ?;
+        )?;
+        conn.execute("DELETE FROM splits WHERE tx_guid = ?1", params![guid])?;
         insert_split_rows(conn, guid, &input.splits)?;
         Ok(())
     })
@@ -1060,21 +1085,20 @@ fn delete_transaction_inner(
             params![guid],
             |_| Ok(()),
         )
-        .optional()
-        ?
+        .optional()?
         .is_some();
     if !exists {
-        return Err(AppError::NotFound("Transaction not found. It may have been deleted or replaced".to_string()));
+        return Err(AppError::NotFound(
+            "Transaction not found. It may have been deleted or replaced".to_string(),
+        ));
     }
     if !unreconcile {
         reject_when_reconciled(conn, guid, "delete")?;
     }
 
     with_tx_err(conn, || {
-        conn.execute("DELETE FROM splits WHERE tx_guid = ?1", params![guid])
-            ?;
-        conn.execute("DELETE FROM transactions WHERE guid = ?1", params![guid])
-            ?;
+        conn.execute("DELETE FROM splits WHERE tx_guid = ?1", params![guid])?;
+        conn.execute("DELETE FROM transactions WHERE guid = ?1", params![guid])?;
         Ok(())
     })
 }
@@ -1245,12 +1269,7 @@ mod tests {
         assert_eq!(detail.transaction.splits.len(), 2);
         assert_eq!(detail.transaction.post_date, "2024-03-01");
         // Raw amounts round-trip with fixed-denominator precision.
-        let mut amounts: Vec<f64> = detail
-            .transaction
-            .splits
-            .iter()
-            .map(|s| s.amount)
-            .collect();
+        let mut amounts: Vec<f64> = detail.transaction.splits.iter().map(|s| s.amount).collect();
         amounts.sort_by(|a, b| a.total_cmp(b));
         assert!((amounts[0] + 42.10).abs() < 1e-6);
         assert!((amounts[1] - 42.10).abs() < 1e-6);
@@ -1332,7 +1351,10 @@ mod tests {
         let mut input = balanced_input();
         input.splits[0].account_guid = "root".to_string();
         let err = create_transaction_inner(&conn, input).unwrap_err();
-        assert!(err.to_string().contains("root account"), "unexpected: {err}");
+        assert!(
+            err.to_string().contains("root account"),
+            "unexpected: {err}"
+        );
     }
 
     #[test]
@@ -1345,19 +1367,31 @@ mod tests {
         // Placeholder account.
         let mut bad = balanced_input();
         bad.splits[1].account_guid = "placeholder".to_string();
-        assert!(create_transaction_inner(&conn, bad).unwrap_err().to_string().contains("placeholder"));
+        assert!(create_transaction_inner(&conn, bad)
+            .unwrap_err()
+            .to_string()
+            .contains("placeholder"));
         // Future date hard-block.
         let mut bad = balanced_input();
         bad.post_date = "2099-01-01".to_string();
-        assert!(create_transaction_inner(&conn, bad).unwrap_err().to_string().contains("Future"));
+        assert!(create_transaction_inner(&conn, bad)
+            .unwrap_err()
+            .to_string()
+            .contains("Future"));
         // Single split.
         let mut bad = balanced_input();
         bad.splits.truncate(1);
-        assert!(create_transaction_inner(&conn, bad).unwrap_err().to_string().contains("two splits"));
+        assert!(create_transaction_inner(&conn, bad)
+            .unwrap_err()
+            .to_string()
+            .contains("two splits"));
         // Unknown account.
         let mut bad = balanced_input();
         bad.splits[0].account_guid = "nope".to_string();
-        assert!(create_transaction_inner(&conn, bad).unwrap_err().to_string().contains("not found"));
+        assert!(create_transaction_inner(&conn, bad)
+            .unwrap_err()
+            .to_string()
+            .contains("not found"));
     }
 
     #[test]
@@ -1376,7 +1410,9 @@ mod tests {
         assert_eq!(detail.transaction.splits.len(), 2);
 
         delete_transaction_inner(&conn, &guid, false).expect("delete runs");
-        assert!(fetch_transaction_inner(&conn, &guid).expect("query runs").is_none());
+        assert!(fetch_transaction_inner(&conn, &guid)
+            .expect("query runs")
+            .is_none());
     }
 
     #[test]

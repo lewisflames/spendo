@@ -198,10 +198,14 @@ pub struct SymbolOverride {
 fn normalize_symbol(input: &str) -> Result<String, AppError> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
-        return Err(AppError::Validation("Enter a Yahoo symbol, like AAPL".to_string()));
+        return Err(AppError::Validation(
+            "Enter a Yahoo symbol, like AAPL".to_string(),
+        ));
     }
     if trimmed.len() > 32 {
-        return Err(AppError::Validation("Keep the symbol under 32 characters".to_string()));
+        return Err(AppError::Validation(
+            "Keep the symbol under 32 characters".to_string(),
+        ));
     }
     if trimmed
         .chars()
@@ -515,8 +519,10 @@ fn plan_symbols(pre: &PriceFetchPlan) -> Result<SymbolPlan, String> {
     let mut symbol_period1: HashMap<String, Option<i64>> = HashMap::new();
 
     for c in &pre.commodities {
-        let period1_for_c: Option<i64> =
-            pre.latest_dates.get(&c.guid).and_then(|d| date_to_period1(d));
+        let period1_for_c: Option<i64> = pre
+            .latest_dates
+            .get(&c.guid)
+            .and_then(|d| date_to_period1(d));
 
         // Per-commodity free-text override wins verbatim (single Yahoo fetch,
         // no heuristic suffix expansion).
@@ -1037,7 +1043,8 @@ pub async fn refresh_prices(state: State<'_, AppState>) -> Result<PricesResult, 
     db::run_blocking(state.db.clone(), move |conn| {
         if gen_check.load(Ordering::SeqCst) != generation {
             return Err(
-                "Book changed while prices were refreshing. Those results were discarded".to_string(),
+                "Book changed while prices were refreshing. Those results were discarded"
+                    .to_string(),
             );
         }
         write_prices_and_log(conn, &write_data).map_err(String::from)

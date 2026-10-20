@@ -256,7 +256,10 @@ mod tests {
             vec!["AIR.AS", "AIR.PA"]
         );
         assert_eq!(derive_yahoo_symbols("AAPL", "NASDAQ", "-EUR"), vec!["AAPL"]);
-        assert_eq!(derive_yahoo_symbols("BTCB", "CRYPTO", "-USD"), vec!["BTCB-USD"]);
+        assert_eq!(
+            derive_yahoo_symbols("BTCB", "CRYPTO", "-USD"),
+            vec!["BTCB-USD"]
+        );
         // Unknown namespaces try the default suffix list.
         assert_eq!(
             derive_yahoo_symbols("XYZ", "LSE", "-EUR"),
@@ -268,7 +271,10 @@ mod tests {
     fn dotted_or_dashed_mnemonics_pass_through() {
         // Already Yahoo-shaped (or crypto-like) mnemonics are used verbatim.
         assert_eq!(derive_yahoo_symbols("BRK.B", "NYSE", "-EUR"), vec!["BRK.B"]);
-        assert_eq!(derive_yahoo_symbols("SOME-PAIR", "CRYPTO", "-EUR"), vec!["SOME-PAIR"]);
+        assert_eq!(
+            derive_yahoo_symbols("SOME-PAIR", "CRYPTO", "-EUR"),
+            vec!["SOME-PAIR"]
+        );
     }
 
     #[test]
