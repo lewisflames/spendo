@@ -14,6 +14,13 @@
   import DescriptionCombobox from '$lib/features/transactions/description-combobox.svelte';
   import TransactionAttachments from '$lib/features/transactions/transaction-attachments.svelte';
   import {
+    readLastAccounts,
+    readRecipes,
+    writeLastAccounts,
+    writeRecipes,
+    type TxRecipe
+  } from '$lib/features/transactions/entry-memory';
+  import {
     SplitEditor,
     autoFillIndex,
     draftFromSplit,
@@ -41,23 +48,7 @@
   import { unsavedChanges } from '$lib/stores/unsaved-changes.svelte';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
 
-  const LAST_ACCOUNTS_KEY = 'tx-last-accounts';
-  const RECENT_RECIPES_KEY = 'tx-recent-recipes';
   const SPLIT_ID_PREFIX = 'tx-split';
-
-  /** One remembered transaction shape, keyed by its description. */
-  interface RecipeSplit {
-    accountGuid: string;
-    amount: string;
-    quantity: string;
-    showQuantity: boolean;
-    memo: string;
-  }
-
-  interface TxRecipe {
-    description: string;
-    splits: RecipeSplit[];
-  }
 
   let {
     mode = 'create',
@@ -102,49 +93,6 @@
   function nextKey(): number {
     keySeq += 1;
     return keySeq;
-  }
-
-  function readStoredArray(key: string): string[] {
-    try {
-      const raw = localStorage.getItem(key);
-      if (!raw) return [];
-      const parsed: unknown = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : [];
-    } catch {
-      return [];
-    }
-  }
-
-  function writeStoredArray(key: string, values: string[]): void {
-    try {
-      localStorage.setItem(key, JSON.stringify(values.slice(0, 20)));
-    } catch {
-      // Storage full or unavailable — entry speed hints are best-effort.
-    }
-  }
-
-  function readStoredRecipes(): TxRecipe[] {
-    try {
-      const raw = localStorage.getItem(RECENT_RECIPES_KEY);
-      if (!raw) return [];
-      const parsed: unknown = JSON.parse(raw);
-      if (!Array.isArray(parsed)) return [];
-      return parsed.filter((v): v is TxRecipe => {
-        if (!v || typeof v !== 'object') return false;
-        const r = v as { description?: unknown; splits?: unknown };
-        return typeof r.description === 'string' && Array.isArray(r.splits);
-      });
-    } catch {
-      return [];
-    }
-  }
-
-  function writeStoredRecipes(recipes: TxRecipe[]): void {
-    try {
-      localStorage.setItem(RECENT_RECIPES_KEY, JSON.stringify(recipes.slice(0, 20)));
-    } catch {
-      // Storage full or unavailable — entry speed hints are best-effort.
-    }
   }
 
   // The edit page mounts this form only after the payload resolves, so the
@@ -203,7 +151,7 @@
   let formError = $state('');
   let showErrors = $state(false);
   let didPrefillAccounts = $state(false);
-  let recipes = $state<TxRecipe[]>(untrack(() => readStoredRecipes()));
+  let recipes = $state<TxRecipe[]>(untrack(() => readRecipes()));
   let pendingSaveMode = $state<'save' | 'next'>('save');
   // Set while a successful save/delete/discard navigates, so the
   // beforeNavigate guard doesn’t ask a second time.
@@ -242,7 +190,7 @@
       didPrefillAccounts = true;
       return;
     }
-    const last = untrack(() => readStoredArray(LAST_ACCOUNTS_KEY)).filter((g) => knownGuids.has(g));
+    const last = untrack(() => readLastAccounts()).filter((g) => knownGuids.has(g));
     if (last.length > 0) {
       for (let i = 0; i < splits.length && i < last.length; i += 1) {
         splits[i].accountGuid = last[i];
@@ -340,7 +288,7 @@
 
   function rememberForNextTime(usedSplits: SplitDraft[], desc: string) {
     const valid = usedSplits.map((s) => s.accountGuid).filter((g) => knownGuids.has(g));
-    if (valid.length > 0) writeStoredArray(LAST_ACCOUNTS_KEY, valid);
+    if (valid.length > 0) writeLastAccounts(valid);
     const trimmed = desc.trim();
     if (!trimmed) return;
     const recipe: TxRecipe = {
@@ -355,7 +303,7 @@
     };
     const next = [recipe, ...recipes.filter((r) => r.description !== trimmed)];
     recipes = next;
-    writeStoredRecipes(next);
+    writeRecipes(next);
   }
 
   /** Description picked a remembered transaction: restore its splits while no
