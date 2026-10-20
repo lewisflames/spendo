@@ -859,7 +859,7 @@ pub fn get_cached_price_maps(conn: &Connection) -> Result<(PriceDateMap, PriceDa
     if latest.is_empty() && prev.is_empty() {
         return Ok((HashMap::new(), HashMap::new()));
     }
-    let report_mnemonic = fx::get_report_currency_mnemonic(conn)?.unwrap_or_default();
+    let report_mnemonic = fx::report_currency_or_empty(conn)?;
     let fx_history = fx::FxHistory::load(conn)?;
     // One rate map per distinct price date instead of one query per commodity.
     let mut rates_by_date: HashMap<String, HashMap<String, f64>> = HashMap::new();
@@ -893,7 +893,7 @@ fn latest_prices_normalized(conn: &Connection, rn: u32) -> Result<Vec<RawPrice>,
     if rows.is_empty() {
         return Ok(vec![]);
     }
-    let report_mnemonic = fx::get_report_currency_mnemonic(conn)?.unwrap_or_default();
+    let report_mnemonic = fx::report_currency_or_empty(conn)?;
     let fx_history = fx::FxHistory::load(conn)?;
     // One rate map per distinct price date instead of one query per commodity.
     let mut rates_by_date: HashMap<String, HashMap<String, f64>> = HashMap::new();

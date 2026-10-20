@@ -312,7 +312,7 @@ fn build_commodity_groups(
     rows: &[HoldingSplit],
     universe: &HoldingUniverse,
 ) -> Result<HashMap<String, CommodityGroup>, String> {
-    let report_currency = fx::get_report_currency_mnemonic(conn)?.unwrap_or_default();
+    let report_currency = fx::report_currency_or_empty(conn)?;
     let fx_map = fx::get_fx_map(conn, None)?;
     // Cost-basis currency per commodity: its latest price quote currency.
     let quote_currencies = latest_quote_currencies(conn)?;
@@ -521,7 +521,7 @@ fn load_trend_inputs(conn: &Connection, filter: Option<&str>) -> Result<TrendInp
 
     // FX rate history per currency (quoted in the report currency), for normalizing
     // prices and cost basis per date. Same source `account_detail.rs` uses.
-    let report_currency = fx::get_report_currency_mnemonic(conn)?.unwrap_or_default();
+    let report_currency = fx::report_currency_or_empty(conn)?;
     let fx_history = fx::FxHistory::load(conn)?;
 
     // Get commodity_guid → mnemonic for market value computation
@@ -740,7 +740,7 @@ fn load_xirr_inputs(conn: &Connection, filter: Option<&str>) -> Result<XirrInput
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
 
-    let report_currency = fx::get_report_currency_mnemonic(conn)?.unwrap_or_default();
+    let report_currency = fx::report_currency_or_empty(conn)?;
     let fx_history = fx::FxHistory::load(conn)?;
 
     // Cost-basis currency per commodity: its latest price quote currency.

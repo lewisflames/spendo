@@ -206,13 +206,7 @@ fn filename_of(path: &str) -> String {
 
 /// SHA-256 of raw bytes, same hex encoding as `csv_row_hash`.
 fn bytes_sha256(bytes: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    hasher
-        .finalize()
-        .iter()
-        .map(|b| format!("{:02x}", b))
-        .collect()
+    utils::hex_digest(Sha256::digest(bytes))
 }
 
 /// Refuse file content that no longer matches what the user selected/previewed.
@@ -721,13 +715,7 @@ fn csv_row_hash(post_date: &str, value_num: i64, description: &str) -> String {
         value_num,
         description.trim().to_lowercase()
     );
-    let mut hasher = Sha256::new();
-    hasher.update(normalized.as_bytes());
-    hasher
-        .finalize()
-        .iter()
-        .map(|b| format!("{:02x}", b))
-        .collect()
+    utils::hex_digest(Sha256::digest(normalized.as_bytes()))
 }
 
 fn amount_to_value_num(amount: f64) -> i64 {

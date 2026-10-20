@@ -347,7 +347,7 @@ fn fetch_monthly_actuals(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
 
-    let report_currency = fx::get_report_currency_mnemonic(conn)?.unwrap_or_default();
+    let report_currency = fx::report_currency_or_empty(conn)?;
     let mut actuals: HashMap<i64, f64> = HashMap::new();
     for (ym, commodity, total) in rows {
         let converted = fx::convert_optional(total, commodity.as_deref(), &report_currency, fx_map);
@@ -409,7 +409,7 @@ fn compute_cumulative_carryovers(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
 
-    let report_currency = fx::get_report_currency_mnemonic(conn)?.unwrap_or_default();
+    let report_currency = fx::report_currency_or_empty(conn)?;
     let fx_map = fx::get_fx_map(conn, Some(&period_start))?;
     let mut yearly_actuals: HashMap<String, HashMap<i32, f64>> = HashMap::new();
     for (account_guid, y, commodity, total) in rows {
@@ -622,7 +622,7 @@ fn fetch_budget_vs_actual_inner(
 
     let raw_rows = fetch_budget_actual_raw_rows(conn, &period_start, &period_end, year)?;
 
-    let report_currency = fx::get_report_currency_mnemonic(conn)?.unwrap_or_default();
+    let report_currency = fx::report_currency_or_empty(conn)?;
     let fx_map = fx::get_fx_map(conn, Some(&period_end))?;
 
     let (aggs, agg_order) = aggregate_budget_actuals(raw_rows, &report_currency, &fx_map);

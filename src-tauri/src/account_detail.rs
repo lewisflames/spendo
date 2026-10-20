@@ -273,7 +273,7 @@ fn fetch_account_detail_inner(
     let descendants_count = (sub_guids.len() as i64) - 1;
     let (child_accounts, subtree, parent) = accounts::fetch_children_and_subtree(conn, guid)?;
     let ctx = FxCtx {
-        report_currency: fx::get_report_currency_mnemonic(conn)?.unwrap_or_default(),
+        report_currency: fx::report_currency_or_empty(conn)?,
         fx_map: fx::get_fx_map(conn, None)?,
     };
 
@@ -884,7 +884,7 @@ fn fetch_account_balance_trend_inner(
     let signed_shares = utils::signed_amount_expr(utils::QUANTITY_AMOUNT, "a.account_type");
     let shares_filter = format!("AND a.account_type IN ({})", utils::investment_types_sql());
 
-    let report_currency = fx::get_report_currency_mnemonic(conn)?.unwrap_or_default();
+    let report_currency = fx::report_currency_or_empty(conn)?;
     let fx_history = fx::FxHistory::load(conn)?;
     let unified_prices = get_cached_prices_map(conn)?;
 
