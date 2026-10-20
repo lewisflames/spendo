@@ -18,14 +18,14 @@ use crate::utils;
 trait Importable {
     fn guid(&self) -> &str;
     fn has_changes(&self, existing: &Self) -> bool;
-    fn upsert(&self, conn: &Connection) -> Result<(), String>;
+    fn upsert(&self, conn: &Connection) -> Result<(), AppError>;
 }
 
 fn process_entities<T: Importable>(
     conn: &Connection,
     src: &[T],
     existing: &HashMap<String, T>,
-) -> Result<(i64, i64), String> {
+) -> Result<(i64, i64), AppError> {
     let mut added = 0;
     let mut updated = 0;
     for r in src {
@@ -69,17 +69,18 @@ pub struct ImportResult {
 
 // ── SHA256 ──────────────────────────────────────────────────────────────────
 
-fn file_sha256(path: &str) -> Result<String, String> {
+fn file_sha256(path: &str) -> Result<String, AppError> {
     // Stream instead of slurping so large books don't need to fit in memory.
     use std::io::Read;
-    let file = fs::File::open(path).map_err(|e| format!("Failed to read file: {}", e))?;
+    let file =
+        fs::File::open(path).map_err(|e| AppError::Io(format!("Failed to read file: {}", e)))?;
     let mut reader = std::io::BufReader::new(file);
     let mut hasher = Sha256::new();
     let mut buf = [0u8; 64 * 1024];
     loop {
         let n = reader
             .read(&mut buf)
-            .map_err(|e| format!("Failed to hash file: {}", e))?;
+            .map_err(|e| AppError::Io(format!("Failed to hash file: {}", e)))?;
         if n == 0 {
             break;
         }
@@ -113,7 +114,7 @@ pub struct SkippedSchedule {
     pub reason: String,
 }
 
-fn read_source_data(source: &Connection) -> Result<SourceData, String> {
+fn read_source_data(source: &Connection) -> Result<SourceData, AppError> {
     let source_schedules = read_source_schedules(source)?;
 
     let mut accounts = read_account(source)?;
@@ -195,14 +196,12 @@ impl Importable for Commodity {
             || existing.fullname != self.fullname
     }
 
-    fn upsert(&self, conn: &Connection) -> Result<(), String> {
+    fn upsert(&self, conn: &Connection) -> Result<(), AppError> {
         conn.prepare_cached(
 			"INSERT INTO commodities (guid, mnemonic, namespace, fullname) VALUES (?1, ?2, ?3, ?4)
 			 ON CONFLICT(guid) DO UPDATE SET mnemonic=excluded.mnemonic, namespace=excluded.namespace, fullname=excluded.fullname",
-		)
-		.map_err(|e| e.to_string())?
-		.execute(rusqlite::params![self.guid, self.mnemonic, self.namespace, self.fullname])
-		.map_err(|e| e.to_string())?;
+		)?
+		.execute(rusqlite::params![self.guid, self.mnemonic, self.namespace, self.fullname])?;
         Ok(())
     }
 }
@@ -234,14 +233,12 @@ impl Importable for Account {
             || existing.commodity_guid != self.commodity_guid
     }
 
-    fn upsert(&self, conn: &Connection) -> Result<(), String> {
+    fn upsert(&self, conn: &Connection) -> Result<(), AppError> {
         conn.prepare_cached(
 			"INSERT INTO accounts (guid, name, account_type, parent_guid, code, description, placeholder, commodity_guid) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
 			 ON CONFLICT(guid) DO UPDATE SET name=excluded.name, account_type=excluded.account_type, parent_guid=excluded.parent_guid, code=excluded.code, description=excluded.description, placeholder=excluded.placeholder, commodity_guid=excluded.commodity_guid",
-		)
-		.map_err(|e| e.to_string())?
-		.execute(rusqlite::params![self.guid, self.name, self.account_type, self.parent_guid, self.code, self.description, self.placeholder, self.commodity_guid])
-		.map_err(|e| e.to_string())?;
+		)?
+		.execute(rusqlite::params![self.guid, self.name, self.account_type, self.parent_guid, self.code, self.description, self.placeholder, self.commodity_guid])?;
         Ok(())
     }
 }
@@ -269,20 +266,18 @@ impl Importable for Transaction {
             || existing.notes != self.notes
     }
 
-    fn upsert(&self, conn: &Connection) -> Result<(), String> {
+    fn upsert(&self, conn: &Connection) -> Result<(), AppError> {
         conn.prepare_cached(
             "INSERT INTO transactions (guid, post_date, description, num, notes) VALUES (?1, ?2, ?3, ?4, ?5)
 			 ON CONFLICT(guid) DO UPDATE SET post_date=excluded.post_date, description=excluded.description, num=excluded.num, notes=excluded.notes",
-        )
-        .map_err(|e| e.to_string())?
+        )?
         .execute(rusqlite::params![
             self.guid,
             self.post_date,
             self.description,
             self.num,
             self.notes
-        ])
-        .map_err(|e| e.to_string())?;
+        ])?;
         Ok(())
     }
 }
@@ -316,7 +311,7 @@ impl Importable for Split {
             || existing.reconcile_state != self.reconcile_state
     }
 
-    fn upsert(&self, conn: &Connection) -> Result<(), String> {
+    fn upsert(&self, conn: &Connection) -> Result<(), AppError> {
         let reconciled = self
             .reconcile_state
             .as_deref()
@@ -324,10 +319,8 @@ impl Importable for Split {
         conn.prepare_cached(
 			"INSERT INTO splits (guid, tx_guid, account_guid, value_num, value_denom, quantity_num, quantity_denom, reconciled, reconcile_state, memo) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
 			 ON CONFLICT(guid) DO UPDATE SET tx_guid=excluded.tx_guid, account_guid=excluded.account_guid, value_num=excluded.value_num, value_denom=excluded.value_denom, quantity_num=excluded.quantity_num, quantity_denom=excluded.quantity_denom, reconciled=excluded.reconciled, reconcile_state=excluded.reconcile_state, memo=excluded.memo",
-		)
-		.map_err(|e| e.to_string())?
-		.execute(rusqlite::params![self.guid, self.tx_guid, self.account_guid, self.value_num, self.value_denom, self.quantity_num, self.quantity_denom, reconciled as i64, self.reconcile_state, self.memo])
-		.map_err(|e| e.to_string())?;
+		)?
+		.execute(rusqlite::params![self.guid, self.tx_guid, self.account_guid, self.value_num, self.value_denom, self.quantity_num, self.quantity_denom, reconciled as i64, self.reconcile_state, self.memo])?;
         Ok(())
     }
 }
@@ -351,10 +344,8 @@ fn is_uuid(s: &str) -> bool {
 
 // ── Read functions ──────────────────────────────────────────────────────────
 
-fn read_commodity(conn: &Connection) -> Result<Vec<Commodity>, String> {
-    let mut stmt = conn
-        .prepare("SELECT guid, mnemonic, namespace, fullname FROM commodities")
-        .map_err(|e| e.to_string())?;
+fn read_commodity(conn: &Connection) -> Result<Vec<Commodity>, AppError> {
+    let mut stmt = conn.prepare("SELECT guid, mnemonic, namespace, fullname FROM commodities")?;
     let rows = stmt
         .query_map([], |row| {
             Ok(Commodity {
@@ -363,19 +354,16 @@ fn read_commodity(conn: &Connection) -> Result<Vec<Commodity>, String> {
                 namespace: row.get(2)?,
                 fullname: row.get(3)?,
             })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
 }
 
-fn read_account(conn: &Connection) -> Result<Vec<Account>, String> {
+fn read_account(conn: &Connection) -> Result<Vec<Account>, AppError> {
     let mut stmt = conn
 		.prepare(
 			"SELECT guid, name, account_type, parent_guid, code, description, placeholder, commodity_guid FROM accounts",
-		)
-		.map_err(|e| e.to_string())?;
+		)?;
     let rows = stmt
         .query_map([], |row| {
             Ok(Account {
@@ -388,18 +376,15 @@ fn read_account(conn: &Connection) -> Result<Vec<Account>, String> {
                 placeholder: row.get(6)?,
                 commodity_guid: row.get(7)?,
             })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
 }
 
 /// App-DB loader (also used for change detection during merge).
-fn read_transaction(conn: &Connection) -> Result<Vec<Transaction>, String> {
-    let mut stmt = conn
-        .prepare("SELECT guid, post_date, description, num, notes FROM transactions")
-        .map_err(|e| e.to_string())?;
+fn read_transaction(conn: &Connection) -> Result<Vec<Transaction>, AppError> {
+    let mut stmt =
+        conn.prepare("SELECT guid, post_date, description, num, notes FROM transactions")?;
     let rows = stmt
         .query_map([], |row| {
             let num: Option<String> = row.get(3)?;
@@ -410,10 +395,8 @@ fn read_transaction(conn: &Connection) -> Result<Vec<Transaction>, String> {
                 num: non_empty(num),
                 notes: non_empty(row.get(4)?),
             })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
 }
 
@@ -457,15 +440,13 @@ fn normalize_post_date(raw: &str) -> String {
 
 /// Source-book loader: joins GnuCash's `slots` table, where transaction notes
 /// live ('notes' string slot keyed by the tx GUID).
-fn read_source_transaction(source: &Connection) -> Result<Vec<Transaction>, String> {
-    let mut stmt = source
-        .prepare(
-            "SELECT t.guid, t.post_date, t.description, t.num,
+fn read_source_transaction(source: &Connection) -> Result<Vec<Transaction>, AppError> {
+    let mut stmt = source.prepare(
+        "SELECT t.guid, t.post_date, t.description, t.num,
                     (SELECT s.string_val FROM slots s
                      WHERE s.obj_guid = t.guid AND s.name = 'notes' LIMIT 1) as notes
              FROM transactions t",
-        )
-        .map_err(|e| e.to_string())?;
+    )?;
     let rows = stmt
         .query_map([], |row| {
             let num: Option<String> = row.get(3)?;
@@ -477,19 +458,16 @@ fn read_source_transaction(source: &Connection) -> Result<Vec<Transaction>, Stri
                 num: non_empty(num),
                 notes: non_empty(notes),
             })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
 }
 
-fn read_split(conn: &Connection) -> Result<Vec<Split>, String> {
+fn read_split(conn: &Connection) -> Result<Vec<Split>, AppError> {
     let mut stmt = conn
 		.prepare(
 			"SELECT guid, tx_guid, account_guid, value_num, value_denom, quantity_num, quantity_denom, reconcile_state, memo FROM splits",
-		)
-		.map_err(|e| e.to_string())?;
+		)?;
     let rows = stmt
         .query_map([], |row| {
             let memo: Option<String> = row.get(8)?;
@@ -504,10 +482,8 @@ fn read_split(conn: &Connection) -> Result<Vec<Split>, String> {
                 reconcile_state: row.get(7)?,
                 memo: non_empty(memo),
             })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
 }
 
@@ -580,25 +556,21 @@ fn slot_value(numeric: Option<f64>, formula: Option<&str>) -> Result<f64, ()> {
     }
 }
 
-fn table_exists(conn: &Connection, name: &str) -> Result<bool, String> {
+fn table_exists(conn: &Connection, name: &str) -> Result<bool, AppError> {
     conn.query_row(
         "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
         [name],
         |row| row.get::<_, i64>(0),
     )
     .map(|n| n > 0)
-    .map_err(|e| e.to_string())
+    .map_err(AppError::from)
 }
 
-fn table_has_column(conn: &Connection, table: &str, column: &str) -> Result<bool, String> {
-    let mut stmt = conn
-        .prepare(&format!("PRAGMA table_info({table})"))
-        .map_err(|e| e.to_string())?;
+fn table_has_column(conn: &Connection, table: &str, column: &str) -> Result<bool, AppError> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
     let names = stmt
-        .query_map([], |row| row.get::<_, String>(1))
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(names.iter().any(|n| n == column))
 }
 
@@ -614,17 +586,15 @@ fn gdate_to_iso(raw: Option<String>) -> Option<String> {
 
 /// Source SX rows with their recurrence rules. Sources without the SX tables
 /// (hand-made or older fixtures) simply have no schedules.
-fn read_source_schedules(source: &Connection) -> Result<Vec<SourceSchedule>, String> {
+fn read_source_schedules(source: &Connection) -> Result<Vec<SourceSchedule>, AppError> {
     if !table_exists(source, "schedxactions")? || !table_exists(source, "recurrences")? {
         return Ok(Vec::new());
     }
-    let mut stmt = source
-        .prepare(
-            "SELECT guid, name, enabled, start_date, end_date, last_occur,
+    let mut stmt = source.prepare(
+        "SELECT guid, name, enabled, start_date, end_date, last_occur,
                     num_occur, rem_occur, instance_count, template_act_guid
              FROM schedxactions",
-        )
-        .map_err(|e| e.to_string())?;
+    )?;
     let mut schedules = stmt
         .query_map([], |row| {
             Ok(SourceSchedule {
@@ -640,10 +610,8 @@ fn read_source_schedules(source: &Connection) -> Result<Vec<SourceSchedule>, Str
                 template_act_guid: row.get(9)?,
                 recurrences: Vec::new(),
             })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
     if schedules.is_empty() {
         return Ok(schedules);
     }
@@ -653,24 +621,20 @@ fn read_source_schedules(source: &Connection) -> Result<Vec<SourceSchedule>, Str
         .enumerate()
         .map(|(i, s)| (s.guid.clone(), i))
         .collect();
-    let mut stmt = source
-        .prepare(
-            "SELECT obj_guid, recurrence_mult, recurrence_period_type, recurrence_period_start
+    let mut stmt = source.prepare(
+        "SELECT obj_guid, recurrence_mult, recurrence_period_type, recurrence_period_start
              FROM recurrences",
-        )
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, String>(2)?,
-                gdate_to_iso(row.get(3)?),
-            ))
-        })
-        .map_err(|e| e.to_string())?;
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, String>(2)?,
+            gdate_to_iso(row.get(3)?),
+        ))
+    })?;
     for row in rows {
-        let (obj_guid, mult, period_type, period_start) = row.map_err(|e| e.to_string())?;
+        let (obj_guid, mult, period_type, period_start) = row?;
         if let Some(&i) = index.get(&obj_guid) {
             schedules[i].recurrences.push(SourceRecurrence {
                 mult,
@@ -687,7 +651,7 @@ fn read_source_schedules(source: &Connection) -> Result<Vec<SourceSchedule>, Str
 /// guid_val = frame GUID)` whose children reference the synthetic frame GUID;
 /// this walks that indirection. Books whose `slots` table lacks the KVP
 /// columns (fixtures) yield no slots.
-fn read_template_slots(source: &Connection) -> Result<HashMap<String, TemplateSlot>, String> {
+fn read_template_slots(source: &Connection) -> Result<HashMap<String, TemplateSlot>, AppError> {
     let mut slots: HashMap<String, TemplateSlot> = HashMap::new();
     if !table_exists(source, "slots")?
         || !table_has_column(source, "slots", "guid_val")?
@@ -700,19 +664,17 @@ fn read_template_slots(source: &Connection) -> Result<HashMap<String, TemplateSl
     // `slot_type = 9` is KvpValue::Type::FRAME.
     let mut frame_to_split: HashMap<String, String> = HashMap::new();
     {
-        let mut stmt = source
-            .prepare("SELECT obj_guid, guid_val FROM slots WHERE name = 'sched-xaction' AND slot_type = 9")
-            .map_err(|e| e.to_string())?;
-        let rows = stmt
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, Option<String>>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                ))
-            })
-            .map_err(|e| e.to_string())?;
+        let mut stmt = source.prepare(
+            "SELECT obj_guid, guid_val FROM slots WHERE name = 'sched-xaction' AND slot_type = 9",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, Option<String>>(0)?,
+                row.get::<_, Option<String>>(1)?,
+            ))
+        })?;
         for row in rows {
-            let (split, frame) = row.map_err(|e| e.to_string())?;
+            let (split, frame) = row?;
             if let (Some(split), Some(frame)) = (split, frame) {
                 frame_to_split.insert(frame, split);
             }
@@ -722,29 +684,25 @@ fn read_template_slots(source: &Connection) -> Result<HashMap<String, TemplateSl
         return Ok(slots);
     }
 
-    let mut stmt = source
-        .prepare(
-            "SELECT obj_guid, name, guid_val, string_val, numeric_val_num, numeric_val_denom
+    let mut stmt = source.prepare(
+        "SELECT obj_guid, name, guid_val, string_val, numeric_val_num, numeric_val_denom
              FROM slots
              WHERE name IN ('sched-xaction/account', 'sched-xaction/credit-formula',
                             'sched-xaction/debit-formula', 'sched-xaction/credit-numeric',
                             'sched-xaction/debit-numeric', 'sched-xaction/shares')",
-        )
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, Option<String>>(2)?,
-                row.get::<_, Option<String>>(3)?,
-                row.get::<_, Option<i64>>(4)?,
-                row.get::<_, Option<i64>>(5)?,
-            ))
-        })
-        .map_err(|e| e.to_string())?;
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, Option<String>>(2)?,
+            row.get::<_, Option<String>>(3)?,
+            row.get::<_, Option<i64>>(4)?,
+            row.get::<_, Option<i64>>(5)?,
+        ))
+    })?;
     for row in rows {
-        let (obj_guid, name, guid_val, string_val, num, denom) = row.map_err(|e| e.to_string())?;
+        let (obj_guid, name, guid_val, string_val, num, denom) = row?;
         let split_guid = frame_to_split.get(&obj_guid).cloned().unwrap_or(obj_guid);
         let slot = slots.entry(split_guid).or_default();
         let numeric = match (num, denom) {
@@ -772,7 +730,7 @@ fn read_template_slots(source: &Connection) -> Result<HashMap<String, TemplateSl
 /// `from-sched-xaction` slot GnuCash writes on generated transactions). The
 /// generated transactions themselves import as ordinary rows, so the schedule
 /// pointer must start after them.
-fn read_last_instance_dates(source: &Connection) -> Result<HashMap<String, String>, String> {
+fn read_last_instance_dates(source: &Connection) -> Result<HashMap<String, String>, AppError> {
     let mut dates: HashMap<String, String> = HashMap::new();
     if !table_exists(source, "slots")?
         || !table_has_column(source, "slots", "guid_val")?
@@ -780,23 +738,19 @@ fn read_last_instance_dates(source: &Connection) -> Result<HashMap<String, Strin
     {
         return Ok(dates);
     }
-    let mut stmt = source
-        .prepare(
-            "SELECT sl.guid_val, t.post_date FROM slots sl
+    let mut stmt = source.prepare(
+        "SELECT sl.guid_val, t.post_date FROM slots sl
              JOIN transactions t ON t.guid = sl.obj_guid
              WHERE sl.name = 'from-sched-xaction'",
-        )
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, Option<String>>(0)?,
-                row.get::<_, Option<String>>(1)?,
-            ))
-        })
-        .map_err(|e| e.to_string())?;
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, Option<String>>(0)?,
+            row.get::<_, Option<String>>(1)?,
+        ))
+    })?;
     for row in rows {
-        let (guid, post_date) = row.map_err(|e| e.to_string())?;
+        let (guid, post_date) = row?;
         let (Some(guid), Some(post_date)) = (guid, post_date) else {
             continue;
         };
@@ -824,7 +778,7 @@ fn excluded_template_accounts(
     source: &Connection,
     accounts: &[Account],
     schedules: &[SourceSchedule],
-) -> Result<HashSet<String>, String> {
+) -> Result<HashSet<String>, AppError> {
     let mut excluded: HashSet<String> = schedules
         .iter()
         .map(|s| s.template_act_guid.clone())
@@ -836,8 +790,7 @@ fn excluded_template_accounts(
             .query_row("SELECT root_template_guid FROM books LIMIT 1", [], |row| {
                 row.get::<_, Option<String>>(0)
             })
-            .optional()
-            .map_err(|e| e.to_string())?
+            .optional()?
             .flatten();
         if let Some(root) = root {
             excluded.insert(root);
