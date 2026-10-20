@@ -172,7 +172,7 @@ fn load_reconcilable_account(
     conn: &Connection,
     guid: &str,
 ) -> Result<ReconcilableAccount, AppError> {
-    let row: Option<(String, Option<String>, String, i64, Option<String>)> = conn
+    let row: Option<(ReconcilableAccount, i64)> = conn
         .query_row(
             "SELECT a.name, a.description, a.account_type, a.placeholder, c.mnemonic
              FROM accounts a LEFT JOIN commodities c ON c.guid = a.commodity_guid
@@ -180,21 +180,23 @@ fn load_reconcilable_account(
             params![guid],
             |row| {
                 Ok((
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
+                    ReconcilableAccount {
+                        name: row.get(0)?,
+                        description: row.get(1)?,
+                        account_type: row.get(2)?,
+                        commodity: row.get(4)?,
+                    },
                     row.get(3)?,
-                    row.get(4)?,
                 ))
             },
         )
         .optional()?;
-    let Some((name, description, account_type, placeholder, commodity)) = row else {
+    let Some((account, placeholder)) = row else {
         return Err(AppError::NotFound(
             "Account not found. It may have been removed".to_string(),
         ));
     };
-    if account_type == "ROOT" {
+    if account.account_type == "ROOT" {
         return Err(AppError::Validation(
             "The root account holds everything together. It can't be reconciled".to_string(),
         ));
@@ -205,17 +207,13 @@ fn load_reconcilable_account(
                 .to_string(),
         ));
     }
-    if !RECONCILABLE_TYPES.contains(&account_type.as_str()) {
+    if !RECONCILABLE_TYPES.contains(&account.account_type.as_str()) {
         return Err(AppError::Validation(format!(
-            "Only cash-like accounts can be reconciled. This one is {account_type}"
+            "Only cash-like accounts can be reconciled. This one is {}",
+            account.account_type
         )));
     }
-    Ok(ReconcilableAccount {
-        name,
-        description,
-        account_type,
-        commodity,
-    })
+    Ok(account)
 }
 
 /// Sum of signed split amounts for one reconcile state up to `statement_date`

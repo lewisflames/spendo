@@ -788,7 +788,7 @@ fn xirr_percent(flows: &[(NaiveDate, f64)]) -> Option<f64> {
         return None;
     }
     let mut sorted: Vec<(NaiveDate, f64)> = flows.to_vec();
-    sorted.sort_by(|a, b| a.0.cmp(&b.0));
+    sorted.sort_by_key(|f| f.0);
     if !sorted.iter().any(|(_, a)| *a > 0.0) || !sorted.iter().any(|(_, a)| *a < 0.0) {
         return None;
     }

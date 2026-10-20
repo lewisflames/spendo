@@ -167,7 +167,7 @@ fn value_account_rows(
                     // Cost leg converts silently (never an FX warning): the
                     // holding is either priced (market dominates) or flagged
                     // via `missing_prices`.
-                    let cost = fx::convert(balance, mnemonic, &report_currency, &fx_map);
+                    let cost = fx::convert(balance, mnemonic, report_currency, fx_map);
                     unrealized_gains += market - cost;
                     balance = market;
                 } else {
@@ -187,8 +187,8 @@ fn value_account_rows(
             balance = fx::convert_tracked(
                 balance,
                 mnemonic,
-                &report_currency,
-                &fx_map,
+                report_currency,
+                fx_map,
                 Some(&mut missing_fx_set),
             );
         }

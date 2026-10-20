@@ -85,35 +85,26 @@ fn search_accounts_inner(
              LIMIT ?2",
         )
         .map_err(|e| e.to_string())?;
-    let rows: Vec<(String, String, String, Option<String>, Option<String>)> = stmt
+    let mut accounts: Vec<SearchAccount> = stmt
         .query_map(rusqlite::params![like, limit], |row| {
-            Ok((
-                row.get(0)?,
-                row.get(1)?,
-                row.get(2)?,
-                row.get(3)?,
-                row.get(4)?,
-            ))
+            Ok(SearchAccount {
+                guid: row.get(0)?,
+                name: row.get(1)?,
+                full_path: String::new(),
+                account_type: row.get(2)?,
+                code: row.get(3)?,
+                description: row.get(4)?,
+            })
         })
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
     // One account index for all path walks instead of queries per ancestor.
     let metas = tree::load_account_metas(conn)?;
-    Ok(rows
-        .into_iter()
-        .map(|(guid, name, account_type, code, description)| {
-            let full_path = tree::full_account_path(&guid, &metas, " : ");
-            SearchAccount {
-                guid,
-                name,
-                full_path,
-                account_type,
-                code,
-                description,
-            }
-        })
-        .collect())
+    for account in &mut accounts {
+        account.full_path = tree::full_account_path(&account.guid, &metas, " : ");
+    }
+    Ok(accounts)
 }
 
 fn search_transactions_inner(

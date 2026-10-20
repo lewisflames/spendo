@@ -1310,7 +1310,7 @@ mod tests {
         assert_eq!(to_value_rational(0.1234).unwrap(), (1234, VALUE_DENOM));
         assert_eq!(to_value_rational(-42.1).unwrap(), (-421_000, VALUE_DENOM));
         // Near the upper bound, f64 error must not cause false rejections.
-        assert!(to_value_rational(999_999_999.9999).is_ok());
+        assert!(to_value_rational(999_999_999.999_9).is_ok());
     }
 
     /// Regression: malformed filter dates used to make `date(?, '+1 day')`
