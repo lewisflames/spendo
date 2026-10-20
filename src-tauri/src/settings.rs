@@ -12,7 +12,7 @@ pub async fn clear_app_db(state: State<'_, AppState>) -> Result<(), String> {
     // only the generation before writing), so bump it under the DB lock.
     let generation = state.book_generation.clone();
     run_blocking(state.db.clone(), move |conn| {
-        clear_db(conn).map_err(|e| e.to_string())?;
+        clear_db(conn)?;
         generation.fetch_add(1, Ordering::SeqCst);
         Ok(())
     })

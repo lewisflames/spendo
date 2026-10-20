@@ -487,7 +487,7 @@ fn plan_symbols(pre: &PriceFetchPlan) -> Result<SymbolPlan, AppError> {
     let tomorrow = today.succ_opt().unwrap_or(today);
     let period2 = tomorrow
         .and_hms_opt(0, 0, 0)
-        .ok_or_else(|| "Failed to construct period2 timestamp".to_string())?
+        .ok_or_else(|| AppError::Io("Failed to construct period2 timestamp".to_string()))?
         .and_utc()
         .timestamp();
 

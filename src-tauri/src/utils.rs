@@ -293,8 +293,9 @@ pub fn paginate(total: i64, page: i64, page_size: i64) -> (i64, i64, i64, i64) {
 /// letting a bad string quietly zero out comparisons.
 pub fn validate_iso_date(value: &str) -> Result<String, AppError> {
     let trimmed = value.trim();
-    let parsed = chrono::NaiveDate::parse_from_str(trimmed, "%Y-%m-%d")
-        .map_err(|_| format!("Invalid date (expected YYYY-MM-DD): {trimmed}"))?;
+    let parsed = chrono::NaiveDate::parse_from_str(trimmed, "%Y-%m-%d").map_err(|_| {
+        AppError::Validation(format!("Invalid date (expected YYYY-MM-DD): {trimmed}"))
+    })?;
     let normalized = parsed.format("%Y-%m-%d").to_string();
     if normalized != trimmed {
         return Err(AppError::Validation(format!(

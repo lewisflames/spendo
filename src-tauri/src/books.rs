@@ -185,8 +185,8 @@ pub async fn close_book(state: State<'_, AppState>) -> Result<HomeDataResult, St
     let generation = state.book_generation.clone();
     db::run_swap_blocking(state.db.clone(), move |conn| {
         db::checkpoint(conn);
-        let placeholder =
-            db::open_placeholder().map_err(|e| format!("Failed to close book: {e}"))?;
+        let placeholder = db::open_placeholder()
+            .map_err(|e| AppError::Io(format!("Failed to close book: {e}")))?;
         *conn = placeholder;
         generation.fetch_add(1, Ordering::SeqCst);
         Ok(())

@@ -346,12 +346,13 @@ pub async fn open_attachment(
         let dir = app
             .path()
             .app_cache_dir()
-            .map_err(|e| format!("Failed to locate the cache folder: {e}"))?
+            .map_err(|e| AppError::Io(format!("Failed to locate the cache folder: {e}")))?
             .join("attachment-previews");
         std::fs::create_dir_all(&dir)
-            .map_err(|e| format!("Failed to create preview folder: {e}"))?;
+            .map_err(|e| AppError::Io(format!("Failed to create preview folder: {e}")))?;
         let file = dir.join(format!("{guid}-{}", sanitize_file_name(&filename)));
-        std::fs::write(&file, data).map_err(|e| format!("Failed to write preview file: {e}"))?;
+        std::fs::write(&file, data)
+            .map_err(|e| AppError::Io(format!("Failed to write preview file: {e}")))?;
         Ok(file)
     })
     .await?;

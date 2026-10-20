@@ -175,18 +175,6 @@ impl From<rusqlite::Error> for AppError {
     }
 }
 
-/// Already-stringified (often validation-adjacent) errors convert as opaque
-/// `Db` errors with no code — lets `?` work in `AppError` closures over
-/// helpers that still return `String`.
-impl From<String> for AppError {
-    fn from(message: String) -> AppError {
-        AppError::Db(DbError {
-            message,
-            extended_code: None,
-        })
-    }
-}
-
 /// Run a mutable closure with the DB connection on a blocking thread. This is
 /// the swap-path counterpart of [`run_blocking`]: book switching must replace
 /// the `Connection` itself (`*conn = new_conn`), which needs `&mut`. Same
