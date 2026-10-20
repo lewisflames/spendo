@@ -1001,7 +1001,7 @@ fn temp_path_for(path: &Path) -> PathBuf {
     PathBuf::from(raw)
 }
 
-fn write_gnucash_file(path: &Path, data: &ExportData) -> Result<(), String> {
+fn write_gnucash_file(path: &Path, data: &ExportData) -> Result<(), AppError> {
     let tmp = temp_path_for(path);
     let _ = std::fs::remove_file(&tmp);
     if let Err(e) = write_gnucash_db(&tmp, data) {
@@ -1012,14 +1012,17 @@ fn write_gnucash_file(path: &Path, data: &ExportData) -> Result<(), String> {
         return Ok(());
     }
     // Windows refuses to replace an existing file with `rename`.
-    std::fs::remove_file(path).map_err(|e| format!("Failed to replace export file: {e}"))?;
-    std::fs::rename(&tmp, path).map_err(|e| format!("Failed to write export file: {e}"))
+    std::fs::remove_file(path)
+        .map_err(|e| AppError::Io(format!("Failed to replace export file: {e}")))?;
+    std::fs::rename(&tmp, path)
+        .map_err(|e| AppError::Io(format!("Failed to write export file: {e}")))
 }
 
-fn write_gnucash_db(path: &Path, data: &ExportData) -> Result<(), String> {
-    let conn = Connection::open(path).map_err(|e| format!("Failed to create export file: {e}"))?;
+fn write_gnucash_db(path: &Path, data: &ExportData) -> Result<(), AppError> {
+    let conn = Connection::open(path)
+        .map_err(|e| AppError::Io(format!("Failed to create export file: {e}")))?;
     conn.execute_batch(GNUCASH_SCHEMA)
-        .map_err(|e| format!("Failed to write GnuCash schema: {e}"))?;
+        .map_err(|e| AppError::Io(format!("Failed to write GnuCash schema: {e}")))?;
 
     with_tx_err(&conn, || -> Result<(), AppError> {
         conn.execute(
@@ -1511,7 +1514,7 @@ pub async fn export_gnucash(
         rounded_amounts: data.rounded_amounts,
     };
     let target = path;
-    run_io(move || write_gnucash_file(&target, &data)).await?;
+    run_io(move || write_gnucash_file(&target, &data).map_err(String::from)).await?;
     Ok(result)
 }
 
