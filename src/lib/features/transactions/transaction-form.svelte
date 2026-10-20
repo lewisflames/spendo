@@ -5,7 +5,6 @@
   import { Textarea } from '$lib/components/ui/textarea';
   import { Button } from '$lib/components/ui/button';
   import * as Card from '$lib/components/ui/card';
-  import * as Dialog from '$lib/components/ui/dialog';
   import IconCardHeader from '$lib/components/shared/icon-card-header.svelte';
   import { ChevronLeft, Info } from '@lucide/svelte';
   import { DatePicker } from '$lib/components/shared/date-picker';
@@ -13,6 +12,9 @@
   import { toast } from '$lib/components/ui/sonner';
   import DescriptionCombobox from '$lib/features/transactions/description-combobox.svelte';
   import TransactionAttachments from '$lib/features/transactions/transaction-attachments.svelte';
+  import UnreconcileConfirmDialog from '$lib/features/transactions/unreconcile-confirm-dialog.svelte';
+  import DeleteTransactionDialog from '$lib/features/transactions/delete-transaction-dialog.svelte';
+  import DiscardChangesDialog from '$lib/features/transactions/discard-changes-dialog.svelte';
   import {
     readLastAccounts,
     readRecipes,
@@ -785,85 +787,19 @@
     bind:pendingPaths={pendingAttachments}
   />
 
-  <Dialog.Root bind:open={confirmUnreconcileOpen}>
-    <Dialog.Content class="max-h-[90vh] overflow-y-auto sm:max-w-lg">
-      <Dialog.Header>
-        <Dialog.Title>Save and unreconcile?</Dialog.Title>
-        <Dialog.Description>
-          Saving re-creates this transaction’s splits, so every cleared or reconciled split goes
-          back to New. Reconciled splits also drop out of the account’s starting balance for its
-          next reconciliation, and all of them show up again as candidates.
-        </Dialog.Description>
-      </Dialog.Header>
-      <Dialog.Footer>
-        <Button
-          variant="outline"
-          onclick={() => (confirmUnreconcileOpen = false)}
-          disabled={saving}
-        >
-          Cancel
-        </Button>
-        <Button
-          onclick={() => {
-            confirmUnreconcileOpen = false;
-            void saveNow(true, pendingSaveMode);
-          }}
-          disabled={saving}
-        >
-          {saving ? 'Saving…' : 'Save anyway'}
-        </Button>
-      </Dialog.Footer>
-    </Dialog.Content>
-  </Dialog.Root>
+  <UnreconcileConfirmDialog
+    bind:open={confirmUnreconcileOpen}
+    {saving}
+    onConfirm={() => void saveNow(true, pendingSaveMode)}
+  />
 
-  <Dialog.Root bind:open={deleteDialogOpen}>
-    <Dialog.Content class="max-h-[90vh] overflow-y-auto sm:max-w-lg">
-      <Dialog.Header>
-        <Dialog.Title>Delete this one?</Dialog.Title>
-        <Dialog.Description>
-          It’ll be gone for good, splits and all.
-          {#if attachmentCount > 0}
-            Its {plural(attachmentCount, 'attachment')} are deleted permanently too.
-          {/if}
-        </Dialog.Description>
-      </Dialog.Header>
-      {#if hasLockedSplits}
-        <p
-          role="note"
-          class="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300"
-        >
-          {plural(lockedSplitCount, 'split')} here {lockedSplitCount === 1 ? 'is' : 'are'} cleared or
-          reconciled. Deleting removes them from the account’s reconciliation history.
-        </p>
-      {/if}
-      <Dialog.Footer>
-        <Button variant="outline" onclick={() => (deleteDialogOpen = false)} disabled={deleting}>
-          Cancel
-        </Button>
-        <Button variant="destructive" onclick={handleDeleteConfirm} disabled={deleting}>
-          {deleting ? 'Deleting…' : 'Yes, delete'}
-        </Button>
-      </Dialog.Footer>
-    </Dialog.Content>
-  </Dialog.Root>
+  <DeleteTransactionDialog
+    bind:open={deleteDialogOpen}
+    {attachmentCount}
+    {lockedSplitCount}
+    {deleting}
+    onConfirm={handleDeleteConfirm}
+  />
 
-  <Dialog.Root
-    bind:open={discardDialogOpen}
-    onOpenChange={(open) => {
-      if (!open) resolveDiscard(false);
-    }}
-  >
-    <Dialog.Content class="max-h-[90vh] overflow-y-auto sm:max-w-lg">
-      <Dialog.Header>
-        <Dialog.Title>Lose your changes?</Dialog.Title>
-        <Dialog.Description>
-          You’ve got unsaved edits. Leave now and you’ll lose them.
-        </Dialog.Description>
-      </Dialog.Header>
-      <Dialog.Footer>
-        <Button variant="outline" onclick={() => resolveDiscard(false)}>Keep editing</Button>
-        <Button variant="destructive" onclick={() => resolveDiscard(true)}>Discard changes</Button>
-      </Dialog.Footer>
-    </Dialog.Content>
-  </Dialog.Root>
+  <DiscardChangesDialog bind:open={discardDialogOpen} onResolve={resolveDiscard} />
 </div>
