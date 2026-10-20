@@ -1,3 +1,4 @@
+use crate::db::AppError;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use tauri::State;
@@ -23,30 +24,30 @@ fn gnucash_guidance() -> String {
 /// Check that `path` is an openable Spendo book: a Spendo `application_id`
 /// stamp. GnuCash sources and random SQLite/text files are rejected with
 /// actionable errors.
-fn validate_spendo_db_inner(path: &Path) -> Result<(), String> {
+fn validate_spendo_db_inner(path: &Path) -> Result<(), AppError> {
     if !path.is_file() {
-        return Err(format!(
+        return Err(AppError::Validation(format!(
             "File not found. We couldn't find it: {}",
             path.display()
-        ));
+        )));
     }
     // Extension hint first: a valid Spendo book renamed to .gnucash is still
     // opened via Import, never via Open.
     if path.extension().and_then(|e| e.to_str()) == Some("gnucash") {
-        return Err(gnucash_guidance());
+        return Err(AppError::Validation(gnucash_guidance()));
     }
     let probe = db::connect_source_db(&path.to_path_buf())
-        .map_err(|e| format!("We couldn't open that file: {}", e))?;
+        .map_err(|e| AppError::Io(format!("We couldn't open that file: {}", e)))?;
 
     let app_id: Result<i32, _> = probe.query_row("PRAGMA application_id", [], |row| row.get(0));
     match app_id {
         Ok(id) if id == db::SPENDO_APP_ID => return Ok(()),
         // Not a SQLite database at all.
         Err(_) => {
-            return Err(format!(
+            return Err(AppError::Validation(format!(
                 "Not a Spendo database. That isn't a Spendo book: {}",
                 path.display()
-            ))
+            )))
         }
         Ok(_) => {}
     }
@@ -61,21 +62,24 @@ fn validate_spendo_db_inner(path: &Path) -> Result<(), String> {
         )
         .is_ok();
     if has_slots {
-        return Err(gnucash_guidance());
+        return Err(AppError::Validation(gnucash_guidance()));
     }
-    Err(format!("Not a Spendo database: {}", path.display()))
+    Err(AppError::Validation(format!(
+        "Not a Spendo database: {}",
+        path.display()
+    )))
 }
 
 /// Open + ensure schema (idempotent `init_db`) + stamp + seed any missing
 /// canonical root accounts (heals pre-existing books on open).
 /// File I/O happens here, before the shared lock is touched.
-fn open_book_inner(path: &Path) -> Result<rusqlite::Connection, String> {
+fn open_book_inner(path: &Path) -> Result<rusqlite::Connection, AppError> {
     validate_spendo_db_inner(path)?;
-    let conn =
-        db::connect_db(&path.to_path_buf()).map_err(|e| format!("Failed to open book: {}", e))?;
-    db::init_db(&conn).map_err(|e| format!("Failed to init book: {}", e))?;
+    let conn = db::connect_db(&path.to_path_buf())
+        .map_err(|e| AppError::Io(format!("Failed to open book: {}", e)))?;
+    db::init_db(&conn).map_err(|e| AppError::Io(format!("Failed to init book: {}", e)))?;
     db::stamp_app_id(&conn);
-    crate::init::ensure_default_roots(&conn).map_err(String::from)?;
+    crate::init::ensure_default_roots(&conn)?;
     Ok(conn)
 }
 
@@ -83,17 +87,17 @@ fn open_book_inner(path: &Path) -> Result<rusqlite::Connection, String> {
 /// `clear_db` on the fresh connection keeps this correct when the target is
 /// the currently open file too (deleting an open SQLite file fails on
 /// Windows, dropping tables does not).
-fn create_book_at_inner(path: &Path, currency: &str) -> Result<rusqlite::Connection, String> {
+fn create_book_at_inner(path: &Path, currency: &str) -> Result<rusqlite::Connection, AppError> {
     let mnemonic = crate::init::normalize_mnemonic(currency)?;
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
             std::fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create folder: {}", e))?;
+                .map_err(|e| AppError::Io(format!("Failed to create folder: {}", e)))?;
         }
     }
-    let conn =
-        db::connect_db(&path.to_path_buf()).map_err(|e| format!("Failed to create book: {}", e))?;
-    db::clear_db(&conn).map_err(|e| format!("Failed to init book: {}", e))?;
+    let conn = db::connect_db(&path.to_path_buf())
+        .map_err(|e| AppError::Io(format!("Failed to create book: {}", e)))?;
+    db::clear_db(&conn).map_err(|e| AppError::Io(format!("Failed to init book: {}", e)))?;
     db::stamp_app_id(&conn);
     crate::init::seed_empty_book(&conn, &mnemonic)?;
     Ok(conn)
@@ -121,12 +125,12 @@ fn remove_target(path: &Path) {
 fn save_book_as_inner(
     conn: &rusqlite::Connection,
     new_path: &Path,
-) -> Result<rusqlite::Connection, String> {
+) -> Result<rusqlite::Connection, AppError> {
     let escaped = escape_path_for_sql(new_path);
     conn.execute_batch(&format!("VACUUM INTO '{escaped}';"))
-        .map_err(|e| format!("Failed to save book: {}", e))?;
+        .map_err(|e| AppError::Io(format!("Failed to save book: {}", e)))?;
     let fresh = db::connect_db(&new_path.to_path_buf())
-        .map_err(|e| format!("Failed to open saved book: {}", e))?;
+        .map_err(|e| AppError::Io(format!("Failed to open saved book: {}", e)))?;
     db::stamp_app_id(&fresh);
     Ok(fresh)
 }
@@ -139,7 +143,7 @@ fn swap_in_book(
     conn: &mut rusqlite::Connection,
     new_conn: rusqlite::Connection,
     generation: &std::sync::atomic::AtomicU64,
-) -> Result<crate::home::DataSummary, String> {
+) -> Result<crate::home::DataSummary, AppError> {
     let summary = get_summary(&new_conn)?;
     *conn = new_conn;
     generation.fetch_add(1, Ordering::SeqCst);
@@ -158,7 +162,7 @@ async fn activate_book(
     let generation = state.book_generation.clone();
     let summary = db::run_swap_blocking(state.db.clone(), move |conn| {
         db::checkpoint(conn);
-        swap_in_book(conn, new_conn, &generation)
+        swap_in_book(conn, new_conn, &generation).map_err(String::from)
     })
     .await?;
     // Brief path-mutex hold in async context: plain PathBuf clone, no I/O.
@@ -212,7 +216,7 @@ pub async fn open_book(state: State<'_, AppState>, path: String) -> Result<HomeD
     let new_path = PathBuf::from(&path);
     // Validate + connect on a blocking thread before touching shared state.
     let open_path = new_path.clone();
-    let new_conn = db::run_io(move || open_book_inner(&open_path)).await?;
+    let new_conn = db::run_io(move || open_book_inner(&open_path).map_err(String::from)).await?;
     activate_book(&state, new_path, new_conn).await
 }
 
@@ -224,7 +228,9 @@ pub async fn create_book_at(
 ) -> Result<HomeDataResult, String> {
     let new_path = PathBuf::from(&path);
     let create_path = new_path.clone();
-    let new_conn = db::run_io(move || create_book_at_inner(&create_path, &currency)).await?;
+    let new_conn =
+        db::run_io(move || create_book_at_inner(&create_path, &currency).map_err(String::from))
+            .await?;
     activate_book(&state, new_path, new_conn).await
 }
 
@@ -258,7 +264,7 @@ pub async fn save_book_as(
         if let Some(parent) = prepare_path.parent() {
             if !parent.as_os_str().is_empty() {
                 std::fs::create_dir_all(parent)
-                    .map_err(|e| format!("Failed to create folder: {}", e))?;
+                    .map_err(|e| AppError::Io(format!("Failed to create folder: {}", e)))?;
             }
         }
         remove_target(&prepare_path);
@@ -321,7 +327,10 @@ mod tests {
         // Missing schema: `get_summary` fails with "no such table".
         let broken = rusqlite::Connection::open_in_memory().unwrap();
         let err = swap_in_book(&mut live, broken, &generation).unwrap_err();
-        assert!(err.contains("no such table"), "unexpected: {err}");
+        assert!(
+            err.to_string().contains("no such table"),
+            "unexpected: {err}"
+        );
         assert_eq!(generation.load(Ordering::SeqCst), 0);
 
         // The live connection is untouched and still usable.
@@ -364,13 +373,13 @@ mod tests {
         )
         .unwrap();
         let err = validate_spendo_db_inner(&src).unwrap_err();
-        assert!(err.contains("GnuCash"), "unexpected: {err}");
+        assert!(err.to_string().contains("GnuCash"), "unexpected: {err}");
 
         // Extension check fires even for real Spendo content.
         let renamed = dir.join("real.gnucash");
         stamped_book(&renamed);
         let err = validate_spendo_db_inner(&renamed).unwrap_err();
-        assert!(err.contains("GnuCash"), "unexpected: {err}");
+        assert!(err.to_string().contains("GnuCash"), "unexpected: {err}");
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -380,12 +389,14 @@ mod tests {
         let dir = tmp_dir("reject");
         assert!(validate_spendo_db_inner(&dir.join("nope.spendo"))
             .unwrap_err()
+            .to_string()
             .contains("File not found"));
 
         let text = dir.join("notes.spendo");
         std::fs::write(&text, "hello, not sqlite").unwrap();
         assert!(validate_spendo_db_inner(&text)
             .unwrap_err()
+            .to_string()
             .contains("Not a Spendo database"));
 
         let other = dir.join("other.db");
@@ -393,6 +404,7 @@ mod tests {
         conn.execute("CREATE TABLE foo (id INTEGER)", []).unwrap();
         assert!(validate_spendo_db_inner(&other)
             .unwrap_err()
+            .to_string()
             .contains("Not a Spendo database"));
 
         std::fs::remove_dir_all(&dir).ok();
