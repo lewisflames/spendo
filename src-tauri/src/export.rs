@@ -353,7 +353,9 @@ fn validate_delimiter(raw: &str) -> Result<u8, AppError> {
 
 fn validate_export_path(path: &str) -> Result<(), AppError> {
     if path.trim().is_empty() {
-        return Err(AppError::Validation("Pick where to save that export".to_string()));
+        return Err(AppError::Validation(
+            "Pick where to save that export".to_string(),
+        ));
     }
     Ok(())
 }
@@ -618,11 +620,20 @@ mod tests {
     fn export_date_options_validate_and_format() {
         assert!(validate_date_options("iso", None, None).unwrap().is_none());
         let locale = validate_date_options("locale", Some("dmy"), Some("/")).unwrap();
-        assert_eq!(format_export_date("2024-03-01", locale.as_ref()), "01/03/2024");
+        assert_eq!(
+            format_export_date("2024-03-01", locale.as_ref()),
+            "01/03/2024"
+        );
         let locale = validate_date_options("locale", Some("mdy"), Some(".")).unwrap();
-        assert_eq!(format_export_date("2024-03-01", locale.as_ref()), "03.01.2024");
+        assert_eq!(
+            format_export_date("2024-03-01", locale.as_ref()),
+            "03.01.2024"
+        );
         let locale = validate_date_options("locale", Some("ymd"), Some("-")).unwrap();
-        assert_eq!(format_export_date("2024-03-01", locale.as_ref()), "2024-03-01");
+        assert_eq!(
+            format_export_date("2024-03-01", locale.as_ref()),
+            "2024-03-01"
+        );
         // Malformed input passes through rather than dropping the date.
         assert_eq!(format_export_date("not-a-date", None), "not-a-date");
         assert!(validate_date_options("us", None, None).is_err());

@@ -46,8 +46,13 @@ impl AppState {
 /// User-data tables whose names may be interpolated into SQL by the import
 /// orphan sweep. Interpolating table names into SQL is only safe through this
 /// allowlist — never inline a table name without `validate_data_table`.
-pub(crate) const DATA_TABLES: &[&str] =
-    &["commodities", "accounts", "transactions", "splits", "recurring_schedules"];
+pub(crate) const DATA_TABLES: &[&str] = &[
+    "commodities",
+    "accounts",
+    "transactions",
+    "splits",
+    "recurring_schedules",
+];
 
 pub(crate) fn validate_data_table(table: &str) -> Result<(), String> {
     if DATA_TABLES.contains(&table) {

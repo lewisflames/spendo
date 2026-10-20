@@ -176,7 +176,9 @@ fn insert_attachments(
     prepared: Vec<PreparedAttachment>,
 ) -> Result<Vec<AttachmentInfo>, AppError> {
     if prepared.is_empty() {
-        return Err(AppError::Validation("Pick a file to attach first".to_string()));
+        return Err(AppError::Validation(
+            "Pick a file to attach first".to_string(),
+        ));
     }
     if prepared.len() > MAX_ATTACHMENTS_PER_TX {
         return Err(AppError::Validation(format!(
@@ -274,9 +276,7 @@ fn fetch_blob(conn: &Connection, guid: &str) -> Result<(String, String, Vec<u8>)
         |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
     )
     .optional()?
-    .ok_or_else(|| {
-        AppError::NotFound("Attachment not found. It may have been removed".to_string())
-    })
+    .ok_or_else(|| AppError::NotFound("Attachment not found. It may have been removed".to_string()))
 }
 
 fn attachment_data_inner(conn: &Connection, guid: &str) -> Result<AttachmentData, AppError> {
@@ -469,7 +469,13 @@ mod tests {
             .unwrap_err()
             .contains("Unsupported"));
         // Accepted image types prepare fine.
-        for name in ["photo.png", "photo.jpg", "photo.jpeg", "anim.gif", "img.webp"] {
+        for name in [
+            "photo.png",
+            "photo.jpg",
+            "photo.jpeg",
+            "anim.gif",
+            "img.webp",
+        ] {
             let path = write_file(&dir, name, b"hi");
             let ok = prepared(&path);
             assert!(!ok.filename.is_empty(), "unexpected empty name for {name}");
@@ -508,10 +514,7 @@ mod tests {
             .map(|_| prepared(&first))
             .collect();
         let err = insert_attachments(&conn, "t1", too_many).unwrap_err();
-        assert!(
-            err.to_string().contains("at most"),
-            "unexpected: {err}"
-        );
+        assert!(err.to_string().contains("at most"), "unexpected: {err}");
 
         // Adding files accumulates instead of replacing.
         let infos = insert_attachments(&conn, "t1", vec![prepared(&first)]).unwrap();
@@ -528,12 +531,12 @@ mod tests {
             let path = write_file(&dir, &format!("f{i}.pdf"), b"z");
             insert_attachments(&conn, "t1", vec![prepared(&path)]).unwrap();
         }
-        assert_eq!(list_attachments(&conn, "t1").unwrap().len(), MAX_ATTACHMENTS_PER_TX);
-        let err = insert_attachments(&conn, "t1", vec![prepared(&first)]).unwrap_err();
-        assert!(
-            err.to_string().contains("at most"),
-            "unexpected: {err}"
+        assert_eq!(
+            list_attachments(&conn, "t1").unwrap().len(),
+            MAX_ATTACHMENTS_PER_TX
         );
+        let err = insert_attachments(&conn, "t1", vec![prepared(&first)]).unwrap_err();
+        assert!(err.to_string().contains("at most"), "unexpected: {err}");
 
         std::fs::remove_dir_all(&dir).ok();
     }

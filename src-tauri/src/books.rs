@@ -25,7 +25,10 @@ fn gnucash_guidance() -> String {
 /// actionable errors.
 fn validate_spendo_db_inner(path: &Path) -> Result<(), String> {
     if !path.is_file() {
-        return Err(format!("File not found. We couldn't find it: {}", path.display()));
+        return Err(format!(
+            "File not found. We couldn't find it: {}",
+            path.display()
+        ));
     }
     // Extension hint first: a valid Spendo book renamed to .gnucash is still
     // opened via Import, never via Open.
@@ -39,7 +42,12 @@ fn validate_spendo_db_inner(path: &Path) -> Result<(), String> {
     match app_id {
         Ok(id) if id == db::SPENDO_APP_ID => return Ok(()),
         // Not a SQLite database at all.
-        Err(_) => return Err(format!("Not a Spendo database. That isn't a Spendo book: {}", path.display())),
+        Err(_) => {
+            return Err(format!(
+                "Not a Spendo database. That isn't a Spendo book: {}",
+                path.display()
+            ))
+        }
         Ok(_) => {}
     }
 
@@ -195,9 +203,7 @@ pub async fn close_book(state: State<'_, AppState>) -> Result<HomeDataResult, St
 pub async fn fetch_active_book(state: State<'_, AppState>) -> Result<ActiveBook, String> {
     let guard = state.db_path.lock().map_err(|e| e.to_string())?;
     Ok(ActiveBook {
-        path: guard
-            .as_ref()
-            .map(|p| p.to_string_lossy().to_string()),
+        path: guard.as_ref().map(|p| p.to_string_lossy().to_string()),
     })
 }
 
@@ -384,8 +390,7 @@ mod tests {
 
         let other = dir.join("other.db");
         let conn = db::connect_db(&other.to_path_buf()).unwrap();
-        conn.execute("CREATE TABLE foo (id INTEGER)", [])
-            .unwrap();
+        conn.execute("CREATE TABLE foo (id INTEGER)", []).unwrap();
         assert!(validate_spendo_db_inner(&other)
             .unwrap_err()
             .contains("Not a Spendo database"));

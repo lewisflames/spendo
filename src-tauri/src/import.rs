@@ -140,7 +140,13 @@ fn read_source_data(source: &Connection) -> Result<SourceData, String> {
     } else {
         let slots = read_template_slots(source)?;
         let last_instances = read_last_instance_dates(source)?;
-        build_import_schedules(&source_schedules, &splits, &transactions, &slots, &last_instances)
+        build_import_schedules(
+            &source_schedules,
+            &splits,
+            &transactions,
+            &slots,
+            &last_instances,
+        )
     };
 
     accounts.retain(|a| !excluded.contains(&a.guid));
@@ -561,8 +567,10 @@ impl TemplateSlot {
     /// that only stored expressions. `Err` when only an unevaluable expression
     /// is available.
     fn amount(&self) -> Result<f64, ()> {
-        Ok(slot_value(self.debit_numeric, self.debit_formula.as_deref())?
-            - slot_value(self.credit_numeric, self.credit_formula.as_deref())?)
+        Ok(
+            slot_value(self.debit_numeric, self.debit_formula.as_deref())?
+                - slot_value(self.credit_numeric, self.credit_formula.as_deref())?,
+        )
     }
 }
 
@@ -754,7 +762,9 @@ fn read_template_slots(source: &Connection) -> Result<HashMap<String, TemplateSl
             "sched-xaction/credit-numeric" => slot.credit_numeric = numeric,
             "sched-xaction/debit-numeric" => slot.debit_numeric = numeric,
             "sched-xaction/shares" => {
-                slot.shares = string_val.and_then(|s| s.trim().parse::<f64>().ok()).or(numeric);
+                slot.shares = string_val
+                    .and_then(|s| s.trim().parse::<f64>().ok())
+                    .or(numeric);
             }
             _ => {}
         }
@@ -872,10 +882,8 @@ fn build_import_schedules(
     slots: &HashMap<String, TemplateSlot>,
     last_instance_dates: &HashMap<String, String>,
 ) -> (Vec<ImportedSchedule>, Vec<SkippedSchedule>) {
-    let txs: HashMap<&str, &Transaction> = transactions
-        .iter()
-        .map(|t| (t.guid.as_str(), t))
-        .collect();
+    let txs: HashMap<&str, &Transaction> =
+        transactions.iter().map(|t| (t.guid.as_str(), t)).collect();
     let mut imported = Vec::new();
     let mut skipped = Vec::new();
     for sx in source_schedules {
@@ -980,12 +988,8 @@ fn build_import_schedule(
             }
         }
     }
-    let next_due_date = schedules::first_occurrence_on_or_after(
-        &from,
-        anchor,
-        rec.mult,
-        &rec.period_type,
-    );
+    let next_due_date =
+        schedules::first_occurrence_on_or_after(&from, anchor, rec.mult, &rec.period_type);
     let next_due_date = next_due_date.filter(|d| {
         let exhausted = sx.num_occur > 0 && sx.rem_occur <= 0;
         let after_end = end_date.as_deref().is_some_and(|e| d.as_str() > e);
@@ -1007,10 +1011,7 @@ fn build_import_schedule(
             account_guid,
             amount,
             quantity: slot.shares.filter(|q| q.is_finite()),
-            memo: s
-                .memo
-                .as_deref()
-                .map(|m| utils::truncate_chars(m, 500)),
+            memo: s.memo.as_deref().map(|m| utils::truncate_chars(m, 500)),
         });
     }
 
@@ -1055,12 +1056,9 @@ fn populate_source_guids(conn: &Connection, name: &str, guids: &[String]) -> Res
     conn.execute_batch(&format!(
         "DROP TABLE IF EXISTS {name};
          CREATE TEMP TABLE {name} (guid TEXT NOT NULL PRIMARY KEY);"
-    ))
-    ?;
+    ))?;
     db::with_tx_err(conn, || {
-        let mut stmt = conn
-            .prepare(&format!("INSERT OR IGNORE INTO {name} (guid) VALUES (?1)"))
-            ?;
+        let mut stmt = conn.prepare(&format!("INSERT OR IGNORE INTO {name} (guid) VALUES (?1)"))?;
         for guid in guids {
             stmt.execute([guid])?;
         }
@@ -1163,9 +1161,7 @@ fn protected_default_roots(conn: &Connection, src: &SourceData) -> Result<Vec<St
             })?
             .collect::<Result<Vec<_>, _>>()?;
         for (guid, parent) in rows {
-            let parent_survives = parent
-                .as_deref()
-                .is_some_and(|p| src_guids.contains(p));
+            let parent_survives = parent.as_deref().is_some_and(|p| src_guids.contains(p));
             if parent_survives && !src_guids.contains(guid.as_str()) {
                 protected.push(guid);
             }
@@ -1260,9 +1256,8 @@ fn plan_schedules(
     existing: &ExistingData,
 ) -> (i64, i64, Vec<SkippedSchedule>) {
     let map = import_account_map(existing, src);
-    let lookup = |guid: &str| -> Result<Option<SplitAccountInfo>, AppError> {
-        Ok(map.get(guid).cloned())
-    };
+    let lookup =
+        |guid: &str| -> Result<Option<SplitAccountInfo>, AppError> { Ok(map.get(guid).cloned()) };
     let mut added = 0;
     let mut updated = 0;
     let mut skipped = src.skipped_schedules.clone();
@@ -1377,8 +1372,7 @@ pub struct GnuCashImportInput {
 /// destroy budgets), accounts referenced by import rules (same cascade
 /// problem), and accounts referenced by schedules.
 fn protected_accounts(conn: &Connection, src: &SourceData) -> Result<HashSet<String>, AppError> {
-    let mut protected: HashSet<String> =
-        protected_default_roots(conn, src)?.into_iter().collect();
+    let mut protected: HashSet<String> = protected_default_roots(conn, src)?.into_iter().collect();
     protected.extend(accounts_with_budgets(conn)?);
     protected.extend(crate::import_rules::rule_account_guids(conn)?);
     protected.extend(schedules::schedule_account_guids(conn)?);
@@ -1402,12 +1396,18 @@ impl ExistingData {
                 .into_iter()
                 .map(|c| (c.guid.clone(), c))
                 .collect(),
-            accounts: read_account(conn)?.into_iter().map(|a| (a.guid.clone(), a)).collect(),
+            accounts: read_account(conn)?
+                .into_iter()
+                .map(|a| (a.guid.clone(), a))
+                .collect(),
             transactions: read_transaction(conn)?
                 .into_iter()
                 .map(|t| (t.guid.clone(), t))
                 .collect(),
-            splits: read_split(conn)?.into_iter().map(|s| (s.guid.clone(), s)).collect(),
+            splits: read_split(conn)?
+                .into_iter()
+                .map(|s| (s.guid.clone(), s))
+                .collect(),
         })
     }
 }
@@ -1546,8 +1546,7 @@ fn import_source_inner(
                 count_orphaned(dest_conn, "accounts", "tmp_src_accounts", accounts_excluded)?;
             counts.transactions_orphaned =
                 count_orphaned(dest_conn, "transactions", "tmp_src_transactions", None)?;
-            counts.splits_orphaned =
-                count_orphaned(dest_conn, "splits", "tmp_src_splits", None)?;
+            counts.splits_orphaned = count_orphaned(dest_conn, "splits", "tmp_src_splits", None)?;
         }
 
         let existing = ExistingData::load(dest_conn)?;
@@ -1571,15 +1570,13 @@ fn import_source_inner(
 
     let summary = get_summary(dest_conn)?;
 
-    let total_accounts: i64 = dest_conn
-        .query_row("SELECT COUNT(*) as cnt FROM accounts", [], |row| row.get(0))
-        ?;
+    let total_accounts: i64 =
+        dest_conn.query_row("SELECT COUNT(*) as cnt FROM accounts", [], |row| row.get(0))?;
 
-    let total_transactions: i64 = dest_conn
-        .query_row("SELECT COUNT(*) as cnt FROM transactions", [], |row| {
+    let total_transactions: i64 =
+        dest_conn.query_row("SELECT COUNT(*) as cnt FROM transactions", [], |row| {
             row.get(0)
-        })
-        ?;
+        })?;
 
     Ok(ImportResult {
         accounts_added: counts.accounts_added,
@@ -1642,7 +1639,8 @@ async fn fetch_prices_best_effort(
     if let Err(e) = db::run_blocking(db, move |conn| {
         if book_generation.load(std::sync::atomic::Ordering::SeqCst) != expected_generation {
             return Err(
-                "Book changed while prices were refreshing. Those results were discarded".to_string(),
+                "Book changed while prices were refreshing. Those results were discarded"
+                    .to_string(),
             );
         }
         prices::write_prices_and_log(conn, &write_data).map_err(String::from)
@@ -1668,7 +1666,9 @@ pub async fn preview_gnucash_import(
     path: String,
     filename: String,
 ) -> Result<GnuCashPreview, String> {
-    let generation = state.book_generation.load(std::sync::atomic::Ordering::SeqCst);
+    let generation = state
+        .book_generation
+        .load(std::sync::atomic::Ordering::SeqCst);
     // Hash and read the source on a blocking thread before the DB lock: the
     // digest and the data come from the same file state, and a slow source
     // book cannot stall other commands.
@@ -1750,7 +1750,9 @@ pub async fn import_gnucash(
 ) -> Result<ImportResult, String> {
     // Capture the active book before any await: the merge must never land in a
     // book the user switched to while the file was being hashed.
-    let generation = state.book_generation.load(std::sync::atomic::Ordering::SeqCst);
+    let generation = state
+        .book_generation
+        .load(std::sync::atomic::Ordering::SeqCst);
     // Validate, hash and read the source on a blocking thread, before the DB
     // lock is touched. Hashing and reading in one closure also closes the
     // window where the file could change between the two.
@@ -1765,7 +1767,9 @@ pub async fn import_gnucash(
     })
     .await?;
     if current_sha != input.sha256 {
-        return Err("Source file changed since the preview. Please run the import again".to_string());
+        return Err(
+            "Source file changed since the preview. Please run the import again".to_string(),
+        );
     }
     let generation_handle = state.book_generation.clone();
     let GnuCashImportInput {
@@ -1778,12 +1782,8 @@ pub async fn import_gnucash(
         import_source_inner(conn, src, &filename, delete_orphans).map_err(String::from)
     })
     .await?;
-    result.prices = fetch_prices_best_effort(
-        state.db.clone(),
-        state.book_generation.clone(),
-        generation,
-    )
-    .await;
+    result.prices =
+        fetch_prices_best_effort(state.db.clone(), state.book_generation.clone(), generation).await;
     Ok(result)
 }
 
@@ -1807,10 +1807,7 @@ mod tests {
             "2024-01-15 10:30:00"
         );
         assert_eq!(normalize_post_date("2024-01-15"), "2024-01-15");
-        assert_eq!(
-            normalize_post_date("20240115103000"),
-            "2024-01-15 10:30:00"
-        );
+        assert_eq!(normalize_post_date("20240115103000"), "2024-01-15 10:30:00");
         assert_eq!(normalize_post_date(" 20240115 "), "2024-01-15");
         // Compact hour / hour+minute tails are padded so SQLite can parse them.
         assert_eq!(normalize_post_date("2024011510"), "2024-01-15 10:00:00");
@@ -1832,8 +1829,7 @@ mod tests {
     /// reimport is a no-op.
     #[test]
     fn import_merges_and_sweeps_orphans() {
-        let dir =
-            std::env::temp_dir().join(format!("spendo-import-test-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("spendo-import-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let src_path = dir.join("book.gnucash");
         {
@@ -1869,7 +1865,8 @@ mod tests {
         )
         .unwrap();
 
-        let result = import_gnucash_inner(&dest, &src_str, "book.gnucash", "deadbeef", true).unwrap();
+        let result =
+            import_gnucash_inner(&dest, &src_str, "book.gnucash", "deadbeef", true).unwrap();
         assert_eq!(result.commodities_added, 1);
         assert_eq!(result.commodities_orphaned, 1);
         assert_eq!(result.accounts_added, 2);
@@ -1881,11 +1878,9 @@ mod tests {
 
         // Orphans are gone from the data.
         let count = |table: &str| -> i64 {
-            dest.query_row(
-                &format!("SELECT COUNT(*) FROM {table}"),
-                [],
-                |row| row.get(0),
-            )
+            dest.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
             .unwrap()
         };
         assert_eq!(count("transactions"), 1);
@@ -1900,7 +1895,8 @@ mod tests {
         );
 
         // Identical reimport is a no-op.
-        let again = import_gnucash_inner(&dest, &src_str, "book.gnucash", "deadbeef", true).unwrap();
+        let again =
+            import_gnucash_inner(&dest, &src_str, "book.gnucash", "deadbeef", true).unwrap();
         assert_eq!(again.transactions_added, 0);
         assert_eq!(again.transactions_orphaned, 0);
 
@@ -1990,7 +1986,8 @@ mod tests {
     }
 
     fn tmp_source(tag: &str, extra_sql: &str) -> (std::path::PathBuf, String) {
-        let dir = std::env::temp_dir().join(format!("spendo-import-{tag}-{}", uuid::Uuid::new_v4()));
+        let dir =
+            std::env::temp_dir().join(format!("spendo-import-{tag}-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("book.gnucash");
         write_source_db(&path, extra_sql);
@@ -2014,7 +2011,8 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM accounts", [], |r| r.get(0))
             .unwrap();
 
-        let err = import_gnucash_inner(&dest, &src_str, "book.gnucash", "deadbeef", true).unwrap_err();
+        let err =
+            import_gnucash_inner(&dest, &src_str, "book.gnucash", "deadbeef", true).unwrap_err();
         assert!(err.to_string().contains("no accounts"), "unexpected: {err}");
 
         let accounts_after: i64 = dest
@@ -2050,9 +2048,11 @@ mod tests {
         assert_eq!(result.accounts_added, 2);
         assert_eq!(result.splits_added, 1);
         let split_account: String = dest
-            .query_row("SELECT account_guid FROM splits WHERE guid = 's1'", [], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT account_guid FROM splits WHERE guid = 's1'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(split_account, "uuid-acct");
         let unused: i64 = dest
@@ -2217,9 +2217,12 @@ mod tests {
         assert_eq!(count(&dest, "accounts"), 7);
         assert_eq!(count(&dest, "transactions"), 1);
         assert_eq!(
-            dest.query_row("SELECT description FROM transactions WHERE guid = 't-local'", [], |r| r
-                .get::<_, String>(0))
-                .unwrap(),
+            dest.query_row(
+                "SELECT description FROM transactions WHERE guid = 't-local'",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
             "Local"
         );
 
@@ -2316,7 +2319,9 @@ mod tests {
         assert_eq!(preview.skipped_schedules.len(), 1);
         assert_eq!(preview.skipped_schedules[0].name, "Twice a month");
         assert!(
-            preview.skipped_schedules[0].reason.contains("more than one recurrence"),
+            preview.skipped_schedules[0]
+                .reason
+                .contains("more than one recurrence"),
             "unexpected: {}",
             preview.skipped_schedules[0].reason
         );

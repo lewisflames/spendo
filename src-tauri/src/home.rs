@@ -77,7 +77,13 @@ pub fn get_summary(conn: &Connection) -> Result<DataSummary, String> {
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?))
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
             })
             .map_err(|e| e.to_string())?;
         rows.collect::<Result<Vec<_>, _>>()
@@ -116,11 +122,7 @@ pub async fn fetch_home_data(state: State<'_, AppState>) -> Result<HomeDataResul
     // freshly seeded book still needs its shell so pages can show their empty
     // states and the import paths stay reachable. `has_data` keeps tracking
     // whether accounts exist; only `summary` is tied to the book being open.
-    let book_open = state
-        .db_path
-        .lock()
-        .map_err(|e| e.to_string())?
-        .is_some();
+    let book_open = state.db_path.lock().map_err(|e| e.to_string())?.is_some();
     run_blocking(state.db.clone(), move |conn| {
         if !book_open {
             return Ok(HomeDataResult {

@@ -174,8 +174,7 @@ fn filter_clauses(
     if include_baseline {
         w.push_raw(utils::VISIBLE_TX_FILTER);
     }
-    let from =
-        utils::validate_optional_iso_date(date_from).map_err(AppError::Validation)?;
+    let from = utils::validate_optional_iso_date(date_from).map_err(AppError::Validation)?;
     let to = utils::validate_optional_iso_date(date_to).map_err(AppError::Validation)?;
     sql::push_tx_date_search(&mut w, from.as_deref(), to.as_deref(), search);
     Ok(w)
@@ -600,9 +599,7 @@ fn order_page_guids(
     ordered.sort_by(|a, b| {
         let cmp = match key {
             SortKey::Date => tx_map[*a].0.cmp(&tx_map[*b].0).then_with(|| a.cmp(b)),
-            SortKey::Description => {
-                desc_keys[a].cmp(&desc_keys[b]).then_with(|| a.cmp(b))
-            }
+            SortKey::Description => desc_keys[a].cmp(&desc_keys[b]).then_with(|| a.cmp(b)),
             SortKey::Amount => amount_by_guid[*a]
                 .total_cmp(&amount_by_guid[*b])
                 .then_with(|| a.cmp(b)),
@@ -880,7 +877,10 @@ fn fetch_account_balance_trend_inner(
     let end_date = Local::now().format("%Y-%m-%d").to_string();
     let start_date = "0000-01-01";
     let signed_cash = utils::signed_amount_expr(utils::RAW_AMOUNT, "a.account_type");
-    let cash_filter = format!("AND a.account_type NOT IN ({})", utils::investment_types_sql());
+    let cash_filter = format!(
+        "AND a.account_type NOT IN ({})",
+        utils::investment_types_sql()
+    );
     let signed_shares = utils::signed_amount_expr(utils::QUANTITY_AMOUNT, "a.account_type");
     let shares_filter = format!("AND a.account_type IN ({})", utils::investment_types_sql());
 
@@ -908,10 +908,7 @@ fn fetch_account_balance_trend_inner(
         start_date,
         &end_date,
     )? {
-        shares_by_day
-            .entry(day)
-            .or_default()
-            .push((guid, delta));
+        shares_by_day.entry(day).or_default().push((guid, delta));
     }
 
     let days: BTreeSet<String> = cash_by_day

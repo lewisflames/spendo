@@ -306,8 +306,8 @@ fn assemble_accounts_result(
 
     let total_of = |key: &str| by_type.get(key).map(|s| s.total_balance).unwrap_or(0.0);
     let retained_earnings = total_of("INCOME") - total_of("EXPENSE");
-    let balance_check =
-        total_of("ASSET") - (total_of("LIABILITY") + total_of("EQUITY") + unrealized_gains + retained_earnings);
+    let balance_check = total_of("ASSET")
+        - (total_of("LIABILITY") + total_of("EQUITY") + unrealized_gains + retained_earnings);
     let mut missing_fx: Vec<String> = missing_fx_set.into_iter().collect();
     missing_fx.sort();
     let mut missing_prices: Vec<fx::MissingPrice> = missing_prices_map
@@ -562,7 +562,9 @@ fn fetch_book_currencies_inner(conn: &Connection) -> Result<Vec<BookCurrency>, S
 }
 
 #[tauri::command]
-pub async fn fetch_book_currencies(state: State<'_, AppState>) -> Result<Vec<BookCurrency>, String> {
+pub async fn fetch_book_currencies(
+    state: State<'_, AppState>,
+) -> Result<Vec<BookCurrency>, String> {
     run_blocking(state.db.clone(), fetch_book_currencies_inner).await
 }
 

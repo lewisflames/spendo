@@ -3,7 +3,7 @@ use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use tauri::State;
 
-use crate::db::{AppState, run_blocking};
+use crate::db::{run_blocking, AppState};
 use crate::fx;
 use crate::tree;
 use crate::utils;
@@ -828,9 +828,7 @@ mod tests {
     #[test]
     fn pnl_rejects_inverted_range() {
         let conn = setup_pnl_fixture();
-        assert!(
-            fetch_pnl_report_inner(&conn, "2024-04-01", "2024-01-01", None, None).is_err()
-        );
+        assert!(fetch_pnl_report_inner(&conn, "2024-04-01", "2024-01-01", None, None).is_err());
     }
 
     #[test]
@@ -1057,7 +1055,9 @@ mod tests {
         assert_eq!(report.total_income, 2000.0);
         assert_eq!(report.total_income_prev, 500.0);
         // Zero-only branches stay hidden.
-        assert!(report.income_rows.iter().all(|r| r.account_name != "Other Leaf"
-            && r.account_name != "Other Top"));
+        assert!(report
+            .income_rows
+            .iter()
+            .all(|r| r.account_name != "Other Leaf" && r.account_name != "Other Top"));
     }
 }

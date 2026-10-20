@@ -7,8 +7,8 @@ use tauri::State;
 use crate::db::{run_blocking, with_tx_err, AppError, AppState};
 use crate::fx;
 use crate::prices::{
-    get_cached_price_maps, get_last_refresh_timestamp,
-    get_price_history, latest_quote_currencies, list_commodities, PriceHistoryEntry,
+    get_cached_price_maps, get_last_refresh_timestamp, get_price_history, latest_quote_currencies,
+    list_commodities, PriceHistoryEntry,
 };
 use crate::sql;
 use crate::utils;
@@ -286,11 +286,13 @@ fn resolve_holding_universe(
         meta_by_guid.insert(guid.to_string(), meta);
     } else {
         for c in list_commodities(conn)? {
-            meta_by_guid.entry(c.guid.clone()).or_insert_with(|| CommodityMeta {
-                mnemonic: c.mnemonic,
-                full_name: c.full_name,
-                namespace: c.namespace,
-            });
+            meta_by_guid
+                .entry(c.guid.clone())
+                .or_insert_with(|| CommodityMeta {
+                    mnemonic: c.mnemonic,
+                    full_name: c.full_name,
+                    namespace: c.namespace,
+                });
         }
     }
 
@@ -381,7 +383,10 @@ fn value_commodity_groups(
             let price_info = prices_with_date_map.get(&guid);
             let price = price_info.map(|p| p.0);
             let price_date = price_info.map(|p| p.1.clone());
-            let prev_price = prev_prices_map.get(&guid).map(|p| p.0).filter(|_| price.is_some());
+            let prev_price = prev_prices_map
+                .get(&guid)
+                .map(|p| p.0)
+                .filter(|_| price.is_some());
             let market_value = group.total_shares * price.unwrap_or(0.0);
             let avg_cost = if group.total_shares != 0.0 {
                 group.total_cost / group.total_shares
@@ -571,7 +576,10 @@ fn load_trend_inputs(conn: &Connection, filter: Option<&str>) -> Result<TrendInp
 /// `end` so the trend stops at the current value.
 fn sample_trend_dates(first: NaiveDate, end: NaiveDate) -> Vec<NaiveDate> {
     let total_days = (end - first).num_days().max(0);
-    let stride = i64::max(1, (total_days as f64 / TREND_SAMPLE_TARGET as f64).ceil() as i64);
+    let stride = i64::max(
+        1,
+        (total_days as f64 / TREND_SAMPLE_TARGET as f64).ceil() as i64,
+    );
 
     let mut sample_dates: Vec<NaiveDate> = Vec::new();
     let mut cursor = first;
@@ -611,9 +619,10 @@ fn accumulate_trend(
         // Advance splits on or before this date (cost accumulates in the
         // commodity's own quote currency)
         while event_idx < events.len() {
-            let prefix = events[event_idx].post_date.get(..10).ok_or_else(|| {
-                format!("Invalid post_date: {}", events[event_idx].post_date)
-            })?;
+            let prefix = events[event_idx]
+                .post_date
+                .get(..10)
+                .ok_or_else(|| format!("Invalid post_date: {}", events[event_idx].post_date))?;
             if prefix > date_str.as_str() {
                 break;
             }
@@ -993,7 +1002,8 @@ fn total_xirr(
     total_market_value: f64,
     end_date: NaiveDate,
 ) -> Option<f64> {
-    let mut flows = cash_flows_from_events(events, guid_to_quote, fx_history, report_currency, None);
+    let mut flows =
+        cash_flows_from_events(events, guid_to_quote, fx_history, report_currency, None);
     if flows.is_empty() {
         return None;
     }
@@ -1231,8 +1241,7 @@ fn fetch_holding_transactions(
         utils::VISIBLE_TX_FILTER,
     );
     // ?1 is the commodity GUID; the search reuses ?2 three times.
-    let mut params: Vec<Box<dyn rusqlite::ToSql>> =
-        vec![Box::new(commodity_guid.to_string())];
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(commodity_guid.to_string())];
     if let Some(q) = search {
         sql.push_str(
             " AND (t.description LIKE '%' || ?2 || '%' ESCAPE '\\' \
@@ -1439,9 +1448,27 @@ mod tests {
             [],
         )
         .unwrap();
-        add_activity(&conn, "t1", "2024-01-10", "Buy AAPL", Some("B1"), Some("first buy"), 10, 1000);
+        add_activity(
+            &conn,
+            "t1",
+            "2024-01-10",
+            "Buy AAPL",
+            Some("B1"),
+            Some("first buy"),
+            10,
+            1000,
+        );
         add_activity(&conn, "t2", "2024-02-05", "Buy AAPL", None, None, 5, 550);
-        add_activity(&conn, "t3", "2024-03-01", "Sell AAPL", Some("S1"), Some("trim"), -8, -960);
+        add_activity(
+            &conn,
+            "t3",
+            "2024-03-01",
+            "Sell AAPL",
+            Some("S1"),
+            Some("trim"),
+            -8,
+            -960,
+        );
         conn
     }
 
@@ -1721,11 +1748,9 @@ mod tests {
         let conn = setup_valued_portfolio();
         assert!(fetch_allocation_targets_inner(&conn).unwrap().is_empty());
 
-        let saved = save_allocation_targets_inner(
-            &conn,
-            &[target("c-aapl", 60.0), target("c-xyz", 40.0)],
-        )
-        .unwrap();
+        let saved =
+            save_allocation_targets_inner(&conn, &[target("c-aapl", 60.0), target("c-xyz", 40.0)])
+                .unwrap();
         // Mnemonic order (AAPL before XYZ), values preserved.
         assert_eq!(saved.len(), 2);
         assert_eq!(saved[0].commodity_guid, "c-aapl");
@@ -1743,7 +1768,9 @@ mod tests {
         assert_eq!(fetch_allocation_targets_inner(&conn).unwrap(), replaced);
 
         // An empty list clears the book's targets.
-        assert!(save_allocation_targets_inner(&conn, &[]).unwrap().is_empty());
+        assert!(save_allocation_targets_inner(&conn, &[])
+            .unwrap()
+            .is_empty());
         assert!(fetch_allocation_targets_inner(&conn).unwrap().is_empty());
     }
 
@@ -1780,11 +1807,9 @@ mod tests {
         // Failed writes leave the stored state untouched, and boundary values
         // (0 and 100, sum exactly 100) are accepted.
         assert!(fetch_allocation_targets_inner(&conn).unwrap().is_empty());
-        let saved = save_allocation_targets_inner(
-            &conn,
-            &[target("c-aapl", 100.0), target("c-xyz", 0.0)],
-        )
-        .unwrap();
+        let saved =
+            save_allocation_targets_inner(&conn, &[target("c-aapl", 100.0), target("c-xyz", 0.0)])
+                .unwrap();
         assert_eq!(saved.len(), 2);
         assert_eq!(saved[1].target_pct, 0.0);
     }
