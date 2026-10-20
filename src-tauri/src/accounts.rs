@@ -461,10 +461,7 @@ pub fn fetch_children_and_subtree(
 
 #[tauri::command]
 pub async fn fetch_accounts(state: State<'_, AppState>) -> Result<AccountsResult, String> {
-    run_blocking(state.db.clone(), |conn| {
-        fetch_accounts_inner(conn).map_err(String::from)
-    })
-    .await
+    run_blocking(state.db.clone(), fetch_accounts_inner).await
 }
 
 /// One ACCOUNTS-group destination: the top-level account representing a
@@ -536,10 +533,7 @@ fn nav_roots_inner(conn: &Connection) -> Result<Vec<NavRoot>, AppError> {
 
 #[tauri::command]
 pub async fn fetch_nav_roots(state: State<'_, AppState>) -> Result<Vec<NavRoot>, String> {
-    run_blocking(state.db.clone(), |conn| {
-        nav_roots_inner(conn).map_err(String::from)
-    })
-    .await
+    run_blocking(state.db.clone(), nav_roots_inner).await
 }
 
 /// Book currencies for the account commodity picker. Thin wrapper over the
@@ -562,10 +556,7 @@ fn fetch_book_currencies_inner(conn: &Connection) -> Result<Vec<BookCurrency>, A
 pub async fn fetch_book_currencies(
     state: State<'_, AppState>,
 ) -> Result<Vec<BookCurrency>, String> {
-    run_blocking(state.db.clone(), |conn| {
-        fetch_book_currencies_inner(conn).map_err(String::from)
-    })
-    .await
+    run_blocking(state.db.clone(), fetch_book_currencies_inner).await
 }
 
 #[cfg(test)]

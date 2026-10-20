@@ -898,10 +898,7 @@ pub fn latest_quote_currencies(conn: &Connection) -> Result<HashMap<String, Stri
 pub async fn fetch_symbol_overrides(
     state: State<'_, AppState>,
 ) -> Result<Vec<SymbolOverride>, String> {
-    db::run_blocking(state.db.clone(), |conn| {
-        fetch_symbol_overrides_inner(conn).map_err(String::from)
-    })
-    .await
+    db::run_blocking(state.db.clone(), fetch_symbol_overrides_inner).await
 }
 
 /// Guard against typos: the commodity must exist and be priceable
@@ -947,7 +944,7 @@ pub async fn set_symbol_override(
 ) -> Result<SymbolOverride, String> {
     let normalized = normalize_symbol(&symbol)?;
     db::run_blocking(state.db.clone(), move |conn| {
-        set_symbol_override_inner(conn, commodity_guid, normalized).map_err(String::from)
+        set_symbol_override_inner(conn, commodity_guid, normalized)
     })
     .await
 }
@@ -966,7 +963,7 @@ pub async fn delete_symbol_override(
     commodity_guid: String,
 ) -> Result<(), String> {
     db::run_blocking(state.db.clone(), move |conn| {
-        delete_symbol_override_inner(conn, &commodity_guid).map_err(String::from)
+        delete_symbol_override_inner(conn, &commodity_guid)
     })
     .await
 }
@@ -1004,10 +1001,7 @@ pub(crate) fn write_prices_and_log(
 #[tauri::command]
 pub async fn refresh_prices(state: State<'_, AppState>) -> Result<PricesResult, String> {
     let generation = state.book_generation.load(Ordering::SeqCst);
-    let pre = db::run_blocking(state.db.clone(), |conn| {
-        read_price_data(conn).map_err(String::from)
-    })
-    .await?;
+    let pre = db::run_blocking(state.db.clone(), read_price_data).await?;
 
     let (result, write_data) = fetch_prices_remote(pre).await?;
 
@@ -1017,12 +1011,12 @@ pub async fn refresh_prices(state: State<'_, AppState>) -> Result<PricesResult, 
     let gen_check = state.book_generation.clone();
     db::run_blocking(state.db.clone(), move |conn| {
         if gen_check.load(Ordering::SeqCst) != generation {
-            return Err(
+            return Err(AppError::Validation(
                 "Book changed while prices were refreshing. Those results were discarded"
                     .to_string(),
-            );
+            ));
         }
-        write_prices_and_log(conn, &write_data).map_err(String::from)
+        write_prices_and_log(conn, &write_data)
     })
     .await?;
 

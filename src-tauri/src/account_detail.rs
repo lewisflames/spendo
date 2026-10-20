@@ -789,7 +789,6 @@ pub async fn fetch_account_detail(
                 sort_dir: sort_dir.as_deref(),
             },
         )
-        .map_err(String::from)
     })
     .await
 }
@@ -954,7 +953,7 @@ pub async fn fetch_account_balance_trend(
     guid: String,
 ) -> Result<Vec<AccountBalancePoint>, String> {
     run_blocking(state.db.clone(), move |conn| {
-        fetch_account_balance_trend_inner(conn, &guid).map_err(String::from)
+        fetch_account_balance_trend_inner(conn, &guid)
     })
     .await
 }

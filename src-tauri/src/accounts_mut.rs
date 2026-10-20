@@ -379,7 +379,7 @@ pub async fn create_account(
     input: AccountInput,
 ) -> Result<String, String> {
     run_blocking(state.db.clone(), move |conn| {
-        create_account_inner(conn, input).map_err(String::from)
+        create_account_inner(conn, input)
     })
     .await
 }
@@ -391,7 +391,7 @@ pub async fn update_account(
     input: AccountInput,
 ) -> Result<(), String> {
     run_blocking(state.db.clone(), move |conn| {
-        update_account_inner(conn, &guid, input).map_err(String::from)
+        update_account_inner(conn, &guid, input)
     })
     .await
 }
@@ -399,7 +399,7 @@ pub async fn update_account(
 #[tauri::command]
 pub async fn delete_account(state: State<'_, AppState>, guid: String) -> Result<(), String> {
     run_blocking(state.db.clone(), move |conn| {
-        delete_account_inner(conn, &guid).map_err(String::from)
+        delete_account_inner(conn, &guid)
     })
     .await
 }

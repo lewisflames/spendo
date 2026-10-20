@@ -140,10 +140,7 @@ fn set_book_setting_inner(
 
 #[tauri::command]
 pub async fn get_book_settings(state: State<'_, AppState>) -> Result<BookSettings, String> {
-    run_blocking(state.db.clone(), |conn| {
-        get_book_settings_inner(conn).map_err(String::from)
-    })
-    .await
+    run_blocking(state.db.clone(), get_book_settings_inner).await
 }
 
 #[tauri::command]
@@ -153,7 +150,7 @@ pub async fn set_book_setting(
     value: String,
 ) -> Result<BookSettings, String> {
     run_blocking(state.db.clone(), move |conn| {
-        set_book_setting_inner(conn, &key, &value).map_err(String::from)
+        set_book_setting_inner(conn, &key, &value)
     })
     .await
 }

@@ -1054,8 +1054,7 @@ fn write_gnucash_db(path: &Path, data: &ExportData) -> Result<(), AppError> {
         }
         write_schedules(&conn, data)?;
         Ok(())
-    })
-    .map_err(String::from)?;
+    })?;
 
     Ok(())
 }
@@ -1496,12 +1495,9 @@ pub async fn export_gnucash(
         return Err("No book is open".to_string());
     }
 
-    state.ensure_not_active_book(&path).map_err(String::from)?;
+    state.ensure_not_active_book(&path)?;
 
-    let data = run_blocking(state.db.clone(), |conn| {
-        fetch_export_data_inner(conn).map_err(String::from)
-    })
-    .await?;
+    let data = run_blocking(state.db.clone(), fetch_export_data_inner).await?;
     let result = GnuCashExportResult {
         accounts: data.accounts.len() as i64,
         transactions: data.transactions.len() as i64,
@@ -1514,7 +1510,7 @@ pub async fn export_gnucash(
         rounded_amounts: data.rounded_amounts,
     };
     let target = path;
-    run_io(move || write_gnucash_file(&target, &data).map_err(String::from)).await?;
+    run_io(move || write_gnucash_file(&target, &data)).await?;
     Ok(result)
 }
 

@@ -64,15 +64,16 @@ pub(crate) fn validate_data_table(table: &str) -> Result<(), AppError> {
 
 /// Run a closure with the DB connection on a blocking thread. Every DB-touching
 /// command must go through here so the tokio runtime threads are never blocked
-/// while the global mutex is held.
+/// while the global mutex is held. The closure's typed error is stringified
+/// here, at the command boundary.
 pub async fn run_blocking<T, F>(db: Arc<Mutex<Connection>>, f: F) -> Result<T, String>
 where
-    F: FnOnce(&Connection) -> Result<T, String> + Send + 'static,
+    F: FnOnce(&Connection) -> Result<T, AppError> + Send + 'static,
     T: Send + 'static,
 {
     tauri::async_runtime::spawn_blocking(move || {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        f(&conn)
+        f(&conn).map_err(String::from)
     })
     .await
     .map_err(|e| format!("Background task failed: {}", e))?
@@ -83,10 +84,10 @@ where
 /// Mirrors [`run_blocking`] without the connection lock.
 pub async fn run_io<T, F>(f: F) -> Result<T, String>
 where
-    F: FnOnce() -> Result<T, String> + Send + 'static,
+    F: FnOnce() -> Result<T, AppError> + Send + 'static,
     T: Send + 'static,
 {
-    tauri::async_runtime::spawn_blocking(f)
+    tauri::async_runtime::spawn_blocking(move || f().map_err(String::from))
         .await
         .map_err(|e| format!("Background task failed: {}", e))?
 }
@@ -118,11 +119,11 @@ pub(crate) fn ensure_same_book(book_generation: &AtomicU64, expected: u64) -> Re
     Ok(())
 }
 
-/// Typed backend error for gradual migration off `Result<T, String>`.
-/// Commands keep `Result<T, String>` at the `#[tauri::command]` boundary (so
-/// the frontend contract is unchanged — `From<AppError> for String` keeps
-/// messages identical); `*_inner` functions should migrate to
-/// `Result<T, AppError>` over time.
+/// Typed backend error returned by every `*_inner` helper. Commands keep
+/// `Result<T, String>` at the `#[tauri::command]` boundary — `run_blocking`,
+/// `run_io` and `run_swap_blocking` stringify it there, and
+/// `From<AppError> for String` uses the plain message, so the frontend only
+/// ever sees the message text.
 #[derive(Debug)]
 pub enum AppError {
     NotFound(String),
@@ -193,12 +194,12 @@ impl From<String> for AppError {
 /// entering, and never lock directly inside an `async fn`.
 pub async fn run_swap_blocking<T, F>(db: Arc<Mutex<Connection>>, f: F) -> Result<T, String>
 where
-    F: FnOnce(&mut Connection) -> Result<T, String> + Send + 'static,
+    F: FnOnce(&mut Connection) -> Result<T, AppError> + Send + 'static,
     T: Send + 'static,
 {
     tauri::async_runtime::spawn_blocking(move || {
         let mut conn = db.lock().map_err(|e| e.to_string())?;
-        f(&mut conn)
+        f(&mut conn).map_err(String::from)
     })
     .await
     .map_err(|e| format!("Background task failed: {}", e))?

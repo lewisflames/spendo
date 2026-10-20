@@ -1188,13 +1188,11 @@ pub async fn csv_detect(
     path: String,
 ) -> Result<CsvDetectResult, String> {
     // File read + parsing run on a blocking thread (the file may be ~10 MiB).
-    let mut detect = run_io(move || csv_detect_inner(&path).map_err(String::from)).await?;
+    let mut detect = run_io(move || csv_detect_inner(&path)).await?;
     // Saved mapping lookup is a book-scoped DB read, separate from file I/O.
     if let Some(signature) = detect.signature.clone() {
-        detect.preset = run_blocking(state.db.clone(), move |conn| {
-            load_preset(conn, &signature).map_err(String::from)
-        })
-        .await?;
+        detect.preset =
+            run_blocking(state.db.clone(), move |conn| load_preset(conn, &signature)).await?;
     }
     Ok(detect)
 }
@@ -1339,9 +1337,9 @@ pub async fn csv_preview(
 ) -> Result<CsvPreviewResult, String> {
     // Read the file off the runtime and before the DB lock.
     let path = input.path.clone();
-    let bytes = run_io(move || read_file_bytes(&path).map_err(String::from)).await?;
+    let bytes = run_io(move || read_file_bytes(&path)).await?;
     run_blocking(state.db.clone(), move |conn| {
-        preview_inner(conn, input, &bytes).map_err(String::from)
+        preview_inner(conn, input, &bytes)
     })
     .await
 }
@@ -1595,11 +1593,11 @@ pub async fn csv_commit(
         .book_generation
         .load(std::sync::atomic::Ordering::SeqCst);
     let path = input.path.clone();
-    let bytes = run_io(move || read_file_bytes(&path).map_err(String::from)).await?;
+    let bytes = run_io(move || read_file_bytes(&path)).await?;
     let generation_handle = state.book_generation.clone();
     run_blocking(state.db.clone(), move |conn| {
         ensure_same_book(&generation_handle, generation)?;
-        commit_inner(conn, input, &bytes).map_err(String::from)
+        commit_inner(conn, input, &bytes)
     })
     .await
 }
@@ -1611,7 +1609,7 @@ pub async fn delete_csv_preset(
     signature: String,
 ) -> Result<(), String> {
     run_blocking(state.db.clone(), move |conn| {
-        delete_preset(conn, &signature).map_err(String::from)
+        delete_preset(conn, &signature)
     })
     .await
 }
