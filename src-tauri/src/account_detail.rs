@@ -174,8 +174,8 @@ fn filter_clauses(
     if include_baseline {
         w.push_raw(utils::VISIBLE_TX_FILTER);
     }
-    let from = utils::validate_optional_iso_date(date_from).map_err(AppError::Validation)?;
-    let to = utils::validate_optional_iso_date(date_to).map_err(AppError::Validation)?;
+    let from = utils::validate_optional_iso_date(date_from)?;
+    let to = utils::validate_optional_iso_date(date_to)?;
     sql::push_tx_date_search(&mut w, from.as_deref(), to.as_deref(), search);
     Ok(w)
 }

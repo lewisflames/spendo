@@ -185,7 +185,7 @@ fn validate_post_date(post_date: &str) -> Result<String, AppError> {
             "Pick a date for this transaction".to_string(),
         ));
     }
-    let normalized = utils::validate_iso_date(trimmed).map_err(AppError::Validation)?;
+    let normalized = utils::validate_iso_date(trimmed)?;
     // Local "today" so users east of UTC can post their current day (matches
     // the frontend's `todayStr` and the visibility window).
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
@@ -403,10 +403,8 @@ fn build_filter_conditions(
     w.push_raw(utils::VISIBLE_TX_FILTER);
 
     if let Some(ref f) = filters {
-        let from = utils::validate_optional_iso_date(f.date_from.as_deref())
-            .map_err(AppError::Validation)?;
-        let to = utils::validate_optional_iso_date(f.date_to.as_deref())
-            .map_err(AppError::Validation)?;
+        let from = utils::validate_optional_iso_date(f.date_from.as_deref())?;
+        let to = utils::validate_optional_iso_date(f.date_to.as_deref())?;
         sql::push_tx_date_search(&mut w, from.as_deref(), to.as_deref(), f.search.as_deref());
     }
 
