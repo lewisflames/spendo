@@ -18,7 +18,8 @@ import type {
   SplitDetail,
   TransactionDetail,
   TransactionRow,
-  MockPayloads
+  CommandPayloads,
+  Command
 } from '$lib/tauri';
 import {
   ACCOUNTS,
@@ -277,13 +278,13 @@ function dataSummary(): DataSummary {
   };
 }
 
-function homeData(): MockPayloads['fetch_home_data'] {
+function homeData(): CommandPayloads['fetch_home_data'] {
   if (state.bookPath === null) return { hasData: false, summary: null };
   const summary = dataSummary();
   return { hasData: summary.totalTransactions > 0, summary };
 }
 
-function emptyBookResult(): MockPayloads['open_book'] {
+function emptyBookResult(): CommandPayloads['open_book'] {
   const summary = dataSummary();
   return { hasData: summary.totalTransactions > 0, summary };
 }
@@ -311,9 +312,9 @@ function isoLocal(date: Date): string {
 
 // ── accounts ───────────────────────────────────────────────────────────────
 
-function accountsResult(): MockPayloads['fetch_accounts'] {
+function accountsResult(): CommandPayloads['fetch_accounts'] {
   const trees = CATEGORY_ROOTS.map((guid) => accountNode(account(guid)!)).filter(Boolean);
-  const byType: MockPayloads['fetch_accounts']['byType'] = {};
+  const byType: CommandPayloads['fetch_accounts']['byType'] = {};
   for (const category of ['ASSET', 'LIABILITY', 'EQUITY', 'INCOME', 'EXPENSE']) {
     const root = trees.find((t) => nodeCategory(t.accountType) === category);
     byType[category] = {
@@ -362,7 +363,7 @@ function toSplitDetail(tx: FixtureTx, split: FixtureSplit, index: number): Split
   };
 }
 
-function accountDetail(args: Record<string, unknown>): MockPayloads['fetch_account_detail'] {
+function accountDetail(args: Record<string, unknown>): CommandPayloads['fetch_account_detail'] {
   const guid = String(args.guid);
   const acc = account(guid);
   if (!acc) throw new Error(`[mock] Unknown account ${guid}`);
@@ -419,29 +420,31 @@ function accountDetail(args: Record<string, unknown>): MockPayloads['fetch_accou
   const safePage = Math.min(page, totalPages);
   const pageRows = sorted.slice((safePage - 1) * pageSize, safePage * pageSize);
 
-  const transactions: MockPayloads['fetch_account_detail']['transactions'] = pageRows.map((tx) => {
-    const entry = runningByGuid.get(tx.guid)!;
-    const relevant = tx.splits.filter((s) => inSubtree.has(s.accountGuid));
-    const counterAccounts = [
-      ...new Set(
-        tx.splits
-          .filter((s) => !inSubtree.has(s.accountGuid))
-          .map((s) => account(s.accountGuid)?.name ?? 'Unknown')
-      )
-    ];
-    return {
-      guid: tx.guid,
-      postDate: tx.postDate,
-      description: tx.description,
-      num: tx.num ?? null,
-      notes: tx.notes ?? null,
-      splits: tx.splits.map((s, i) => toSplitDetail(tx, s, i)),
-      counterAccounts,
-      amount: entry.delta,
-      runningBalance: entry.running,
-      reconcileState: relevant[0]?.reconcileState ?? 'n'
-    };
-  });
+  const transactions: CommandPayloads['fetch_account_detail']['transactions'] = pageRows.map(
+    (tx) => {
+      const entry = runningByGuid.get(tx.guid)!;
+      const relevant = tx.splits.filter((s) => inSubtree.has(s.accountGuid));
+      const counterAccounts = [
+        ...new Set(
+          tx.splits
+            .filter((s) => !inSubtree.has(s.accountGuid))
+            .map((s) => account(s.accountGuid)?.name ?? 'Unknown')
+        )
+      ];
+      return {
+        guid: tx.guid,
+        postDate: tx.postDate,
+        description: tx.description,
+        num: tx.num ?? null,
+        notes: tx.notes ?? null,
+        splits: tx.splits.map((s, i) => toSplitDetail(tx, s, i)),
+        counterAccounts,
+        amount: entry.delta,
+        runningBalance: entry.running,
+        reconcileState: relevant[0]?.reconcileState ?? 'n'
+      };
+    }
+  );
 
   let totalIncome = 0;
   let totalExpenses = 0;
@@ -495,7 +498,7 @@ function accountDetail(args: Record<string, unknown>): MockPayloads['fetch_accou
   };
 }
 
-function accountBalanceTrend(guid: string): MockPayloads['fetch_account_balance_trend'] {
+function accountBalanceTrend(guid: string): CommandPayloads['fetch_account_balance_trend'] {
   const inSubtree = subtreeGuids(guid);
   const points: { date: string; balance: number }[] = [];
   const today = new Date();
@@ -565,7 +568,7 @@ function filterTxs(filters: Record<string, unknown> | null | undefined): Fixture
   return rows;
 }
 
-function transactionsResult(args: Record<string, unknown>): MockPayloads['fetch_transactions'] {
+function transactionsResult(args: Record<string, unknown>): CommandPayloads['fetch_transactions'] {
   const pageSize = Number(args.pageSize) || 25;
   const page = Math.max(1, Number(args.page) || 1);
   const sortBy = (args.sortBy ? String(args.sortBy) : 'date') as 'date' | 'description' | 'amount';
@@ -597,7 +600,7 @@ function transactionsResult(args: Record<string, unknown>): MockPayloads['fetch_
   };
 }
 
-function heatmap(args: Record<string, unknown>): MockPayloads['fetch_transaction_heatmap'] {
+function heatmap(args: Record<string, unknown>): CommandPayloads['fetch_transaction_heatmap'] {
   const counts = new Map<string, number>();
   for (const tx of filterTxs(args.filters as Record<string, unknown> | null | undefined)) {
     counts.set(tx.postDate, (counts.get(tx.postDate) ?? 0) + 1);
@@ -607,7 +610,7 @@ function heatmap(args: Record<string, unknown>): MockPayloads['fetch_transaction
     .sort((a, b) => a.date.localeCompare(b.date));
 }
 
-function transactionDetail(guid: string): MockPayloads['fetch_transaction'] {
+function transactionDetail(guid: string): CommandPayloads['fetch_transaction'] {
   const tx = state.transactions.find((t) => t.guid === guid);
   if (!tx) return null;
   const transaction: TransactionDetail = {
@@ -698,7 +701,7 @@ function deleteTransaction(guid: string, unreconcile = false): void {
 
 // ── books / settings ───────────────────────────────────────────────────────
 
-function bookSettings(): MockPayloads['get_book_settings'] {
+function bookSettings(): CommandPayloads['get_book_settings'] {
   return { ...state.bookSettings };
 }
 
@@ -854,7 +857,7 @@ const elapsedMonths = (year: number): number => {
   return now.getMonth() + 1;
 };
 
-function budgetActualRows(year: number): MockPayloads['fetch_budget_vs_actual'] {
+function budgetActualRows(year: number): CommandPayloads['fetch_budget_vs_actual'] {
   const elapsed = elapsedMonths(year);
   return state.budgets
     .filter((b) => b.year === year)
@@ -883,7 +886,7 @@ function budgetActualRows(year: number): MockPayloads['fetch_budget_vs_actual'] 
     });
 }
 
-function budgetDetail(accountGuid: string, year: number): MockPayloads['fetch_budget_detail'] {
+function budgetDetail(accountGuid: string, year: number): CommandPayloads['fetch_budget_detail'] {
   const acc = account(accountGuid);
   const plan = budgetFor(accountGuid, year);
   if (!acc || !plan) throw new Error(`[mock] No budget for ${accountGuid} in ${year}`);
@@ -999,7 +1002,7 @@ function investmentAccounts(): FixtureAccount[] {
   return state.accounts.filter((a) => INVESTMENT_ACCOUNT_TYPES.has(a.accountType));
 }
 
-function portfolioData(): MockPayloads['fetch_portfolio_data'] {
+function portfolioData(): CommandPayloads['fetch_portfolio_data'] {
   const holdings = investmentAccounts().map(holdingFor);
   const totalMarketValue = holdings.reduce((sum, h) => sum + h.marketValue, 0);
   const totalCostBasis = holdings.reduce((sum, h) => sum + h.costBasis, 0);
@@ -1019,7 +1022,7 @@ function portfolioData(): MockPayloads['fetch_portfolio_data'] {
   };
 }
 
-function allocationTargets(): MockPayloads['fetch_allocation_targets'] {
+function allocationTargets(): CommandPayloads['fetch_allocation_targets'] {
   return [...state.allocationTargets.entries()]
     .map(([commodityGuid, targetPct]) => ({ commodityGuid, targetPct }))
     .sort((a, b) => {
@@ -1029,7 +1032,7 @@ function allocationTargets(): MockPayloads['fetch_allocation_targets'] {
     });
 }
 
-function holdingDetail(args: Record<string, unknown>): MockPayloads['fetch_holding_detail'] {
+function holdingDetail(args: Record<string, unknown>): CommandPayloads['fetch_holding_detail'] {
   const commodityGuid = String(args.commodityGuid);
   const acc = investmentAccounts().find((a) => a.commodityGuid === commodityGuid);
   if (!acc) throw new Error(`[mock] Unknown holding ${commodityGuid}`);
@@ -1138,7 +1141,7 @@ function pnlRows(
   return rows;
 }
 
-function pnlReport(args: Record<string, unknown>): MockPayloads['fetch_pnl_report'] {
+function pnlReport(args: Record<string, unknown>): CommandPayloads['fetch_pnl_report'] {
   const dateFrom = String(args.dateFrom);
   const dateTo = String(args.dateTo);
   const prevDateFrom = args.prevDateFrom ? String(args.prevDateFrom) : dateFrom;
@@ -1178,7 +1181,7 @@ function pnlReport(args: Record<string, unknown>): MockPayloads['fetch_pnl_repor
   };
 }
 
-function pnlTrend(args: Record<string, unknown>): MockPayloads['fetch_pnl_trend'] {
+function pnlTrend(args: Record<string, unknown>): CommandPayloads['fetch_pnl_trend'] {
   const dateFrom = String(args.dateFrom);
   const dateTo = String(args.dateTo);
   const months: string[] = [];
@@ -1266,7 +1269,9 @@ function lastReconciledBatch(accountGuid: string): MockReconcileBatch | null {
   return { fromDate, throughDate, guids };
 }
 
-function reconcileSummary(accountGuid: string): MockPayloads['fetch_reconcile_summaries'][number] {
+function reconcileSummary(
+  accountGuid: string
+): CommandPayloads['fetch_reconcile_summaries'][number] {
   let unreconciledCount = 0;
   let clearedCount = 0;
   let unclearedTotal = 0;
@@ -1343,7 +1348,7 @@ function restoreReconcileStates(
   for (const entry of snapshot) entry.split.reconcileState = entry.state;
 }
 
-function reconcileInfo(args: Record<string, unknown>): MockPayloads['fetch_reconcile_info'] {
+function reconcileInfo(args: Record<string, unknown>): CommandPayloads['fetch_reconcile_info'] {
   const accountGuid = String(args.accountGuid);
   const statementDate = String(args.statementDate);
   const acc = account(accountGuid);
@@ -1352,7 +1357,7 @@ function reconcileInfo(args: Record<string, unknown>): MockPayloads['fetch_recon
     throw new Error('That statement date is in the future. Use today or earlier');
   }
   let startingBalance = 0;
-  const candidates: MockPayloads['fetch_reconcile_info']['candidates'] = [];
+  const candidates: CommandPayloads['fetch_reconcile_info']['candidates'] = [];
   for (const tx of visibleTxs()) {
     if (tx.postDate > statementDate) continue;
     tx.splits.forEach((split, index) => {
@@ -1436,7 +1441,7 @@ for (const tx of state.transactions) {
 // ── handlers ───────────────────────────────────────────────────────────────
 
 type HandlerMap = {
-  [K in keyof MockPayloads]: (args: Record<string, unknown>) => MockPayloads[K];
+  [K in keyof CommandPayloads]: (args: Record<string, unknown>) => CommandPayloads[K];
 };
 
 const handlers: HandlerMap = {
@@ -1679,7 +1684,7 @@ const handlers: HandlerMap = {
   fetch_holding_detail: (args) => holdingDetail(args),
   fetch_allocation_targets: () => allocationTargets(),
   save_allocation_targets: (args) => {
-    const targets = (args.targets ?? []) as MockPayloads['fetch_allocation_targets'];
+    const targets = (args.targets ?? []) as CommandPayloads['fetch_allocation_targets'];
     state.allocationTargets = new Map(targets.map((t) => [t.commodityGuid, Number(t.targetPct)]));
     return allocationTargets();
   },
@@ -2188,7 +2193,7 @@ function accountPath(acc: FixtureAccount | undefined): string {
   return parts.join(':');
 }
 
-function importResult(): MockPayloads['import_gnucash'] {
+function importResult(): CommandPayloads['import_gnucash'] {
   const summary = dataSummary();
   return {
     accountsAdded: 12,
@@ -2214,7 +2219,10 @@ function importResult(): MockPayloads['import_gnucash'] {
 
 /** Commands with a deliberately inert implementation (dialogs/paths need Tauri). */
 
-export async function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+export async function mockInvoke<K extends Command>(
+  cmd: K,
+  args?: Record<string, unknown>
+): Promise<CommandPayloads[K]> {
   const handler = (
     handlers as Record<string, ((a: Record<string, unknown>) => unknown) | undefined>
   )[cmd];
@@ -2226,5 +2234,5 @@ export async function mockInvoke<T>(cmd: string, args?: Record<string, unknown>)
   }
   // A small delay keeps async loading states (skeletons, spinners) observable.
   await new Promise((resolve) => setTimeout(resolve, 20));
-  return handler(args ?? {}) as T;
+  return handler(args ?? {}) as CommandPayloads[K];
 }
