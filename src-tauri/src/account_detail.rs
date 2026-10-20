@@ -1,5 +1,5 @@
 use chrono::Local;
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
@@ -132,7 +132,7 @@ struct AccountHeader {
     parent_guid: Option<String>,
 }
 
-fn load_account_header(conn: &Connection, guid: &str) -> Result<AccountHeader, String> {
+fn load_account_header(conn: &Connection, guid: &str) -> Result<AccountHeader, AppError> {
     conn.query_row(
         "SELECT a.guid, a.name, a.account_type, a.code, a.description, a.placeholder,
                 c.mnemonic, a.commodity_guid, a.parent_guid
@@ -154,10 +154,8 @@ fn load_account_header(conn: &Connection, guid: &str) -> Result<AccountHeader, S
             })
         },
     )
-    .map_err(|e| match e {
-        rusqlite::Error::QueryReturnedNoRows => format!("Account not found: {}", guid),
-        other => other.to_string(),
-    })
+    .optional()?
+    .ok_or_else(|| AppError::NotFound(format!("Account not found: {}", guid)))
 }
 
 /// Shared transaction-filter WHERE builder for this module's queries. All
@@ -190,7 +188,7 @@ fn compute_summary(
     ctx: &FxCtx,
     sub_guids: &[String],
     search: Option<&str>,
-) -> Result<AccountSummary, String> {
+) -> Result<AccountSummary, AppError> {
     let in_list = sql::in_clause(sub_guids.len());
     let sub_params = sql::string_param_refs(sub_guids);
 
@@ -213,7 +211,7 @@ fn compute_summary(
         sum_extra_sql
     );
 
-    let mut summary_stmt = conn.prepare(&summary_sql).map_err(|e| e.to_string())?;
+    let mut summary_stmt = conn.prepare(&summary_sql)?;
     let summary_params: Vec<&dyn rusqlite::types::ToSql> = sub_params
         .iter()
         .copied()
@@ -223,10 +221,8 @@ fn compute_summary(
     let summary_rows: Vec<(String, String, String, f64)> = summary_stmt
         .query_map(summary_params.as_slice(), |row| {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
 
     let mut total_txns: i64 = 0;
     let mut pos_effect = 0.0;
@@ -262,12 +258,14 @@ fn fetch_account_detail_inner(
     conn: &Connection,
     guid: &str,
     query: TxQuery<'_>,
-) -> Result<AccountDetailResult, String> {
+) -> Result<AccountDetailResult, AppError> {
     let header = load_account_header(conn, guid)?;
     let sub_guids = accounts::get_subaccount_guids(conn, guid)?;
 
     if sub_guids.is_empty() {
-        return Err("Account has no sub-account entries".to_string());
+        return Err(AppError::NotFound(
+            "Account has no sub-account entries".to_string(),
+        ));
     }
 
     let descendants_count = (sub_guids.len() as i64) - 1;
@@ -337,7 +335,7 @@ fn load_tx_page(
     ctx: &FxCtx,
     sub_guids: &[String],
     query: &TxQuery<'_>,
-) -> Result<TxPage, String> {
+) -> Result<TxPage, AppError> {
     let TxQuery {
         page,
         page_size,
@@ -386,7 +384,7 @@ fn count_subtree_transactions(
     conn: &Connection,
     sub_guids: &[String],
     query: &TxQuery<'_>,
-) -> Result<i64, String> {
+) -> Result<i64, AppError> {
     let placeholders_str = sql::in_clause(sub_guids.len());
     let sub_params = sql::string_param_refs(sub_guids);
 
@@ -407,7 +405,7 @@ fn count_subtree_transactions(
         w.joined()
     );
 
-    let mut count_stmt = conn.prepare(&count_sql).map_err(|e| e.to_string())?;
+    let mut count_stmt = conn.prepare(&count_sql)?;
     let count_params: Vec<&dyn rusqlite::types::ToSql> = sub_params
         .iter()
         .copied()
@@ -416,7 +414,7 @@ fn count_subtree_transactions(
 
     count_stmt
         .query_row(count_params.as_slice(), |row| row.get(0))
-        .map_err(|e| e.to_string())
+        .map_err(AppError::from)
 }
 
 /// Per-currency transaction effects from the subtree CTE, in
@@ -428,7 +426,7 @@ fn fetch_tx_effects(
     conn: &Connection,
     sub_guids: &[String],
     query: &TxQuery<'_>,
-) -> Result<Vec<TxEffect>, String> {
+) -> Result<Vec<TxEffect>, AppError> {
     let w = filter_clauses(query.date_from, query.date_to, query.search, 1, true)?;
 
     let grouped_balance = utils::signed_amount_expr("t.raw_amount", "t.account_type");
@@ -465,7 +463,7 @@ fn fetch_tx_effects(
         grouped_balance
     );
 
-    let mut tx_stmt = conn.prepare(&tx_sql).map_err(|e| e.to_string())?;
+    let mut tx_stmt = conn.prepare(&tx_sql)?;
 
     let mut all_tx_params: Vec<Box<dyn rusqlite::types::ToSql>> =
         vec![Box::new(sub_guids.first().cloned().unwrap_or_default())];
@@ -484,10 +482,8 @@ fn fetch_tx_effects(
                 currency: row.get(4)?,
                 balance_effect: row.get(5)?,
             })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
 
     Ok(tx_effects)
 }
@@ -528,7 +524,7 @@ fn accumulate_running_balances(
     ctx: &FxCtx,
     tx_order: &[String],
     tx_map: &TxGroups,
-) -> Result<RunningBalances, String> {
+) -> Result<RunningBalances, AppError> {
     let fx_history = fx::FxHistory::load(conn)?;
     let mut running = 0.0;
     let mut running_by_guid: HashMap<String, f64> = HashMap::new();
@@ -626,7 +622,7 @@ fn enrich_page_transactions(
     running_by_guid: &HashMap<String, f64>,
     amount_by_guid: &HashMap<String, f64>,
     sub_guids: &[String],
-) -> Result<Vec<DetailTransaction>, String> {
+) -> Result<Vec<DetailTransaction>, AppError> {
     let notes_map = load_page_notes(conn, page_guids)?;
     let mut splits_by_guid = load_page_splits(conn, page_guids)?;
 
@@ -662,21 +658,19 @@ fn enrich_page_transactions(
 fn load_page_notes(
     conn: &Connection,
     page_guids: &[String],
-) -> Result<HashMap<String, Option<String>>, String> {
+) -> Result<HashMap<String, Option<String>>, AppError> {
     let mut notes_map: HashMap<String, Option<String>> = HashMap::new();
     if !page_guids.is_empty() {
         let notes_sql = format!(
             "SELECT guid, notes FROM transactions WHERE guid IN ({})",
             sql::in_clause(page_guids.len())
         );
-        let mut notes_stmt = conn.prepare(&notes_sql).map_err(|e| e.to_string())?;
+        let mut notes_stmt = conn.prepare(&notes_sql)?;
         let rows: Vec<(String, Option<String>)> = notes_stmt
             .query_map(sql::string_param_refs(page_guids).as_slice(), |row| {
                 Ok((row.get(0)?, row.get(1)?))
-            })
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?;
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
         notes_map.extend(rows);
     }
     Ok(notes_map)
@@ -687,7 +681,7 @@ fn load_page_notes(
 fn load_page_splits(
     conn: &Connection,
     page_guids: &[String],
-) -> Result<HashMap<String, Vec<DetailSplit>>, String> {
+) -> Result<HashMap<String, Vec<DetailSplit>>, AppError> {
     let mut splits_by_guid: HashMap<String, Vec<DetailSplit>> = HashMap::new();
     for chunk in page_guids.chunks(sql::MAX_IN_PARAMS) {
         let split_sql = format!(
@@ -704,7 +698,7 @@ fn load_page_splits(
             utils::RAW_AMOUNT,
             sql::in_clause(chunk.len()),
         );
-        let mut split_stmt = conn.prepare(&split_sql).map_err(|e| e.to_string())?;
+        let mut split_stmt = conn.prepare(&split_sql)?;
         let rows = split_stmt
             .query_map(sql::string_param_refs(chunk).as_slice(), |row| {
                 Ok((
@@ -720,10 +714,8 @@ fn load_page_splits(
                         reconcile_state: row.get(7)?,
                     },
                 ))
-            })
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?;
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
         for (tx_guid, split) in rows {
             splits_by_guid.entry(tx_guid).or_default().push(split);
         }
@@ -797,6 +789,7 @@ pub async fn fetch_account_detail(
                 sort_dir: sort_dir.as_deref(),
             },
         )
+        .map_err(String::from)
     })
     .await
 }
@@ -824,7 +817,7 @@ fn subtree_deltas_by_day(
     type_filter: &str,
     start_date: &str,
     end_date: &str,
-) -> Result<Vec<(String, String, String, f64)>, String> {
+) -> Result<Vec<(String, String, String, f64)>, AppError> {
     let n = sub_guids.len();
     let sql = format!(
         "SELECT substr(t.post_date, 1, 10) as day, c.guid, c.mnemonic, COALESCE(SUM({}), 0)
@@ -848,14 +841,12 @@ fn subtree_deltas_by_day(
     params.push(&start_date);
     params.push(&end_date);
 
-    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(&sql)?;
     let rows = stmt
         .query_map(params.as_slice(), |row| {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
 }
 
@@ -866,10 +857,10 @@ fn subtree_deltas_by_day(
 fn fetch_account_balance_trend_inner(
     conn: &Connection,
     guid: &str,
-) -> Result<Vec<AccountBalancePoint>, String> {
+) -> Result<Vec<AccountBalancePoint>, AppError> {
     let sub_guids = accounts::get_subaccount_guids(conn, guid)?;
     if sub_guids.is_empty() {
-        return Err(format!("Account not found: {}", guid));
+        return Err(AppError::NotFound(format!("Account not found: {}", guid)));
     }
 
     // Full history through today: the chart always shows all data, with the
@@ -963,7 +954,7 @@ pub async fn fetch_account_balance_trend(
     guid: String,
 ) -> Result<Vec<AccountBalancePoint>, String> {
     run_blocking(state.db.clone(), move |conn| {
-        fetch_account_balance_trend_inner(conn, &guid)
+        fetch_account_balance_trend_inner(conn, &guid).map_err(String::from)
     })
     .await
 }
@@ -1074,7 +1065,10 @@ mod tests {
             },
         )
         .unwrap_err();
-        assert!(err.contains("Invalid date"), "unexpected: {err}");
+        assert!(
+            err.to_string().contains("Invalid date"),
+            "unexpected: {err}"
+        );
     }
 
     #[test]

@@ -424,7 +424,7 @@ struct FxContext {
     history: fx::FxHistory,
 }
 
-fn load_fx_context(conn: &Connection) -> Result<FxContext, String> {
+fn load_fx_context(conn: &Connection) -> Result<FxContext, AppError> {
     Ok(FxContext {
         report_currency: fx::report_currency_or_empty(conn)?,
         history: fx::FxHistory::load(conn)?,
@@ -437,7 +437,7 @@ fn load_fx_context(conn: &Connection) -> Result<FxContext, String> {
 /// ordering/totals are unaffected.
 const MAX_IN_PARAMS: usize = sql::MAX_IN_PARAMS;
 
-fn fetch_splits_for_txns(conn: &Connection, guids: &[String]) -> Result<SplitMaps, String> {
+fn fetch_splits_for_txns(conn: &Connection, guids: &[String]) -> Result<SplitMaps, AppError> {
     let ctx = load_fx_context(conn)?;
     fetch_splits_for_txns_with(conn, guids, &ctx)
 }
@@ -446,7 +446,7 @@ fn fetch_splits_for_txns_with(
     conn: &Connection,
     guids: &[String],
     ctx: &FxContext,
-) -> Result<SplitMaps, String> {
+) -> Result<SplitMaps, AppError> {
     if guids.is_empty() {
         return Ok((
             std::collections::HashMap::new(),
@@ -489,7 +489,7 @@ fn fetch_splits_for_txns_with(
             sql::in_clause(chunk.len())
         );
 
-        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+        let mut stmt = conn.prepare(&sql)?;
         let param_refs = sql::string_param_refs(chunk);
 
         let rows: Vec<(String, SplitData, f64, String)> = stmt
@@ -514,10 +514,8 @@ fn fetch_splits_for_txns_with(
                     row.get::<_, f64>(6)?,    // signed_amount
                     row.get::<_, String>(7)?, // post_date
                 ))
-            })
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?;
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
 
         for (tx_guid, split, signed_amount, post_date) in rows {
             // Sorted by rational magnitude desc, then signed asc (outflow leg
@@ -544,7 +542,7 @@ struct TxRow {
     notes: Option<String>,
 }
 
-fn map_tx_rows(conn: &Connection, rows: Vec<TxRow>) -> Result<Vec<TransactionRow>, String> {
+fn map_tx_rows(conn: &Connection, rows: Vec<TxRow>) -> Result<Vec<TransactionRow>, AppError> {
     let ctx = load_fx_context(conn)?;
     map_tx_rows_with(conn, rows, &ctx)
 }
@@ -553,7 +551,7 @@ fn map_tx_rows_with(
     conn: &Connection,
     rows: Vec<TxRow>,
     ctx: &FxContext,
-) -> Result<Vec<TransactionRow>, String> {
+) -> Result<Vec<TransactionRow>, AppError> {
     let guids: Vec<String> = rows.iter().map(|r| r.guid.clone()).collect();
     let (split_map, total_map) = fetch_splits_for_txns_with(conn, &guids, ctx)?;
 
@@ -583,7 +581,7 @@ fn fetch_tx_totals(
     where_clause: &str,
     params: &[Box<dyn rusqlite::types::ToSql>],
     ctx: &FxContext,
-) -> Result<Vec<(String, f64)>, String> {
+) -> Result<Vec<(String, f64)>, AppError> {
     let signed = utils::signed_amount_expr(utils::RAW_AMOUNT, "a.account_type");
     let sql = format!(
         "SELECT guid, post_date, signed_amount, commodity FROM (
@@ -602,15 +600,13 @@ fn fetch_tx_totals(
          ) WHERE rn = 1",
         raw = utils::RAW_AMOUNT,
     );
-    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(&sql)?;
     let refs = sql::param_refs(params);
     let rows: Vec<(String, String, Option<f64>, Option<String>)> = stmt
         .query_map(refs.as_slice(), |row| {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
 
     Ok(rows
         .into_iter()
@@ -633,17 +629,15 @@ fn fetch_transactions_inner(
     filters: Option<Filters>,
     sort_by: Option<&str>,
     sort_dir: Option<&str>,
-) -> Result<TransactionsResult, String> {
+) -> Result<TransactionsResult, AppError> {
     let w = build_filter_conditions(&filters, 0)?;
     let where_clause = w.where_clause();
 
     let count_sql = format!("SELECT COUNT(*) as cnt FROM transactions t{where_clause}");
-    let mut count_stmt = conn.prepare(&count_sql).map_err(|e| e.to_string())?;
+    let mut count_stmt = conn.prepare(&count_sql)?;
     let param_refs = sql::param_refs(&w.params);
 
-    let total: i64 = count_stmt
-        .query_row(param_refs.as_slice(), |row| row.get(0))
-        .map_err(|e| e.to_string())?;
+    let total: i64 = count_stmt.query_row(param_refs.as_slice(), |row| row.get(0))?;
 
     let (page_size, total_pages, safe_page, offset) = utils::paginate(total, page, page_size);
 
@@ -681,7 +675,7 @@ fn fetch_transactions_inner(
                  WHERE guid IN ({})",
                 sql::in_clause(chunk.len())
             );
-            let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+            let mut stmt = conn.prepare(&sql)?;
             let param_refs = sql::string_param_refs(chunk);
             let rows = stmt
                 .query_map(param_refs.as_slice(), |row| {
@@ -692,10 +686,8 @@ fn fetch_transactions_inner(
                         num: row.get(3)?,
                         notes: row.get(4)?,
                     })
-                })
-                .map_err(|e| e.to_string())?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| e.to_string())?;
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
             for row in rows {
                 rows_by_guid.insert(row.guid.clone(), row);
             }
@@ -729,7 +721,7 @@ fn fetch_transactions_inner(
         "SELECT guid, post_date, description, num, notes FROM transactions t{where_clause} {order_clause} LIMIT ? OFFSET ?"
     );
 
-    let mut query_stmt = conn.prepare(&query_sql).map_err(|e| e.to_string())?;
+    let mut query_stmt = conn.prepare(&query_sql)?;
     let all_params: Vec<Box<dyn rusqlite::types::ToSql>> = w
         .params
         .into_iter()
@@ -749,10 +741,8 @@ fn fetch_transactions_inner(
                 num: row.get(3)?,
                 notes: row.get(4)?,
             })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
 
     let transactions = map_tx_rows(conn, rows)?;
 
@@ -770,7 +760,7 @@ fn fetch_transactions_inner(
 fn fetch_transaction_heatmap_inner(
     conn: &Connection,
     filters: Option<Filters>,
-) -> Result<Vec<HeatmapPoint>, String> {
+) -> Result<Vec<HeatmapPoint>, AppError> {
     let w = build_filter_conditions(&filters, 0)?;
     let where_clause = w.where_clause();
 
@@ -780,7 +770,7 @@ fn fetch_transaction_heatmap_inner(
          GROUP BY day
          ORDER BY day"
     );
-    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(&sql)?;
     let param_refs = sql::param_refs(&w.params);
 
     let points = stmt
@@ -789,10 +779,8 @@ fn fetch_transaction_heatmap_inner(
                 date: row.get(0)?,
                 count: row.get(1)?,
             })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
 
     Ok(points)
 }
@@ -815,6 +803,7 @@ pub async fn fetch_transactions(
             sort_by.as_deref(),
             sort_dir.as_deref(),
         )
+        .map_err(String::from)
     })
     .await
 }
@@ -825,7 +814,7 @@ pub async fn fetch_transaction_heatmap(
     filters: Option<Filters>,
 ) -> Result<Vec<HeatmapPoint>, String> {
     run_blocking(state.db.clone(), move |conn| {
-        fetch_transaction_heatmap_inner(conn, filters)
+        fetch_transaction_heatmap_inner(conn, filters).map_err(String::from)
     })
     .await
 }
@@ -839,7 +828,7 @@ fn neighbor_guid(
     post_date: &str,
     guid: &str,
     above: bool,
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, AppError> {
     let (op, order) = if above {
         (">", "ORDER BY t.post_date ASC, t.guid ASC")
     } else {
@@ -856,13 +845,13 @@ fn neighbor_guid(
     );
     conn.query_row(&sql, rusqlite::params![post_date, guid], |row| row.get(0))
         .optional()
-        .map_err(|e| e.to_string())
+        .map_err(AppError::from)
 }
 
 fn fetch_transaction_inner(
     conn: &Connection,
     guid: &str,
-) -> Result<Option<TransactionDetailResult>, String> {
+) -> Result<Option<TransactionDetailResult>, AppError> {
     let base = conn
         .query_row(
             &format!(
@@ -882,8 +871,7 @@ fn fetch_transaction_inner(
                 })
             },
         )
-        .optional()
-        .map_err(|e| e.to_string())?;
+        .optional()?;
 
     let Some(base) = base else {
         return Ok(None);
@@ -891,13 +879,11 @@ fn fetch_transaction_inner(
 
     let guids = [base.guid.clone()];
     let (split_map, total_map) = fetch_splits_for_txns(conn, &guids)?;
-    let attachment_count: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM attachments WHERE tx_guid = ?1",
-            [&base.guid],
-            |row| row.get(0),
-        )
-        .map_err(|e| e.to_string())?;
+    let attachment_count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM attachments WHERE tx_guid = ?1",
+        [&base.guid],
+        |row| row.get(0),
+    )?;
 
     let transaction = TransactionDetail {
         guid: base.guid.clone(),
@@ -931,7 +917,7 @@ pub async fn fetch_transaction(
     guid: String,
 ) -> Result<Option<TransactionDetailResult>, String> {
     run_blocking(state.db.clone(), move |conn| {
-        fetch_transaction_inner(conn, &guid)
+        fetch_transaction_inner(conn, &guid).map_err(String::from)
     })
     .await
 }
@@ -1329,7 +1315,10 @@ mod tests {
             None,
         )
         .unwrap_err();
-        assert!(err.contains("Invalid date"), "unexpected: {err}");
+        assert!(
+            err.to_string().contains("Invalid date"),
+            "unexpected: {err}"
+        );
 
         let err = fetch_transaction_heatmap_inner(
             &conn,
@@ -1340,7 +1329,10 @@ mod tests {
             }),
         )
         .unwrap_err();
-        assert!(err.contains("Invalid date"), "unexpected: {err}");
+        assert!(
+            err.to_string().contains("Invalid date"),
+            "unexpected: {err}"
+        );
     }
 
     #[test]

@@ -70,7 +70,7 @@ fn price_for(amount: f64, quantity: f64) -> f64 {
     }
 }
 
-fn fetch_export_transactions_inner(conn: &Connection) -> Result<Vec<ExportSplitRow>, String> {
+fn fetch_export_transactions_inner(conn: &Connection) -> Result<Vec<ExportSplitRow>, AppError> {
     let metas = tree::load_account_metas(conn)?;
     let mut path_cache: HashMap<String, String> = HashMap::new();
     for guid in metas.keys() {
@@ -94,7 +94,7 @@ fn fetch_export_transactions_inner(conn: &Connection) -> Result<Vec<ExportSplitR
         utils::RAW_AMOUNT,
         utils::QUANTITY_AMOUNT,
     );
-    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(&sql)?;
     let rows = stmt
         .query_map([], |row| {
             Ok((
@@ -112,10 +112,8 @@ fn fetch_export_transactions_inner(conn: &Connection) -> Result<Vec<ExportSplitR
                 row.get::<_, String>(11)?,
                 row.get::<_, Option<String>>(12)?,
             ))
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
 
     Ok(rows
         .into_iter()
@@ -159,16 +157,14 @@ fn fetch_export_transactions_inner(conn: &Connection) -> Result<Vec<ExportSplitR
         .collect())
 }
 
-fn fetch_export_accounts_inner(conn: &Connection) -> Result<Vec<ExportAccountRow>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT a.guid, a.parent_guid, a.name, a.account_type, a.code, a.description,
+fn fetch_export_accounts_inner(conn: &Connection) -> Result<Vec<ExportAccountRow>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT a.guid, a.parent_guid, a.name, a.account_type, a.code, a.description,
                     a.placeholder, c.mnemonic, c.namespace
              FROM accounts a
              LEFT JOIN commodities c ON c.guid = a.commodity_guid
              WHERE a.account_type != 'ROOT'",
-        )
-        .map_err(|e| e.to_string())?;
+    )?;
     struct Raw {
         guid: String,
         parent_guid: Option<String>,
@@ -193,10 +189,8 @@ fn fetch_export_accounts_inner(conn: &Connection) -> Result<Vec<ExportAccountRow
                 commodity: row.get(7)?,
                 commodity_namespace: row.get(8)?,
             })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
 
     // Full paths need the complete map (including the excluded ROOT row).
     let metas = tree::load_account_metas(conn)?;
@@ -488,7 +482,10 @@ pub async fn export_transactions_csv(
     )
     .map_err(String::from)?;
 
-    let rows = run_blocking(state.db.clone(), fetch_export_transactions_inner).await?;
+    let rows = run_blocking(state.db.clone(), |conn| {
+        fetch_export_transactions_inner(conn).map_err(String::from)
+    })
+    .await?;
     let cells: Vec<Vec<String>> = rows
         .iter()
         .map(|r| split_row_cells(r, locale.as_ref()))
@@ -512,7 +509,10 @@ pub async fn export_accounts_csv(
         .ensure_not_active_book(&PathBuf::from(input.path.trim()))
         .map_err(String::from)?;
 
-    let rows = run_blocking(state.db.clone(), fetch_export_accounts_inner).await?;
+    let rows = run_blocking(state.db.clone(), |conn| {
+        fetch_export_accounts_inner(conn).map_err(String::from)
+    })
+    .await?;
     let cells: Vec<Vec<String>> = rows.iter().map(account_row_cells).collect();
     let bytes =
         build_csv_bytes(delimiter, &ACCOUNTS_EXPORT_HEADERS, &cells).map_err(String::from)?;
