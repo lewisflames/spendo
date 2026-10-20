@@ -794,15 +794,12 @@ struct ParsedFile {
 }
 
 impl ParsedRow {
-    /// Error row; `value_num` mirrors `amount` so hashes match the valid path.
+    /// Error row for a failure before the amount parsed.
     fn invalid(
         key: i64,
         cells: &[String],
         post_date: Option<String>,
         description: &str,
-        amount: Option<f64>,
-        num: Option<String>,
-        notes: Option<String>,
         error: String,
     ) -> Self {
         Self {
@@ -810,13 +807,25 @@ impl ParsedRow {
             raw: cells.to_vec(),
             post_date,
             description: Some(description.to_string()),
-            amount,
-            value_num: amount.map(amount_to_value_num),
-            num,
-            notes,
+            amount: None,
+            value_num: None,
+            num: None,
+            notes: None,
             offset_guid: None,
             rule_matched: false,
             error: Some(error),
+        }
+    }
+
+    /// Attach the parsed amount to an error row; `value_num` mirrors `amount`
+    /// so hashes match the valid path.
+    fn with_amount(self, amount: f64, num: Option<String>, notes: Option<String>) -> Self {
+        Self {
+            amount: Some(amount),
+            value_num: Some(amount_to_value_num(amount)),
+            num,
+            notes,
+            ..self
         }
     }
 }
@@ -947,9 +956,6 @@ fn parse_file_rows(
                     cells,
                     None,
                     &description,
-                    None,
-                    None,
-                    None,
                     e.to_string(),
                 ));
                 continue;
@@ -964,9 +970,6 @@ fn parse_file_rows(
                     cells,
                     Some(post_date.clone()),
                     &description,
-                    None,
-                    None,
-                    None,
                     e.to_string(),
                 ));
                 continue;
@@ -1020,16 +1023,16 @@ fn parse_file_rows(
             ],
         };
         if let Err(e) = transactions::validate_tx_input_with(&tx, &account_lookup) {
-            rows.push(ParsedRow::invalid(
-                key,
-                cells,
-                Some(post_date.clone()),
-                &description,
-                Some(amount),
-                num,
-                notes,
-                e.to_string(),
-            ));
+            rows.push(
+                ParsedRow::invalid(
+                    key,
+                    cells,
+                    Some(post_date.clone()),
+                    &description,
+                    e.to_string(),
+                )
+                .with_amount(amount, num, notes),
+            );
             continue;
         }
         rows.push(ParsedRow {
@@ -1246,7 +1249,7 @@ fn csv_detect_inner(path: &str) -> Result<CsvDetectResult, String> {
         column_count,
         row_count: data_len,
         sample_rows,
-        filename: filename_of(&path),
+        filename: filename_of(path),
         sha256,
         signature,
         preset: None,

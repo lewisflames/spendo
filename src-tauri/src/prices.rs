@@ -87,14 +87,20 @@ pub fn list_commodities(conn: &Connection) -> Result<Vec<CommodityInfo>, String>
     Ok(rows)
 }
 
+/// One stored price row: `price` is in the `quote` currency as of `date`.
+struct RawPrice {
+    commodity_guid: String,
+    mnemonic: String,
+    price: f64,
+    date: String,
+    /// Quote currency mnemonic.
+    quote: String,
+}
+
 /// Latest `rn`-th price row per commodity. Keyed by commodity GUID (a
 /// mnemonic can repeat across namespaces, e.g. the same ticker on two
 /// exchanges) with the mnemonic kept for display only.
-/// Returns `(commodity_guid, mnemonic, price, date, quote_currency_mnemonic)`.
-fn nth_price_raw(
-    conn: &Connection,
-    rn: u32,
-) -> Result<Vec<(String, String, f64, String, String)>, String> {
+fn nth_price_raw(conn: &Connection, rn: u32) -> Result<Vec<RawPrice>, String> {
     let mut stmt = conn
         .prepare(&format!(
             "SELECT guid, mnemonic, price, date, quote FROM (
@@ -114,13 +120,13 @@ fn nth_price_raw(
 
     let rows = stmt
         .query_map([rn], |row| {
-            Ok((
-                row.get(0)?,
-                row.get(1)?,
-                row.get(2)?,
-                row.get(3)?,
-                row.get(4)?,
-            ))
+            Ok(RawPrice {
+                commodity_guid: row.get(0)?,
+                mnemonic: row.get(1)?,
+                price: row.get(2)?,
+                date: row.get(3)?,
+                quote: row.get(4)?,
+            })
         })
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
@@ -132,11 +138,11 @@ fn nth_price_raw(
 fn get_latest_live_prices(conn: &Connection) -> Result<Vec<PriceEntry>, String> {
     Ok(nth_price_raw(conn, 1)?
         .into_iter()
-        .map(|(_guid, mnemonic, price, date, currency)| PriceEntry {
-            mnemonic,
-            price,
-            price_date: date,
-            currency,
+        .map(|p| PriceEntry {
+            mnemonic: p.mnemonic,
+            price: p.price,
+            price_date: p.date,
+            currency: p.quote,
         })
         .collect())
 }
@@ -838,21 +844,16 @@ fn assemble_result(
 pub fn get_cached_prices_map(conn: &Connection) -> Result<HashMap<String, f64>, String> {
     Ok(latest_prices_normalized(conn, 1)?
         .into_iter()
-        .map(|(guid, _, price, _, _)| (guid, price))
+        .map(|p| (p.commodity_guid, p.price))
         .collect())
 }
 
+/// Price map keyed by commodity GUID: (price, price date).
+type PriceDateMap = HashMap<String, (f64, String)>;
+
 /// Latest and second-latest price maps in one pass: one `nth_price_raw` scan
 /// per rank and a single `FxHistory::load` shared by both normalizations.
-pub fn get_cached_price_maps(
-    conn: &Connection,
-) -> Result<
-    (
-        HashMap<String, (f64, String)>,
-        HashMap<String, (f64, String)>,
-    ),
-    String,
-> {
+pub fn get_cached_price_maps(conn: &Connection) -> Result<(PriceDateMap, PriceDateMap), String> {
     let latest = nth_price_raw(conn, 1)?;
     let prev = nth_price_raw(conn, 2)?;
     if latest.is_empty() && prev.is_empty() {
@@ -862,20 +863,20 @@ pub fn get_cached_price_maps(
     let fx_history = fx::FxHistory::load(conn)?;
     // One rate map per distinct price date instead of one query per commodity.
     let mut rates_by_date: HashMap<String, HashMap<String, f64>> = HashMap::new();
-    let normalize = |rows: Vec<(String, String, f64, String, String)>,
+    let normalize = |rows: Vec<RawPrice>,
                      rates_by_date: &mut HashMap<String, HashMap<String, f64>>|
-     -> HashMap<String, (f64, String)> {
+     -> PriceDateMap {
         rows.into_iter()
-            .map(|(guid, _mnemonic, price, date, quote)| {
-                let normalized = if quote == report_mnemonic {
-                    price
+            .map(|p| {
+                let normalized = if p.quote == report_mnemonic {
+                    p.price
                 } else {
                     let rates = rates_by_date
-                        .entry(date.clone())
-                        .or_insert_with(|| fx_history.map_for_date(&date));
-                    price * rates.get(&quote).copied().unwrap_or(1.0)
+                        .entry(p.date.clone())
+                        .or_insert_with(|| fx_history.map_for_date(&p.date));
+                    p.price * rates.get(&p.quote).copied().unwrap_or(1.0)
                 };
-                (guid, (normalized, date))
+                (p.commodity_guid, (normalized, p.date))
             })
             .collect()
     };
@@ -884,14 +885,10 @@ pub fn get_cached_price_maps(
     Ok((latest_map, prev_map))
 }
 
-/// Latest-price rows normalized to the report currency, keyed by commodity
-/// GUID: (guid, mnemonic, price, price date, quote mnemonic). Single
+/// Latest-price rows with `price` normalized to the report currency. Single
 /// window-function scan plus one FX-history scan shared by every cached-price
 /// map above.
-fn latest_prices_normalized(
-    conn: &Connection,
-    rn: u32,
-) -> Result<Vec<(String, String, f64, String, String)>, String> {
+fn latest_prices_normalized(conn: &Connection, rn: u32) -> Result<Vec<RawPrice>, String> {
     let rows = nth_price_raw(conn, rn)?;
     if rows.is_empty() {
         return Ok(vec![]);
@@ -901,16 +898,16 @@ fn latest_prices_normalized(
     // One rate map per distinct price date instead of one query per commodity.
     let mut rates_by_date: HashMap<String, HashMap<String, f64>> = HashMap::new();
     rows.into_iter()
-        .map(|(guid, mnemonic, price, date, quote)| {
-            let normalized = if quote == report_mnemonic {
-                price
+        .map(|p| {
+            let price = if p.quote == report_mnemonic {
+                p.price
             } else {
                 let rates = rates_by_date
-                    .entry(date.clone())
-                    .or_insert_with(|| fx_history.map_for_date(&date));
-                price * rates.get(&quote).copied().unwrap_or(1.0)
+                    .entry(p.date.clone())
+                    .or_insert_with(|| fx_history.map_for_date(&p.date));
+                p.price * rates.get(&p.quote).copied().unwrap_or(1.0)
             };
-            Ok((guid, mnemonic, normalized, date, quote))
+            Ok(RawPrice { price, ..p })
         })
         .collect()
 }
@@ -921,7 +918,7 @@ fn latest_prices_normalized(
 pub fn latest_quote_currencies(conn: &Connection) -> Result<HashMap<String, String>, String> {
     Ok(nth_price_raw(conn, 1)?
         .into_iter()
-        .map(|(guid, _, _, _, quote)| (guid, quote))
+        .map(|p| (p.commodity_guid, p.quote))
         .collect())
 }
 
