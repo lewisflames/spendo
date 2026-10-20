@@ -125,6 +125,8 @@ pub(crate) fn ensure_same_book(book_generation: &AtomicU64, expected: u64) -> Re
 pub enum AppError {
     NotFound(String),
     Validation(String),
+    /// Filesystem or network failure outside the database.
+    Io(String),
     Db(DbError),
 }
 
@@ -145,7 +147,7 @@ impl DbError {
 impl std::fmt::Display for AppError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AppError::NotFound(m) | AppError::Validation(m) => write!(f, "{m}"),
+            AppError::NotFound(m) | AppError::Validation(m) | AppError::Io(m) => write!(f, "{m}"),
             AppError::Db(e) => write!(f, "{}", e.message),
         }
     }
