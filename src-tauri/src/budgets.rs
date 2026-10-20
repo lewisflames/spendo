@@ -1,3 +1,4 @@
+use crate::db::AppError;
 use chrono::Datelike;
 use std::collections::HashMap;
 
@@ -106,18 +107,20 @@ fn row_to_budget(row: &rusqlite::Row) -> rusqlite::Result<Budget> {
     })
 }
 
-fn validate_year(year: i32) -> Result<(), String> {
+fn validate_year(year: i32) -> Result<(), AppError> {
     if !(1900..=2200).contains(&year) {
-        return Err(format!(
+        return Err(AppError::Validation(format!(
             "Pick a budget year between 1900 and 2200 (got {year})"
-        ));
+        )));
     }
     Ok(())
 }
 
-fn validate_amount(amount: f64) -> Result<(), String> {
+fn validate_amount(amount: f64) -> Result<(), AppError> {
     if !amount.is_finite() || amount <= 0.0 {
-        return Err("Enter a budget amount above zero".to_string());
+        return Err(AppError::Validation(
+            "Enter a budget amount above zero".to_string(),
+        ));
     }
     Ok(())
 }
@@ -188,28 +191,30 @@ fn descendants_cte(seed_filter_sql: &str) -> String {
     )
 }
 
-fn read_budget_year(conn: &Connection, account_guid: &str, year: i32) -> Result<Budget, String> {
-    let mut stmt = conn
-        .prepare(budget_select_sql())
-        .map_err(|e| e.to_string())?;
+fn read_budget_year(conn: &Connection, account_guid: &str, year: i32) -> Result<Budget, AppError> {
+    let mut stmt = conn.prepare(budget_select_sql())?;
     stmt.query_row(rusqlite::params![account_guid, year], row_to_budget)
-        .optional()
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "No budget for this year".to_string())
+        .optional()?
+        .ok_or_else(|| AppError::NotFound("No budget for this year".to_string()))
 }
 
-fn assert_expense_account(conn: &Connection, account_guid: &str) -> Result<(), String> {
+fn assert_expense_account(conn: &Connection, account_guid: &str) -> Result<(), AppError> {
     let acct_type: String = conn
         .query_row(
             "SELECT account_type FROM accounts WHERE guid = ?1",
             [account_guid],
             |row| row.get(0),
         )
-        .optional()
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Account not found. It may have been removed: {account_guid}"))?;
+        .optional()?
+        .ok_or_else(|| {
+            AppError::NotFound(format!(
+                "Account not found. It may have been removed: {account_guid}"
+            ))
+        })?;
     if acct_type != "EXPENSE" {
-        return Err("Only expense accounts can have budgets. Pick an expense account".to_string());
+        return Err(AppError::Validation(
+            "Only expense accounts can have budgets. Pick an expense account".to_string(),
+        ));
     }
     Ok(())
 }
@@ -220,7 +225,7 @@ fn set_budget_year_amount_inner(
     account_guid: &str,
     year: i32,
     amount: f64,
-) -> Result<Budget, String> {
+) -> Result<Budget, AppError> {
     assert_expense_account(conn, account_guid)?;
     validate_amount(amount)?;
     validate_year(year)?;
@@ -236,27 +241,22 @@ fn set_budget_year_amount_inner(
             amount,
             utils::iso_now()
         ],
-    )
-    .map_err(|e| e.to_string())?;
+    )?;
     read_budget_year(conn, account_guid, year)
 }
 
 /// Years that already have a budget for the account, ascending. Used by
 /// the Add dialog to disable taken years so a new budget is always created
 /// for a single free year.
-fn fetch_budget_years_inner(conn: &Connection, account_guid: &str) -> Result<Vec<i32>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT year FROM budgets
+fn fetch_budget_years_inner(conn: &Connection, account_guid: &str) -> Result<Vec<i32>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT year FROM budgets
 			 WHERE account_guid = ?1
 			 ORDER BY year",
-        )
-        .map_err(|e| e.to_string())?;
+    )?;
     let years = stmt
-        .query_map([account_guid], |row| row.get::<_, i32>(0))
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        .query_map([account_guid], |row| row.get::<_, i32>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(years)
 }
 
@@ -265,27 +265,24 @@ fn delete_budget_year_inner(
     conn: &Connection,
     account_guid: &str,
     year: i32,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     validate_year(year)?;
     conn.execute(
         "DELETE FROM budgets WHERE account_guid = ?1 AND year = ?2",
         rusqlite::params![account_guid, year],
-    )
-    .map_err(|e| e.to_string())?;
+    )?;
     Ok(())
 }
 
 /// All yearly budgets as `(account_guid → year → amount)` for expense
 /// accounts. Only years with a row count towards carryover.
-fn yearly_budgets_map(conn: &Connection) -> Result<HashMap<String, HashMap<i32, f64>>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT b.account_guid, b.year, b.amount
+fn yearly_budgets_map(conn: &Connection) -> Result<HashMap<String, HashMap<i32, f64>>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT b.account_guid, b.year, b.amount
 			 FROM budgets b
 			 JOIN accounts a ON a.guid = b.account_guid
 			 WHERE a.account_type = 'EXPENSE'",
-        )
-        .map_err(|e| e.to_string())?;
+    )?;
     let rows = stmt
         .query_map([], |row| {
             Ok((
@@ -293,10 +290,8 @@ fn yearly_budgets_map(conn: &Connection) -> Result<HashMap<String, HashMap<i32, 
                 row.get::<_, i32>(1)?,
                 row.get::<_, f64>(2)?,
             ))
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
     let mut map: HashMap<String, HashMap<i32, f64>> = HashMap::new();
     for (account_guid, year, amount) in rows {
         map.entry(account_guid).or_default().insert(year, amount);
@@ -313,7 +308,7 @@ fn fetch_monthly_actuals(
     start_n: i64,
     end_n: i64,
     fx_map: &HashMap<String, f64>,
-) -> Result<HashMap<i64, f64>, String> {
+) -> Result<HashMap<i64, f64>, AppError> {
     let sql = format!(
         "WITH RECURSIVE
          descendants(descendant_guid) AS (
@@ -332,7 +327,7 @@ fn fetch_monthly_actuals(
         utils::signed_amount_expr(utils::RAW_AMOUNT, "a2.account_type"),
         utils::VISIBLE_TX_FILTER
     );
-    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(&sql)?;
     let start = format!("{}-01", utils::format_month(start_n));
     let end = format!("{}-01", utils::format_month(end_n));
     let rows: Vec<(String, Option<String>, f64)> = stmt
@@ -342,10 +337,8 @@ fn fetch_monthly_actuals(
                 row.get::<_, Option<String>>(1)?,
                 row.get::<_, f64>(2)?,
             ))
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
 
     let report_currency = fx::report_currency_or_empty(conn)?;
     let mut actuals: HashMap<i64, f64> = HashMap::new();
@@ -365,7 +358,7 @@ fn fetch_monthly_actuals(
 fn compute_cumulative_carryovers(
     conn: &Connection,
     year: i32,
-) -> Result<HashMap<String, f64>, String> {
+) -> Result<HashMap<String, f64>, AppError> {
     let period_start = format!("{year:04}-01-01");
 
     let yearly = yearly_budgets_map(conn)?;
@@ -394,7 +387,7 @@ fn compute_cumulative_carryovers(
         utils::signed_amount_expr(utils::RAW_AMOUNT, "a2.account_type"),
         utils::VISIBLE_TX_FILTER
     );
-    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(&sql)?;
     let start = format!("{start_year:04}-01-01");
     let rows: Vec<(String, String, Option<String>, f64)> = stmt
         .query_map(rusqlite::params![start, period_start], |row| {
@@ -404,10 +397,8 @@ fn compute_cumulative_carryovers(
                 row.get::<_, Option<String>>(2)?,
                 row.get::<_, f64>(3)?,
             ))
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
 
     let report_currency = fx::report_currency_or_empty(conn)?;
     let fx_map = fx::get_fx_map(conn, Some(&period_start))?;
@@ -474,10 +465,9 @@ fn fetch_budget_actual_raw_rows(
     period_start: &str,
     period_end: &str,
     year: i32,
-) -> Result<Vec<RawBudgetRow>, String> {
-    let mut stmt = conn
-        .prepare(&format!(
-            "{}
+) -> Result<Vec<RawBudgetRow>, AppError> {
+    let mut stmt = conn.prepare(&format!(
+        "{}
 			 SELECT b.guid, b.account_guid, a.name, a.description, a.code, a.account_type,
 			        b.amount,
 			        c.mnemonic,
@@ -497,11 +487,10 @@ fn fetch_budget_actual_raw_rows(
 			  WHERE a.account_type = 'EXPENSE' AND b.year = ?3
 			  GROUP BY b.guid, c.mnemonic
 			  ORDER BY a.name",
-            descendants_cte("WHERE b.year = ?3"),
-            utils::RAW_AMOUNT,
-            utils::VISIBLE_TX_FILTER
-        ))
-        .map_err(|e| e.to_string())?;
+        descendants_cte("WHERE b.year = ?3"),
+        utils::RAW_AMOUNT,
+        utils::VISIBLE_TX_FILTER
+    ))?;
 
     let raw_rows: Vec<RawBudgetRow> = stmt
         .query_map(rusqlite::params![period_start, period_end, year], |row| {
@@ -516,10 +505,8 @@ fn fetch_budget_actual_raw_rows(
                 row.get::<_, Option<String>>(7)?,
                 row.get::<_, f64>(8)?,
             ))
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(raw_rows)
 }
 
@@ -615,7 +602,7 @@ fn build_budget_actual_rows(
 fn fetch_budget_vs_actual_inner(
     conn: &Connection,
     year: i32,
-) -> Result<Vec<BudgetActualRow>, String> {
+) -> Result<Vec<BudgetActualRow>, AppError> {
     validate_year(year)?;
     let period_start = format!("{year:04}-01-01");
     let period_end = format!("{:04}-01-01", year + 1);
@@ -642,27 +629,23 @@ fn fetch_budget_detail_inner(
     conn: &Connection,
     account_guid: &str,
     year: i32,
-) -> Result<BudgetDetail, String> {
+) -> Result<BudgetDetail, AppError> {
     validate_year(year)?;
     let budget = read_budget_year(conn, account_guid, year)?;
     let annual_amount = budget.amount;
     let period_start = format!("{year:04}-01-01");
     let period_end = format!("{:04}-01-01", year + 1);
 
-    let mut stmt = conn
-        .prepare(
-            "SELECT year, amount FROM budgets
+    let mut stmt = conn.prepare(
+        "SELECT year, amount FROM budgets
 			 WHERE account_guid = ?1
 			 ORDER BY year",
-        )
-        .map_err(|e| e.to_string())?;
+    )?;
     let raw_entries: Vec<(i32, f64)> = stmt
         .query_map([account_guid], |row| {
             Ok((row.get::<_, i32>(0)?, row.get::<_, f64>(1)?))
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
     let yearly: HashMap<i32, f64> = raw_entries.iter().map(|(y, a)| (*y, *a)).collect();
 
     // Carry-in at Jan 1 of the selected year (always applied). Only years
@@ -745,7 +728,7 @@ fn fetch_budget_detail_inner(
     })
 }
 
-fn fetch_budget_date_range_inner(conn: &Connection) -> Result<BudgetDateRange, String> {
+fn fetch_budget_date_range_inner(conn: &Connection) -> Result<BudgetDateRange, AppError> {
     let (earliest, latest) = utils::visible_tx_window(conn)?;
 
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
@@ -770,7 +753,7 @@ pub async fn set_budget_year_amount(
     amount: f64,
 ) -> Result<Budget, String> {
     run_blocking(state.db.clone(), move |conn| {
-        set_budget_year_amount_inner(conn, &account_guid, year, amount)
+        set_budget_year_amount_inner(conn, &account_guid, year, amount).map_err(String::from)
     })
     .await
 }
@@ -781,7 +764,7 @@ pub async fn fetch_budget_years(
     account_guid: String,
 ) -> Result<Vec<i32>, String> {
     run_blocking(state.db.clone(), move |conn| {
-        fetch_budget_years_inner(conn, &account_guid)
+        fetch_budget_years_inner(conn, &account_guid).map_err(String::from)
     })
     .await
 }
@@ -793,7 +776,7 @@ pub async fn delete_budget_year(
     year: i32,
 ) -> Result<(), String> {
     run_blocking(state.db.clone(), move |conn| {
-        delete_budget_year_inner(conn, &account_guid, year)
+        delete_budget_year_inner(conn, &account_guid, year).map_err(String::from)
     })
     .await
 }
@@ -804,7 +787,7 @@ pub async fn fetch_budget_vs_actual(
     year: i32,
 ) -> Result<Vec<BudgetActualRow>, String> {
     run_blocking(state.db.clone(), move |conn| {
-        fetch_budget_vs_actual_inner(conn, year)
+        fetch_budget_vs_actual_inner(conn, year).map_err(String::from)
     })
     .await
 }
@@ -816,7 +799,7 @@ pub async fn fetch_budget_detail(
     year: i32,
 ) -> Result<BudgetDetail, String> {
     run_blocking(state.db.clone(), move |conn| {
-        fetch_budget_detail_inner(conn, &account_guid, year)
+        fetch_budget_detail_inner(conn, &account_guid, year).map_err(String::from)
     })
     .await
 }
@@ -825,7 +808,10 @@ pub async fn fetch_budget_detail(
 pub async fn fetch_budget_date_range(
     state: State<'_, AppState>,
 ) -> Result<BudgetDateRange, String> {
-    run_blocking(state.db.clone(), fetch_budget_date_range_inner).await
+    run_blocking(state.db.clone(), |conn| {
+        fetch_budget_date_range_inner(conn).map_err(String::from)
+    })
+    .await
 }
 
 #[cfg(test)]
@@ -1072,7 +1058,7 @@ mod tests {
         let conn = setup();
         set_budget_year_amount_inner(&conn, "food", 2024, 600.0).unwrap();
         let err = fetch_budget_detail_inner(&conn, "food", 2025).unwrap_err();
-        assert_eq!(err, "No budget for this year");
+        assert_eq!(err.to_string(), "No budget for this year");
     }
 
     #[test]
