@@ -50,7 +50,7 @@ struct PreparedAttachment {
     data: Vec<u8>,
 }
 
-fn mime_for_path(path: &Path) -> Result<&'static str, String> {
+fn mime_for_path(path: &Path) -> Result<&'static str, AppError> {
     let extension = path
         .extension()
         .and_then(|ext| ext.to_str())
@@ -61,47 +61,52 @@ fn mime_for_path(path: &Path) -> Result<&'static str, String> {
         .find(|(candidate, _)| *candidate == extension)
         .map(|(_, mime)| *mime)
         .ok_or_else(|| {
-            if extension.is_empty() {
+            AppError::Validation(if extension.is_empty() {
                 format!("Unsupported file type: {}", path.display())
             } else {
                 format!("Unsupported file type: .{extension}")
-            }
+            })
         })
 }
 
 /// Read + validate one picked/dropped file. Runs before the DB lock is taken
 /// (disk I/O never happens while holding the connection).
-fn prepare_attachment(path: &str) -> Result<PreparedAttachment, String> {
+fn prepare_attachment(path: &str) -> Result<PreparedAttachment, AppError> {
     let source = Path::new(path);
     let filename = source
         .file_name()
         .and_then(|name| name.to_str())
         .map(|name| name.trim().to_string())
         .filter(|name| !name.is_empty())
-        .ok_or_else(|| format!("Unreadable file name: {}", source.display()))?;
+        .ok_or_else(|| {
+            AppError::Validation(format!("Unreadable file name: {}", source.display()))
+        })?;
     let mime_type = mime_for_path(source)?;
     let metadata = std::fs::metadata(source)
-        .map_err(|e| format!("Failed to read {}: {e}", source.display()))?;
+        .map_err(|e| AppError::Io(format!("Failed to read {}: {e}", source.display())))?;
     if !metadata.is_file() {
-        return Err(format!("Not a file: {}", source.display()));
+        return Err(AppError::Validation(format!(
+            "Not a file: {}",
+            source.display()
+        )));
     }
     if metadata.len() == 0 {
-        return Err(format!("{filename} is empty"));
+        return Err(AppError::Validation(format!("{filename} is empty")));
     }
     if metadata.len() > MAX_ATTACHMENT_BYTES {
-        return Err(format!(
+        return Err(AppError::Validation(format!(
             "{filename} is larger than {} MB",
             MAX_ATTACHMENT_BYTES / (1024 * 1024)
-        ));
+        )));
     }
-    let data =
-        std::fs::read(source).map_err(|e| format!("Failed to read {}: {e}", source.display()))?;
+    let data = std::fs::read(source)
+        .map_err(|e| AppError::Io(format!("Failed to read {}: {e}", source.display())))?;
     // The file could have grown between `metadata` and `read`.
     if data.len() as u64 > MAX_ATTACHMENT_BYTES {
-        return Err(format!(
+        return Err(AppError::Validation(format!(
             "{filename} is larger than {} MB",
             MAX_ATTACHMENT_BYTES / (1024 * 1024)
-        ));
+        )));
     }
     let filename: String = filename.chars().take(255).collect();
     Ok(PreparedAttachment {
@@ -294,6 +299,7 @@ pub async fn add_attachments(
             .iter()
             .map(|path| prepare_attachment(path))
             .collect::<Result<Vec<_>, _>>()
+            .map_err(String::from)
     })
     .await?;
     run_blocking(state.db.clone(), move |conn| {
@@ -431,6 +437,7 @@ mod tests {
         let txt = write_file(&dir, "notes.txt", b"hi");
         assert!(prepare_attachment(&txt)
             .unwrap_err()
+            .to_string()
             .contains("Unsupported"));
         // Accepted image types prepare fine.
         for name in [
@@ -446,7 +453,10 @@ mod tests {
         }
         // Empty file.
         let empty = write_file(&dir, "empty.pdf", b"");
-        assert!(prepare_attachment(&empty).unwrap_err().contains("empty"));
+        assert!(prepare_attachment(&empty)
+            .unwrap_err()
+            .to_string()
+            .contains("empty"));
         // Missing file.
         let missing = dir.join("nope.pdf");
         assert!(prepare_attachment(&missing.to_string_lossy()).is_err());
@@ -458,6 +468,7 @@ mod tests {
             .unwrap();
         assert!(prepare_attachment(&big.to_string_lossy())
             .unwrap_err()
+            .to_string()
             .contains("larger than"));
 
         std::fs::remove_dir_all(&dir).ok();
