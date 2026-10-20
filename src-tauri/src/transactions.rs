@@ -793,7 +793,7 @@ pub async fn fetch_transactions(
     filters: Option<Filters>,
     sort_by: Option<String>,
     sort_dir: Option<String>,
-) -> Result<TransactionsResult, String> {
+) -> Result<TransactionsResult, AppError> {
     run_blocking(state.db.clone(), move |conn| {
         fetch_transactions_inner(
             conn,
@@ -811,7 +811,7 @@ pub async fn fetch_transactions(
 pub async fn fetch_transaction_heatmap(
     state: State<'_, AppState>,
     filters: Option<Filters>,
-) -> Result<Vec<HeatmapPoint>, String> {
+) -> Result<Vec<HeatmapPoint>, AppError> {
     run_blocking(state.db.clone(), move |conn| {
         fetch_transaction_heatmap_inner(conn, filters)
     })
@@ -914,7 +914,7 @@ fn fetch_transaction_inner(
 pub async fn fetch_transaction(
     state: State<'_, AppState>,
     guid: String,
-) -> Result<Option<TransactionDetailResult>, String> {
+) -> Result<Option<TransactionDetailResult>, AppError> {
     run_blocking(state.db.clone(), move |conn| {
         fetch_transaction_inner(conn, &guid)
     })
@@ -1090,7 +1090,7 @@ fn delete_transaction_inner(
 pub async fn create_transaction(
     state: State<'_, AppState>,
     input: TxInput,
-) -> Result<String, String> {
+) -> Result<String, AppError> {
     run_blocking(state.db.clone(), move |conn| {
         create_transaction_inner(conn, input)
     })
@@ -1102,7 +1102,7 @@ pub async fn update_transaction(
     state: State<'_, AppState>,
     guid: String,
     input: TxInput,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     run_blocking(state.db.clone(), move |conn| {
         update_transaction_inner(conn, &guid, input)
     })
@@ -1114,7 +1114,7 @@ pub async fn delete_transaction(
     state: State<'_, AppState>,
     guid: String,
     unreconcile: Option<bool>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let unreconcile = unreconcile.unwrap_or(false);
     run_blocking(state.db.clone(), move |conn| {
         delete_transaction_inner(conn, &guid, unreconcile)

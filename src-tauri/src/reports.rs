@@ -690,7 +690,7 @@ pub async fn fetch_pnl_report(
     date_to: String,
     prev_date_from: Option<String>,
     prev_date_to: Option<String>,
-) -> Result<ProfitLossReport, String> {
+) -> Result<ProfitLossReport, AppError> {
     run_blocking(state.db.clone(), move |conn| {
         fetch_pnl_report_inner(
             conn,
@@ -708,7 +708,7 @@ pub async fn fetch_pnl_trend(
     state: State<'_, AppState>,
     date_from: String,
     date_to: String,
-) -> Result<Vec<PnlTrendPoint>, String> {
+) -> Result<Vec<PnlTrendPoint>, AppError> {
     run_blocking(state.db.clone(), move |conn| {
         fetch_pnl_trend_inner(conn, &date_from, &date_to)
     })

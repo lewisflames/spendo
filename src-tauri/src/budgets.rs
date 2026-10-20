@@ -751,7 +751,7 @@ pub async fn set_budget_year_amount(
     account_guid: String,
     year: i32,
     amount: f64,
-) -> Result<Budget, String> {
+) -> Result<Budget, AppError> {
     run_blocking(state.db.clone(), move |conn| {
         set_budget_year_amount_inner(conn, &account_guid, year, amount)
     })
@@ -762,7 +762,7 @@ pub async fn set_budget_year_amount(
 pub async fn fetch_budget_years(
     state: State<'_, AppState>,
     account_guid: String,
-) -> Result<Vec<i32>, String> {
+) -> Result<Vec<i32>, AppError> {
     run_blocking(state.db.clone(), move |conn| {
         fetch_budget_years_inner(conn, &account_guid)
     })
@@ -774,7 +774,7 @@ pub async fn delete_budget_year(
     state: State<'_, AppState>,
     account_guid: String,
     year: i32,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     run_blocking(state.db.clone(), move |conn| {
         delete_budget_year_inner(conn, &account_guid, year)
     })
@@ -785,7 +785,7 @@ pub async fn delete_budget_year(
 pub async fn fetch_budget_vs_actual(
     state: State<'_, AppState>,
     year: i32,
-) -> Result<Vec<BudgetActualRow>, String> {
+) -> Result<Vec<BudgetActualRow>, AppError> {
     run_blocking(state.db.clone(), move |conn| {
         fetch_budget_vs_actual_inner(conn, year)
     })
@@ -797,7 +797,7 @@ pub async fn fetch_budget_detail(
     state: State<'_, AppState>,
     account_guid: String,
     year: i32,
-) -> Result<BudgetDetail, String> {
+) -> Result<BudgetDetail, AppError> {
     run_blocking(state.db.clone(), move |conn| {
         fetch_budget_detail_inner(conn, &account_guid, year)
     })
@@ -807,7 +807,7 @@ pub async fn fetch_budget_detail(
 #[tauri::command]
 pub async fn fetch_budget_date_range(
     state: State<'_, AppState>,
-) -> Result<BudgetDateRange, String> {
+) -> Result<BudgetDateRange, AppError> {
     run_blocking(state.db.clone(), fetch_budget_date_range_inner).await
 }
 

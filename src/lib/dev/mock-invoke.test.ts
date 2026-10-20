@@ -15,6 +15,16 @@ describe('mockInvoke', () => {
     );
   });
 
+  it('rejects with serialized backend errors', async () => {
+    await expect(mockInvoke('fetch_holding_detail', { commodityGuid: 'nope' })).rejects.toEqual({
+      kind: 'notFound',
+      message: '[mock] Unknown holding nope'
+    });
+    await expect(
+      mockInvoke('create_transaction', { input: { postDate: '', splits: [] } })
+    ).rejects.toMatchObject({ kind: 'validation' });
+  });
+
   it('boots the shell with a balanced book', async () => {
     const home = await mockInvoke('fetch_home_data');
     expect(home.hasData).toBe(true);

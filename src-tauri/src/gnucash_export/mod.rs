@@ -691,13 +691,15 @@ fn to_recurrence(frequency: &str, interval_mult: i64) -> Option<(&'static str, i
 pub async fn export_gnucash(
     state: State<'_, AppState>,
     input: GnuCashExportInput,
-) -> Result<GnuCashExportResult, String> {
+) -> Result<GnuCashExportResult, AppError> {
     let path = PathBuf::from(input.path.trim());
     if path.as_os_str().is_empty() {
-        return Err("Pick where to save that export".to_string());
+        return Err(AppError::Validation(
+            "Pick where to save that export".to_string(),
+        ));
     }
-    if state.db_path.lock().map_err(|e| e.to_string())?.is_none() {
-        return Err("No book is open".to_string());
+    if state.db_path.lock()?.is_none() {
+        return Err(AppError::Validation("No book is open".to_string()));
     }
 
     state.ensure_not_active_book(&path)?;

@@ -158,7 +158,7 @@ async fn activate_book(
     state: &State<'_, AppState>,
     new_path: PathBuf,
     new_conn: rusqlite::Connection,
-) -> Result<HomeDataResult, String> {
+) -> Result<HomeDataResult, AppError> {
     let generation = state.book_generation.clone();
     let summary = db::run_swap_blocking(state.db.clone(), move |conn| {
         db::checkpoint(conn);
@@ -166,7 +166,7 @@ async fn activate_book(
     })
     .await?;
     // Brief path-mutex hold in async context: plain PathBuf clone, no I/O.
-    *state.db_path.lock().map_err(|e| e.to_string())? = Some(new_path.clone());
+    *state.db_path.lock()? = Some(new_path.clone());
     if let Err(e) = db::write_last_book(&state.app_data_dir, &new_path) {
         eprintln!("spendo: {e}");
     }
@@ -181,7 +181,7 @@ async fn activate_book(
 /// sidecars next to the closed file. The sidecar clear must not fail the
 /// close, so it is logged, not bubbled.
 #[tauri::command]
-pub async fn close_book(state: State<'_, AppState>) -> Result<HomeDataResult, String> {
+pub async fn close_book(state: State<'_, AppState>) -> Result<HomeDataResult, AppError> {
     let generation = state.book_generation.clone();
     db::run_swap_blocking(state.db.clone(), move |conn| {
         db::checkpoint(conn);
@@ -192,7 +192,7 @@ pub async fn close_book(state: State<'_, AppState>) -> Result<HomeDataResult, St
         Ok(())
     })
     .await?;
-    *state.db_path.lock().map_err(|e| e.to_string())? = None;
+    *state.db_path.lock()? = None;
     db::clear_last_book(&state.app_data_dir);
     Ok(HomeDataResult {
         has_data: false,
@@ -204,15 +204,18 @@ pub async fn close_book(state: State<'_, AppState>) -> Result<HomeDataResult, St
 /// install before any New/Open). Locks only the path mutex — a PathBuf clone
 /// with no DB access — so no blocking-thread hop is needed.
 #[tauri::command]
-pub async fn fetch_active_book(state: State<'_, AppState>) -> Result<ActiveBook, String> {
-    let guard = state.db_path.lock().map_err(|e| e.to_string())?;
+pub async fn fetch_active_book(state: State<'_, AppState>) -> Result<ActiveBook, AppError> {
+    let guard = state.db_path.lock()?;
     Ok(ActiveBook {
         path: guard.as_ref().map(|p| p.to_string_lossy().to_string()),
     })
 }
 
 #[tauri::command]
-pub async fn open_book(state: State<'_, AppState>, path: String) -> Result<HomeDataResult, String> {
+pub async fn open_book(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<HomeDataResult, AppError> {
     let new_path = PathBuf::from(&path);
     // Validate + connect on a blocking thread before touching shared state.
     let open_path = new_path.clone();
@@ -225,7 +228,7 @@ pub async fn create_book_at(
     state: State<'_, AppState>,
     path: String,
     currency: String,
-) -> Result<HomeDataResult, String> {
+) -> Result<HomeDataResult, AppError> {
     let new_path = PathBuf::from(&path);
     let create_path = new_path.clone();
     let new_conn = db::run_io(move || create_book_at_inner(&create_path, &currency)).await?;
@@ -236,15 +239,14 @@ pub async fn create_book_at(
 pub async fn save_book_as(
     state: State<'_, AppState>,
     path: String,
-) -> Result<HomeDataResult, String> {
+) -> Result<HomeDataResult, AppError> {
     let new_path = PathBuf::from(&path);
     // Saving onto the open file is a no-op: just re-report its summary. Compare
     // canonical forms too: `sub/../book.spendo` aliases the live file, and the
     // stale-target sweep below would otherwise delete it before copying.
     let is_same = state
         .db_path
-        .lock()
-        .map_err(|e| e.to_string())?
+        .lock()?
         .as_ref()
         .is_some_and(|p| crate::utils::same_path(p, &new_path));
     if is_same {
@@ -283,7 +285,7 @@ pub async fn save_book_as(
         get_summary(conn)
     })
     .await?;
-    *state.db_path.lock().map_err(|e| e.to_string())? = Some(new_path.clone());
+    *state.db_path.lock()? = Some(new_path.clone());
     if let Err(e) = db::write_last_book(&state.app_data_dir, &new_path) {
         eprintln!("spendo: {e}");
     }

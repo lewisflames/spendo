@@ -506,7 +506,7 @@ fn duplicate_flags_for_rows(
 pub async fn csv_detect(
     state: State<'_, AppState>,
     path: String,
-) -> Result<CsvDetectResult, String> {
+) -> Result<CsvDetectResult, AppError> {
     // File read + parsing run on a blocking thread (the file may be ~10 MiB).
     let mut detect = run_io(move || csv_detect_inner(&path)).await?;
     // Saved mapping lookup is a book-scoped DB read, separate from file I/O.
@@ -654,7 +654,7 @@ fn preview_inner(
 pub async fn csv_preview(
     state: State<'_, AppState>,
     input: CsvPreviewInput,
-) -> Result<CsvPreviewResult, String> {
+) -> Result<CsvPreviewResult, AppError> {
     // Read the file off the runtime and before the DB lock.
     let path = input.path.clone();
     let bytes = run_io(move || read_file_bytes(&path)).await?;
@@ -906,7 +906,7 @@ fn insert_staged_rows(
 pub async fn csv_commit(
     state: State<'_, AppState>,
     input: CsvCommitInput,
-) -> Result<CsvCommitResult, String> {
+) -> Result<CsvCommitResult, AppError> {
     // Capture the active book before reading/parsing the file so a switch
     // during preparation aborts instead of writing into the new book.
     let generation = state
@@ -927,7 +927,7 @@ pub async fn csv_commit(
 pub async fn delete_csv_preset(
     state: State<'_, AppState>,
     signature: String,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     run_blocking(state.db.clone(), move |conn| {
         delete_preset(conn, &signature)
     })

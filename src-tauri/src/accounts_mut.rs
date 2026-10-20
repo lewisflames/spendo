@@ -377,7 +377,7 @@ fn delete_account_inner(conn: &Connection, guid: &str) -> Result<(), AppError> {
 pub async fn create_account(
     state: State<'_, AppState>,
     input: AccountInput,
-) -> Result<String, String> {
+) -> Result<String, AppError> {
     run_blocking(state.db.clone(), move |conn| {
         create_account_inner(conn, input)
     })
@@ -389,7 +389,7 @@ pub async fn update_account(
     state: State<'_, AppState>,
     guid: String,
     input: AccountInput,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     run_blocking(state.db.clone(), move |conn| {
         update_account_inner(conn, &guid, input)
     })
@@ -397,7 +397,7 @@ pub async fn update_account(
 }
 
 #[tauri::command]
-pub async fn delete_account(state: State<'_, AppState>, guid: String) -> Result<(), String> {
+pub async fn delete_account(state: State<'_, AppState>, guid: String) -> Result<(), AppError> {
     run_blocking(state.db.clone(), move |conn| {
         delete_account_inner(conn, &guid)
     })

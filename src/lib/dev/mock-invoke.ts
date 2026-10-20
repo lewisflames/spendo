@@ -19,8 +19,10 @@ import type {
   TransactionDetail,
   TransactionRow,
   CommandPayloads,
-  Command
+  Command,
+  BackendError
 } from '$lib/tauri';
+import { errMsg, isBackendError } from '$lib/utils/error';
 import {
   ACCOUNTS,
   BUDGET_PLANS,
@@ -37,6 +39,11 @@ import {
   type FixtureTx
 } from './fixtures';
 import { INVESTMENT_ACCOUNT_TYPES, nodeCategory } from '$lib/features/accounts/account-types';
+
+/** Missing-entity rejection, shaped like the Rust `AppError::NotFound` payload. */
+function notFound(message: string): BackendError {
+  return { kind: 'notFound', message };
+}
 
 // ── state ──────────────────────────────────────────────────────────────────
 
@@ -366,7 +373,7 @@ function toSplitDetail(tx: FixtureTx, split: FixtureSplit, index: number): Split
 function accountDetail(args: Record<string, unknown>): CommandPayloads['fetch_account_detail'] {
   const guid = String(args.guid);
   const acc = account(guid);
-  if (!acc) throw new Error(`[mock] Unknown account ${guid}`);
+  if (!acc) throw notFound(`[mock] Unknown account ${guid}`);
   const pageSize = Number(args.pageSize) || 25;
   const page = Math.max(1, Number(args.page) || 1);
   const dateFrom = args.dateFrom ? String(args.dateFrom) : null;
@@ -666,7 +673,7 @@ function updateTransaction(args: Record<string, unknown>): void {
   const guid = String(args.guid);
   const input = args.input as TxInputLike;
   const tx = state.transactions.find((t) => t.guid === guid);
-  if (!tx) throw new Error(`[mock] Unknown transaction ${guid}`);
+  if (!tx) throw notFound(`[mock] Unknown transaction ${guid}`);
   if (!input.unreconcile && hasLockedSplits(tx)) {
     throw new Error(
       'Cannot edit. This transaction has cleared or reconciled splits. Unreconcile it first'
@@ -689,7 +696,7 @@ function updateTransaction(args: Record<string, unknown>): void {
 
 function deleteTransaction(guid: string, unreconcile = false): void {
   const index = state.transactions.findIndex((t) => t.guid === guid);
-  if (index === -1) throw new Error(`[mock] Unknown transaction ${guid}`);
+  if (index === -1) throw notFound(`[mock] Unknown transaction ${guid}`);
   if (!unreconcile && hasLockedSplits(state.transactions[index])) {
     throw new Error(
       'Cannot delete. This transaction has cleared or reconciled splits. Unreconcile it first'
@@ -889,7 +896,7 @@ function budgetActualRows(year: number): CommandPayloads['fetch_budget_vs_actual
 function budgetDetail(accountGuid: string, year: number): CommandPayloads['fetch_budget_detail'] {
   const acc = account(accountGuid);
   const plan = budgetFor(accountGuid, year);
-  if (!acc || !plan) throw new Error(`[mock] No budget for ${accountGuid} in ${year}`);
+  if (!acc || !plan) throw notFound(`[mock] No budget for ${accountGuid} in ${year}`);
   const elapsed = elapsedMonths(year);
   const actual = actualFor(accountGuid, year);
   const monthly = Array.from({ length: 12 }, (_, i) => {
@@ -1035,7 +1042,7 @@ function allocationTargets(): CommandPayloads['fetch_allocation_targets'] {
 function holdingDetail(args: Record<string, unknown>): CommandPayloads['fetch_holding_detail'] {
   const commodityGuid = String(args.commodityGuid);
   const acc = investmentAccounts().find((a) => a.commodityGuid === commodityGuid);
-  if (!acc) throw new Error(`[mock] Unknown holding ${commodityGuid}`);
+  if (!acc) throw notFound(`[mock] Unknown holding ${commodityGuid}`);
   const holding = holdingFor(acc);
   const pageSize = Number(args.pageSize) || 25;
   const page = Math.max(1, Number(args.page) || 1);
@@ -1309,7 +1316,7 @@ function applyMockUpdates(
       throw new Error(`[mock] Invalid reconcile state '${change.state}'. Expected 'n' or 'c'`);
     }
     const found = findSplit(change.splitGuid);
-    if (!found) throw new Error('A split was not found. It may have been removed');
+    if (!found) throw notFound('A split was not found. It may have been removed');
     if (found.split.accountGuid !== accountGuid) {
       throw new Error(`Split ${change.splitGuid} does not belong to this account`);
     }
@@ -1352,7 +1359,7 @@ function reconcileInfo(args: Record<string, unknown>): CommandPayloads['fetch_re
   const accountGuid = String(args.accountGuid);
   const statementDate = String(args.statementDate);
   const acc = account(accountGuid);
-  if (!acc) throw new Error(`[mock] Unknown account ${accountGuid}`);
+  if (!acc) throw notFound(`[mock] Unknown account ${accountGuid}`);
   if (statementDate > todayIso()) {
     throw new Error('That statement date is in the future. Use today or earlier');
   }
@@ -1497,7 +1504,7 @@ const handlers: HandlerMap = {
     const guid = String(args.guid);
     const input = args.input as AccountInputLike;
     const acc = account(guid);
-    if (!acc) throw new Error(`[mock] Unknown account ${guid}`);
+    if (!acc) throw notFound(`[mock] Unknown account ${guid}`);
     const commodity = COMMODITIES.find((c) => c.guid === input.commodityGuid);
     Object.assign(acc, {
       name: input.name,
@@ -1513,7 +1520,7 @@ const handlers: HandlerMap = {
   delete_account: (args) => {
     const guid = String(args.guid);
     const acc = account(guid);
-    if (!acc) throw new Error(`[mock] Unknown account ${guid}`);
+    if (!acc) throw notFound(`[mock] Unknown account ${guid}`);
     const removed = subtreeGuids(guid);
     state.accounts = state.accounts.filter((a) => !removed.has(a.guid));
     state.transactions = state.transactions.filter(
@@ -1583,7 +1590,7 @@ const handlers: HandlerMap = {
   fetch_schedules: () => state.schedules,
   fetch_schedule: (args) => {
     const schedule = state.schedules.find((s) => s.guid === args.guid);
-    if (!schedule) throw new Error(`[mock] Unknown schedule ${args.guid}`);
+    if (!schedule) throw notFound(`[mock] Unknown schedule ${args.guid}`);
     return schedule;
   },
   create_schedule: (args) => {
@@ -1607,7 +1614,7 @@ const handlers: HandlerMap = {
   },
   update_schedule: (args) => {
     const schedule = state.schedules.find((s) => s.guid === args.guid);
-    if (!schedule) throw new Error(`[mock] Unknown schedule ${args.guid}`);
+    if (!schedule) throw notFound(`[mock] Unknown schedule ${args.guid}`);
     const input = args.input as ScheduleInputLike;
     const updated = buildSchedule({
       guid: schedule.guid,
@@ -1631,7 +1638,7 @@ const handlers: HandlerMap = {
   },
   set_schedule_active: (args) => {
     const schedule = state.schedules.find((s) => s.guid === args.guid);
-    if (!schedule) throw new Error(`[mock] Unknown schedule ${args.guid}`);
+    if (!schedule) throw notFound(`[mock] Unknown schedule ${args.guid}`);
     schedule.active = Boolean(args.active);
     return schedule;
   },
@@ -2047,7 +2054,7 @@ const handlers: HandlerMap = {
   update_import_rule: (args) => {
     const input = args.input as Omit<ImportRuleLike, 'id'>;
     const rule = state.importRules.find((r) => r.id === Number(args.id));
-    if (!rule) throw new Error('[mock] Unknown import rule');
+    if (!rule) throw notFound('[mock] Unknown import rule');
     Object.assign(rule, input);
     return {
       ...rule,
@@ -2063,7 +2070,7 @@ const handlers: HandlerMap = {
   move_import_rule: (args) => {
     const ordered = [...state.importRules].sort((a, b) => a.priority - b.priority || a.id - b.id);
     const index = ordered.findIndex((r) => r.id === Number(args.id));
-    if (index < 0) throw new Error('[mock] Unknown import rule');
+    if (index < 0) throw notFound('[mock] Unknown import rule');
     const target = index + Number(args.direction);
     if (target >= 0 && target < ordered.length) {
       const current = ordered[index];
@@ -2234,5 +2241,11 @@ export async function mockInvoke<K extends Command>(
   }
   // A small delay keeps async loading states (skeletons, spinners) observable.
   await new Promise((resolve) => setTimeout(resolve, 20));
-  return handler(args ?? {}) as CommandPayloads[K];
+  try {
+    return handler(args ?? {}) as CommandPayloads[K];
+  } catch (e) {
+    // Commands reject with a serialized `AppError`; plain mock errors stand
+    // in for the backend's validation failures.
+    throw isBackendError(e) ? e : { kind: 'validation', message: errMsg(e, String(e)) };
+  }
 }

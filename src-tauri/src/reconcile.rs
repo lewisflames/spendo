@@ -949,7 +949,7 @@ pub async fn fetch_reconcile_info(
     state: State<'_, AppState>,
     account_guid: String,
     statement_date: String,
-) -> Result<ReconcileInfo, String> {
+) -> Result<ReconcileInfo, AppError> {
     run_blocking(state.db.clone(), move |conn| {
         fetch_reconcile_info_inner(conn, &account_guid, &statement_date)
     })
@@ -960,7 +960,7 @@ pub async fn fetch_reconcile_info(
 pub async fn mark_reconcile_splits(
     state: State<'_, AppState>,
     input: MarkReconcileInput,
-) -> Result<MarkReconcileResult, String> {
+) -> Result<MarkReconcileResult, AppError> {
     run_blocking(state.db.clone(), move |conn| {
         mark_reconcile_splits_inner(conn, input)
     })
@@ -971,7 +971,7 @@ pub async fn mark_reconcile_splits(
 pub async fn finish_reconciliation(
     state: State<'_, AppState>,
     input: FinishReconcileInput,
-) -> Result<FinishReconcileResult, String> {
+) -> Result<FinishReconcileResult, AppError> {
     run_blocking(state.db.clone(), move |conn| {
         finish_reconciliation_inner(conn, input)
     })
@@ -982,7 +982,7 @@ pub async fn finish_reconciliation(
 pub async fn reopen_last_reconciliation(
     state: State<'_, AppState>,
     account_guid: String,
-) -> Result<ReopenReconcileResult, String> {
+) -> Result<ReopenReconcileResult, AppError> {
     run_blocking(state.db.clone(), move |conn| {
         reopen_last_reconciliation_inner(conn, &account_guid)
     })
@@ -992,7 +992,7 @@ pub async fn reopen_last_reconciliation(
 #[tauri::command]
 pub async fn fetch_reconcile_summaries(
     state: State<'_, AppState>,
-) -> Result<Vec<ReconcileAccountSummary>, String> {
+) -> Result<Vec<ReconcileAccountSummary>, AppError> {
     run_blocking(state.db.clone(), |conn| {
         fetch_reconcile_summaries_inner(conn)
     })

@@ -460,7 +460,7 @@ pub fn fetch_children_and_subtree(
 }
 
 #[tauri::command]
-pub async fn fetch_accounts(state: State<'_, AppState>) -> Result<AccountsResult, String> {
+pub async fn fetch_accounts(state: State<'_, AppState>) -> Result<AccountsResult, AppError> {
     run_blocking(state.db.clone(), fetch_accounts_inner).await
 }
 
@@ -532,7 +532,7 @@ fn nav_roots_inner(conn: &Connection) -> Result<Vec<NavRoot>, AppError> {
 }
 
 #[tauri::command]
-pub async fn fetch_nav_roots(state: State<'_, AppState>) -> Result<Vec<NavRoot>, String> {
+pub async fn fetch_nav_roots(state: State<'_, AppState>) -> Result<Vec<NavRoot>, AppError> {
     run_blocking(state.db.clone(), nav_roots_inner).await
 }
 
@@ -555,7 +555,7 @@ fn fetch_book_currencies_inner(conn: &Connection) -> Result<Vec<BookCurrency>, A
 #[tauri::command]
 pub async fn fetch_book_currencies(
     state: State<'_, AppState>,
-) -> Result<Vec<BookCurrency>, String> {
+) -> Result<Vec<BookCurrency>, AppError> {
     run_blocking(state.db.clone(), fetch_book_currencies_inner).await
 }
 

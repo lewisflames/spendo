@@ -678,7 +678,7 @@ pub async fn preview_gnucash_import(
     state: State<'_, AppState>,
     path: String,
     filename: String,
-) -> Result<GnuCashPreview, String> {
+) -> Result<GnuCashPreview, AppError> {
     let generation = state
         .book_generation
         .load(std::sync::atomic::Ordering::SeqCst);
@@ -760,7 +760,7 @@ fn preview_source_inner(
 pub async fn import_gnucash(
     state: State<'_, AppState>,
     input: GnuCashImportInput,
-) -> Result<ImportResult, String> {
+) -> Result<ImportResult, AppError> {
     // Capture the active book before any await: the merge must never land in a
     // book the user switched to while the file was being hashed.
     let generation = state
@@ -780,9 +780,9 @@ pub async fn import_gnucash(
     })
     .await?;
     if current_sha != input.sha256 {
-        return Err(
+        return Err(AppError::Validation(
             "Source file changed since the preview. Please run the import again".to_string(),
-        );
+        ));
     }
     let generation_handle = state.book_generation.clone();
     let GnuCashImportInput {

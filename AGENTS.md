@@ -51,7 +51,7 @@ Frontend work is done when `bun run check`, `bun run lint` and `bun run test` pa
 ## Backend conventions
 
 - Every DB-touching command runs through `db::run_blocking(state.db.clone(), move |conn| …)` — never lock the connection directly inside an `async fn`. Non-DB file I/O goes through `db::run_io(…)`; read import/CSV files before `run_blocking` so the DB lock is never held during disk I/O. Book switching follows the same rule via the mutable counterpart `db::run_swap_blocking`.
-- Use `db::with_tx_err(conn, || …)` instead of manual `BEGIN`/`COMMIT`/`ROLLBACK` (RAII rollback on drop). Private cores follow `<command>_inner(conn, …)`, return `Result<T, db::AppError>` (`NotFound`/`Validation`/`Db`) and convert to `String` only at the `#[tauri::command]` boundary; commands stay thin wrappers.
+- Use `db::with_tx_err(conn, || …)` instead of manual `BEGIN`/`COMMIT`/`ROLLBACK` (RAII rollback on drop). Private cores follow `<command>_inner(conn, …)` and return `Result<T, db::AppError>` (`NotFound`/`Validation`/`Io`/`Db`/`Internal`); commands return `Result<T, AppError>` too and stay thin wrappers. `AppError` crosses IPC as `{ kind, message }` (`BackendError` in `tauri.ts`).
 - Never match SQLite errors by message text — `DbError` carries the extended code (`is_foreign_key()`).
 - Read helpers tolerate only `QueryReturnedNoRows` (`.optional()`); never swallow DB failures with `.ok()` or `unwrap_or_default()`.
 - Visibility window: future-dated transactions are excluded from every "current state" query, details included, via `utils::VISIBLE_TX_FILTER` (or `utils::VISIBLE_NOW_EXPR` when the bound is an expression). The window is local-timezone (`date('now','localtime','+1 day')`), matching `todayStr()` and `chrono::Local`; timestamps stay UTC. Never hand-write the predicate or net worth/PnL/budgets diverge.
@@ -68,6 +68,7 @@ Frontend work is done when `bun run check`, `bun run lint` and `bun run test` pa
 - Table sort state uses `useTableSort<K>(defaults, descFirst)` from `$lib/hooks/`.
 - URL state composes factories from `use-url-params.svelte.ts` (`pageParam`, `debouncedSearchParam`, `dateParam`, `yearParam`); free-form specs only when none fits.
 - Search inputs debounce through `useDebouncedSearch`.
+- Command failures reject with `BackendError` (`{ kind, message }`): show text via `errMsg(e, fallback)` and branch on `errKind(e)` / `useAsyncData().errorKind` (e.g. `'notFound'` → `EmptyState`), never on message text.
 - Dates parse through `parseLocalDate` (date-only strings are local, not UTC); counts use `plural(n, 'word')`; ranges use `formatDateRange`.
 - Dialog form reset uses `useDialogReset(() => open, sync)` (bits-ui never fires `onOpenChange` for programmatic `bind:open`); create/edit footers use `<SaveFooter>`.
 - `index.ts` barrels use named exports only.
