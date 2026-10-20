@@ -276,7 +276,7 @@ pub async fn save_book_as(
         let fresh = save_book_as_inner(conn, &fresh_path)?;
         *conn = fresh;
         generation.fetch_add(1, Ordering::SeqCst);
-        get_summary(conn)
+        get_summary(conn).map_err(String::from)
     })
     .await?;
     *state.db_path.lock().map_err(|e| e.to_string())? = Some(new_path.clone());

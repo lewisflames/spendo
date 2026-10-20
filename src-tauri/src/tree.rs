@@ -1,3 +1,4 @@
+use crate::db::AppError;
 use rusqlite::Connection;
 use std::collections::{HashMap, HashSet};
 
@@ -10,10 +11,8 @@ pub struct AccountMeta {
 
 /// Load every account's path metadata in one query so ancestor walks are
 /// in-memory instead of one query per level.
-pub fn load_account_metas(conn: &Connection) -> Result<HashMap<String, AccountMeta>, String> {
-    let mut stmt = conn
-        .prepare("SELECT guid, name, parent_guid, account_type FROM accounts")
-        .map_err(|e| e.to_string())?;
+pub fn load_account_metas(conn: &Connection) -> Result<HashMap<String, AccountMeta>, AppError> {
+    let mut stmt = conn.prepare("SELECT guid, name, parent_guid, account_type FROM accounts")?;
     let rows = stmt
         .query_map([], |row| {
             Ok((
@@ -24,10 +23,8 @@ pub fn load_account_metas(conn: &Connection) -> Result<HashMap<String, AccountMe
                     account_type: row.get(3)?,
                 },
             ))
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<HashMap<_, _>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<HashMap<_, _>, _>>()?;
     Ok(rows)
 }
 
