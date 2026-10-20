@@ -8,7 +8,6 @@
   import { ArrowLeft, CalendarDays, CircleCheck, Undo2, X } from '@lucide/svelte';
   import { toast } from '$lib/components/ui/sonner';
   import { Button } from '$lib/components/ui/button';
-  import * as Dialog from '$lib/components/ui/dialog';
   import { dbSession, dbBootstrapping, refreshSession } from '$lib/stores/db.svelte';
   import { appSettings } from '$lib/stores/settings.svelte';
   import {
@@ -18,12 +17,7 @@
     reopenLastReconciliation,
     type TxSortKey
   } from '$lib/tauri';
-  import {
-    sessionCurrency,
-    plural,
-    formatDate,
-    formatSignedCurrency
-  } from '$lib/utils/format.svelte';
+  import { sessionCurrency, plural, formatSignedCurrency } from '$lib/utils/format.svelte';
   import { errMsg } from '$lib/utils/error';
   import { today } from '$lib/utils/date-utils.svelte';
   import BookGate from '$lib/components/shared/book-gate.svelte';
@@ -43,6 +37,18 @@
   import ReconcileKpiCards from '$lib/features/reconcile/reconcile-kpi-cards.svelte';
   import ReconcileStatementForm from '$lib/features/reconcile/reconcile-statement-form.svelte';
   import ReconcileTable from '$lib/features/reconcile/reconcile-table.svelte';
+  import ReconcileLeaveDialog from '$lib/features/reconcile/reconcile-leave-dialog.svelte';
+  import ReconcileFinishDialog from '$lib/features/reconcile/reconcile-finish-dialog.svelte';
+  import ReconcileUndoDialog from '$lib/features/reconcile/reconcile-undo-dialog.svelte';
+  import {
+    filterAndSortCandidates,
+    pendingReconcileUpdates
+  } from '$lib/features/reconcile/candidates';
+  import {
+    readReconcileDraft,
+    removeReconcileDraft,
+    writeReconcileDraft
+  } from '$lib/features/reconcile/reconcile-draft';
   import {
     clearedTotal,
     duplicateCandidateGuids,
@@ -128,15 +134,7 @@
   });
 
   function pendingUpdates() {
-    return candidates
-      .filter((c) => {
-        const want = checked.has(c.splitGuid) ? 'c' : 'n';
-        return want !== c.reconcileState;
-      })
-      .map((c) => ({
-        splitGuid: c.splitGuid,
-        state: checked.has(c.splitGuid) ? 'c' : 'n'
-      }));
+    return pendingReconcileUpdates(candidates, checked);
   }
 
   let dirty = $derived(pendingUpdates().length > 0);
@@ -172,30 +170,15 @@
     return q ? parseStatementAmount(q, appSettings.value.locale) : null;
   });
 
-  let filtered = $derived.by(() => {
-    const q = search.value.trim().toLowerCase();
-    const base = candidates.filter((c) => {
-      if (amountFilter !== null && Math.abs(c.amount - amountFilter) > 0.005) return false;
-      if (!q) return true;
-      const textMatch = [c.description, c.num, c.memo].some((f) => f?.toLowerCase().includes(q));
-      const amountMatch = searchAmount !== null && Math.abs(c.amount - searchAmount) <= 0.005;
-      return textMatch || amountMatch;
-    });
-    const sorted = [...base];
-    const dir = sort.sortDir === 'asc' ? 1 : -1;
-    sorted.sort((a, b) => {
-      if (sort.sortBy === 'amount') return (a.amount - b.amount || 0) * dir;
-      if (sort.sortBy === 'description')
-        return (
-          (a.description ?? '').localeCompare(b.description ?? '', undefined, {
-            sensitivity: 'base'
-          }) * dir
-        );
-      if (a.postDate !== b.postDate) return (a.postDate < b.postDate ? -1 : 1) * dir;
-      return (a.splitGuid < b.splitGuid ? -1 : 1) * dir;
-    });
-    return sorted;
-  });
+  let filtered = $derived(
+    filterAndSortCandidates(candidates, {
+      query: search.value,
+      queryAmount: searchAmount,
+      amountFilter,
+      sortBy: sort.sortBy,
+      sortDir: sort.sortDir
+    })
+  );
 
   let hiddenCount = $derived(candidates.length - filtered.length);
   let duplicates = $derived(duplicateCandidateGuids(candidates));
@@ -227,32 +210,6 @@
   }
 
   // ── draft persistence ─────────────────────────────────────────────────────
-  // Marks are saved explicitly, but the typed ending balance (and a moved
-  // statement date) would otherwise vanish on any reload or back navigation.
-
-  interface ReconcileDraft {
-    endingBalance: string;
-    statementDate: string;
-  }
-
-  function draftKey(g: string): string {
-    return `reconcile-draft:${g}`;
-  }
-
-  function readDraft(g: string): ReconcileDraft | null {
-    try {
-      const raw = localStorage.getItem(draftKey(g));
-      if (!raw) return null;
-      const parsed = JSON.parse(raw) as Partial<ReconcileDraft>;
-      if (typeof parsed.endingBalance !== 'string') return null;
-      return {
-        endingBalance: parsed.endingBalance,
-        statementDate: typeof parsed.statementDate === 'string' ? parsed.statementDate : ''
-      };
-    } catch {
-      return null;
-    }
-  }
 
   let draftFor = $state<string | null>(null);
 
@@ -260,7 +217,7 @@
     const g = guid;
     if (!g || draftFor === g) return;
     draftFor = g;
-    const draft = readDraft(g);
+    const draft = readReconcileDraft(g);
     if (!draft) return;
     endingBalanceInput = draft.endingBalance;
     // A `statement` URL param was shared/bookmarked explicitly, so it wins.
@@ -276,17 +233,14 @@
     if (!g) return;
     // Don't litter storage with pristine accounts.
     if (balance.trim() === '' && date === today.value) {
-      localStorage.removeItem(draftKey(g));
+      removeReconcileDraft(g);
       return;
     }
-    localStorage.setItem(
-      draftKey(g),
-      JSON.stringify({ endingBalance: balance, statementDate: date })
-    );
+    writeReconcileDraft(g, { endingBalance: balance, statementDate: date });
   });
 
   function clearDraft(g: string) {
-    localStorage.removeItem(draftKey(g));
+    removeReconcileDraft(g);
     // Reset to the pristine form before releasing the key: the read effect would
     // otherwise re-seed `draftFor` and the write effect would immediately save
     // the still-populated inputs back to storage.
@@ -631,79 +585,31 @@
   </div>
 </BookGate>
 
-<Dialog.Root bind:open={leaveOpen}>
-  <Dialog.Content class="sm:max-w-lg">
-    <Dialog.Header>
-      <Dialog.Title>{closeRequested ? 'Save before closing?' : 'Save before you go?'}</Dialog.Title>
-      <Dialog.Description>
-        {closeRequested
-          ? 'You have unsaved cleared marks for this statement. Closing without saving loses them.'
-          : 'You have unsaved cleared marks for this statement. Saving keeps them for next time.'}
-      </Dialog.Description>
-    </Dialog.Header>
-    <Dialog.Footer>
-      <Button
-        variant="ghost"
-        onclick={() => {
-          leaveOpen = false;
-          closeRequested = false;
-        }}>Stay</Button
-      >
-      <Button variant="outline" onclick={leaveWithoutSaving}>
-        {closeRequested ? 'Close without saving' : 'Leave without saving'}
-      </Button>
-      <Button onclick={saveAndLeave} disabled={saving}>
-        {saving ? 'Saving…' : closeRequested ? 'Save and close' : 'Save and leave'}
-      </Button>
-    </Dialog.Footer>
-  </Dialog.Content>
-</Dialog.Root>
+<ReconcileLeaveDialog
+  bind:open={leaveOpen}
+  {closeRequested}
+  {saving}
+  onStay={() => {
+    leaveOpen = false;
+    closeRequested = false;
+  }}
+  onLeave={leaveWithoutSaving}
+  onSaveAndLeave={saveAndLeave}
+/>
 
-<Dialog.Root bind:open={confirmFinishOpen}>
-  <Dialog.Content class="max-h-[90vh] overflow-y-auto sm:max-w-lg">
-    <Dialog.Header>
-      <Dialog.Title>Finish reconciliation?</Dialog.Title>
-      <Dialog.Description>
-        This saves your progress and marks the {checked.size} ticked splits as reconciled. Editing a transaction
-        later will ask before putting its splits back to New.
-      </Dialog.Description>
-    </Dialog.Header>
-    <Dialog.Footer>
-      <Button variant="outline" onclick={() => (confirmFinishOpen = false)} disabled={finishing}>
-        Cancel
-      </Button>
-      <Button
-        disabled={finishing}
-        onclick={() => {
-          confirmFinishOpen = false;
-          void finish();
-        }}
-      >
-        {finishing ? 'Finishing…' : 'Finish reconciliation'}
-      </Button>
-    </Dialog.Footer>
-  </Dialog.Content>
-</Dialog.Root>
+<ReconcileFinishDialog
+  bind:open={confirmFinishOpen}
+  checkedCount={checked.size}
+  {finishing}
+  onConfirm={() => void finish()}
+/>
 
 {#if res.data && res.data.lastReconciledDate && res.data.lastReconciledCount > 0}
-  <Dialog.Root bind:open={undoOpen}>
-    <Dialog.Content class="sm:max-w-lg">
-      <Dialog.Header>
-        <Dialog.Title>Undo last reconciliation?</Dialog.Title>
-        <Dialog.Description>
-          This returns {plural(res.data.lastReconciledCount, 'split')} from your last statement (through
-          {formatDate(res.data.lastReconciledDate)}) to Cleared, so you can tick them off and finish
-          again. Earlier reconciled statements are untouched.
-        </Dialog.Description>
-      </Dialog.Header>
-      <Dialog.Footer>
-        <Button variant="outline" onclick={() => (undoOpen = false)} disabled={undoing}>
-          Cancel
-        </Button>
-        <Button variant="destructive" onclick={undoLastReconciliation} disabled={undoing}>
-          {undoing ? 'Reopening…' : 'Undo reconciliation'}
-        </Button>
-      </Dialog.Footer>
-    </Dialog.Content>
-  </Dialog.Root>
+  <ReconcileUndoDialog
+    bind:open={undoOpen}
+    lastReconciledCount={res.data.lastReconciledCount}
+    lastReconciledDate={res.data.lastReconciledDate}
+    {undoing}
+    onConfirm={undoLastReconciliation}
+  />
 {/if}
