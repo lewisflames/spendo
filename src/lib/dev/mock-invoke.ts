@@ -28,8 +28,6 @@ import {
   INVESTMENT_TYPES,
   MARKET_PRICES,
   REPORT_CURRENCY,
-  SAMPLE_IMAGE_DATA_URL,
-  SAMPLE_TEXT_DATA_URL,
   SCHEDULES,
   TRANSACTIONS,
   categoryOf,
@@ -49,7 +47,6 @@ interface AttachmentRecord {
   mimeType: string;
   byteSize: number;
   createdAt: string;
-  isImage: boolean;
 }
 
 interface TxInputLike {
@@ -1841,8 +1838,7 @@ const handlers: HandlerMap = {
         filename,
         mimeType,
         byteSize: 48_000 + filename.length * 137,
-        createdAt: nowIso(),
-        isImage: mimeType.startsWith('image/')
+        createdAt: nowIso()
       };
       state.attachments.push(record);
       return {
@@ -1857,15 +1853,6 @@ const handlers: HandlerMap = {
   },
   delete_attachment: (args) => {
     state.attachments = state.attachments.filter((a) => a.guid !== args.guid);
-  },
-  fetch_attachment_data: (args) => {
-    const record = state.attachments.find((a) => a.guid === args.guid);
-    if (!record) throw new Error(`[mock] Unknown attachment ${args.guid}`);
-    return {
-      filename: record.filename,
-      mimeType: record.mimeType,
-      dataUrl: record.isImage ? SAMPLE_IMAGE_DATA_URL : SAMPLE_TEXT_DATA_URL
-    };
   },
   export_attachment: () => undefined,
   open_attachment: () => undefined,

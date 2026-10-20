@@ -611,9 +611,3 @@ export const MARKET_PRICES: Record<
   VTI: { price: 324.18, prevPrice: 321.4, priceDate: '2026-09-19' },
   AAPL: { price: 245.63, prevPrice: 247.1, priceDate: '2026-09-19' }
 };
-
-/** 1×1 transparent PNG, good enough for attachment previews in the mock. */
-export const SAMPLE_IMAGE_DATA_URL =
-  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
-
-export const SAMPLE_TEXT_DATA_URL = 'data:text/plain;base64,U3BlbmRvIG1vY2sgYXR0YWNobWVudC4=';

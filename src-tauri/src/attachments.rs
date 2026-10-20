@@ -1,4 +1,3 @@
-use base64::Engine;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -34,15 +33,6 @@ pub struct AttachmentInfo {
     pub mime_type: String,
     pub byte_size: i64,
     pub created_at: String,
-}
-
-/// Preview payload: the bytes as a `data:` URL ready for an `<img src>`.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AttachmentData {
-    pub filename: String,
-    pub mime_type: String,
-    pub data_url: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -279,16 +269,6 @@ fn fetch_blob(conn: &Connection, guid: &str) -> Result<(String, String, Vec<u8>)
     .ok_or_else(|| AppError::NotFound("Attachment not found. It may have been removed".to_string()))
 }
 
-fn attachment_data_inner(conn: &Connection, guid: &str) -> Result<AttachmentData, AppError> {
-    let (filename, mime_type, data) = fetch_blob(conn, guid)?;
-    let encoded = base64::engine::general_purpose::STANDARD.encode(&data);
-    Ok(AttachmentData {
-        data_url: format!("data:{mime_type};base64,{encoded}"),
-        filename,
-        mime_type,
-    })
-}
-
 #[tauri::command]
 pub async fn fetch_attachments(
     state: State<'_, AppState>,
@@ -326,17 +306,6 @@ pub async fn add_attachments(
 pub async fn delete_attachment(state: State<'_, AppState>, guid: String) -> Result<(), String> {
     run_blocking(state.db.clone(), move |conn| {
         delete_attachment_inner(conn, &guid).map_err(String::from)
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn fetch_attachment_data(
-    state: State<'_, AppState>,
-    guid: String,
-) -> Result<AttachmentData, String> {
-    run_blocking(state.db.clone(), move |conn| {
-        attachment_data_inner(conn, &guid).map_err(String::from)
     })
     .await
 }
@@ -442,15 +411,10 @@ mod tests {
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0], infos[0]);
 
-        let data = attachment_data_inner(&conn, &infos[0].guid).unwrap();
-        assert_eq!(data.filename, "receipt.pdf");
-        assert_eq!(
-            data.data_url,
-            format!(
-                "data:application/pdf;base64,{}",
-                base64::engine::general_purpose::STANDARD.encode(b"fake-pdf-bytes")
-            )
-        );
+        let (filename, mime_type, data) = fetch_blob(&conn, &infos[0].guid).unwrap();
+        assert_eq!(filename, "receipt.pdf");
+        assert_eq!(mime_type, "application/pdf");
+        assert_eq!(data, b"fake-pdf-bytes");
 
         delete_attachment_inner(&conn, &infos[0].guid).unwrap();
         assert!(list_attachments(&conn, "t1").unwrap().is_empty());

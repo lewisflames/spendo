@@ -347,7 +347,7 @@ export interface GnuCashPreview {
   skippedSchedules: { name: string; reason: string }[];
 }
 
-export interface GnuCashImportInput {
+interface GnuCashImportInput {
   path: string;
   filename: string;
   /** Hash returned by `previewGnucashImport`; the merge refuses stale files. */
@@ -588,13 +588,6 @@ export interface AttachmentInfo {
   createdAt: string;
 }
 
-/** Preview payload: bytes as a `data:` URL ready for an `<img src>`. */
-interface AttachmentData {
-  filename: string;
-  mimeType: string;
-  dataUrl: string;
-}
-
 interface AttachmentAddInput {
   txGuid: string;
   paths: string[];
@@ -609,9 +602,6 @@ export const addAttachments = (input: AttachmentAddInput): Promise<AttachmentInf
 
 export const deleteAttachment = (guid: string): Promise<void> =>
   invoke<void>('delete_attachment', { guid });
-
-export const fetchAttachmentData = (guid: string): Promise<AttachmentData> =>
-  invoke<AttachmentData>('fetch_attachment_data', { guid });
 
 export const exportAttachment = (guid: string, destPath: string): Promise<void> =>
   invoke<void>('export_attachment', { guid, destPath });
@@ -697,7 +687,7 @@ export const skipScheduleOccurrence = (guid: string): Promise<string | null> =>
   invoke<string | null>('skip_schedule_occurrence', { guid });
 
 /** Full-book transactions CSV written straight to the chosen path. */
-export interface TransactionsExportInput {
+interface TransactionsExportInput {
   path: string;
   delimiter: ',' | ';';
   /** `iso` keeps `YYYY-MM-DD`; `locale` uses the probe-derived parts. */
@@ -707,7 +697,7 @@ export interface TransactionsExportInput {
 }
 
 /** Full account-tree CSV written straight to the chosen path. */
-export interface AccountsExportInput {
+interface AccountsExportInput {
   path: string;
   delimiter: ',' | ';';
 }
@@ -1214,7 +1204,6 @@ export type MockPayloads = {
   fetch_accounts: AccountsResult;
   fetch_active_book: ActiveBook;
   fetch_allocation_targets: AllocationTarget[];
-  fetch_attachment_data: AttachmentData;
   fetch_attachments: AttachmentInfo[];
   fetch_book_currencies: BookCurrency[];
   fetch_budget_date_range: BudgetDateRange;
