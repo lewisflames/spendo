@@ -1,3 +1,5 @@
+use crate::db::AppError;
+
 /// Account types displayed with reversed sign (credit balances read positive).
 /// TRADING is included: GnuCash trading books accumulate currency/commodity
 /// trading gains as net credits, and the balance-sheet identity only holds if
@@ -94,7 +96,7 @@ pub fn opt_text(s: &Option<String>) -> Option<String> {
 /// Normalize an optional `YYYY-MM-DD` filter bound; `None`/blank pass through.
 /// Malformed values would otherwise turn `date(?, '+1 day')` into NULL and
 /// silently empty the query instead of erroring.
-pub fn validate_optional_iso_date(raw: Option<&str>) -> Result<Option<String>, String> {
+pub fn validate_optional_iso_date(raw: Option<&str>) -> Result<Option<String>, AppError> {
     match raw.map(str::trim).filter(|s| !s.is_empty()) {
         Some(value) => validate_iso_date(value).map(Some),
         None => Ok(None),
@@ -123,7 +125,7 @@ pub fn truncate_chars(s: &str, max_bytes: usize) -> String {
 /// query so earliest/latest can never diverge between callers.
 pub fn visible_tx_window(
     conn: &rusqlite::Connection,
-) -> Result<(Option<String>, Option<String>), String> {
+) -> Result<(Option<String>, Option<String>), AppError> {
     conn.query_row(
         &format!(
             "SELECT substr(MIN(t.post_date), 1, 10), substr(MAX(t.post_date), 1, 10)
@@ -134,7 +136,7 @@ pub fn visible_tx_window(
         [],
         |row| Ok((row.get(0)?, row.get(1)?)),
     )
-    .map_err(|e| e.to_string())
+    .map_err(AppError::from)
 }
 
 pub const RAW_AMOUNT: &str = "CAST(s.value_num AS REAL) / CAST(s.value_denom AS REAL)";
@@ -202,28 +204,32 @@ pub fn format_month(n: i64) -> String {
 }
 
 /// Last calendar day of a `YYYY-MM` month, for month-end FX lookups.
-pub fn month_end(month: &str) -> Result<String, String> {
+pub fn month_end(month: &str) -> Result<String, AppError> {
     let mut parts = month.split('-');
     let (Some(y), Some(m)) = (parts.next(), parts.next()) else {
-        return Err(format!("Invalid month: {month}"));
+        return Err(AppError::Validation(format!("Invalid month: {month}")));
     };
     if parts.next().is_some() {
-        return Err(format!("Invalid month: {month}"));
+        return Err(AppError::Validation(format!("Invalid month: {month}")));
     }
-    let y: i32 = y.parse().map_err(|_| format!("Invalid month: {month}"))?;
-    let m: u32 = m.parse().map_err(|_| format!("Invalid month: {month}"))?;
+    let y: i32 = y
+        .parse()
+        .map_err(|_| AppError::Validation(format!("Invalid month: {month}")))?;
+    let m: u32 = m
+        .parse()
+        .map_err(|_| AppError::Validation(format!("Invalid month: {month}")))?;
     let first_next = if m == 12 {
         chrono::NaiveDate::from_ymd_opt(y + 1, 1, 1)
     } else {
         chrono::NaiveDate::from_ymd_opt(y, m + 1, 1)
     }
-    .ok_or_else(|| format!("Invalid month: {month}"))?;
+    .ok_or_else(|| AppError::Validation(format!("Invalid month: {month}")))?;
     Ok((first_next - chrono::Duration::days(1))
         .format("%Y-%m-%d")
         .to_string())
 }
 
-pub fn month_number(ym: &str) -> Result<i64, String> {
+pub fn month_number(ym: &str) -> Result<i64, AppError> {
     // Accept both `YYYY-MM` (canonical) and full `YYYY-MM-DD` dates (as passed
     // by calendar widgets) by truncating dated strings to the month prefix.
     // Only truncate when the input actually looks like a full date; otherwise
@@ -235,20 +241,26 @@ pub fn month_number(ym: &str) -> Result<i64, String> {
     };
     let parts: Vec<&str> = ym.split('-').collect();
     if parts.len() != 2 {
-        return Err(format!("Invalid month format: {}", ym));
+        return Err(AppError::Validation(format!(
+            "Invalid month format: {}",
+            ym
+        )));
     }
     let y: i64 = parts[0]
         .parse()
-        .map_err(|_| format!("Invalid year in month string: {}", ym))?;
+        .map_err(|_| AppError::Validation(format!("Invalid year in month string: {}", ym)))?;
     let m: i64 = parts[1]
         .parse()
-        .map_err(|_| format!("Invalid month in month string: {}", ym))?;
+        .map_err(|_| AppError::Validation(format!("Invalid month in month string: {}", ym)))?;
     if !(1..=12).contains(&m) {
-        return Err(format!("Invalid month in month string: {}", ym));
+        return Err(AppError::Validation(format!(
+            "Invalid month in month string: {}",
+            ym
+        )));
     }
     y.checked_mul(12)
         .and_then(|v| v.checked_add(m - 1))
-        .ok_or_else(|| format!("Month out of range: {ym}"))
+        .ok_or_else(|| AppError::Validation(format!("Month out of range: {ym}")))
 }
 
 /// Clamp a client-supplied page size into a sane range (SQLite treats negative
@@ -279,13 +291,15 @@ pub fn paginate(total: i64, page: i64, page_size: i64) -> (i64, i64, i64, i64) {
 /// normalized. SQLite's `date()` silently yields NULL for malformed input, so
 /// any caller that interpolates a date into SQL must validate first instead of
 /// letting a bad string quietly zero out comparisons.
-pub fn validate_iso_date(value: &str) -> Result<String, String> {
+pub fn validate_iso_date(value: &str) -> Result<String, AppError> {
     let trimmed = value.trim();
     let parsed = chrono::NaiveDate::parse_from_str(trimmed, "%Y-%m-%d")
         .map_err(|_| format!("Invalid date (expected YYYY-MM-DD): {trimmed}"))?;
     let normalized = parsed.format("%Y-%m-%d").to_string();
     if normalized != trimmed {
-        return Err(format!("Invalid date (expected YYYY-MM-DD): {trimmed}"));
+        return Err(AppError::Validation(format!(
+            "Invalid date (expected YYYY-MM-DD): {trimmed}"
+        )));
     }
     Ok(normalized)
 }
@@ -302,13 +316,16 @@ pub fn same_path(a: &std::path::Path, b: &std::path::Path) -> bool {
 }
 
 /// Validate that a path points at an existing `.gnucash` file.
-pub fn validate_gnucash_path(path: &str) -> Result<(), String> {
+pub fn validate_gnucash_path(path: &str) -> Result<(), AppError> {
     let p = std::path::Path::new(path);
     if p.extension().and_then(|e| e.to_str()) != Some("gnucash") {
-        return Err(format!("Not a .gnucash file: {}", path));
+        return Err(AppError::Validation(format!(
+            "Not a .gnucash file: {}",
+            path
+        )));
     }
     if !p.is_file() {
-        return Err(format!("File not found: {}", path));
+        return Err(AppError::Validation(format!("File not found: {}", path)));
     }
     Ok(())
 }

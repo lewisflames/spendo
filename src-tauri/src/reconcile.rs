@@ -156,7 +156,7 @@ fn validate_statement_date(raw: &str) -> Result<String, AppError> {
             "Add the statement date from your bank".to_string(),
         ));
     }
-    let normalized = crate::utils::validate_iso_date(trimmed).map_err(AppError::Validation)?;
+    let normalized = crate::utils::validate_iso_date(trimmed)?;
     // Local "today": the reconcile form offers the user's local today, so the
     // backend must accept it (UTC would reject it east of UTC).
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
