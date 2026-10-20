@@ -1436,7 +1436,7 @@ pub(crate) fn import_gnucash_inner(
     delete_orphans: bool,
 ) -> Result<ImportResult, AppError> {
     let source = connect_source_db(&std::path::PathBuf::from(source_path))
-        .map_err(|e| format!("Failed to open source DB: {}", e))?;
+        .map_err(|e| AppError::Io(format!("Failed to open source DB: {}", e)))?;
     let src = read_source_data(&source)?;
     import_source_inner(dest_conn, src, _filename, delete_orphans)
 }
@@ -1449,7 +1449,7 @@ fn import_source_inner(
     _filename: &str,
     delete_orphans: bool,
 ) -> Result<ImportResult, AppError> {
-    init_db(dest_conn).map_err(|e| format!("Failed to init dest DB: {}", e))?;
+    init_db(dest_conn).map_err(|e| AppError::Io(format!("Failed to init dest DB: {}", e)))?;
 
     // The orphan sweep treats the source as authoritative and deletes rows it
     // doesn't cover, so an empty source set (`NOT IN (empty)`) would wipe the
@@ -1626,7 +1626,7 @@ pub async fn preview_gnucash_import(
         utils::validate_gnucash_path(&read_path)?;
         let sha = file_sha256(&read_path)?;
         let source = connect_source_db(&std::path::PathBuf::from(&read_path))
-            .map_err(|e| format!("Failed to open source DB: {}", e))?;
+            .map_err(|e| AppError::Io(format!("Failed to open source DB: {}", e)))?;
         let src = read_source_data(&source)?;
         Ok((sha, src))
     })
@@ -1649,7 +1649,7 @@ fn preview_gnucash_inner(
     sha256: &str,
 ) -> Result<GnuCashPreview, AppError> {
     let source = connect_source_db(&std::path::PathBuf::from(source_path))
-        .map_err(|e| format!("Failed to open source DB: {}", e))?;
+        .map_err(|e| AppError::Io(format!("Failed to open source DB: {}", e)))?;
     let src = read_source_data(&source)?;
     preview_source_inner(dest_conn, src, source_path, filename, sha256)
 }
@@ -1710,7 +1710,7 @@ pub async fn import_gnucash(
         utils::validate_gnucash_path(&read_path)?;
         let sha = file_sha256(&read_path)?;
         let source = connect_source_db(&std::path::PathBuf::from(&read_path))
-            .map_err(|e| format!("Failed to open source DB: {}", e))?;
+            .map_err(|e| AppError::Io(format!("Failed to open source DB: {}", e)))?;
         let src = read_source_data(&source)?;
         Ok((sha, src))
     })

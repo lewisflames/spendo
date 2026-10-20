@@ -124,9 +124,8 @@ pub async fn fetch_home_data(state: State<'_, AppState>) -> Result<HomeDataResul
             });
         }
 
-        let cnt: i64 = conn
-            .query_row("SELECT COUNT(*) as cnt FROM accounts", [], |row| row.get(0))
-            .map_err(|e| e.to_string())?;
+        let cnt: i64 =
+            conn.query_row("SELECT COUNT(*) as cnt FROM accounts", [], |row| row.get(0))?;
 
         Ok(HomeDataResult {
             has_data: cnt > 0,

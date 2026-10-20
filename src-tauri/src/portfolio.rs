@@ -1,5 +1,5 @@
 use chrono::{NaiveDate, Utc};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use tauri::State;
@@ -271,12 +271,8 @@ fn resolve_holding_universe(
                     })
                 },
             )
-            .map_err(|e| match e {
-                rusqlite::Error::QueryReturnedNoRows => {
-                    format!("Commodity not found: {guid}")
-                }
-                other => other.to_string(),
-            })?;
+            .optional()?
+            .ok_or_else(|| AppError::NotFound(format!("Commodity not found: {guid}")))?;
         meta_by_guid.insert(guid.to_string(), meta);
     } else {
         for c in list_commodities(conn)? {
