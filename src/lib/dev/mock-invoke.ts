@@ -25,18 +25,17 @@ import {
   BUDGET_PLANS,
   COMMODITIES,
   CREDIT_NORMAL_TYPES,
-  INVESTMENT_TYPES,
   MARKET_PRICES,
   REPORT_CURRENCY,
   SCHEDULES,
   TRANSACTIONS,
-  categoryOf,
   todayIso,
   type FixtureAccount,
   type FixtureScheduleDef,
   type FixtureSplit,
   type FixtureTx
 } from './fixtures';
+import { INVESTMENT_ACCOUNT_TYPES, nodeCategory } from '$lib/features/accounts/account-types';
 
 // ── state ──────────────────────────────────────────────────────────────────
 
@@ -185,7 +184,7 @@ function investmentTotals(guid: string): { shares: number; cost: number } {
     for (const split of tx.splits) {
       if (!guids.has(split.accountGuid)) continue;
       const acc = account(split.accountGuid);
-      if (!acc || !INVESTMENT_TYPES.has(acc.accountType)) continue;
+      if (!acc || !INVESTMENT_ACCOUNT_TYPES.has(acc.accountType)) continue;
       shares += split.quantity ?? 0;
       cost += split.raw;
     }
@@ -201,7 +200,7 @@ function marketPrice(mnemonic: string | null | undefined): number | null {
 function nodeBalance(guid: string): number {
   const acc = account(guid);
   if (!acc) return 0;
-  if (INVESTMENT_TYPES.has(acc.accountType)) {
+  if (INVESTMENT_ACCOUNT_TYPES.has(acc.accountType)) {
     const { shares, cost } = investmentTotals(guid);
     const price = marketPrice(acc.commodity);
     return price === null ? cost : shares * price;
@@ -239,7 +238,10 @@ const CATEGORY_ROOTS = ['assets', 'liabilities', 'equity', 'income', 'expenses']
 function cashTotalForCategory(category: string): number {
   const guids = new Set(
     state.accounts
-      .filter((a) => categoryOf(a.accountType) === category && !INVESTMENT_TYPES.has(a.accountType))
+      .filter(
+        (a) =>
+          nodeCategory(a.accountType) === category && !INVESTMENT_ACCOUNT_TYPES.has(a.accountType)
+      )
       .map((a) => a.guid)
   );
   let sum = 0;
@@ -254,7 +256,7 @@ function cashTotalForCategory(category: string): number {
 function unrealizedGains(): number {
   let total = 0;
   for (const acc of state.accounts) {
-    if (!INVESTMENT_TYPES.has(acc.accountType)) continue;
+    if (!INVESTMENT_ACCOUNT_TYPES.has(acc.accountType)) continue;
     const { shares, cost } = investmentTotals(acc.guid);
     const price = marketPrice(acc.commodity);
     if (price !== null) total += shares * price - cost;
@@ -313,10 +315,11 @@ function accountsResult(): MockPayloads['fetch_accounts'] {
   const trees = CATEGORY_ROOTS.map((guid) => accountNode(account(guid)!)).filter(Boolean);
   const byType: MockPayloads['fetch_accounts']['byType'] = {};
   for (const category of ['ASSET', 'LIABILITY', 'EQUITY', 'INCOME', 'EXPENSE']) {
-    const root = trees.find((t) => categoryOf(t.accountType) === category);
+    const root = trees.find((t) => nodeCategory(t.accountType) === category);
     byType[category] = {
       count: state.accounts.filter(
-        (a) => a.accountType !== 'ROOT' && !a.placeholder && categoryOf(a.accountType) === category
+        (a) =>
+          a.accountType !== 'ROOT' && !a.placeholder && nodeCategory(a.accountType) === category
       ).length,
       totalBalance: root?.balance ?? 0
     };
@@ -327,7 +330,7 @@ function accountsResult(): MockPayloads['fetch_accounts'] {
   const unrealized = unrealizedGains();
   const retained = cashTotalForCategory('INCOME') - cashTotalForCategory('EXPENSE');
   const missingPrices = state.accounts
-    .filter((a) => INVESTMENT_TYPES.has(a.accountType) && marketPrice(a.commodity) === null)
+    .filter((a) => INVESTMENT_ACCOUNT_TYPES.has(a.accountType) && marketPrice(a.commodity) === null)
     .map((a) => ({ mnemonic: a.commodity ?? a.name, commodityGuid: a.commodityGuid }));
   return {
     trees,
@@ -993,7 +996,7 @@ function holdingFor(acc: FixtureAccount) {
 }
 
 function investmentAccounts(): FixtureAccount[] {
-  return state.accounts.filter((a) => INVESTMENT_TYPES.has(a.accountType));
+  return state.accounts.filter((a) => INVESTMENT_ACCOUNT_TYPES.has(a.accountType));
 }
 
 function portfolioData(): MockPayloads['fetch_portfolio_data'] {
@@ -1089,7 +1092,7 @@ function holdingDetail(args: Record<string, unknown>): MockPayloads['fetch_holdi
 
 function periodTotals(from: string, to: string, category: string): Map<string, number> {
   const guids = new Set(
-    state.accounts.filter((a) => categoryOf(a.accountType) === category).map((a) => a.guid)
+    state.accounts.filter((a) => nodeCategory(a.accountType) === category).map((a) => a.guid)
   );
   const totals = new Map<string, number>();
   for (const tx of visibleTxs()) {
@@ -1443,7 +1446,7 @@ const handlers: HandlerMap = {
   fetch_nav_roots: () =>
     ['ASSET', 'LIABILITY', 'EQUITY', 'INCOME', 'EXPENSE'].map((category) => {
       const root = state.accounts.find(
-        (a) => a.parentGuid === 'root' && categoryOf(a.accountType) === category
+        (a) => a.parentGuid === 'root' && nodeCategory(a.accountType) === category
       );
       return { category, guid: root?.guid ?? null, name: root?.name ?? null };
     }),
@@ -1455,7 +1458,7 @@ const handlers: HandlerMap = {
       tx.splits.some(
         (s) =>
           reconcileState(s) === 'n' &&
-          categoryOf(account(s.accountGuid)?.accountType ?? '') === 'ASSET'
+          nodeCategory(account(s.accountGuid)?.accountType ?? '') === 'ASSET'
       )
     ).length
   }),
