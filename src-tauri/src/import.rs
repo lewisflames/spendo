@@ -1574,11 +1574,7 @@ async fn fetch_prices_best_effort(
 
     // Each stage runs sequentially without holding the DB lock across the
     // network fetch (same discipline as `refresh_prices`).
-    let pre = match db::run_blocking(db.clone(), |conn| {
-        prices::read_price_data(conn).map_err(String::from)
-    })
-    .await
-    {
+    let pre = match db::run_blocking(db.clone(), prices::read_price_data).await {
         Ok(pre) => pre,
         Err(e) => return failed(format!("Failed to read price plan: {e}")),
     };
@@ -1591,12 +1587,12 @@ async fn fetch_prices_best_effort(
     };
     if let Err(e) = db::run_blocking(db, move |conn| {
         if book_generation.load(std::sync::atomic::Ordering::SeqCst) != expected_generation {
-            return Err(
+            return Err(AppError::Validation(
                 "Book changed while prices were refreshing. Those results were discarded"
                     .to_string(),
-            );
+            ));
         }
-        prices::write_prices_and_log(conn, &write_data).map_err(String::from)
+        prices::write_prices_and_log(conn, &write_data)
     })
     .await
     {
@@ -1638,7 +1634,7 @@ pub async fn preview_gnucash_import(
     let generation_handle = state.book_generation.clone();
     db::run_blocking(state.db.clone(), move |conn| {
         db::ensure_same_book(&generation_handle, generation)?;
-        preview_source_inner(conn, src, &path, &filename, &sha256).map_err(String::from)
+        preview_source_inner(conn, src, &path, &filename, &sha256)
     })
     .await
 }
@@ -1732,7 +1728,7 @@ pub async fn import_gnucash(
     } = input;
     let mut result = db::run_blocking(state.db.clone(), move |conn| {
         db::ensure_same_book(&generation_handle, generation)?;
-        import_source_inner(conn, src, &filename, delete_orphans).map_err(String::from)
+        import_source_inner(conn, src, &filename, delete_orphans)
     })
     .await?;
     result.prices =

@@ -699,7 +699,6 @@ pub async fn fetch_pnl_report(
             prev_date_from.as_deref(),
             prev_date_to.as_deref(),
         )
-        .map_err(String::from)
     })
     .await
 }
@@ -711,7 +710,7 @@ pub async fn fetch_pnl_trend(
     date_to: String,
 ) -> Result<Vec<PnlTrendPoint>, String> {
     run_blocking(state.db.clone(), move |conn| {
-        fetch_pnl_trend_inner(conn, &date_from, &date_to).map_err(String::from)
+        fetch_pnl_trend_inner(conn, &date_from, &date_to)
     })
     .await
 }

@@ -951,7 +951,7 @@ pub async fn fetch_reconcile_info(
     statement_date: String,
 ) -> Result<ReconcileInfo, String> {
     run_blocking(state.db.clone(), move |conn| {
-        fetch_reconcile_info_inner(conn, &account_guid, &statement_date).map_err(String::from)
+        fetch_reconcile_info_inner(conn, &account_guid, &statement_date)
     })
     .await
 }
@@ -962,7 +962,7 @@ pub async fn mark_reconcile_splits(
     input: MarkReconcileInput,
 ) -> Result<MarkReconcileResult, String> {
     run_blocking(state.db.clone(), move |conn| {
-        mark_reconcile_splits_inner(conn, input).map_err(String::from)
+        mark_reconcile_splits_inner(conn, input)
     })
     .await
 }
@@ -973,7 +973,7 @@ pub async fn finish_reconciliation(
     input: FinishReconcileInput,
 ) -> Result<FinishReconcileResult, String> {
     run_blocking(state.db.clone(), move |conn| {
-        finish_reconciliation_inner(conn, input).map_err(String::from)
+        finish_reconciliation_inner(conn, input)
     })
     .await
 }
@@ -984,7 +984,7 @@ pub async fn reopen_last_reconciliation(
     account_guid: String,
 ) -> Result<ReopenReconcileResult, String> {
     run_blocking(state.db.clone(), move |conn| {
-        reopen_last_reconciliation_inner(conn, &account_guid).map_err(String::from)
+        reopen_last_reconciliation_inner(conn, &account_guid)
     })
     .await
 }
@@ -994,7 +994,7 @@ pub async fn fetch_reconcile_summaries(
     state: State<'_, AppState>,
 ) -> Result<Vec<ReconcileAccountSummary>, String> {
     run_blocking(state.db.clone(), |conn| {
-        fetch_reconcile_summaries_inner(conn).map_err(String::from)
+        fetch_reconcile_summaries_inner(conn)
     })
     .await
 }

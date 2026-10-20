@@ -753,7 +753,7 @@ pub async fn set_budget_year_amount(
     amount: f64,
 ) -> Result<Budget, String> {
     run_blocking(state.db.clone(), move |conn| {
-        set_budget_year_amount_inner(conn, &account_guid, year, amount).map_err(String::from)
+        set_budget_year_amount_inner(conn, &account_guid, year, amount)
     })
     .await
 }
@@ -764,7 +764,7 @@ pub async fn fetch_budget_years(
     account_guid: String,
 ) -> Result<Vec<i32>, String> {
     run_blocking(state.db.clone(), move |conn| {
-        fetch_budget_years_inner(conn, &account_guid).map_err(String::from)
+        fetch_budget_years_inner(conn, &account_guid)
     })
     .await
 }
@@ -776,7 +776,7 @@ pub async fn delete_budget_year(
     year: i32,
 ) -> Result<(), String> {
     run_blocking(state.db.clone(), move |conn| {
-        delete_budget_year_inner(conn, &account_guid, year).map_err(String::from)
+        delete_budget_year_inner(conn, &account_guid, year)
     })
     .await
 }
@@ -787,7 +787,7 @@ pub async fn fetch_budget_vs_actual(
     year: i32,
 ) -> Result<Vec<BudgetActualRow>, String> {
     run_blocking(state.db.clone(), move |conn| {
-        fetch_budget_vs_actual_inner(conn, year).map_err(String::from)
+        fetch_budget_vs_actual_inner(conn, year)
     })
     .await
 }
@@ -799,7 +799,7 @@ pub async fn fetch_budget_detail(
     year: i32,
 ) -> Result<BudgetDetail, String> {
     run_blocking(state.db.clone(), move |conn| {
-        fetch_budget_detail_inner(conn, &account_guid, year).map_err(String::from)
+        fetch_budget_detail_inner(conn, &account_guid, year)
     })
     .await
 }
@@ -808,10 +808,7 @@ pub async fn fetch_budget_detail(
 pub async fn fetch_budget_date_range(
     state: State<'_, AppState>,
 ) -> Result<BudgetDateRange, String> {
-    run_blocking(state.db.clone(), |conn| {
-        fetch_budget_date_range_inner(conn).map_err(String::from)
-    })
-    .await
+    run_blocking(state.db.clone(), fetch_budget_date_range_inner).await
 }
 
 #[cfg(test)]

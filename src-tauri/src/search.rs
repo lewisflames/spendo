@@ -227,7 +227,7 @@ pub async fn search_global(
     limit_per_group: Option<i64>,
 ) -> Result<GlobalSearchResult, String> {
     run_blocking(state.db.clone(), move |conn| {
-        search_global_inner(conn, &query, limit_per_group).map_err(String::from)
+        search_global_inner(conn, &query, limit_per_group)
     })
     .await
 }

@@ -156,7 +156,7 @@ pub async fn set_base_currency(
     currency: String,
 ) -> Result<HomeDataResult, String> {
     run_blocking(state.db.clone(), move |conn| {
-        set_base_currency_inner(conn, &currency).map_err(String::from)
+        set_base_currency_inner(conn, &currency)
     })
     .await
 }

@@ -162,7 +162,7 @@ async fn activate_book(
     let generation = state.book_generation.clone();
     let summary = db::run_swap_blocking(state.db.clone(), move |conn| {
         db::checkpoint(conn);
-        swap_in_book(conn, new_conn, &generation).map_err(String::from)
+        swap_in_book(conn, new_conn, &generation)
     })
     .await?;
     // Brief path-mutex hold in async context: plain PathBuf clone, no I/O.
@@ -216,7 +216,7 @@ pub async fn open_book(state: State<'_, AppState>, path: String) -> Result<HomeD
     let new_path = PathBuf::from(&path);
     // Validate + connect on a blocking thread before touching shared state.
     let open_path = new_path.clone();
-    let new_conn = db::run_io(move || open_book_inner(&open_path).map_err(String::from)).await?;
+    let new_conn = db::run_io(move || open_book_inner(&open_path)).await?;
     activate_book(&state, new_path, new_conn).await
 }
 
@@ -228,9 +228,7 @@ pub async fn create_book_at(
 ) -> Result<HomeDataResult, String> {
     let new_path = PathBuf::from(&path);
     let create_path = new_path.clone();
-    let new_conn =
-        db::run_io(move || create_book_at_inner(&create_path, &currency).map_err(String::from))
-            .await?;
+    let new_conn = db::run_io(move || create_book_at_inner(&create_path, &currency)).await?;
     activate_book(&state, new_path, new_conn).await
 }
 
@@ -282,7 +280,7 @@ pub async fn save_book_as(
         let fresh = save_book_as_inner(conn, &fresh_path)?;
         *conn = fresh;
         generation.fetch_add(1, Ordering::SeqCst);
-        get_summary(conn).map_err(String::from)
+        get_summary(conn)
     })
     .await?;
     *state.db_path.lock().map_err(|e| e.to_string())? = Some(new_path.clone());

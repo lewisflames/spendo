@@ -316,10 +316,7 @@ pub(crate) fn rule_account_guids(conn: &Connection) -> Result<Vec<String>, AppEr
 
 #[tauri::command]
 pub async fn fetch_import_rules(state: State<'_, AppState>) -> Result<Vec<ImportRule>, String> {
-    run_blocking(state.db.clone(), |conn| {
-        fetch_import_rules_inner(conn).map_err(String::from)
-    })
-    .await
+    run_blocking(state.db.clone(), fetch_import_rules_inner).await
 }
 
 #[tauri::command]
@@ -328,7 +325,7 @@ pub async fn create_import_rule(
     input: ImportRuleInput,
 ) -> Result<ImportRule, String> {
     run_blocking(state.db.clone(), move |conn| {
-        create_import_rule_inner(conn, &input).map_err(String::from)
+        create_import_rule_inner(conn, &input)
     })
     .await
 }
@@ -340,7 +337,7 @@ pub async fn update_import_rule(
     input: ImportRuleInput,
 ) -> Result<ImportRule, String> {
     run_blocking(state.db.clone(), move |conn| {
-        update_import_rule_inner(conn, id, &input).map_err(String::from)
+        update_import_rule_inner(conn, id, &input)
     })
     .await
 }
@@ -348,7 +345,7 @@ pub async fn update_import_rule(
 #[tauri::command]
 pub async fn delete_import_rule(state: State<'_, AppState>, id: i64) -> Result<(), String> {
     run_blocking(state.db.clone(), move |conn| {
-        delete_import_rule_inner(conn, id).map_err(String::from)
+        delete_import_rule_inner(conn, id)
     })
     .await
 }
@@ -360,7 +357,7 @@ pub async fn move_import_rule(
     direction: i64,
 ) -> Result<Vec<ImportRule>, String> {
     run_blocking(state.db.clone(), move |conn| {
-        move_import_rule_inner(conn, id, direction).map_err(String::from)
+        move_import_rule_inner(conn, id, direction)
     })
     .await
 }

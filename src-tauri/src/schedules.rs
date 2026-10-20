@@ -1032,7 +1032,7 @@ pub async fn create_schedule(
     input: ScheduleInput,
 ) -> Result<Schedule, String> {
     run_blocking(state.db.clone(), move |conn| {
-        create_schedule_inner(conn, input).map_err(String::from)
+        create_schedule_inner(conn, input)
     })
     .await
 }
@@ -1044,7 +1044,7 @@ pub async fn update_schedule(
     input: ScheduleInput,
 ) -> Result<Schedule, String> {
     run_blocking(state.db.clone(), move |conn| {
-        update_schedule_inner(conn, &guid, input).map_err(String::from)
+        update_schedule_inner(conn, &guid, input)
     })
     .await
 }
@@ -1052,7 +1052,7 @@ pub async fn update_schedule(
 #[tauri::command]
 pub async fn delete_schedule(state: State<'_, AppState>, guid: String) -> Result<(), String> {
     run_blocking(state.db.clone(), move |conn| {
-        delete_schedule_inner(conn, &guid).map_err(String::from)
+        delete_schedule_inner(conn, &guid)
     })
     .await
 }
@@ -1064,23 +1064,20 @@ pub async fn set_schedule_active(
     active: bool,
 ) -> Result<Schedule, String> {
     run_blocking(state.db.clone(), move |conn| {
-        set_schedule_active_inner(conn, &guid, active).map_err(String::from)
+        set_schedule_active_inner(conn, &guid, active)
     })
     .await
 }
 
 #[tauri::command]
 pub async fn fetch_schedules(state: State<'_, AppState>) -> Result<Vec<Schedule>, String> {
-    run_blocking(state.db.clone(), |conn| {
-        fetch_schedules_inner(conn).map_err(String::from)
-    })
-    .await
+    run_blocking(state.db.clone(), fetch_schedules_inner).await
 }
 
 #[tauri::command]
 pub async fn fetch_schedule(state: State<'_, AppState>, guid: String) -> Result<Schedule, String> {
     run_blocking(state.db.clone(), move |conn| {
-        fetch_schedule_inner(conn, &guid).map_err(String::from)
+        fetch_schedule_inner(conn, &guid)
     })
     .await
 }
@@ -1093,7 +1090,7 @@ pub async fn post_schedule_occurrence(
     guid: String,
 ) -> Result<String, String> {
     run_blocking(state.db.clone(), move |conn| {
-        post_schedule_occurrence_inner(conn, &guid).map_err(String::from)
+        post_schedule_occurrence_inner(conn, &guid)
     })
     .await
 }
@@ -1106,7 +1103,7 @@ pub async fn skip_schedule_occurrence(
     guid: String,
 ) -> Result<Option<String>, String> {
     run_blocking(state.db.clone(), move |conn| {
-        skip_schedule_occurrence_inner(conn, &guid).map_err(String::from)
+        skip_schedule_occurrence_inner(conn, &guid)
     })
     .await
 }

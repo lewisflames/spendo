@@ -1374,10 +1374,7 @@ fn fetch_holding_detail_inner(
 
 #[tauri::command]
 pub async fn fetch_portfolio_data(state: State<'_, AppState>) -> Result<PortfolioData, String> {
-    run_blocking(state.db.clone(), |conn| {
-        fetch_portfolio_data_inner(conn).map_err(String::from)
-    })
-    .await
+    run_blocking(state.db.clone(), fetch_portfolio_data_inner).await
 }
 
 #[tauri::command]
@@ -1390,7 +1387,6 @@ pub async fn fetch_holding_detail(
 ) -> Result<HoldingDetail, String> {
     run_blocking(state.db.clone(), move |conn| {
         fetch_holding_detail_inner(conn, &commodity_guid, page, page_size, search.as_deref())
-            .map_err(String::from)
     })
     .await
 }
@@ -1400,7 +1396,7 @@ pub async fn fetch_allocation_targets(
     state: State<'_, AppState>,
 ) -> Result<Vec<AllocationTarget>, String> {
     run_blocking(state.db.clone(), |conn| {
-        fetch_allocation_targets_inner(conn).map_err(String::from)
+        fetch_allocation_targets_inner(conn)
     })
     .await
 }
@@ -1411,7 +1407,7 @@ pub async fn save_allocation_targets(
     targets: Vec<AllocationTargetInput>,
 ) -> Result<Vec<AllocationTarget>, String> {
     run_blocking(state.db.clone(), move |conn| {
-        save_allocation_targets_inner(conn, &targets).map_err(String::from)
+        save_allocation_targets_inner(conn, &targets)
     })
     .await
 }

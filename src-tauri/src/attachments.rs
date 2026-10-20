@@ -280,7 +280,7 @@ pub async fn fetch_attachments(
     tx_guid: String,
 ) -> Result<Vec<AttachmentInfo>, String> {
     run_blocking(state.db.clone(), move |conn| {
-        list_attachments(conn, &tx_guid).map_err(String::from)
+        list_attachments(conn, &tx_guid)
     })
     .await
 }
@@ -299,11 +299,10 @@ pub async fn add_attachments(
             .iter()
             .map(|path| prepare_attachment(path))
             .collect::<Result<Vec<_>, _>>()
-            .map_err(String::from)
     })
     .await?;
     run_blocking(state.db.clone(), move |conn| {
-        insert_attachments(conn, &tx_guid, prepared).map_err(String::from)
+        insert_attachments(conn, &tx_guid, prepared)
     })
     .await
 }
@@ -311,7 +310,7 @@ pub async fn add_attachments(
 #[tauri::command]
 pub async fn delete_attachment(state: State<'_, AppState>, guid: String) -> Result<(), String> {
     run_blocking(state.db.clone(), move |conn| {
-        delete_attachment_inner(conn, &guid).map_err(String::from)
+        delete_attachment_inner(conn, &guid)
     })
     .await
 }
@@ -322,15 +321,11 @@ pub async fn export_attachment(
     guid: String,
     dest_path: String,
 ) -> Result<(), String> {
-    state
-        .ensure_not_active_book(Path::new(dest_path.trim()))
-        .map_err(String::from)?;
-    let (_, _, data) = run_blocking(state.db.clone(), move |conn| {
-        fetch_blob(conn, &guid).map_err(String::from)
-    })
-    .await?;
+    state.ensure_not_active_book(Path::new(dest_path.trim()))?;
+    let (_, _, data) = run_blocking(state.db.clone(), move |conn| fetch_blob(conn, &guid)).await?;
     run_io(move || {
-        std::fs::write(&dest_path, data).map_err(|e| format!("Failed to write file: {e}"))
+        std::fs::write(&dest_path, data)
+            .map_err(|e| AppError::Io(format!("Failed to write file: {e}")))
     })
     .await
 }
@@ -345,10 +340,8 @@ pub async fn open_attachment(
     guid: String,
 ) -> Result<(), String> {
     let blob_guid = guid.clone();
-    let (filename, _, data) = run_blocking(state.db.clone(), move |conn| {
-        fetch_blob(conn, &blob_guid).map_err(String::from)
-    })
-    .await?;
+    let (filename, _, data) =
+        run_blocking(state.db.clone(), move |conn| fetch_blob(conn, &blob_guid)).await?;
     let path = run_io(move || {
         let dir = app
             .path()

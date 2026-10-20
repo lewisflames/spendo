@@ -470,31 +470,29 @@ pub async fn export_transactions_csv(
     state: State<'_, AppState>,
     input: TransactionsExportInput,
 ) -> Result<(), String> {
-    let delimiter = validate_delimiter(&input.delimiter).map_err(String::from)?;
-    validate_export_path(&input.path).map_err(String::from)?;
-    state
-        .ensure_not_active_book(&PathBuf::from(input.path.trim()))
-        .map_err(String::from)?;
+    let delimiter = validate_delimiter(&input.delimiter)?;
+    validate_export_path(&input.path)?;
+    state.ensure_not_active_book(&PathBuf::from(input.path.trim()))?;
     let locale = validate_date_options(
         &input.date_format,
         input.date_parts.as_deref(),
         input.date_separator.as_deref(),
-    )
-    .map_err(String::from)?;
+    )?;
 
     let rows = run_blocking(state.db.clone(), |conn| {
-        fetch_export_transactions_inner(conn).map_err(String::from)
+        fetch_export_transactions_inner(conn)
     })
     .await?;
     let cells: Vec<Vec<String>> = rows
         .iter()
         .map(|r| split_row_cells(r, locale.as_ref()))
         .collect();
-    let bytes =
-        build_csv_bytes(delimiter, &TRANSACTIONS_EXPORT_HEADERS, &cells).map_err(String::from)?;
+    let bytes = build_csv_bytes(delimiter, &TRANSACTIONS_EXPORT_HEADERS, &cells)?;
     let path = input.path;
-    run_io(move || std::fs::write(&path, bytes).map_err(|e| format!("Failed to write file: {e}")))
-        .await
+    run_io(move || {
+        std::fs::write(&path, bytes).map_err(|e| AppError::Io(format!("Failed to write file: {e}")))
+    })
+    .await
 }
 
 /// Full account-tree CSV written straight to the user's chosen path.
@@ -503,22 +501,18 @@ pub async fn export_accounts_csv(
     state: State<'_, AppState>,
     input: AccountsExportInput,
 ) -> Result<(), String> {
-    let delimiter = validate_delimiter(&input.delimiter).map_err(String::from)?;
-    validate_export_path(&input.path).map_err(String::from)?;
-    state
-        .ensure_not_active_book(&PathBuf::from(input.path.trim()))
-        .map_err(String::from)?;
+    let delimiter = validate_delimiter(&input.delimiter)?;
+    validate_export_path(&input.path)?;
+    state.ensure_not_active_book(&PathBuf::from(input.path.trim()))?;
 
-    let rows = run_blocking(state.db.clone(), |conn| {
-        fetch_export_accounts_inner(conn).map_err(String::from)
-    })
-    .await?;
+    let rows = run_blocking(state.db.clone(), fetch_export_accounts_inner).await?;
     let cells: Vec<Vec<String>> = rows.iter().map(account_row_cells).collect();
-    let bytes =
-        build_csv_bytes(delimiter, &ACCOUNTS_EXPORT_HEADERS, &cells).map_err(String::from)?;
+    let bytes = build_csv_bytes(delimiter, &ACCOUNTS_EXPORT_HEADERS, &cells)?;
     let path = input.path;
-    run_io(move || std::fs::write(&path, bytes).map_err(|e| format!("Failed to write file: {e}")))
-        .await
+    run_io(move || {
+        std::fs::write(&path, bytes).map_err(|e| AppError::Io(format!("Failed to write file: {e}")))
+    })
+    .await
 }
 
 #[cfg(test)]
