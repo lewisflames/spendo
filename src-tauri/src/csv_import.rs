@@ -1188,7 +1188,7 @@ pub async fn csv_detect(
     path: String,
 ) -> Result<CsvDetectResult, String> {
     // File read + parsing run on a blocking thread (the file may be ~10 MiB).
-    let mut detect = run_io(move || csv_detect_inner(&path)).await?;
+    let mut detect = run_io(move || csv_detect_inner(&path).map_err(String::from)).await?;
     // Saved mapping lookup is a book-scoped DB read, separate from file I/O.
     if let Some(signature) = detect.signature.clone() {
         detect.preset = run_blocking(state.db.clone(), move |conn| {
@@ -1199,13 +1199,13 @@ pub async fn csv_detect(
     Ok(detect)
 }
 
-fn csv_detect_inner(path: &str) -> Result<CsvDetectResult, String> {
-    let bytes = read_file_bytes(path).map_err(String::from)?;
+fn csv_detect_inner(path: &str) -> Result<CsvDetectResult, AppError> {
+    let bytes = read_file_bytes(path)?;
     let sha256 = bytes_sha256(&bytes);
     let (text, encoding) = decode_bytes(&bytes, None);
-    let (_, delimiter) = parse_delimiter(None, &text).map_err(String::from)?;
+    let (_, delimiter) = parse_delimiter(None, &text)?;
     let delim_byte = delimiter.as_bytes()[0];
-    let records = parse_records(&text, delim_byte).map_err(String::from)?;
+    let records = parse_records(&text, delim_byte)?;
     let has_header = records
         .first()
         .map(|r| looks_like_header(r))

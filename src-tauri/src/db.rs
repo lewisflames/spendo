@@ -54,11 +54,11 @@ pub(crate) const DATA_TABLES: &[&str] = &[
     "recurring_schedules",
 ];
 
-pub(crate) fn validate_data_table(table: &str) -> Result<(), String> {
+pub(crate) fn validate_data_table(table: &str) -> Result<(), AppError> {
     if DATA_TABLES.contains(&table) {
         Ok(())
     } else {
-        Err(format!("Invalid table name: {table}"))
+        Err(AppError::Validation(format!("Invalid table name: {table}")))
     }
 }
 
@@ -109,9 +109,11 @@ where
 /// preparing (file hashing, CSV parsing, network fetch). Call this **inside**
 /// the `run_blocking` closure that performs the write: connection swaps also
 /// take the DB lock, so the check is authoritative once the lock is held.
-pub(crate) fn ensure_same_book(book_generation: &AtomicU64, expected: u64) -> Result<(), String> {
+pub(crate) fn ensure_same_book(book_generation: &AtomicU64, expected: u64) -> Result<(), AppError> {
     if book_generation.load(std::sync::atomic::Ordering::SeqCst) != expected {
-        return Err("Book changed while the operation was preparing. Please try again".to_string());
+        return Err(AppError::Validation(
+            "Book changed while the operation was preparing. Please try again".to_string(),
+        ));
     }
     Ok(())
 }
@@ -467,10 +469,10 @@ pub fn read_last_book(app_data_dir: &Path) -> Option<PathBuf> {
 
 /// Remember the active book. Called after every successful open/create/save-as;
 /// a failure here must not fail the switch, so callers log and continue.
-pub fn write_last_book(app_data_dir: &Path, path: &Path) -> Result<(), String> {
+pub fn write_last_book(app_data_dir: &Path, path: &Path) -> Result<(), AppError> {
     let body = serde_json::json!({ "path": path.to_string_lossy() });
     std::fs::write(last_book_file(app_data_dir), body.to_string())
-        .map_err(|e| format!("Failed to remember open book: {}", e))
+        .map_err(|e| AppError::Io(format!("Failed to remember open book: {}", e)))
 }
 
 /// Forget the active book (e.g. its file vanished). Never errors.
