@@ -124,7 +124,6 @@ pub fn run() {
             attachments::fetch_attachments,
             attachments::add_attachments,
             attachments::delete_attachment,
-            attachments::fetch_attachment_data,
             attachments::export_attachment,
             attachments::open_attachment,
             reconcile::fetch_reconcile_info,
