@@ -1621,7 +1621,11 @@ async fn fetch_prices_best_effort(
 
     // Each stage runs sequentially without holding the DB lock across the
     // network fetch (same discipline as `refresh_prices`).
-    let pre = match db::run_blocking(db.clone(), prices::read_price_data).await {
+    let pre = match db::run_blocking(db.clone(), |conn| {
+        prices::read_price_data(conn).map_err(String::from)
+    })
+    .await
+    {
         Ok(pre) => pre,
         Err(e) => return failed(format!("Failed to read price plan: {e}")),
     };
@@ -1630,7 +1634,7 @@ async fn fetch_prices_best_effort(
     }
     let (mut result, write_data) = match prices::fetch_prices_remote(pre).await {
         Ok(v) => v,
-        Err(e) => return failed(e),
+        Err(e) => return failed(e.to_string()),
     };
     if let Err(e) = db::run_blocking(db, move |conn| {
         if book_generation.load(std::sync::atomic::Ordering::SeqCst) != expected_generation {
