@@ -75,6 +75,11 @@ pub fn get_report_currency_mnemonic(conn: &Connection) -> Result<Option<String>,
     .map_err(|e| e.to_string())
 }
 
+/// Report currency mnemonic, or `""` when the book has none yet.
+pub fn report_currency_or_empty(conn: &Connection) -> Result<String, String> {
+    Ok(get_report_currency_mnemonic(conn)?.unwrap_or_default())
+}
+
 /// All CURRENCY-namespace commodities as (guid, mnemonic).
 pub fn list_book_currencies(conn: &Connection) -> Result<Vec<(String, String)>, String> {
     let mut stmt = conn

@@ -282,7 +282,7 @@ fn convert_buckets(
     conn: &Connection,
     buckets: &[MonthlyBucket],
 ) -> Result<(Vec<ConvertedBucket>, Vec<String>, String), String> {
-    let report = fx::get_report_currency_mnemonic(conn)?.unwrap_or_default();
+    let report = fx::report_currency_or_empty(conn)?;
     let fx_history = fx::FxHistory::load(conn)?;
     let mut missing = HashSet::new();
     let mut maps: HashMap<String, HashMap<String, f64>> = HashMap::new();

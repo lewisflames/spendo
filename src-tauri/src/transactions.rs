@@ -428,7 +428,7 @@ struct FxContext {
 
 fn load_fx_context(conn: &Connection) -> Result<FxContext, String> {
     Ok(FxContext {
-        report_currency: fx::get_report_currency_mnemonic(conn)?.unwrap_or_default(),
+        report_currency: fx::report_currency_or_empty(conn)?,
         history: fx::FxHistory::load(conn)?,
     })
 }

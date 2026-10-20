@@ -336,7 +336,7 @@ fn fetch_accounts_inner(conn: &Connection) -> Result<AccountsResult, String> {
     let rows = load_account_rows(conn)?;
 
     let unified_prices = get_cached_prices_map(conn)?;
-    let report_currency = fx::get_report_currency_mnemonic(conn)?.unwrap_or_default();
+    let report_currency = fx::report_currency_or_empty(conn)?;
     let fx_map = fx::get_fx_map(conn, None)?;
 
     let valuation = value_account_rows(&rows, &unified_prices, &report_currency, &fx_map);

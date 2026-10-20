@@ -313,6 +313,11 @@ pub fn validate_gnucash_path(path: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Lowercase hex encoding of a digest (SHA-256 file and row hashes).
+pub fn hex_digest(digest: impl AsRef<[u8]>) -> String {
+    digest.as_ref().iter().map(|b| format!("{b:02x}")).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

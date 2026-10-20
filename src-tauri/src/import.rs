@@ -85,11 +85,7 @@ fn file_sha256(path: &str) -> Result<String, String> {
         }
         hasher.update(&buf[..n]);
     }
-    Ok(hasher
-        .finalize()
-        .iter()
-        .map(|b| format!("{:02x}", b))
-        .collect())
+    Ok(utils::hex_digest(hasher.finalize()))
 }
 
 // ── Source data: shared read+filter logic for preview and import ────────────
