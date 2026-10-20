@@ -27,30 +27,6 @@ export const CREDIT_NORMAL_TYPES = new Set([
   'TRADING'
 ]);
 
-export const INVESTMENT_TYPES = new Set(['STOCK', 'MUTUAL', 'FUND']);
-
-const TYPE_TO_CATEGORY: Record<string, string> = {
-  ASSET: 'ASSET',
-  BANK: 'ASSET',
-  CASH: 'ASSET',
-  STOCK: 'ASSET',
-  MUTUAL: 'ASSET',
-  FUND: 'ASSET',
-  CURRENCY: 'ASSET',
-  RECEIVABLE: 'ASSET',
-  LIABILITY: 'LIABILITY',
-  CREDIT: 'LIABILITY',
-  PAYABLE: 'LIABILITY',
-  INCOME: 'INCOME',
-  EXPENSE: 'EXPENSE',
-  EQUITY: 'EQUITY',
-  TRADING: 'EQUITY'
-};
-
-export function categoryOf(accountType: string): string {
-  return TYPE_TO_CATEGORY[accountType] ?? accountType;
-}
-
 export interface FixtureAccount {
   guid: string;
   parentGuid: string | null;

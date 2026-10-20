@@ -35,6 +35,9 @@ export const ACCOUNT_TYPES = [
   'TRADING'
 ];
 
+/** Account types whose splits carry a share quantity distinct from the amount. */
+export const INVESTMENT_ACCOUNT_TYPES: ReadonlySet<string> = new Set(['STOCK', 'MUTUAL', 'FUND']);
+
 /** Category of an account type, falling back to the raw type when unknown. */
 export function nodeCategory(accountType: string): string {
   return TYPE_TO_CATEGORY[accountType] ?? accountType;
