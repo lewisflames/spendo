@@ -180,9 +180,9 @@ export async function closeActiveBook(): Promise<boolean> {
   });
 }
 
-/** The path-taking variant is the single implementation for callers that
- * already have a book path (settings book card). */
-export async function copyBookPathAt(path: string): Promise<boolean> {
+export async function copyActiveBookPath(): Promise<boolean> {
+  const path = activeBookPath.value;
+  if (!path) return false;
   try {
     await navigator.clipboard.writeText(path);
     toast.success('Book path copied');
@@ -191,12 +191,6 @@ export async function copyBookPathAt(path: string): Promise<boolean> {
     toast.error(errMsg(e, 'We couldn’t copy that path'));
     return false;
   }
-}
-
-export async function copyActiveBookPath(): Promise<boolean> {
-  const path = activeBookPath.value;
-  if (!path) return false;
-  return copyBookPathAt(path);
 }
 
 /** Reveal the active book file in the OS file manager. */

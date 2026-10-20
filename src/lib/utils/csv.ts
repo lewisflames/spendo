@@ -9,9 +9,6 @@ function toCsvText(lines: string[][], delimiter: string): string {
   return lines.map((r) => r.map((c) => escapeCell(c, delimiter)).join(delimiter)).join('\n');
 }
 
-/** BOM prefix the file-write exports apply so Excel detects UTF-8. */
-export const CSV_BOM = '﻿';
-
 /** Pure CSV text builder (no BOM) shared by all export writers. */
 export function buildCsvText(
   headers: string[],

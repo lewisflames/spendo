@@ -16,8 +16,6 @@ const TYPE_TO_CATEGORY: Record<string, string> = {
   TRADING: 'EQUITY'
 };
 
-export const CATEGORY_ORDER = ['ASSET', 'LIABILITY', 'EQUITY', 'INCOME', 'EXPENSE'];
-
 /** Creatable account types (mirrors backend `ACCOUNT_TYPES`; ROOT is internal). */
 export const ACCOUNT_TYPES = [
   'ASSET',
