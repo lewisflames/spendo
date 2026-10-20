@@ -7,7 +7,7 @@ use tauri::State;
 use crate::db::{clear_db, run_blocking, AppState};
 
 #[tauri::command]
-pub async fn clear_app_db(state: State<'_, AppState>) -> Result<(), String> {
+pub async fn clear_app_db(state: State<'_, AppState>) -> Result<(), AppError> {
     // Clearing the book invalidates any in-flight price refresh (which checks
     // only the generation before writing), so bump it under the DB lock.
     let generation = state.book_generation.clone();
@@ -139,7 +139,7 @@ fn set_book_setting_inner(
 }
 
 #[tauri::command]
-pub async fn get_book_settings(state: State<'_, AppState>) -> Result<BookSettings, String> {
+pub async fn get_book_settings(state: State<'_, AppState>) -> Result<BookSettings, AppError> {
     run_blocking(state.db.clone(), get_book_settings_inner).await
 }
 
@@ -148,7 +148,7 @@ pub async fn set_book_setting(
     state: State<'_, AppState>,
     key: String,
     value: String,
-) -> Result<BookSettings, String> {
+) -> Result<BookSettings, AppError> {
     run_blocking(state.db.clone(), move |conn| {
         set_book_setting_inner(conn, &key, &value)
     })

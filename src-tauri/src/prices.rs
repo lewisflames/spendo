@@ -897,7 +897,7 @@ pub fn latest_quote_currencies(conn: &Connection) -> Result<HashMap<String, Stri
 #[tauri::command]
 pub async fn fetch_symbol_overrides(
     state: State<'_, AppState>,
-) -> Result<Vec<SymbolOverride>, String> {
+) -> Result<Vec<SymbolOverride>, AppError> {
     db::run_blocking(state.db.clone(), fetch_symbol_overrides_inner).await
 }
 
@@ -941,7 +941,7 @@ pub async fn set_symbol_override(
     state: State<'_, AppState>,
     commodity_guid: String,
     symbol: String,
-) -> Result<SymbolOverride, String> {
+) -> Result<SymbolOverride, AppError> {
     let normalized = normalize_symbol(&symbol)?;
     db::run_blocking(state.db.clone(), move |conn| {
         set_symbol_override_inner(conn, commodity_guid, normalized)
@@ -961,7 +961,7 @@ fn delete_symbol_override_inner(conn: &Connection, commodity_guid: &str) -> Resu
 pub async fn delete_symbol_override(
     state: State<'_, AppState>,
     commodity_guid: String,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     db::run_blocking(state.db.clone(), move |conn| {
         delete_symbol_override_inner(conn, &commodity_guid)
     })
@@ -999,7 +999,7 @@ pub(crate) fn write_prices_and_log(
 }
 
 #[tauri::command]
-pub async fn refresh_prices(state: State<'_, AppState>) -> Result<PricesResult, String> {
+pub async fn refresh_prices(state: State<'_, AppState>) -> Result<PricesResult, AppError> {
     let generation = state.book_generation.load(Ordering::SeqCst);
     let pre = db::run_blocking(state.db.clone(), read_price_data).await?;
 

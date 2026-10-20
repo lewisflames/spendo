@@ -774,7 +774,7 @@ pub async fn fetch_account_detail(
     search: Option<String>,
     sort_by: Option<String>,
     sort_dir: Option<String>,
-) -> Result<AccountDetailResult, String> {
+) -> Result<AccountDetailResult, AppError> {
     run_blocking(state.db.clone(), move |conn| {
         fetch_account_detail_inner(
             conn,
@@ -951,7 +951,7 @@ fn fetch_account_balance_trend_inner(
 pub async fn fetch_account_balance_trend(
     state: State<'_, AppState>,
     guid: String,
-) -> Result<Vec<AccountBalancePoint>, String> {
+) -> Result<Vec<AccountBalancePoint>, AppError> {
     run_blocking(state.db.clone(), move |conn| {
         fetch_account_balance_trend_inner(conn, &guid)
     })

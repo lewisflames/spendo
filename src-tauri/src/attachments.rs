@@ -229,17 +229,13 @@ fn insert_attachments(
                 // Books created before the multi-attachment schema still carry
                 // `UNIQUE(tx_guid)` (no migrations by design). Surface that as
                 // guidance instead of a raw constraint message.
-                let extended_code = match &e {
-                    rusqlite::Error::SqliteFailure(err, _) => Some(err.extended_code),
-                    _ => None,
-                };
-                if extended_code == Some(rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE) {
-                    return Err(AppError::Validation(
+                return Err(match AppError::from(e) {
+                    AppError::Db(db) if db.is_unique() => AppError::Validation(
                         "This book holds one attachment per transaction. Clear your data or start a new book to add more"
                             .to_string(),
-                    ));
-                }
-                return Err(AppError::from(e));
+                    ),
+                    other => other,
+                });
             }
             infos.push(AttachmentInfo {
                 guid,
@@ -278,7 +274,7 @@ fn fetch_blob(conn: &Connection, guid: &str) -> Result<(String, String, Vec<u8>)
 pub async fn fetch_attachments(
     state: State<'_, AppState>,
     tx_guid: String,
-) -> Result<Vec<AttachmentInfo>, String> {
+) -> Result<Vec<AttachmentInfo>, AppError> {
     run_blocking(state.db.clone(), move |conn| {
         list_attachments(conn, &tx_guid)
     })
@@ -289,7 +285,7 @@ pub async fn fetch_attachments(
 pub async fn add_attachments(
     state: State<'_, AppState>,
     input: AttachmentAddInput,
-) -> Result<Vec<AttachmentInfo>, String> {
+) -> Result<Vec<AttachmentInfo>, AppError> {
     let tx_guid = input.tx_guid;
     // Disk I/O first (house rule): read + validate the file before touching
     // the DB lock; a bad file fails with its own message.
@@ -308,7 +304,7 @@ pub async fn add_attachments(
 }
 
 #[tauri::command]
-pub async fn delete_attachment(state: State<'_, AppState>, guid: String) -> Result<(), String> {
+pub async fn delete_attachment(state: State<'_, AppState>, guid: String) -> Result<(), AppError> {
     run_blocking(state.db.clone(), move |conn| {
         delete_attachment_inner(conn, &guid)
     })
@@ -320,7 +316,7 @@ pub async fn export_attachment(
     state: State<'_, AppState>,
     guid: String,
     dest_path: String,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     state.ensure_not_active_book(Path::new(dest_path.trim()))?;
     let (_, _, data) = run_blocking(state.db.clone(), move |conn| fetch_blob(conn, &guid)).await?;
     run_io(move || {
@@ -338,7 +334,7 @@ pub async fn open_attachment(
     app: AppHandle,
     state: State<'_, AppState>,
     guid: String,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let blob_guid = guid.clone();
     let (filename, _, data) =
         run_blocking(state.db.clone(), move |conn| fetch_blob(conn, &blob_guid)).await?;
@@ -357,7 +353,7 @@ pub async fn open_attachment(
     })
     .await?;
     tauri_plugin_opener::open_path(path.to_string_lossy().to_string(), None::<&str>)
-        .map_err(|e| format!("Failed to open file: {e}"))
+        .map_err(|e| AppError::Io(format!("Failed to open file: {e}")))
 }
 
 #[cfg(test)]

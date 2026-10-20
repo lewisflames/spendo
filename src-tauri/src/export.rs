@@ -469,7 +469,7 @@ fn account_row_cells(row: &ExportAccountRow) -> Vec<String> {
 pub async fn export_transactions_csv(
     state: State<'_, AppState>,
     input: TransactionsExportInput,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let delimiter = validate_delimiter(&input.delimiter)?;
     validate_export_path(&input.path)?;
     state.ensure_not_active_book(&PathBuf::from(input.path.trim()))?;
@@ -500,7 +500,7 @@ pub async fn export_transactions_csv(
 pub async fn export_accounts_csv(
     state: State<'_, AppState>,
     input: AccountsExportInput,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let delimiter = validate_delimiter(&input.delimiter)?;
     validate_export_path(&input.path)?;
     state.ensure_not_active_book(&PathBuf::from(input.path.trim()))?;

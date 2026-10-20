@@ -27,11 +27,7 @@ impl AppState {
     /// Those writes use `std::fs::write`, which truncates — exporting onto the
     /// live `.spendo` file would destroy the book.
     pub fn ensure_not_active_book(&self, target: &Path) -> Result<(), AppError> {
-        let active = self
-            .db_path
-            .lock()
-            .map_err(|e| AppError::Validation(e.to_string()))?
-            .clone();
+        let active = self.db_path.lock()?.clone();
         if let Some(active) = active {
             if crate::utils::same_path(&active, target) {
                 return Err(AppError::Validation(
@@ -64,32 +60,32 @@ pub(crate) fn validate_data_table(table: &str) -> Result<(), AppError> {
 
 /// Run a closure with the DB connection on a blocking thread. Every DB-touching
 /// command must go through here so the tokio runtime threads are never blocked
-/// while the global mutex is held. The closure's typed error is stringified
-/// here, at the command boundary.
-pub async fn run_blocking<T, F>(db: Arc<Mutex<Connection>>, f: F) -> Result<T, String>
+/// while the global mutex is held.
+pub async fn run_blocking<T, F>(db: Arc<Mutex<Connection>>, f: F) -> Result<T, AppError>
 where
     F: FnOnce(&Connection) -> Result<T, AppError> + Send + 'static,
     T: Send + 'static,
 {
-    tauri::async_runtime::spawn_blocking(move || {
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        f(&conn).map_err(String::from)
-    })
-    .await
-    .map_err(|e| format!("Background task failed: {}", e))?
+    tauri::async_runtime::spawn_blocking(move || f(&*db.lock()?))
+        .await
+        .map_err(task_failed)?
+}
+
+fn task_failed(e: tauri::Error) -> AppError {
+    AppError::Internal(format!("Background task failed: {}", e))
 }
 
 /// Run a synchronous, non-DB closure (file hashing, reading, writing) on a
 /// blocking thread so async commands never stall a tokio worker on disk I/O.
 /// Mirrors [`run_blocking`] without the connection lock.
-pub async fn run_io<T, F>(f: F) -> Result<T, String>
+pub async fn run_io<T, F>(f: F) -> Result<T, AppError>
 where
     F: FnOnce() -> Result<T, AppError> + Send + 'static,
     T: Send + 'static,
 {
-    tauri::async_runtime::spawn_blocking(move || f().map_err(String::from))
+    tauri::async_runtime::spawn_blocking(f)
         .await
-        .map_err(|e| format!("Background task failed: {}", e))?
+        .map_err(task_failed)?
 }
 
 /// Run `f` inside a SQLite transaction on a shared `&Connection`.
@@ -119,11 +115,10 @@ pub(crate) fn ensure_same_book(book_generation: &AtomicU64, expected: u64) -> Re
     Ok(())
 }
 
-/// Typed backend error returned by every `*_inner` helper. Commands keep
-/// `Result<T, String>` at the `#[tauri::command]` boundary — `run_blocking`,
-/// `run_io` and `run_swap_blocking` stringify it there, and
-/// `From<AppError> for String` uses the plain message, so the frontend only
-/// ever sees the message text.
+/// Typed backend error returned by every `*_inner` helper and every
+/// `#[tauri::command]`. It crosses IPC as `{ kind, message }` (see the
+/// `Serialize` impl and `BackendError` in `$lib/tauri.ts`), so the frontend
+/// branches on `kind` instead of matching message text.
 #[derive(Debug)]
 pub enum AppError {
     NotFound(String),
@@ -131,6 +126,37 @@ pub enum AppError {
     /// Filesystem or network failure outside the database.
     Io(String),
     Db(DbError),
+    /// Poisoned lock or failed background task: a bug, not user input.
+    Internal(String),
+}
+
+impl AppError {
+    /// Wire name of the variant (`BackendErrorKind` on the frontend).
+    pub fn kind(&self) -> &'static str {
+        match self {
+            AppError::NotFound(_) => "notFound",
+            AppError::Validation(_) => "validation",
+            AppError::Io(_) => "io",
+            AppError::Db(_) => "db",
+            AppError::Internal(_) => "internal",
+        }
+    }
+}
+
+impl serde::Serialize for AppError {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut out = serializer.serialize_struct("AppError", 2)?;
+        out.serialize_field("kind", self.kind())?;
+        out.serialize_field("message", &self.to_string())?;
+        out.end()
+    }
+}
+
+impl<T> From<std::sync::PoisonError<T>> for AppError {
+    fn from(e: std::sync::PoisonError<T>) -> AppError {
+        AppError::Internal(e.to_string())
+    }
 }
 
 /// A database failure with its message plus the extended SQLite result code,
@@ -142,23 +168,26 @@ pub struct DbError {
 }
 
 impl DbError {
+    // No production caller matches FK failures yet; kept as the typed matcher.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn is_foreign_key(&self) -> bool {
         self.extended_code == Some(rusqlite::ffi::SQLITE_CONSTRAINT_FOREIGNKEY)
+    }
+
+    pub fn is_unique(&self) -> bool {
+        self.extended_code == Some(rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE)
     }
 }
 
 impl std::fmt::Display for AppError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AppError::NotFound(m) | AppError::Validation(m) | AppError::Io(m) => write!(f, "{m}"),
+            AppError::NotFound(m)
+            | AppError::Validation(m)
+            | AppError::Io(m)
+            | AppError::Internal(m) => write!(f, "{m}"),
             AppError::Db(e) => write!(f, "{}", e.message),
         }
-    }
-}
-
-impl From<AppError> for String {
-    fn from(e: AppError) -> String {
-        e.to_string()
     }
 }
 
@@ -180,17 +209,14 @@ impl From<rusqlite::Error> for AppError {
 /// the `Connection` itself (`*conn = new_conn`), which needs `&mut`. Same
 /// rule applies — callers must do file I/O (validate, connect new file) before
 /// entering, and never lock directly inside an `async fn`.
-pub async fn run_swap_blocking<T, F>(db: Arc<Mutex<Connection>>, f: F) -> Result<T, String>
+pub async fn run_swap_blocking<T, F>(db: Arc<Mutex<Connection>>, f: F) -> Result<T, AppError>
 where
     F: FnOnce(&mut Connection) -> Result<T, AppError> + Send + 'static,
     T: Send + 'static,
 {
-    tauri::async_runtime::spawn_blocking(move || {
-        let mut conn = db.lock().map_err(|e| e.to_string())?;
-        f(&mut conn).map_err(String::from)
-    })
-    .await
-    .map_err(|e| format!("Background task failed: {}", e))?
+    tauri::async_runtime::spawn_blocking(move || f(&mut *db.lock()?))
+        .await
+        .map_err(task_failed)?
 }
 
 const SCHEMA: &str = "
@@ -510,6 +536,24 @@ pub fn clear_db(conn: &Connection) -> Result<()> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn app_error_serializes_kind_and_message() {
+        let cases = [
+            (AppError::NotFound("gone".into()), "notFound"),
+            (AppError::Validation("bad".into()), "validation"),
+            (AppError::Io("disk".into()), "io"),
+            (AppError::Internal("bug".into()), "internal"),
+            (AppError::from(rusqlite::Error::QueryReturnedNoRows), "db"),
+        ];
+        for (err, kind) in cases {
+            let message = err.to_string();
+            assert_eq!(
+                serde_json::to_value(&err).unwrap(),
+                serde_json::json!({ "kind": kind, "message": message })
+            );
+        }
+    }
+
     fn table_names(conn: &Connection) -> Vec<String> {
         let mut stmt = conn
             .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
@@ -518,6 +562,15 @@ mod tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap()
+    }
+
+    #[test]
+    fn unique_error_matches_extended_code() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE u (x TEXT UNIQUE); INSERT INTO u VALUES ('a');")
+            .unwrap();
+        let err = AppError::from(conn.execute("INSERT INTO u VALUES ('a')", []).unwrap_err());
+        assert!(matches!(err, AppError::Db(ref e) if e.is_unique() && !e.is_foreign_key()));
     }
 
     #[test]
@@ -546,9 +599,8 @@ mod tests {
         assert!(matches!(app_err, AppError::Db(ref e) if e.is_foreign_key()));
         let app_unique = AppError::from(unique_err);
         assert!(matches!(app_unique, AppError::Db(ref e) if !e.is_foreign_key()));
-        // Frontend contract unchanged: plain messages.
         assert_eq!(
-            String::from(app_unique),
+            app_unique.to_string(),
             "UNIQUE constraint failed: fk_parent.id"
         );
     }

@@ -32,7 +32,7 @@
     sessionCurrency,
     signColor
   } from '$lib/utils/format.svelte';
-  import { errMsg, isNotFoundMessage } from '$lib/utils/error';
+  import { errMsg } from '$lib/utils/error';
   import { statusFor } from '$lib/utils/reconcile';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
   import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
@@ -246,7 +246,7 @@
       {#key d.guid}
         <TransactionAttachments txGuid={d.guid} />
       {/key}
-    {:else if res.error && isNotFoundMessage(res.error)}
+    {:else if res.errorKind === 'notFound'}
       <EmptyState
         card
         title="That transaction is gone"

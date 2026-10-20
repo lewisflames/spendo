@@ -1,4 +1,5 @@
-import { errMsg } from '$lib/utils/error';
+import type { BackendErrorKind } from '$lib/tauri';
+import { errKind, errMsg } from '$lib/utils/error';
 
 interface AsyncDataConfig<T> {
   /** Whether fetching should happen (e.g. a DB session exists). */
@@ -33,6 +34,7 @@ export function useAsyncData<T>({ enabled, fetch, onSuccess, onError, label }: A
   let data = $state<T | null>(null);
   let loading = $state(false);
   let error = $state<string | null>(null);
+  let errorKind = $state<BackendErrorKind | null>(null);
   let reloadSeq = $state(0);
 
   $effect(() => {
@@ -40,6 +42,7 @@ export function useAsyncData<T>({ enabled, fetch, onSuccess, onError, label }: A
       data = null;
       loading = false;
       error = null;
+      errorKind = null;
       return;
     }
 
@@ -47,6 +50,7 @@ export function useAsyncData<T>({ enabled, fetch, onSuccess, onError, label }: A
     void reloadSeq;
     loading = true;
     error = null;
+    errorKind = null;
 
     void (async () => {
       let result: T;
@@ -55,6 +59,7 @@ export function useAsyncData<T>({ enabled, fetch, onSuccess, onError, label }: A
       } catch (e) {
         if (cancelled) return;
         error = errMsg(e, label);
+        errorKind = errKind(e);
         loading = false;
         onError?.(error);
         return;
@@ -79,6 +84,10 @@ export function useAsyncData<T>({ enabled, fetch, onSuccess, onError, label }: A
     },
     get error(): string | null {
       return error;
+    },
+    /** Backend `AppError` kind of the failure (e.g. `'notFound'`), if any. */
+    get errorKind(): BackendErrorKind | null {
+      return errorKind;
     },
     reload(): void {
       reloadSeq++;

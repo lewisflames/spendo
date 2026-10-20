@@ -51,7 +51,7 @@ fn nav_badges_inner(conn: &Connection) -> Result<NavBadges, AppError> {
 }
 
 #[tauri::command]
-pub async fn fetch_nav_badges(state: State<'_, AppState>) -> Result<NavBadges, String> {
+pub async fn fetch_nav_badges(state: State<'_, AppState>) -> Result<NavBadges, AppError> {
     run_blocking(state.db.clone(), nav_badges_inner).await
 }
 

@@ -225,7 +225,7 @@ pub async fn search_global(
     state: State<'_, AppState>,
     query: String,
     limit_per_group: Option<i64>,
-) -> Result<GlobalSearchResult, String> {
+) -> Result<GlobalSearchResult, AppError> {
     run_blocking(state.db.clone(), move |conn| {
         search_global_inner(conn, &query, limit_per_group)
     })

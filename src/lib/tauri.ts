@@ -17,6 +17,15 @@ const invoke = <K extends Command>(
   return tauriInvoke<CommandPayloads[K]>(cmd, args);
 };
 
+/** Variant of the Rust `AppError` a command failed with. */
+export type BackendErrorKind = 'notFound' | 'validation' | 'io' | 'db' | 'internal';
+
+/** Every command rejects with this shape (serialized `AppError`). */
+export interface BackendError {
+  kind: BackendErrorKind;
+  message: string;
+}
+
 interface HomeDataResult {
   hasData: boolean;
   summary: DataSummary | null;

@@ -154,7 +154,7 @@ fn set_base_currency_inner(conn: &Connection, currency: &str) -> Result<HomeData
 pub async fn set_base_currency(
     state: State<'_, AppState>,
     currency: String,
-) -> Result<HomeDataResult, String> {
+) -> Result<HomeDataResult, AppError> {
     run_blocking(state.db.clone(), move |conn| {
         set_base_currency_inner(conn, &currency)
     })
