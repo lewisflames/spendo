@@ -103,24 +103,6 @@ pub fn validate_optional_iso_date(raw: Option<&str>) -> Result<Option<String>, A
     }
 }
 
-/// Truncate user text to at most `max_bytes` **without splitting a UTF-8
-/// character**, appending `…` when anything was cut. Imported names and
-/// descriptions may hold any script — a raw `&s[..max_bytes]` panics (and
-/// `panic = "abort"` in release kills the process) when the cut lands inside a
-/// multibyte char.
-pub fn truncate_chars(s: &str, max_bytes: usize) -> String {
-    if s.len() <= max_bytes {
-        return s.to_string();
-    }
-    let end = s
-        .char_indices()
-        .map(|(i, c)| i + c.len_utf8())
-        .take_while(|&end| end <= max_bytes)
-        .last()
-        .unwrap_or(0);
-    format!("{}…", &s[..end])
-}
-
 /// Book-wide visible transaction window (`YYYY-MM-DD`). Single `MIN,MAX`
 /// query so earliest/latest can never diverge between callers.
 pub fn visible_tx_window(
@@ -365,23 +347,6 @@ mod tests {
         }
         assert_eq!(format_month(0), "0000-01");
         assert_eq!(format_month(24), "0002-01");
-    }
-
-    #[test]
-    fn truncate_chars_never_splits_multibyte_chars() {
-        assert_eq!(truncate_chars("hello", 80), "hello");
-        // Exact byte fit is left untouched (é is 2 bytes).
-        let exact = format!("{}é", "a".repeat(78));
-        assert_eq!(truncate_chars(&exact, 80), exact);
-        // 79 ASCII + é = 81 bytes: cut back to the last full char (79).
-        let over = format!("{}é", "a".repeat(79));
-        assert_eq!(truncate_chars(&over, 80), format!("{}…", "a".repeat(79)));
-        // 27 CJK chars = 81 bytes; 26 fit at 78 bytes.
-        let cjk = "漢".repeat(27);
-        assert_eq!(truncate_chars(&cjk, 80), format!("{}…", "漢".repeat(26)));
-        // Degenerate budgets still return valid UTF-8.
-        assert_eq!(truncate_chars("漢字", 0), "…");
-        assert_eq!(truncate_chars("", 80), "");
     }
 
     #[test]

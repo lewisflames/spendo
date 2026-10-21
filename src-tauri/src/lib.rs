@@ -8,7 +8,6 @@ mod csv_import;
 mod db;
 mod export;
 mod fx;
-mod gnucash_export;
 mod home;
 mod import;
 mod import_rules;
@@ -133,7 +132,6 @@ pub fn run() {
             reconcile::fetch_reconcile_summaries,
             export::export_transactions_csv,
             export::export_accounts_csv,
-            gnucash_export::export_gnucash,
             prices::refresh_prices,
             account_detail::fetch_account_detail,
             account_detail::fetch_account_balance_trend,

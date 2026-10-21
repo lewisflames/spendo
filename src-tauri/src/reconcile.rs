@@ -366,105 +366,25 @@ fn apply_split_updates(conn: &Connection, pending: &[(String, String)]) -> Resul
     Ok(())
 }
 
-/// Legacy fallback for books finished before `reconcile_batches` existed: the
-/// most recent reconciled batch inferred from the `'y'` splits dated after the
-/// previous batch's last date. Returns `(from_exclusive, through, count)`.
-fn legacy_last_reconciled_batch(
+/// Last reconciled day for an account with no finished batch: its `'y'`
+/// splits were reconciled outside Spendo (e.g. an imported GnuCash book).
+/// Display only; those statements can't be reopened. Truncated to the day
+/// because imported books carry `HH:MM:SS`.
+fn unbatched_last_reconciled_date(
     conn: &Connection,
     account_guid: &str,
-) -> Result<Option<(Option<String>, String, i64)>, AppError> {
-    let through: Option<String> = conn
-        .query_row(
-            &format!(
-                "SELECT MAX(t.post_date) FROM splits s
-                 JOIN transactions t ON t.guid = s.tx_guid
-                 WHERE s.account_guid = ?1 AND s.reconcile_state = 'y' AND {}",
-                utils::VISIBLE_TX_FILTER
-            ),
-            params![account_guid],
-            |row| row.get(0),
-        )
-        .map_err(AppError::from)?;
-    let Some(through) = through else {
-        return Ok(None);
-    };
-    let from_date: Option<String> = conn
-        .query_row(
-            &format!(
-                "SELECT MAX(t.post_date) FROM splits s
-                 JOIN transactions t ON t.guid = s.tx_guid
-                 WHERE s.account_guid = ?1 AND s.reconcile_state = 'y'
-                   AND t.post_date < ?2 AND {}",
-                utils::VISIBLE_TX_FILTER
-            ),
-            params![account_guid, &through],
-            |row| row.get(0),
-        )
-        .map_err(AppError::from)?;
-    let count: i64 = match from_date.as_deref() {
-        Some(from) => conn.query_row(
-            &format!(
-                "SELECT COUNT(*) FROM splits s
-                 JOIN transactions t ON t.guid = s.tx_guid
-                 WHERE s.account_guid = ?1 AND s.reconcile_state = 'y'
-                   AND t.post_date > ?2 AND {}",
-                utils::VISIBLE_TX_FILTER
-            ),
-            params![account_guid, from],
-            |row| row.get(0),
-        )?,
-        None => conn.query_row(
-            &format!(
-                "SELECT COUNT(*) FROM splits s
-                 JOIN transactions t ON t.guid = s.tx_guid
-                 WHERE s.account_guid = ?1 AND s.reconcile_state = 'y' AND {}",
-                utils::VISIBLE_TX_FILTER
-            ),
-            params![account_guid],
-            |row| row.get(0),
-        )?,
-    };
-    Ok(Some((from_date, through, count)))
-}
-
-/// Currency-priced `'y'` split guids in the legacy last batch (date-derived).
-fn legacy_reconciled_batch_guids(
-    conn: &Connection,
-    account_guid: &str,
-    from_date: Option<&str>,
-) -> Result<Vec<String>, AppError> {
-    let sql_text = match from_date {
-        Some(_) => format!(
-            "SELECT s.guid FROM splits s
-             JOIN transactions t ON t.guid = s.tx_guid
-             WHERE s.account_guid = ?1 AND s.reconcile_state = 'y'
-               AND t.post_date > ?2 AND {}",
-            utils::VISIBLE_TX_FILTER
-        ),
-        None => format!(
-            "SELECT s.guid FROM splits s
+) -> Result<Option<String>, AppError> {
+    let date = conn.query_row(
+        &format!(
+            "SELECT substr(MAX(t.post_date), 1, 10) FROM splits s
              JOIN transactions t ON t.guid = s.tx_guid
              WHERE s.account_guid = ?1 AND s.reconcile_state = 'y' AND {}",
             utils::VISIBLE_TX_FILTER
         ),
-    };
-    let mut stmt = conn.prepare(&sql_text)?;
-    let mut guids: Vec<String> = Vec::new();
-    match from_date {
-        Some(from) => {
-            let rows = stmt.query_map(params![account_guid, from], |row| row.get(0))?;
-            for row in rows {
-                guids.push(row?);
-            }
-        }
-        None => {
-            let rows = stmt.query_map(params![account_guid], |row| row.get(0))?;
-            for row in rows {
-                guids.push(row?);
-            }
-        }
-    }
-    Ok(guids)
+        params![account_guid],
+        |row| row.get(0),
+    )?;
+    Ok(date)
 }
 
 /// Latest finished batch for an account:
@@ -610,12 +530,8 @@ fn fetch_reconcile_info_inner(
             Some(through),
             batch_split_guids(conn, &batch_guid)?.len() as i64,
         ),
-        // Books finished before batches were persisted fall back to the
-        // date-derived heuristic.
-        None => match legacy_last_reconciled_batch(conn, account_guid)? {
-            Some((_, through, count)) => (Some(through), count),
-            None => (None, 0),
-        },
+        // Nothing to reopen, so the count stays 0 and the UI hides Undo.
+        None => (unbatched_last_reconciled_date(conn, account_guid)?, 0),
     };
 
     Ok(ReconcileInfo {
@@ -756,63 +672,38 @@ fn reopen_last_reconciliation_inner(
 ) -> Result<ReopenReconcileResult, AppError> {
     load_reconcilable_account(conn, account_guid)?;
 
-    // Persisted batches are authoritative; they carry exactly the splits the
-    // Finish promoted and the preceding batch's through date.
-    if let Some((batch_guid, through_date, from_date)) = latest_batch_row(conn, account_guid)? {
-        let guids = batch_split_guids(conn, &batch_guid)?;
-        if guids.is_empty() {
-            // Membership lost (e.g. its transactions were swept). Drop the
-            // empty batch and fall through to the legacy path.
-            conn.execute(
-                "DELETE FROM reconcile_batches WHERE guid = ?1",
-                params![batch_guid],
-            )?;
-        } else {
-            let reopened_count = guids.len() as i64;
-            with_tx_err(conn, || -> Result<(), AppError> {
-                for guid in &guids {
-                    // `'c'` keeps the GnuCash `reconciled = 1` convention used
-                    // by `apply_split_updates`, so the editor still warns.
-                    conn.execute(
-                        "UPDATE splits SET reconcile_state = 'c', reconciled = 1 WHERE guid = ?1",
-                        params![guid],
-                    )?;
-                }
-                conn.execute(
-                    "DELETE FROM reconcile_batches WHERE guid = ?1",
-                    params![batch_guid],
-                )?;
-                Ok(())
-            })?;
-            return Ok(ReopenReconcileResult {
-                reopened_count,
-                from_date,
-                through_date,
-            });
-        }
-    }
-
-    // Legacy date-derived fallback for books finished before batches existed.
-    let Some((from_date, through_date, _)) = legacy_last_reconciled_batch(conn, account_guid)?
-    else {
-        return Err(AppError::Validation(
-            "Nothing is reconciled yet. Finish a statement first".to_string(),
-        ));
+    // Only batches finished here are reopened: they carry exactly the splits
+    // the Finish promoted and the preceding batch's through date.
+    let nothing = || {
+        AppError::Validation(
+            "Nothing to undo. Only statements finished in Spendo can be reopened".to_string(),
+        )
     };
-    let guids = legacy_reconciled_batch_guids(conn, account_guid, from_date.as_deref())?;
+    let (batch_guid, through_date, from_date) =
+        latest_batch_row(conn, account_guid)?.ok_or_else(nothing)?;
+    let guids = batch_split_guids(conn, &batch_guid)?;
     if guids.is_empty() {
-        return Err(AppError::Validation(
-            "Nothing is reconciled yet. Finish a statement first".to_string(),
-        ));
+        // Membership lost (e.g. its transactions were swept): drop the empty batch.
+        conn.execute(
+            "DELETE FROM reconcile_batches WHERE guid = ?1",
+            params![batch_guid],
+        )?;
+        return Err(nothing());
     }
     let reopened_count = guids.len() as i64;
     with_tx_err(conn, || -> Result<(), AppError> {
         for guid in &guids {
+            // `'c'` keeps the GnuCash `reconciled = 1` convention used by
+            // `apply_split_updates`, so the editor still warns.
             conn.execute(
                 "UPDATE splits SET reconcile_state = 'c', reconciled = 1 WHERE guid = ?1",
                 params![guid],
             )?;
         }
+        conn.execute(
+            "DELETE FROM reconcile_batches WHERE guid = ?1",
+            params![batch_guid],
+        )?;
         Ok(())
     })?;
     Ok(ReopenReconcileResult {
@@ -902,8 +793,8 @@ fn fetch_reconcile_summaries_inner(
         }
     }
     {
-        // Legacy fallback for accounts with `'y'` splits but no batch row
-        // (books finished before batches were persisted). Truncate to the day:
+        // Accounts with `'y'` splits but no batch row were reconciled outside
+        // Spendo (e.g. an imported GnuCash book). Truncate to the day:
         // imported books carry `HH:MM:SS`.
         let mut stmt = conn.prepare(&format!(
             "SELECT s.account_guid, substr(MAX(t.post_date), 1, 10)
@@ -1108,8 +999,9 @@ mod tests {
         assert_eq!(info.candidates.len(), 1);
         assert_eq!(info.candidates[0].split_guid, "s-t2");
         assert_eq!(info.candidates[0].amount, -30.0);
+        // t1 was reconciled without a batch: dated, but nothing to reopen.
         assert_eq!(info.last_reconciled_date.as_deref(), Some("2024-01-10"));
-        assert_eq!(info.last_reconciled_count, 1);
+        assert_eq!(info.last_reconciled_count, 0);
     }
 
     #[test]
@@ -1350,22 +1242,11 @@ mod tests {
     }
 
     #[test]
-    fn reopen_returns_only_the_last_batch_to_cleared() {
+    fn reopen_ignores_splits_reconciled_outside_a_batch() {
         let conn = setup();
         seed(&conn);
-        add_split(&conn, "t4", "2024-03-15", "checking", 2_000, "y");
-        let out = reopen_last_reconciliation_inner(&conn, "checking").expect("reopen runs");
-        assert_eq!(out.reopened_count, 1);
-        assert_eq!(out.from_date.as_deref(), Some("2024-01-10"));
-        assert_eq!(out.through_date, "2024-03-15");
-        let reopened: String = conn
-            .query_row(
-                "SELECT reconcile_state FROM splits WHERE guid = 's-t4'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(reopened, "c");
+        let err = reopen_last_reconciliation_inner(&conn, "checking").unwrap_err();
+        assert!(err.to_string().contains("Nothing to undo"));
         let kept: String = conn
             .query_row(
                 "SELECT reconcile_state FROM splits WHERE guid = 's-t1'",
@@ -1374,16 +1255,6 @@ mod tests {
             )
             .unwrap();
         assert_eq!(kept, "y");
-    }
-
-    #[test]
-    fn reopen_rejects_accounts_without_reconciliations() {
-        let conn = setup();
-        seed(&conn);
-        let err = reopen_last_reconciliation_inner(&conn, "checking")
-            .and_then(|_| reopen_last_reconciliation_inner(&conn, "checking"))
-            .unwrap_err();
-        assert!(err.to_string().contains("Nothing is reconciled"));
     }
 
     #[test]

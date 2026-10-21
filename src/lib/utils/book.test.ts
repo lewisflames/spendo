@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bookDisplayName, bookFolder, ensureCsvExtension, ensureGnuCashExtension } from './book';
+import { bookDisplayName, bookFolder, ensureCsvExtension } from './book';
 
 describe('bookDisplayName', () => {
   it('strips directories and the .spendo extension', () => {
@@ -31,8 +31,6 @@ describe('bookFolder', () => {
 
 describe('export extension helpers', () => {
   it('appends the export extension only when the path has none', () => {
-    expect(ensureGnuCashExtension('/tmp/books/demo')).toBe('/tmp/books/demo.gnucash');
-    expect(ensureGnuCashExtension('/tmp/books/demo.gnucash')).toBe('/tmp/books/demo.gnucash');
     expect(ensureCsvExtension('/tmp/books/demo')).toBe('/tmp/books/demo.csv');
     expect(ensureCsvExtension('/tmp/books/demo.csv')).toBe('/tmp/books/demo.csv');
   });
