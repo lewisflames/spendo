@@ -5,12 +5,7 @@
   import { Button } from '$lib/components/ui/button';
   import { Progress } from '$lib/components/ui/progress';
   import IconCardHeader from '$lib/components/shared/icon-card-header.svelte';
-  import {
-    checkForUpdates,
-    installUpdate,
-    selfUpdateSupported,
-    updates
-  } from '$lib/stores/updates.svelte';
+  import { checkForUpdates, installUpdate, updates } from '$lib/stores/updates.svelte';
 
   const AUR_URL = 'https://aur.archlinux.org/packages/spendo-bin';
   const AUR_COMMAND = 'yay -Syu spendo-bin';
@@ -28,7 +23,7 @@
   }
 
   function handleRetry() {
-    if (selfUpdateSupported && updates.value.version) {
+    if (updates.value.canSelfUpdate && updates.value.version) {
       void installUpdate();
     } else {
       void checkForUpdates();
@@ -69,15 +64,15 @@
             {updates.value.notes}
           </p>
         {/if}
-        {#if selfUpdateSupported}
+        {#if updates.value.canSelfUpdate}
           <Button onclick={handleInstall}>
             <RefreshCw aria-hidden="true" class="size-4" />
             Download &amp; install
           </Button>
         {:else}
           <p class="text-sm text-muted-foreground">
-            Spendo was installed from the AUR, so update it through your package manager rather than
-            here.
+            This copy of Spendo is managed by your package manager, so update it there. On Arch
+            Linux:
           </p>
           <code class="block rounded-md bg-muted px-2 py-1 font-mono text-xs">{AUR_COMMAND}</code>
           <div class="flex flex-wrap items-center gap-2">

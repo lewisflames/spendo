@@ -1,15 +1,21 @@
+import { BundleType, getBundleType } from '@tauri-apps/api/app';
 import { check, type Update } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { errMsg } from '$lib/utils/error';
-import { isMacPlatform } from '$lib/utils/platform';
 
 type UpdateStatus = 'idle' | 'checking' | 'up-to-date' | 'available' | 'downloading' | 'error';
 
 /**
- * macOS builds install their own updates. Everywhere else Spendo ships as the
- * Arch AUR package `spendo-bin`, whose files the package manager owns.
+ * The macOS app and the Linux AppImage install their own updates. The deb
+ * (repackaged as the Arch AUR `spendo-bin`) belongs to the package manager.
  */
-export const selfUpdateSupported = isMacPlatform();
+const SELF_UPDATING_BUNDLES: readonly BundleType[] = [BundleType.App, BundleType.AppImage];
+
+async function detectSelfUpdate(): Promise<boolean> {
+  // Unbundled dev builds report no type, and older runtimes may reject.
+  const bundle = await getBundleType().catch(() => null);
+  return bundle !== null && SELF_UPDATING_BUNDLES.includes(bundle);
+}
 
 export const updates = $state<{
   value: {
@@ -18,6 +24,8 @@ export const updates = $state<{
     notes: string | null;
     progress: number | null;
     error: string | null;
+    /** Whether this install can download and apply `version` itself. */
+    canSelfUpdate: boolean;
   };
 }>({
   value: {
@@ -25,7 +33,8 @@ export const updates = $state<{
     version: null,
     notes: null,
     progress: null,
-    error: null
+    error: null,
+    canSelfUpdate: false
   }
 });
 
@@ -53,7 +62,8 @@ export async function checkForUpdates(): Promise<void> {
   updates.value.status = 'checking';
 
   try {
-    const update = await check();
+    const [update, canSelfUpdate] = await Promise.all([check(), detectSelfUpdate()]);
+    updates.value.canSelfUpdate = canSelfUpdate;
     if (!update) {
       updates.value.status = 'up-to-date';
       return;
@@ -69,7 +79,7 @@ export async function checkForUpdates(): Promise<void> {
 }
 
 export async function installUpdate(): Promise<void> {
-  if (!pending || !selfUpdateSupported || updates.value.status === 'downloading') return;
+  if (!pending || !updates.value.canSelfUpdate || updates.value.status === 'downloading') return;
   const update = pending;
 
   updates.value.status = 'downloading';
