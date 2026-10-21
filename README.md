@@ -12,11 +12,13 @@ A local-first personal finance app for macOS and Linux. Your money lives in a si
 
 **macOS:** download `Spendo_<version>_universal.dmg` from the [latest release](https://github.com/lewisflames/spendo/releases/latest). The app is not notarized, so on first launch right-click it and choose **Open**. It updates itself from **About → Updates**.
 
-**Arch Linux:** install [`spendo-bin`](https://aur.archlinux.org/packages/spendo-bin) from the AUR and update it with your AUR helper.
+**Linux:** download `Spendo_<version>_amd64.AppImage` from the [latest release](https://github.com/lewisflames/spendo/releases/latest), make it executable and run it. Like the Mac app, it updates itself.
 
 ```sh
-yay -S spendo-bin
+chmod +x Spendo_*_amd64.AppImage && ./Spendo_*_amd64.AppImage
 ```
+
+**Arch Linux:** install [`spendo-bin`](https://aur.archlinux.org/packages/spendo-bin) from the AUR (`yay -S spendo-bin`) and update it with your AUR helper.
 
 ## Getting started
 

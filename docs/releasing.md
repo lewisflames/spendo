@@ -10,7 +10,7 @@ It bumps the version in `package.json` (the single source; `tauri.conf.json` poi
 
 The tag triggers `.github/workflows/release.yml`, which:
 
-1. builds the universal macOS dmg (plus the `.app.tar.gz` updater artifact) and the Linux deb;
+1. builds the universal macOS dmg (plus the `.app.tar.gz` updater artifact), the Linux AppImage (which self-updates) and the Linux deb;
 2. publishes a GitHub release with the bundles, signatures, the `latest.json` updater manifest and notes grouped from the `feat`/`fix`/`perf` commits since the previous tag;
 3. repackages the deb as `spendo-bin` and pushes it to the AUR.
 
