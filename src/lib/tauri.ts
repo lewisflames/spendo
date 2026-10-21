@@ -1,21 +1,10 @@
-import { invoke as tauriInvoke, isTauri } from '@tauri-apps/api/core';
+import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 
-/**
- * Dev-only fixture backend: when `bun run dev` is opened in a plain browser
- * (no Tauri runtime) calls resolve against `$lib/dev/mock-invoke.ts` so
- * frontend/UI work doesn’t need the desktop shell. `import.meta.env.DEV` is a
- * build-time constant, so the mock and its fixtures are dropped from production
- * bundles.
- */
+/** Typed `invoke`: the command name picks its payload type from `CommandPayloads`. */
 const invoke = <K extends Command>(
   cmd: K,
   args?: Record<string, unknown>
-): Promise<CommandPayloads[K]> => {
-  if (import.meta.env.DEV && !isTauri()) {
-    return import('./dev/mock-invoke').then((mock) => mock.mockInvoke(cmd, args));
-  }
-  return tauriInvoke<CommandPayloads[K]>(cmd, args);
-};
+): Promise<CommandPayloads[K]> => tauriInvoke<CommandPayloads[K]>(cmd, args);
 
 /** Variant of the Rust `AppError` a command failed with. */
 export type BackendErrorKind = 'notFound' | 'validation' | 'io' | 'db' | 'internal';
@@ -367,7 +356,7 @@ export const importGnucash = (input: GnuCashImportInput): Promise<ImportResult> 
 
 // ── CSV import (bank-statement wizard: detect → map → preview → commit) ──
 
-export interface CsvMapping {
+interface CsvMapping {
   dateCol: number;
   descCol: number;
   amountCol?: number | null;
@@ -391,7 +380,7 @@ interface CsvPreviewInput {
 }
 
 /** Saved mapping for one bank-statement header layout. */
-export interface CsvPreset {
+interface CsvPreset {
   signature: string;
   name: string;
   encoding: string | null;
@@ -1067,7 +1056,7 @@ interface FinishReconcileResult {
   endingBalance: number;
 }
 
-export interface ReopenReconcileResult {
+interface ReopenReconcileResult {
   reopenedCount: number;
   /** Post date of the batch before the reopened one; null for a first reconcile. */
   fromDate: string | null;
@@ -1149,10 +1138,9 @@ export const searchGlobal = (query: string, limitPerGroup?: number): Promise<Glo
 /**
  * Payload type of every backend command. `invoke` is typed against it, so a
  * misspelled command or a wrapper whose return type disagrees with the map
- * fails type-checking; the dev fixture backend (`$lib/dev/mock-invoke.ts`)
- * implements one handler per key.
+ * fails type-checking.
  */
-export type CommandPayloads = {
+type CommandPayloads = {
   add_attachments: AttachmentInfo[];
   clear_app_db: void;
   close_book: CloseBookResult;

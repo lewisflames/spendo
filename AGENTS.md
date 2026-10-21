@@ -33,7 +33,7 @@ Frontend work is done when `bun run check`, `bun run lint` and `bun run test` pa
 - One active `.spendo` book opened in place. Every connection swap bumps `book_generation` while the DB lock is held; long-running network writes capture the generation before fetching and abort if it changed. Books carry `PRAGMA application_id` (`SPENDO_APP_ID`). No migrations by design (pre-release): `SCHEMA` is the source of truth, so schema changes mean a reset (Settings → Clear all data or delete the book) plus re-import.
 - Routes contain only route files; page components/types live in `$lib/features/<domain>/`, domain utilities in `$lib/utils/`.
 - Store convention: `.svelte.ts` modules using `$state()` wrapped in `{ value }` — every store, including scalar flags.
-- In a plain browser, `invoke()` routes through the DEV-gated `$lib/dev/mock-invoke.ts` over `$lib/dev/fixtures.ts`; file dialogs and OS actions still need `tauri:dev`.
+- Every page needs the Rust backend: develop with `bun run tauri:dev`. A plain browser (`bun run dev`) has no backend, so `invoke()` calls reject.
 
 ## Data / imports
 
