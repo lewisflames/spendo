@@ -353,8 +353,9 @@ CREATE TABLE IF NOT EXISTS schedule_skips (
 -- Finished reconciliation batches. Persisting the membership (not inferring it
 -- from transaction dates) is what lets Undo last statement reopen exactly the
 -- splits a Finish promoted, even when one was dated before the previous
--- batch's last transaction. Older books without rows fall back to the date
--- heuristic. Rows are deleted by reopen; ON DELETE CASCADE clears mappings.
+-- batch's last transaction. Splits reconciled outside Spendo (imported books)
+-- have no batch and can't be reopened. Rows are deleted by reopen; ON DELETE
+-- CASCADE clears mappings.
 CREATE TABLE IF NOT EXISTS reconcile_batches (
 	guid TEXT PRIMARY KEY,
 	account_guid TEXT NOT NULL REFERENCES accounts(guid) ON DELETE CASCADE,
