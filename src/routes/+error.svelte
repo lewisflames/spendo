@@ -16,7 +16,7 @@
     if (navHistory.value.index > 0) {
       goBackInApp();
     } else {
-      void goto(dbSession.value ? resolve('/transactions') : resolve('/'));
+      void goto(resolve('/'));
     }
   }
 </script>
@@ -25,22 +25,22 @@
   <title>{page.status} · Spendo</title>
 </svelte:head>
 
-<div class="flex flex-col gap-6">
+<div class="page-stack">
   <div class="flex flex-col items-center justify-center gap-4 py-16 text-center">
     {#if isNotFound}
       <SearchX aria-hidden="true" class="size-16 text-muted-foreground" />
-      <h1 class="text-6xl font-bold tracking-tight">404</h1>
+      <h1 class="text-5xl font-semibold tracking-tight">404</h1>
       <h2 class="text-xl font-semibold">We can’t find that page</h2>
       <p class="max-w-md text-sm text-muted-foreground">
         That link doesn’t go anywhere anymore. It may have moved.
       </p>
     {:else}
       <Frown aria-hidden="true" class="size-16 text-destructive" />
-      <h1 class="text-6xl font-bold tracking-tight">{page.status}</h1>
+      <h1 class="text-5xl font-semibold tracking-tight">{page.status}</h1>
       <h2 class="text-xl font-semibold">That didn’t work</h2>
       <p class="max-w-md text-sm text-muted-foreground">
-        Something hiccupped on our side. Try again, or head back. If it keeps happening, the details
-        below may help.
+        Something went wrong. Try again or go back. The details below may help if it keeps
+        happening.
       </p>
       {#if rawError}
         <details class="max-w-md text-left text-xs text-muted-foreground">
@@ -58,17 +58,10 @@
         <ArrowLeft aria-hidden="true" class="size-4" />
         Go back
       </Button>
-      {#if dbSession.value}
-        <Button onclick={() => goto(resolve('/transactions'))} variant="outline">
-          <ArrowRight aria-hidden="true" class="size-4" />
-          Transactions
-        </Button>
-      {:else}
-        <Button onclick={() => goto(resolve('/'))} variant="outline">
-          <ArrowRight aria-hidden="true" class="size-4" />
-          Welcome
-        </Button>
-      {/if}
+      <Button onclick={() => goto(resolve('/'))} variant="outline">
+        <ArrowRight aria-hidden="true" class="size-4" />
+        {dbSession.value ? 'Overview' : 'Welcome'}
+      </Button>
     </div>
   </div>
 </div>

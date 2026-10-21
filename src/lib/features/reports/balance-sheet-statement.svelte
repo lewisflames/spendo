@@ -103,7 +103,7 @@
 <!-- Two stacked statements become side by side on wide screens. Parent
      subtotals count their children, matching the P&L report rows; the footer
      totals come from the backend's per-category sums so they can't drift. -->
-<div class="grid grid-cols-1 items-start gap-6 xl:grid-cols-2">
+<div class="grid grid-cols-1 items-start gap-6 @5xl:grid-cols-2">
   <TableShell>
     {@render tableHead()}
     <Table.Body>

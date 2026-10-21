@@ -298,13 +298,28 @@
   }
 }
 
-/* Compact density: tighter page spacing (Settings → Appearance → Density).
- * Targets each route's `flex flex-col gap-6` shell, since the wrapper inside
- * `#main-content` only ever holds one child and has no gap to tighten. */
-html.compact #main-content {
-  padding: 1.25rem;
+/* Page rhythm. Density (Settings → Appearance) only swaps these variables, so
+ * every page that uses the layout utilities below follows it. */
+:root {
+  --page-padding: 2rem;
+  --page-gap: 1.5rem;
 }
 
-html.compact #main-content > div > .flex.flex-col {
-  gap: 1rem;
+html.compact {
+  --page-padding: 1.25rem;
+  --page-gap: 1rem;
+}
+
+/* Vertical stack every page root uses: list and detail pages fill the
+ * layout's max-w-7xl; `page-form` narrows create/edit pages. */
+@utility page-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--page-gap);
+}
+
+@utility page-form {
+  margin-inline: auto;
+  width: 100%;
+  max-width: var(--container-5xl);
 }

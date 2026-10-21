@@ -166,14 +166,16 @@
 
 <div class="[--header-height:calc(--spacing(10))]">
   <Sidebar.Provider class={cn('flex flex-col', !showSidebar && 'bg-sidebar')}>
-    <TitleBar showSidebarTrigger={showSidebar} showHome={showSidebar} />
+    <TitleBar showSidebarTrigger={showSidebar} />
     <div class="flex flex-1 overflow-hidden">
       {#if showSidebar}
         <AppSidebar />
       {/if}
       <Sidebar.Inset class={cn('min-w-0', !showSidebar && 'mx-2 mb-2 rounded-xl shadow-sm')}>
-        <main id="main-content" class="flex flex-1 flex-col overflow-auto p-8">
-          <div class="mx-auto flex w-full max-w-7xl flex-1 flex-col">
+        <main id="main-content" class="flex flex-1 flex-col overflow-auto p-(--page-padding)">
+          <!-- `@container`: page grids respond to the content width, not the
+               window, so the sidebar never leaves them cramped. -->
+          <div class="@container mx-auto flex w-full max-w-7xl flex-1 flex-col">
             {@render children()}
           </div>
         </main>

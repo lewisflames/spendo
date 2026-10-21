@@ -28,11 +28,11 @@
   <Table.Header>
     <Table.Row class="bg-muted/75">
       <Table.Head class="text-muted-foreground">Account</Table.Head>
-      <Table.Head class="hidden text-muted-foreground sm:table-cell">Type</Table.Head>
+      <Table.Head class="hidden text-muted-foreground @xl:table-cell">Type</Table.Head>
       <Table.Head class="text-right text-muted-foreground">Uncleared</Table.Head>
-      <Table.Head class="hidden text-right text-muted-foreground sm:table-cell">Saved</Table.Head>
-      <Table.Head class="hidden text-muted-foreground md:table-cell">Last reconciled</Table.Head>
-      <Table.Head class="hidden text-right text-muted-foreground xl:table-cell">Txn</Table.Head>
+      <Table.Head class="hidden text-right text-muted-foreground @xl:table-cell">Saved</Table.Head>
+      <Table.Head class="hidden text-muted-foreground @2xl:table-cell">Last reconciled</Table.Head>
+      <Table.Head class="hidden text-right text-muted-foreground @5xl:table-cell">Txn</Table.Head>
       <Table.Head class="text-right text-muted-foreground">Balance</Table.Head>
     </Table.Row>
   </Table.Header>
@@ -58,7 +58,7 @@
             </span>
           </a>
         </Table.Cell>
-        <Table.Cell class="hidden py-2.5 text-sm text-muted-foreground sm:table-cell">
+        <Table.Cell class="hidden py-2.5 text-sm text-muted-foreground @xl:table-cell">
           {row.accountType}
         </Table.Cell>
         <Table.Cell class="py-2.5 text-right text-sm tabular-nums">
@@ -71,7 +71,7 @@
             <EmptyValue />
           {/if}
         </Table.Cell>
-        <Table.Cell class="hidden py-2.5 text-right sm:table-cell">
+        <Table.Cell class="hidden py-2.5 text-right @xl:table-cell">
           {#if row.stats.clearedCount > 0}
             <Badge variant="warning" title="Cleared marks saved but not finished" class="ml-auto">
               {formatNumber(row.stats.clearedCount)}
@@ -80,11 +80,11 @@
             <EmptyValue />
           {/if}
         </Table.Cell>
-        <Table.Cell class="hidden py-2.5 text-sm text-muted-foreground md:table-cell">
+        <Table.Cell class="hidden py-2.5 text-sm text-muted-foreground @2xl:table-cell">
           {row.stats.lastReconciledDate ? formatDate(row.stats.lastReconciledDate) : EMPTY_DASH}
         </Table.Cell>
         <Table.Cell
-          class="hidden py-2.5 text-right text-sm text-muted-foreground tabular-nums xl:table-cell"
+          class="hidden py-2.5 text-right text-sm text-muted-foreground tabular-nums @5xl:table-cell"
         >
           {formatNumber(row.txCount)}
         </Table.Cell>

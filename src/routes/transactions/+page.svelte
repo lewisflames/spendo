@@ -33,8 +33,11 @@
   import { useResetPageOnChange } from '$lib/hooks/use-page-reset.svelte';
   import { useTableSort } from '$lib/hooks/use-table-sort.svelte';
   import { plural, sessionCurrency } from '$lib/utils/format.svelte';
-  import { ArrowLeftRight, CalendarClock } from '@lucide/svelte';
+  import { ArrowLeftRight } from '@lucide/svelte';
+  import { PAGE_META } from '$lib/features/nav/page-meta';
   import type { TransactionColumnId } from '$lib/features/transactions/transaction-table.svelte';
+
+  const meta = PAGE_META.transactions;
 
   let pageSize = $derived(appSettings.value.pageSize);
 
@@ -138,29 +141,18 @@
 </script>
 
 <svelte:head>
-  <title>Transactions · Spendo</title>
-  <meta name="description" content="Every move your money has made." />
+  <title>{meta.title} · Spendo</title>
+  <meta name="description" content={meta.description} />
 </svelte:head>
 
-<BookGate title="Transactions" description="Every move your money has made">
-  <div class="flex flex-col gap-6">
+<BookGate title={meta.title} description={meta.description}>
+  <div class="page-stack">
     <PageHeader
-      title="Transactions"
+      title={meta.title}
       description={res.data
-        ? `Every move your money has made · ${plural(res.data.total, 'transaction')}`
-        : 'Every move your money has made'}
-    >
-      {#if dbSession.value}
-        <Button variant="outline" href={resolve('/scheduled')}>
-          <CalendarClock aria-hidden="true" class="size-4" />
-          Scheduled
-        </Button>
-        <Button href={resolve('/transactions/new')}>
-          <Plus aria-hidden="true" class="size-4" />
-          New transaction
-        </Button>
-      {/if}
-    </PageHeader>
+        ? `${meta.description} · ${plural(res.data.total, 'transaction')}`
+        : meta.description}
+    />
 
     <TransactionHeatmap {filters} />
 

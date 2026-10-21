@@ -1,6 +1,5 @@
 <script lang="ts">
-  import { resolve } from '$app/paths';
-  import { ArrowLeft, ArrowRight, House } from '@lucide/svelte';
+  import { ArrowLeft, ArrowRight } from '@lucide/svelte';
   import { Button } from '$lib/components/ui/button';
   import { SidebarTrigger } from '$lib/components/ui/sidebar/index.js';
   import { goBack, goForward, navHistory } from '$lib/stores/nav-history.svelte';
@@ -9,11 +8,9 @@
   import WindowControls from './window-controls.svelte';
 
   let {
-    showSidebarTrigger = true,
-    showHome = true
+    showSidebarTrigger = true
   }: {
     showSidebarTrigger?: boolean;
-    showHome?: boolean;
   } = $props();
 
   const {
@@ -65,18 +62,6 @@
     >
       <ArrowRight class="size-4" />
     </Button>
-    {#if showHome}
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        class="text-muted-foreground"
-        href={resolve('/transactions')}
-        aria-label="Home"
-        title="Home"
-      >
-        <House class="size-4" />
-      </Button>
-    {/if}
   </div>
 
   <div class="flex h-full min-w-0 flex-1 items-center justify-center px-3">

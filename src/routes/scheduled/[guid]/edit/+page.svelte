@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { PAGE_META } from '$lib/features/nav/page-meta';
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
@@ -42,11 +43,11 @@
 
 <svelte:head>
   <title>{schedule ? `Edit ${schedule.name} · Spendo` : 'Edit schedule · Spendo'}</title>
-  <meta name="description" content="Edit a recurring schedule and its template splits." />
+  <meta name="description" content="Change a recurring transaction" />
 </svelte:head>
 
-<BookGate title="Edit schedule" description="Tweak the rhythm. Future reminders follow along">
-  <div class="mx-auto flex w-full max-w-5xl flex-col gap-6">
+<BookGate title="Edit schedule" description="Change a recurring transaction">
+  <div class="page-form page-stack">
     {#if (res.loading || dbBootstrapping.value) && !res.data}
       <PageSkeleton variant="form" />
     {:else if schedule}
@@ -55,7 +56,8 @@
           mode="edit"
           guid={schedule.guid}
           title="Edit schedule"
-          headerDescription={`${schedule.name} · Nothing posts without you. Due dates just nudge you to post or skip.`}
+          headerDescription={`${schedule.name} · Nothing posts automatically.`}
+          breadcrumbs={[{ label: PAGE_META.scheduled.title, href: resolve('/scheduled') }]}
           initial={schedule}
           onSaved={handleSaved}
           onDeleted={handleDeleted}

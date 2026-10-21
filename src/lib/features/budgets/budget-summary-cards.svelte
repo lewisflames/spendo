@@ -20,7 +20,7 @@
 </script>
 
 <!-- Yearly summary -->
-<div class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+<div class="grid grid-cols-1 gap-6 @xl:grid-cols-2 @4xl:grid-cols-4">
   <KpiCard title="Annual target" value={fmt(clampZero(annualTarget))} />
   <KpiCard
     title="Carry-in (Jan 1)"

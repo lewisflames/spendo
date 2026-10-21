@@ -67,7 +67,7 @@
         dir={sortDir}
         onclick={() => onSort('description')}
       />
-      <Table.Head class="hidden text-muted-foreground md:table-cell">Counter account</Table.Head>
+      <Table.Head class="hidden text-muted-foreground @2xl:table-cell">Counter account</Table.Head>
       <Table.Head class="text-muted-foreground">Status</Table.Head>
       <SortHead
         label="Amount"
@@ -124,7 +124,7 @@
           {/if}
         </Table.Cell>
         <Table.Cell
-          class="hidden max-w-40 truncate py-2.5 text-sm text-muted-foreground md:table-cell"
+          class="hidden max-w-40 truncate py-2.5 text-sm text-muted-foreground @2xl:table-cell"
         >
           {#if row.counterAccounts.length > 0}
             <span title={row.counterAccounts.join(', ')}>{row.counterAccounts.join(', ')}</span>

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { PAGE_META } from '$lib/features/nav/page-meta';
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
@@ -71,8 +72,8 @@
   <meta name="description" content="Edit transaction details and splits." />
 </svelte:head>
 
-<BookGate title="Edit transaction" description="Tweak the details. Both sides should still balance">
-  <div class="mx-auto flex w-full max-w-5xl flex-col gap-6">
+<BookGate title="Edit transaction" description="Both sides must balance">
+  <div class="page-form page-stack">
     {#if (res.loading || dbBootstrapping.value) && !res.data}
       <PageSkeleton variant="form" />
     {:else if detail}
@@ -84,7 +85,14 @@
           mode="edit"
           guid={detail.guid}
           title="Edit transaction"
-          headerDescription="Splits use raw amounts as shown in the detail view and must sum to zero."
+          headerDescription="Splits must sum to zero."
+          breadcrumbs={[
+            { label: PAGE_META.transactions.title, href: resolve('/transactions') },
+            {
+              label: detail.description || 'Transaction',
+              href: resolve('/transactions/[guid]', { guid: detail.guid })
+            }
+          ]}
           initial={detail}
           prevGuid={res.data?.prevGuid ?? null}
           nextGuid={res.data?.nextGuid ?? null}

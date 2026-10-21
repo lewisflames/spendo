@@ -7,7 +7,7 @@
   let { summary, currentBalance }: { summary: AccountSummary; currentBalance: number } = $props();
 </script>
 
-<div class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+<div class="grid grid-cols-1 gap-6 @xl:grid-cols-2 @3xl:grid-cols-3">
   <KpiCard title="Total balance" value={fmt(currentBalance)}>
     {#snippet icon()}
       <Wallet aria-hidden="true" class="size-4 text-muted-foreground" />

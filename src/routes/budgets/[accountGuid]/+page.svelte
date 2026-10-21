@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { PAGE_META } from '$lib/features/nav/page-meta';
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
@@ -8,7 +9,7 @@
   import { fetchBudgetDetail, fetchBudgetDateRange, fetchAccounts } from '$lib/tauri';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import { useUrlParams, yearParam } from '$lib/hooks/use-url-params.svelte';
-  import { ArrowLeft, Pencil, PiggyBank, Plus } from '@lucide/svelte';
+  import { Pencil, PiggyBank, Plus } from '@lucide/svelte';
   import { toast } from '$lib/components/ui/sonner';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
@@ -102,19 +103,16 @@
 
 <svelte:head>
   <title>{accountName} · Spendo</title>
-  <meta name="description" content="Yearly budget for this account." />
+  <meta name="description" content="Yearly budget for this account" />
 </svelte:head>
 
 <BookGate title="Budget" description="Yearly budget for this account">
-  <div class="flex flex-col gap-6">
+  <div class="page-stack">
     <PageHeader
       title={accountName}
       description={accountDescription ?? 'Yearly budget for this account'}
+      breadcrumbs={[{ label: PAGE_META.budgets.title, href: resolve('/budgets') }]}
     >
-      <Button variant="outline" href={resolve('/budgets')}>
-        <ArrowLeft aria-hidden="true" class="size-4" />
-        Budgets
-      </Button>
       <BudgetYearStepper
         bind:yearSel={by.yearSel}
         yearOptions={by.yearOptions}

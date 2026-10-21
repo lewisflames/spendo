@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { PAGE_META } from '$lib/features/nav/page-meta';
   import { resolve } from '$app/paths';
   import { getVersion } from '@tauri-apps/api/app';
   import { Badge } from '$lib/components/ui/badge';
@@ -8,6 +9,8 @@
   import { dbSession } from '$lib/stores/db.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import UpdateCard from '$lib/features/updates/update-card.svelte';
+
+  const meta = PAGE_META.about;
 
   let appVersion = $state<string | null>(null);
 
@@ -22,11 +25,11 @@
 
 <svelte:head>
   <title>About · Spendo</title>
-  <meta name="description" content="About Spendo" />
+  <meta name="description" content={meta.description} />
 </svelte:head>
 
-<div class="flex flex-col gap-6">
-  <PageHeader title="About Spendo" description="The short version">
+<div class="page-stack">
+  <PageHeader title={meta.title} description={meta.description}>
     {#if !dbSession.value}
       <Button variant="outline" href={resolve('/')}>Welcome</Button>
     {/if}

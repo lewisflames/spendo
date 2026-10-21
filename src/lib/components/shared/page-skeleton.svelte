@@ -54,7 +54,7 @@
   </div>
 {:else if variant === 'balance-sheet'}
   <!-- Two statement columns; each line mirrors an account row with its amount. -->
-  <div class="grid grid-cols-1 gap-6 xl:grid-cols-2">
+  <div class="grid grid-cols-1 gap-6 @5xl:grid-cols-2">
     {#each [0, 1] as col (col)}
       <Card.Root>
         <Card.Header>
@@ -84,10 +84,10 @@
   </div>
 {:else if variant === 'transaction-detail'}
   <PageHeaderSkeleton />
-  <KpiCardRow gridClass="sm:grid-cols-2 lg:grid-cols-3" />
+  <Skeleton class="h-16 w-full rounded-lg" />
   <TableSkeleton cols={4} rows={3} />
 {:else if variant === 'budgets'}
-  <KpiCardRow count={3} gridClass="sm:grid-cols-2 lg:grid-cols-3" />
+  <KpiCardRow count={3} gridClass="@xl:grid-cols-2 @3xl:grid-cols-3" />
   <ToolbarSkeleton />
   <TableSkeleton cols={7} rows={4} />
 {:else if variant === 'budget-detail'}
@@ -101,14 +101,14 @@
   <!-- The holdings table renders its own skeleton via HoldingsTable loading. -->
   <KpiCardRow count={4} />
   <!-- Matches the loaded performance + allocation layout. -->
-  <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
-    <ChartSkeleton class="lg:col-span-2" withFilters />
+  <div class="grid grid-cols-1 gap-6 @3xl:grid-cols-3">
+    <ChartSkeleton class="@3xl:col-span-2" withFilters />
     <ChartSkeleton />
   </div>
 {:else if variant === 'holding'}
   <PageHeaderSkeleton />
   <KpiCardRow count={4} />
-  <div class="grid grid-cols-1 gap-6 xl:grid-cols-2">
+  <div class="grid grid-cols-1 gap-6 @5xl:grid-cols-2">
     <ChartSkeleton withFilters />
     <ChartSkeleton withFilters />
   </div>
@@ -133,8 +133,8 @@
   <TableSkeleton cols={5} rows={8} />
 {:else if variant === 'form'}
   <PageHeaderSkeleton />
-  <div class="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
-    <Skeleton class="order-2 h-72 w-full rounded-lg lg:order-1" />
-    <Skeleton class="order-1 h-80 w-full rounded-lg lg:order-2" />
+  <div class="grid grid-cols-1 gap-6 @3xl:grid-cols-[minmax(0,1fr)_22rem]">
+    <Skeleton class="order-2 h-72 w-full rounded-lg @3xl:order-1" />
+    <Skeleton class="order-1 h-80 w-full rounded-lg @3xl:order-2" />
   </div>
 {/if}

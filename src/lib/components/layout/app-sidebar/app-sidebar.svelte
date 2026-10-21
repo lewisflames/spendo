@@ -32,9 +32,9 @@
     importGnucashViaDialog,
     openCsvImport
   } from '$lib/features/book/import-export-actions';
-  import { NAV_GROUPS, navHref, navItemActive } from '$lib/features/nav/nav-items';
+  import { NAV_GROUPS } from '$lib/features/nav/nav-items';
   import { activeBookPath, dbSession } from '$lib/stores/db.svelte';
-  import { navBadges, navRoots } from '$lib/stores/nav.svelte';
+  import { navBadges } from '$lib/stores/nav.svelte';
   import { keyboardShortcutsDialog } from '$lib/stores/ui.svelte';
   import { bookDisplayName, bookFolder } from '$lib/utils/book';
   import { plural } from '$lib/utils/format.svelte';
@@ -52,25 +52,22 @@
     return currency ? `${currency} · ${count}` : count;
   });
 
-  // Resolve dynamic account-root hrefs, active state and badge counts once per
-  // render pass; items without a target (roots still loading) are hidden.
+  // Resolve active state and badge counts once per render pass.
   const groups = $derived(
     NAV_GROUPS.map((group) => ({
       label: group.label,
-      items: group.items
-        .map((item) => ({
-          item,
-          href: navHref(item, navRoots.value),
-          active: navItemActive(item, page.url.pathname, navRoots.value),
-          badge:
-            item.badge === 'reconcile'
-              ? navBadges.value.unclearedTransactions
-              : item.badge === 'scheduled'
-                ? navBadges.value.dueSchedules
-                : 0
-        }))
-        .filter((entry) => entry.href !== null)
-    })).filter((group) => group.items.length > 0)
+      items: group.items.map((item) => ({
+        item,
+        href: item.href,
+        active: item.match(page.url.pathname),
+        badge:
+          item.badge === 'reconcile'
+            ? navBadges.value.unclearedTransactions
+            : item.badge === 'scheduled'
+              ? navBadges.value.dueSchedules
+              : 0
+      }))
+    }))
   );
 </script>
 
@@ -113,11 +110,7 @@
                     .join(' · ')}
                 >
                   {#snippet child({ props })}
-                    <a
-                      href={href === null ? undefined : resolve(href)}
-                      {...props}
-                      aria-current={active ? 'page' : undefined}
-                    >
+                    <a href={resolve(href)} {...props} aria-current={active ? 'page' : undefined}>
                       <item.icon aria-hidden="true" />
                       <span class="group-data-[collapsible=icon]:hidden">{item.label}</span>
                     </a>

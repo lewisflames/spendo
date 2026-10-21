@@ -13,7 +13,7 @@
 
 <Card.Root class={className}>
   <Card.Header>
-    <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+    <div class="flex flex-col gap-3 @xl:flex-row @xl:items-start @xl:justify-between @xl:gap-4">
       <div class="flex min-w-0 flex-col gap-1">
         <Skeleton class="h-5 w-40" />
         <Skeleton class="h-4 w-56" />
