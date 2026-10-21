@@ -152,20 +152,27 @@ struct ReconcilableAccount {
 fn validate_statement_date(raw: &str) -> Result<String, AppError> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        return Err(AppError::Validation("Add the statement date from your bank".to_string()));
+        return Err(AppError::Validation(
+            "Add the statement date from your bank".to_string(),
+        ));
     }
-    let normalized = crate::utils::validate_iso_date(trimmed).map_err(AppError::Validation)?;
+    let normalized = crate::utils::validate_iso_date(trimmed)?;
     // Local "today": the reconcile form offers the user's local today, so the
     // backend must accept it (UTC would reject it east of UTC).
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     if normalized > today {
-        return Err(AppError::Validation("That statement date is in the future. Use today or earlier".to_string()));
+        return Err(AppError::Validation(
+            "That statement date is in the future. Use today or earlier".to_string(),
+        ));
     }
     Ok(normalized)
 }
 
-fn load_reconcilable_account(conn: &Connection, guid: &str) -> Result<ReconcilableAccount, AppError> {
-    let row: Option<(String, Option<String>, String, i64, Option<String>)> = conn
+fn load_reconcilable_account(
+    conn: &Connection,
+    guid: &str,
+) -> Result<ReconcilableAccount, AppError> {
+    let row: Option<(ReconcilableAccount, i64)> = conn
         .query_row(
             "SELECT a.name, a.description, a.account_type, a.placeholder, c.mnemonic
              FROM accounts a LEFT JOIN commodities c ON c.guid = a.commodity_guid
@@ -173,30 +180,40 @@ fn load_reconcilable_account(conn: &Connection, guid: &str) -> Result<Reconcilab
             params![guid],
             |row| {
                 Ok((
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
+                    ReconcilableAccount {
+                        name: row.get(0)?,
+                        description: row.get(1)?,
+                        account_type: row.get(2)?,
+                        commodity: row.get(4)?,
+                    },
                     row.get(3)?,
-                    row.get(4)?,
                 ))
             },
         )
         .optional()?;
-    let Some((name, description, account_type, placeholder, commodity)) = row else {
-        return Err(AppError::NotFound("Account not found. It may have been removed".to_string()));
+    let Some((account, placeholder)) = row else {
+        return Err(AppError::NotFound(
+            "Account not found. It may have been removed".to_string(),
+        ));
     };
-    if account_type == "ROOT" {
-        return Err(AppError::Validation("The root account holds everything together. It can't be reconciled".to_string()));
+    if account.account_type == "ROOT" {
+        return Err(AppError::Validation(
+            "The root account holds everything together. It can't be reconciled".to_string(),
+        ));
     }
     if placeholder != 0 {
-        return Err(AppError::Validation("Placeholder accounts just group things. Pick one that holds money to reconcile".to_string()));
+        return Err(AppError::Validation(
+            "Placeholder accounts just group things. Pick one that holds money to reconcile"
+                .to_string(),
+        ));
     }
-    if !RECONCILABLE_TYPES.contains(&account_type.as_str()) {
+    if !RECONCILABLE_TYPES.contains(&account.account_type.as_str()) {
         return Err(AppError::Validation(format!(
-            "Only cash-like accounts can be reconciled. This one is {account_type}"
+            "Only cash-like accounts can be reconciled. This one is {}",
+            account.account_type
         )));
     }
-    Ok(ReconcilableAccount { name, description, account_type, commodity })
+    Ok(account)
 }
 
 /// Sum of signed split amounts for one reconcile state up to `statement_date`
@@ -251,7 +268,9 @@ fn pending_split_updates(
             )));
         }
         if u.split_guid.trim().is_empty() {
-            return Err(AppError::Validation("We’re missing a split id. Please try again".to_string()));
+            return Err(AppError::Validation(
+                "We’re missing a split id. Please try again".to_string(),
+            ));
         }
     }
     // De-dupe by split guid, preserving first-seen order; last write wins.
@@ -299,7 +318,9 @@ fn pending_split_updates(
         );
     }
     if rows.len() != guids.len() {
-        return Err(AppError::NotFound("A split was not found. It may have been removed".to_string()));
+        return Err(AppError::NotFound(
+            "A split was not found. It may have been removed".to_string(),
+        ));
     }
     let by_guid: HashMap<&str, &(String, String, Option<String>, i64)> =
         rows.iter().map(|row| (row.0.as_str(), row)).collect();
@@ -313,12 +334,14 @@ fn pending_split_updates(
         }
         if row.2.as_deref() == Some("y") {
             return Err(AppError::Validation(
-                "Reconciled splits are locked here. Head back to reconcile to change them".to_string(),
+                "Reconciled splits are locked here. Head back to reconcile to change them"
+                    .to_string(),
             ));
         }
         if row.3 == 0 {
             return Err(AppError::Validation(
-                "That split is dated after the statement. Pick a later statement date first".to_string(),
+                "That split is dated after the statement. Pick a later statement date first"
+                    .to_string(),
             ));
         }
         let have = row.2.clone().unwrap_or_else(|| "n".to_string());
@@ -581,16 +604,19 @@ fn fetch_reconcile_info_inner(
         .collect::<Result<Vec<_>, _>>()?;
     attach_counter_accounts(conn, account_guid, &mut candidates)?;
 
-    let (last_reconciled_date, last_reconciled_count) =
-        match latest_batch_row(conn, account_guid)? {
-            Some((batch_guid, through, _)) => (Some(through), batch_split_guids(conn, &batch_guid)?.len() as i64),
-            // Books finished before batches were persisted fall back to the
-            // date-derived heuristic.
-            None => match legacy_last_reconciled_batch(conn, account_guid)? {
-                Some((_, through, count)) => (Some(through), count),
-                None => (None, 0),
-            },
-        };
+    let (last_reconciled_date, last_reconciled_count) = match latest_batch_row(conn, account_guid)?
+    {
+        Some((batch_guid, through, _)) => (
+            Some(through),
+            batch_split_guids(conn, &batch_guid)?.len() as i64,
+        ),
+        // Books finished before batches were persisted fall back to the
+        // date-derived heuristic.
+        None => match legacy_last_reconciled_batch(conn, account_guid)? {
+            Some((_, through, count)) => (Some(through), count),
+            None => (None, 0),
+        },
+    };
 
     Ok(ReconcileInfo {
         account_guid: account_guid.to_string(),
@@ -614,9 +640,12 @@ fn mark_reconcile_splits_inner(
     // Validate the target is a real, reconcilable account before touching rows.
     load_reconcilable_account(conn, &input.account_guid)?;
     if input.updates.is_empty() {
-        return Err(AppError::Validation("Nothing changed yet. Tick something off first".to_string()));
+        return Err(AppError::Validation(
+            "Nothing changed yet. Tick something off first".to_string(),
+        ));
     }
-    let pending = pending_split_updates(conn, &input.account_guid, &statement_date, &input.updates)?;
+    let pending =
+        pending_split_updates(conn, &input.account_guid, &statement_date, &input.updates)?;
     if pending.is_empty() {
         return Ok(MarkReconcileResult { updated: 0 });
     }
@@ -652,17 +681,22 @@ fn finish_reconciliation_inner(
     input: FinishReconcileInput,
 ) -> Result<FinishReconcileResult, AppError> {
     if !input.ending_balance.is_finite() {
-        return Err(AppError::Validation("Enter the ending balance as a number".to_string()));
+        return Err(AppError::Validation(
+            "Enter the ending balance as a number".to_string(),
+        ));
     }
     if input.ending_balance.abs() > 1_000_000_000.0 {
-        return Err(AppError::Validation("That ending balance is huge. Keep it under 1,000,000,000".to_string()));
+        return Err(AppError::Validation(
+            "That ending balance is huge. Keep it under 1,000,000,000".to_string(),
+        ));
     }
     let statement_date = validate_statement_date(&input.statement_date)?;
     // Validate the target is a real, reconcilable account before touching rows.
     load_reconcilable_account(conn, &input.account_guid)?;
     // Validated up front; applied inside the transaction below so an
     // out-of-balance statement leaves the saved marks untouched.
-    let pending = pending_split_updates(conn, &input.account_guid, &statement_date, &input.updates)?;
+    let pending =
+        pending_split_updates(conn, &input.account_guid, &statement_date, &input.updates)?;
 
     with_tx_err(conn, || -> Result<FinishReconcileResult, AppError> {
         apply_split_updates(conn, &pending)?;
@@ -677,7 +711,9 @@ fn finish_reconciliation_inner(
         }
         let guids = cleared_split_guids(conn, &input.account_guid, &statement_date)?;
         if guids.is_empty() {
-            return Err(AppError::Validation("Nothing ticked off yet. Mark what cleared first".to_string()));
+            return Err(AppError::Validation(
+                "Nothing ticked off yet. Mark what cleared first".to_string(),
+            ));
         }
         let reconciled_count = guids.len() as i64;
 
@@ -757,7 +793,8 @@ fn reopen_last_reconciliation_inner(
     }
 
     // Legacy date-derived fallback for books finished before batches existed.
-    let Some((from_date, through_date, _)) = legacy_last_reconciled_batch(conn, account_guid)? else {
+    let Some((from_date, through_date, _)) = legacy_last_reconciled_batch(conn, account_guid)?
+    else {
         return Err(AppError::Validation(
             "Nothing is reconciled yet. Finish a statement first".to_string(),
         ));
@@ -912,9 +949,9 @@ pub async fn fetch_reconcile_info(
     state: State<'_, AppState>,
     account_guid: String,
     statement_date: String,
-) -> Result<ReconcileInfo, String> {
+) -> Result<ReconcileInfo, AppError> {
     run_blocking(state.db.clone(), move |conn| {
-        fetch_reconcile_info_inner(conn, &account_guid, &statement_date).map_err(String::from)
+        fetch_reconcile_info_inner(conn, &account_guid, &statement_date)
     })
     .await
 }
@@ -923,9 +960,9 @@ pub async fn fetch_reconcile_info(
 pub async fn mark_reconcile_splits(
     state: State<'_, AppState>,
     input: MarkReconcileInput,
-) -> Result<MarkReconcileResult, String> {
+) -> Result<MarkReconcileResult, AppError> {
     run_blocking(state.db.clone(), move |conn| {
-        mark_reconcile_splits_inner(conn, input).map_err(String::from)
+        mark_reconcile_splits_inner(conn, input)
     })
     .await
 }
@@ -934,9 +971,9 @@ pub async fn mark_reconcile_splits(
 pub async fn finish_reconciliation(
     state: State<'_, AppState>,
     input: FinishReconcileInput,
-) -> Result<FinishReconcileResult, String> {
+) -> Result<FinishReconcileResult, AppError> {
     run_blocking(state.db.clone(), move |conn| {
-        finish_reconciliation_inner(conn, input).map_err(String::from)
+        finish_reconciliation_inner(conn, input)
     })
     .await
 }
@@ -945,9 +982,9 @@ pub async fn finish_reconciliation(
 pub async fn reopen_last_reconciliation(
     state: State<'_, AppState>,
     account_guid: String,
-) -> Result<ReopenReconcileResult, String> {
+) -> Result<ReopenReconcileResult, AppError> {
     run_blocking(state.db.clone(), move |conn| {
-        reopen_last_reconciliation_inner(conn, &account_guid).map_err(String::from)
+        reopen_last_reconciliation_inner(conn, &account_guid)
     })
     .await
 }
@@ -955,9 +992,9 @@ pub async fn reopen_last_reconciliation(
 #[tauri::command]
 pub async fn fetch_reconcile_summaries(
     state: State<'_, AppState>,
-) -> Result<Vec<ReconcileAccountSummary>, String> {
+) -> Result<Vec<ReconcileAccountSummary>, AppError> {
     run_blocking(state.db.clone(), |conn| {
-        fetch_reconcile_summaries_inner(conn).map_err(String::from)
+        fetch_reconcile_summaries_inner(conn)
     })
     .await
 }
@@ -1064,8 +1101,7 @@ mod tests {
     fn info_returns_starting_and_candidates_capped_by_date() {
         let conn = setup();
         seed(&conn);
-        let info =
-            fetch_reconcile_info_inner(&conn, "checking", "2024-02-15").expect("info runs");
+        let info = fetch_reconcile_info_inner(&conn, "checking", "2024-02-15").expect("info runs");
         assert_eq!(info.starting_balance, 100.0);
         assert_eq!(info.account_name, "Checking");
         // t3 (Mar) is past the statement date.
@@ -1121,7 +1157,11 @@ mod tests {
         let out = mark(&conn, "s-t3", "c", "2024-03-31").expect("mark runs");
         assert_eq!(out.updated, 1);
         let state: String = conn
-            .query_row("SELECT reconcile_state FROM splits WHERE guid = 's-t3'", [], |r| r.get(0))
+            .query_row(
+                "SELECT reconcile_state FROM splits WHERE guid = 's-t3'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(state, "c");
     }
@@ -1151,12 +1191,20 @@ mod tests {
         let out = finish(&conn, "2024-02-15", 70.0, vec![]).expect("finish runs");
         assert_eq!(out.reconciled_count, 1);
         let state: String = conn
-            .query_row("SELECT reconcile_state FROM splits WHERE guid = 's-t2'", [], |r| r.get(0))
+            .query_row(
+                "SELECT reconcile_state FROM splits WHERE guid = 's-t2'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(state, "y");
         // The untouched 'n' split stays new.
         let state: String = conn
-            .query_row("SELECT reconcile_state FROM splits WHERE guid = 's-t3'", [], |r| r.get(0))
+            .query_row(
+                "SELECT reconcile_state FROM splits WHERE guid = 's-t3'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(state, "n");
     }
@@ -1170,12 +1218,19 @@ mod tests {
             &conn,
             "2024-03-31",
             120.0,
-            vec![SplitStateUpdate { split_guid: "s-t3".into(), state: "c".into() }],
+            vec![SplitStateUpdate {
+                split_guid: "s-t3".into(),
+                state: "c".into(),
+            }],
         )
         .expect("finish runs");
         assert_eq!(out.reconciled_count, 2);
         let state: String = conn
-            .query_row("SELECT reconcile_state FROM splits WHERE guid = 's-t3'", [], |r| r.get(0))
+            .query_row(
+                "SELECT reconcile_state FROM splits WHERE guid = 's-t3'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(state, "y");
     }
@@ -1188,13 +1243,20 @@ mod tests {
             &conn,
             "2024-03-31",
             0.0,
-            vec![SplitStateUpdate { split_guid: "s-t3".into(), state: "c".into() }],
+            vec![SplitStateUpdate {
+                split_guid: "s-t3".into(),
+                state: "c".into(),
+            }],
         )
         .unwrap_err();
         assert!(err.to_string().contains("Out of balance"));
         // The update was applied inside the rolled-back transaction.
         let state: String = conn
-            .query_row("SELECT reconcile_state FROM splits WHERE guid = 's-t3'", [], |r| r.get(0))
+            .query_row(
+                "SELECT reconcile_state FROM splits WHERE guid = 's-t3'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(state, "n");
     }
@@ -1259,7 +1321,14 @@ mod tests {
     #[test]
     fn summaries_use_the_finished_batch_through_date() {
         let conn = setup();
-        add_split(&conn, "t-jan", "2024-01-10 09:30:00", "checking", 10_000, "n");
+        add_split(
+            &conn,
+            "t-jan",
+            "2024-01-10 09:30:00",
+            "checking",
+            10_000,
+            "n",
+        );
         finish(
             &conn,
             "2024-01-31",
@@ -1285,17 +1354,24 @@ mod tests {
         let conn = setup();
         seed(&conn);
         add_split(&conn, "t4", "2024-03-15", "checking", 2_000, "y");
-        let out =
-            reopen_last_reconciliation_inner(&conn, "checking").expect("reopen runs");
+        let out = reopen_last_reconciliation_inner(&conn, "checking").expect("reopen runs");
         assert_eq!(out.reopened_count, 1);
         assert_eq!(out.from_date.as_deref(), Some("2024-01-10"));
         assert_eq!(out.through_date, "2024-03-15");
         let reopened: String = conn
-            .query_row("SELECT reconcile_state FROM splits WHERE guid = 's-t4'", [], |r| r.get(0))
+            .query_row(
+                "SELECT reconcile_state FROM splits WHERE guid = 's-t4'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(reopened, "c");
         let kept: String = conn
-            .query_row("SELECT reconcile_state FROM splits WHERE guid = 's-t1'", [], |r| r.get(0))
+            .query_row(
+                "SELECT reconcile_state FROM splits WHERE guid = 's-t1'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(kept, "y");
     }

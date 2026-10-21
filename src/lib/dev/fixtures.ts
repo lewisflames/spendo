@@ -27,30 +27,6 @@ export const CREDIT_NORMAL_TYPES = new Set([
   'TRADING'
 ]);
 
-export const INVESTMENT_TYPES = new Set(['STOCK', 'MUTUAL', 'FUND']);
-
-const TYPE_TO_CATEGORY: Record<string, string> = {
-  ASSET: 'ASSET',
-  BANK: 'ASSET',
-  CASH: 'ASSET',
-  STOCK: 'ASSET',
-  MUTUAL: 'ASSET',
-  FUND: 'ASSET',
-  CURRENCY: 'ASSET',
-  RECEIVABLE: 'ASSET',
-  LIABILITY: 'LIABILITY',
-  CREDIT: 'LIABILITY',
-  PAYABLE: 'LIABILITY',
-  INCOME: 'INCOME',
-  EXPENSE: 'EXPENSE',
-  EQUITY: 'EQUITY',
-  TRADING: 'EQUITY'
-};
-
-export function categoryOf(accountType: string): string {
-  return TYPE_TO_CATEGORY[accountType] ?? accountType;
-}
-
 export interface FixtureAccount {
   guid: string;
   parentGuid: string | null;
@@ -611,9 +587,3 @@ export const MARKET_PRICES: Record<
   VTI: { price: 324.18, prevPrice: 321.4, priceDate: '2026-09-19' },
   AAPL: { price: 245.63, prevPrice: 247.1, priceDate: '2026-09-19' }
 };
-
-/** 1×1 transparent PNG, good enough for attachment previews in the mock. */
-export const SAMPLE_IMAGE_DATA_URL =
-  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
-
-export const SAMPLE_TEXT_DATA_URL = 'data:text/plain;base64,U3BlbmRvIG1vY2sgYXR0YWNobWVudC4=';

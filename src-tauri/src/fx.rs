@@ -1,3 +1,4 @@
+use crate::db::AppError;
 use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -13,7 +14,7 @@ use crate::utils;
 ///
 /// `Ok(None)` means the book genuinely has no currency commodity; a database
 /// failure propagates instead of masquerading as "no currency".
-pub fn get_report_currency_guid(conn: &Connection) -> Result<Option<String>, String> {
+pub fn get_report_currency_guid(conn: &Connection) -> Result<Option<String>, AppError> {
     let root: Option<String> = conn
         .query_row(
             "SELECT c.guid
@@ -23,8 +24,7 @@ pub fn get_report_currency_guid(conn: &Connection) -> Result<Option<String>, Str
             [],
             |row| row.get(0),
         )
-        .optional()
-        .map_err(|e| e.to_string())?;
+        .optional()?;
     if root.is_some() {
         return Ok(root);
     }
@@ -47,8 +47,7 @@ pub fn get_report_currency_guid(conn: &Connection) -> Result<Option<String>, Str
             [],
             |row| row.get(0),
         )
-        .optional()
-        .map_err(|e| e.to_string())?;
+        .optional()?;
     if weighted.is_some() {
         return Ok(weighted);
     }
@@ -59,10 +58,10 @@ pub fn get_report_currency_guid(conn: &Connection) -> Result<Option<String>, Str
         |row| row.get(0),
     )
     .optional()
-    .map_err(|e| e.to_string())
+    .map_err(AppError::from)
 }
 
-pub fn get_report_currency_mnemonic(conn: &Connection) -> Result<Option<String>, String> {
+pub fn get_report_currency_mnemonic(conn: &Connection) -> Result<Option<String>, AppError> {
     let Some(guid) = get_report_currency_guid(conn)? else {
         return Ok(None);
     };
@@ -72,27 +71,27 @@ pub fn get_report_currency_mnemonic(conn: &Connection) -> Result<Option<String>,
         |row| row.get(0),
     )
     .optional()
-    .map_err(|e| e.to_string())
+    .map_err(AppError::from)
+}
+
+/// Report currency mnemonic, or `""` when the book has none yet.
+pub fn report_currency_or_empty(conn: &Connection) -> Result<String, AppError> {
+    Ok(get_report_currency_mnemonic(conn)?.unwrap_or_default())
 }
 
 /// All CURRENCY-namespace commodities as (guid, mnemonic).
-pub fn list_book_currencies(conn: &Connection) -> Result<Vec<(String, String)>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT guid, mnemonic FROM commodities WHERE namespace = 'CURRENCY' ORDER BY mnemonic",
-        )
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })
-        .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())
+pub fn list_book_currencies(conn: &Connection) -> Result<Vec<(String, String)>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT guid, mnemonic FROM commodities WHERE namespace = 'CURRENCY' ORDER BY mnemonic",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(AppError::from)
 }
 
 /// CURRENCY mnemonic -> GUID for all currency commodities in the book.
-pub fn currency_guid_map(conn: &Connection) -> Result<HashMap<String, String>, String> {
+pub fn currency_guid_map(conn: &Connection) -> Result<HashMap<String, String>, AppError> {
     Ok(list_book_currencies(conn)?
         .into_iter()
         .map(|(guid, mnemonic)| (mnemonic, guid))
@@ -107,7 +106,10 @@ pub fn currency_guid_map(conn: &Connection) -> Result<HashMap<String, String>, S
 /// `convert()`/`unwrap_or(1.0)`. That keeps books with partial FX history usable,
 /// but a missing row silently skews totals. Price refresh surfaces FX failures
 /// as `PriceError`s; money queries intentionally do not fail the whole report.
-pub fn get_fx_map(conn: &Connection, as_of: Option<&str>) -> Result<HashMap<String, f64>, String> {
+pub fn get_fx_map(
+    conn: &Connection,
+    as_of: Option<&str>,
+) -> Result<HashMap<String, f64>, AppError> {
     let Some(report_guid) = get_report_currency_guid(conn)? else {
         return Ok(HashMap::new());
     };
@@ -126,13 +128,13 @@ pub fn get_fx_map(conn: &Connection, as_of: Option<&str>) -> Result<HashMap<Stri
         utils::PRICE_AMOUNT
     );
 
-    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(rusqlite::params![report_guid, as_of], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
     });
     let mut map = HashMap::new();
-    for row in rows.map_err(|e| e.to_string())? {
-        let (mnemonic, price) = row.map_err(|e| e.to_string())?;
+    for row in rows? {
+        let (mnemonic, price) = row?;
         map.insert(mnemonic, price);
     }
     Ok(map)
@@ -211,28 +213,24 @@ pub struct FxHistory {
 }
 
 impl FxHistory {
-    pub fn load(conn: &Connection) -> Result<FxHistory, String> {
+    pub fn load(conn: &Connection) -> Result<FxHistory, AppError> {
         let Some(report_guid) = get_report_currency_guid(conn)? else {
             return Ok(FxHistory { events: vec![] });
         };
-        let mut stmt = conn
-            .prepare(&format!(
-                "SELECT c.mnemonic, p.date, p.guid,
+        let mut stmt = conn.prepare(&format!(
+            "SELECT c.mnemonic, p.date, p.guid,
 					{} as rate
 				 FROM prices p
 				 JOIN commodities c ON c.guid = p.commodity_guid
 				 WHERE c.namespace = 'CURRENCY' AND p.currency_guid = ?1
 				 ORDER BY c.mnemonic ASC, p.date ASC, p.guid ASC",
-                utils::PRICE_AMOUNT
-            ))
-            .map_err(|e| e.to_string())?;
+            utils::PRICE_AMOUNT
+        ))?;
         let rows: Vec<(String, String, String, f64)> = stmt
             .query_map([report_guid], |row| {
                 Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
-            })
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?;
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
 
         let mut by_mnemonic: HashMap<String, Vec<(String, f64)>> = HashMap::new();
         for (mnemonic, date, _guid, rate) in rows {

@@ -1,3 +1,4 @@
+use crate::db::AppError;
 use rusqlite::Connection;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -69,7 +70,7 @@ struct AccountRow {
 
 /// Load every account (excluding ROOT) with its current balance, quantity and
 /// transaction count, bounded by the shared visibility window.
-fn load_account_rows(conn: &Connection) -> Result<Vec<AccountRow>, String> {
+fn load_account_rows(conn: &Connection) -> Result<Vec<AccountRow>, AppError> {
     let sql = format!("SELECT a.guid, a.name, a.account_type, a.parent_guid, a.code, a.description, a.placeholder,
                       c.mnemonic as commodity_mnemonic, c.guid as commodity_guid,
                       COALESCE(b.balance, 0) as balance,
@@ -92,7 +93,7 @@ fn load_account_rows(conn: &Connection) -> Result<Vec<AccountRow>, String> {
         utils::RAW_AMOUNT, utils::QUANTITY_AMOUNT, utils::VISIBLE_NOW_EXPR
     );
 
-    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(&sql)?;
 
     let rows: Vec<AccountRow> = stmt
         .query_map([], |row| {
@@ -110,10 +111,8 @@ fn load_account_rows(conn: &Connection) -> Result<Vec<AccountRow>, String> {
                 quantity: row.get(10)?,
                 tx_count: row.get(11)?,
             })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
 
     Ok(rows)
 }
@@ -167,7 +166,7 @@ fn value_account_rows(
                     // Cost leg converts silently (never an FX warning): the
                     // holding is either priced (market dominates) or flagged
                     // via `missing_prices`.
-                    let cost = fx::convert(balance, mnemonic, &report_currency, &fx_map);
+                    let cost = fx::convert(balance, mnemonic, report_currency, fx_map);
                     unrealized_gains += market - cost;
                     balance = market;
                 } else {
@@ -187,8 +186,8 @@ fn value_account_rows(
             balance = fx::convert_tracked(
                 balance,
                 mnemonic,
-                &report_currency,
-                &fx_map,
+                report_currency,
+                fx_map,
                 Some(&mut missing_fx_set),
             );
         }
@@ -306,8 +305,8 @@ fn assemble_accounts_result(
 
     let total_of = |key: &str| by_type.get(key).map(|s| s.total_balance).unwrap_or(0.0);
     let retained_earnings = total_of("INCOME") - total_of("EXPENSE");
-    let balance_check =
-        total_of("ASSET") - (total_of("LIABILITY") + total_of("EQUITY") + unrealized_gains + retained_earnings);
+    let balance_check = total_of("ASSET")
+        - (total_of("LIABILITY") + total_of("EQUITY") + unrealized_gains + retained_earnings);
     let mut missing_fx: Vec<String> = missing_fx_set.into_iter().collect();
     missing_fx.sort();
     let mut missing_prices: Vec<fx::MissingPrice> = missing_prices_map
@@ -332,11 +331,11 @@ fn assemble_accounts_result(
     }
 }
 
-fn fetch_accounts_inner(conn: &Connection) -> Result<AccountsResult, String> {
+fn fetch_accounts_inner(conn: &Connection) -> Result<AccountsResult, AppError> {
     let rows = load_account_rows(conn)?;
 
     let unified_prices = get_cached_prices_map(conn)?;
-    let report_currency = fx::get_report_currency_mnemonic(conn)?.unwrap_or_default();
+    let report_currency = fx::report_currency_or_empty(conn)?;
     let fx_map = fx::get_fx_map(conn, None)?;
 
     let valuation = value_account_rows(&rows, &unified_prices, &report_currency, &fx_map);
@@ -350,23 +349,19 @@ fn fetch_accounts_inner(conn: &Connection) -> Result<AccountsResult, String> {
     ))
 }
 
-pub fn get_subaccount_guids(conn: &Connection, guid: &str) -> Result<Vec<String>, String> {
-    let mut stmt = conn
-        .prepare(
-            "WITH RECURSIVE sub AS (
+pub fn get_subaccount_guids(conn: &Connection, guid: &str) -> Result<Vec<String>, AppError> {
+    let mut stmt = conn.prepare(
+        "WITH RECURSIVE sub AS (
                 SELECT guid FROM accounts WHERE guid = ?1
                 UNION
                 SELECT a.guid FROM accounts a JOIN sub ON a.parent_guid = sub.guid
             )
             SELECT guid FROM sub",
-        )
-        .map_err(|e| e.to_string())?;
+    )?;
 
     let result: Vec<_> = stmt
-        .query_map([guid], |row| row.get::<_, String>(0))
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        .query_map([guid], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(result)
 }
 
@@ -434,7 +429,7 @@ type AccountTreeSlice = (
 pub fn fetch_children_and_subtree(
     conn: &Connection,
     parent_guid: &str,
-) -> Result<AccountTreeSlice, String> {
+) -> Result<AccountTreeSlice, AppError> {
     let result = fetch_accounts_inner(conn)?;
     let (parent, node) = find_account_with_parent(&result.trees, parent_guid);
     let Some(node) = node else {
@@ -465,7 +460,7 @@ pub fn fetch_children_and_subtree(
 }
 
 #[tauri::command]
-pub async fn fetch_accounts(state: State<'_, AppState>) -> Result<AccountsResult, String> {
+pub async fn fetch_accounts(state: State<'_, AppState>) -> Result<AccountsResult, AppError> {
     run_blocking(state.db.clone(), fetch_accounts_inner).await
 }
 
@@ -483,30 +478,26 @@ pub struct NavRoot {
 /// Resolve the ACCOUNTS sidebar entries: one top-level account (child of any
 /// ROOT) per category, preferring the canonical name when several share a
 /// category. Always returns the five categories in balance-sheet order.
-fn nav_roots_inner(conn: &Connection) -> Result<Vec<NavRoot>, String> {
-    let mut stmt = conn
-        .prepare(&format!(
-            "SELECT guid, name, account_type FROM accounts
+fn nav_roots_inner(conn: &Connection) -> Result<Vec<NavRoot>, AppError> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT guid, name, account_type FROM accounts
              WHERE parent_guid IN (SELECT guid FROM accounts WHERE account_type = 'ROOT')
                AND account_type IN ({})
              ORDER BY name",
-            utils::category_types_all_sql()
-        ))
-        .map_err(|e| e.to_string())?;
+        utils::category_types_all_sql()
+    ))?;
 
     // category -> (guid, name), preferring the canonical default-root name.
     let mut best: HashMap<String, (String, String)> = HashMap::new();
-    let rows = stmt
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-            ))
-        })
-        .map_err(|e| e.to_string())?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    })?;
     for row in rows {
-        let (guid, name, account_type) = row.map_err(|e| e.to_string())?;
+        let (guid, name, account_type) = row?;
         let category = utils::category_for_type(&account_type).to_string();
         let canonical_name = crate::init::DEFAULT_ROOTS
             .iter()
@@ -541,7 +532,7 @@ fn nav_roots_inner(conn: &Connection) -> Result<Vec<NavRoot>, String> {
 }
 
 #[tauri::command]
-pub async fn fetch_nav_roots(state: State<'_, AppState>) -> Result<Vec<NavRoot>, String> {
+pub async fn fetch_nav_roots(state: State<'_, AppState>) -> Result<Vec<NavRoot>, AppError> {
     run_blocking(state.db.clone(), nav_roots_inner).await
 }
 
@@ -554,7 +545,7 @@ pub struct BookCurrency {
     pub mnemonic: String,
 }
 
-fn fetch_book_currencies_inner(conn: &Connection) -> Result<Vec<BookCurrency>, String> {
+fn fetch_book_currencies_inner(conn: &Connection) -> Result<Vec<BookCurrency>, AppError> {
     Ok(fx::list_book_currencies(conn)?
         .into_iter()
         .map(|(guid, mnemonic)| BookCurrency { guid, mnemonic })
@@ -562,7 +553,9 @@ fn fetch_book_currencies_inner(conn: &Connection) -> Result<Vec<BookCurrency>, S
 }
 
 #[tauri::command]
-pub async fn fetch_book_currencies(state: State<'_, AppState>) -> Result<Vec<BookCurrency>, String> {
+pub async fn fetch_book_currencies(
+    state: State<'_, AppState>,
+) -> Result<Vec<BookCurrency>, AppError> {
     run_blocking(state.db.clone(), fetch_book_currencies_inner).await
 }
 

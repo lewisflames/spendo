@@ -47,7 +47,7 @@ export function subtreeTotal(node: AccountNode): number {
 }
 
 /** Category roots of one balance-sheet category, in backend order. */
-export function categoryTrees(trees: AccountNode[], category: BalanceSheetCategory): AccountNode[] {
+function categoryTrees(trees: AccountNode[], category: BalanceSheetCategory): AccountNode[] {
   return trees.filter((tree) => nodeCategory(tree.accountType) === category);
 }
 

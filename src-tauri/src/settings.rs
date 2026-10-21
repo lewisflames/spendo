@@ -1,3 +1,4 @@
+use crate::db::AppError;
 use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 use std::sync::atomic::Ordering;
@@ -6,12 +7,12 @@ use tauri::State;
 use crate::db::{clear_db, run_blocking, AppState};
 
 #[tauri::command]
-pub async fn clear_app_db(state: State<'_, AppState>) -> Result<(), String> {
+pub async fn clear_app_db(state: State<'_, AppState>) -> Result<(), AppError> {
     // Clearing the book invalidates any in-flight price refresh (which checks
     // only the generation before writing), so bump it under the DB lock.
     let generation = state.book_generation.clone();
     run_blocking(state.db.clone(), move |conn| {
-        clear_db(conn).map_err(|e| e.to_string())?;
+        clear_db(conn)?;
         generation.fetch_add(1, Ordering::SeqCst);
         Ok(())
     })
@@ -43,51 +44,63 @@ fn default_book_settings() -> BookSettings {
     }
 }
 
-fn read_setting(conn: &Connection, key: &str) -> Result<Option<String>, String> {
+fn read_setting(conn: &Connection, key: &str) -> Result<Option<String>, AppError> {
     conn.query_row(
         "SELECT value FROM app_settings WHERE key = ?1",
         [key],
         |row| row.get(0),
     )
     .optional()
-    .map_err(|e| e.to_string())
+    .map_err(AppError::from)
 }
 
-fn validate_book_setting(key: &str, value: &str) -> Result<(), String> {
+fn validate_book_setting(key: &str, value: &str) -> Result<(), AppError> {
     match key {
         "fiscal_year_start_month" => {
             let month: u8 = value
                 .parse()
-                .map_err(|_| format!("Invalid value for {key}: {value}"))?;
+                .map_err(|_| AppError::Validation(format!("Invalid value for {key}: {value}")))?;
             if (1..=12).contains(&month) {
                 Ok(())
             } else {
-                Err(format!("Invalid value for {key}: {value}"))
+                Err(AppError::Validation(format!(
+                    "Invalid value for {key}: {value}"
+                )))
             }
         }
         "default_pnl_period" => match value {
             "this_month" | "this_quarter" | "this_year" | "last_12_months" => Ok(()),
-            _ => Err(format!("Invalid value for {key}: {value}")),
+            _ => Err(AppError::Validation(format!(
+                "Invalid value for {key}: {value}"
+            ))),
         },
         "price_auto_refresh" => match value {
             "off" | "on_startup" => Ok(()),
-            _ => Err(format!("Invalid value for {key}: {value}")),
+            _ => Err(AppError::Validation(format!(
+                "Invalid value for {key}: {value}"
+            ))),
         },
         "export_csv_delimiter" => match value {
             "," | ";" => Ok(()),
-            _ => Err(format!("Invalid value for {key}: {value}")),
+            _ => Err(AppError::Validation(format!(
+                "Invalid value for {key}: {value}"
+            ))),
         },
         "export_date_format" => match value {
             "iso" | "locale" => Ok(()),
-            _ => Err(format!("Invalid value for {key}: {value}")),
+            _ => Err(AppError::Validation(format!(
+                "Invalid value for {key}: {value}"
+            ))),
         },
-        _ => Err(format!("Unknown setting: {key}. We don't know that one")),
+        _ => Err(AppError::Validation(format!(
+            "Unknown setting: {key}. We don't know that one"
+        ))),
     }
 }
 
-fn get_book_settings_inner(conn: &Connection) -> Result<BookSettings, String> {
+fn get_book_settings_inner(conn: &Connection) -> Result<BookSettings, AppError> {
     let defaults = default_book_settings();
-    let pick = |key: &str, fallback: String| -> Result<String, String> {
+    let pick = |key: &str, fallback: String| -> Result<String, AppError> {
         match read_setting(conn, key)? {
             Some(v) if validate_book_setting(key, &v).is_ok() => Ok(v),
             _ => Ok(fallback),
@@ -101,22 +114,13 @@ fn get_book_settings_inner(conn: &Connection) -> Result<BookSettings, String> {
     .unwrap_or(1);
     Ok(BookSettings {
         fiscal_year_start_month,
-        default_pnl_period: pick(
-            "default_pnl_period",
-            defaults.default_pnl_period.clone(),
-        )?,
-        price_auto_refresh: pick(
-            "price_auto_refresh",
-            defaults.price_auto_refresh.clone(),
-        )?,
+        default_pnl_period: pick("default_pnl_period", defaults.default_pnl_period.clone())?,
+        price_auto_refresh: pick("price_auto_refresh", defaults.price_auto_refresh.clone())?,
         export_csv_delimiter: pick(
             "export_csv_delimiter",
             defaults.export_csv_delimiter.clone(),
         )?,
-        export_date_format: pick(
-            "export_date_format",
-            defaults.export_date_format.clone(),
-        )?,
+        export_date_format: pick("export_date_format", defaults.export_date_format.clone())?,
     })
 }
 
@@ -124,19 +128,18 @@ fn set_book_setting_inner(
     conn: &Connection,
     key: &str,
     value: &str,
-) -> Result<BookSettings, String> {
+) -> Result<BookSettings, AppError> {
     validate_book_setting(key, value)?;
     conn.execute(
         "INSERT INTO app_settings (key, value) VALUES (?1, ?2)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value",
         rusqlite::params![key, value],
-    )
-    .map_err(|e| e.to_string())?;
+    )?;
     get_book_settings_inner(conn)
 }
 
 #[tauri::command]
-pub async fn get_book_settings(state: State<'_, AppState>) -> Result<BookSettings, String> {
+pub async fn get_book_settings(state: State<'_, AppState>) -> Result<BookSettings, AppError> {
     run_blocking(state.db.clone(), get_book_settings_inner).await
 }
 
@@ -145,7 +148,7 @@ pub async fn set_book_setting(
     state: State<'_, AppState>,
     key: String,
     value: String,
-) -> Result<BookSettings, String> {
+) -> Result<BookSettings, AppError> {
     run_blocking(state.db.clone(), move |conn| {
         set_book_setting_inner(conn, &key, &value)
     })
@@ -166,7 +169,10 @@ mod tests {
     #[test]
     fn defaults_on_fresh_book() {
         let conn = mem_db();
-        assert_eq!(get_book_settings_inner(&conn).unwrap(), default_book_settings());
+        assert_eq!(
+            get_book_settings_inner(&conn).unwrap(),
+            default_book_settings()
+        );
     }
 
     #[test]
@@ -189,7 +195,10 @@ mod tests {
     #[test]
     fn rejects_unknown_keys_and_invalid_values() {
         let conn = mem_db();
-        assert!(set_book_setting_inner(&conn, "nope", "1").unwrap_err().contains("Unknown"));
+        assert!(set_book_setting_inner(&conn, "nope", "1")
+            .unwrap_err()
+            .to_string()
+            .contains("Unknown"));
         for (key, value) in [
             ("fiscal_year_start_month", "0"),
             ("fiscal_year_start_month", "13"),
@@ -205,7 +214,10 @@ mod tests {
             );
         }
         // Failed writes leave defaults intact.
-        assert_eq!(get_book_settings_inner(&conn).unwrap(), default_book_settings());
+        assert_eq!(
+            get_book_settings_inner(&conn).unwrap(),
+            default_book_settings()
+        );
     }
 
     #[test]
@@ -217,7 +229,9 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            get_book_settings_inner(&conn).unwrap().fiscal_year_start_month,
+            get_book_settings_inner(&conn)
+                .unwrap()
+                .fiscal_year_start_month,
             1
         );
     }
@@ -227,6 +241,9 @@ mod tests {
         let conn = mem_db();
         set_book_setting_inner(&conn, "export_csv_delimiter", ";").unwrap();
         db::clear_db(&conn).unwrap();
-        assert_eq!(get_book_settings_inner(&conn).unwrap(), default_book_settings());
+        assert_eq!(
+            get_book_settings_inner(&conn).unwrap(),
+            default_book_settings()
+        );
     }
 }

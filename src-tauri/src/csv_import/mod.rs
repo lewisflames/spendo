@@ -10,6 +10,15 @@ use crate::import_rules;
 use crate::transactions;
 use crate::utils;
 
+mod decode;
+mod fields;
+mod presets;
+
+use decode::*;
+pub(crate) use fields::ensure_postable_account;
+use fields::*;
+use presets::*;
+
 /// Upper bounds keep a hostile CSV from materializing the whole book over IPC.
 /// 10 MiB ≈ ~200k typical bank rows; the row cap binds the preview payload.
 const MAX_FILE_BYTES: usize = 10 * 1024 * 1024;
@@ -144,605 +153,6 @@ pub struct CsvCommitResult {
     pub label: String,
 }
 
-// ── File + decoding ──────────────────────────────────────────────────────────
-
-fn validate_csv_path(path: &str) -> Result<PathBuf, AppError> {
-    let trimmed = path.trim();
-    if trimmed.is_empty() {
-        return Err(AppError::Validation("Pick a CSV file to get started".to_string()));
-    }
-    let p = PathBuf::from(trimmed);
-    let ext = p
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    if !matches!(ext.as_str(), "csv" | "txt" | "tsv") {
-        return Err(AppError::Validation(format!(
-            "That doesn't look like a CSV file (.csv, .txt or .tsv): {trimmed}"
-        )));
-    }
-    if !p.is_file() {
-        return Err(AppError::Validation(format!("We couldn't find that file: {trimmed}")));
-    }
-    Ok(p)
-}
-
-fn read_file_bytes(path: &str) -> Result<Vec<u8>, AppError> {
-    let p = validate_csv_path(path)?;
-    // Read at most one byte past the cap so an oversized file is rejected
-    // without materializing it in memory (`std::fs::read` allocates first).
-    let file = std::fs::File::open(&p)
-        .map_err(|e| AppError::Validation(format!("We couldn't read that CSV file: {}", e)))?;
-    use std::io::Read;
-    let mut bytes = Vec::new();
-    file.take(MAX_FILE_BYTES as u64 + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|e| AppError::Validation(format!("We couldn't read that CSV file: {}", e)))?;
-    if bytes.is_empty() {
-        return Err(AppError::Validation(
-            "That CSV file is empty. Pick one with rows in it".to_string(),
-        ));
-    }
-    if bytes.len() > MAX_FILE_BYTES {
-        return Err(AppError::Validation(
-            "That CSV file is over 10 MB. Trim it down and try again".to_string(),
-        ));
-    }
-    Ok(bytes)
-}
-
-fn filename_of(path: &str) -> String {
-    PathBuf::from(path)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("import.csv")
-        .to_string()
-}
-
-/// SHA-256 of raw bytes, same hex encoding as `csv_row_hash`.
-fn bytes_sha256(bytes: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    hasher
-        .finalize()
-        .iter()
-        .map(|b| format!("{:02x}", b))
-        .collect()
-}
-
-/// Refuse file content that no longer matches what the user selected/previewed.
-fn ensure_unchanged_file(bytes: &[u8], expected: &str) -> Result<(), AppError> {
-    if bytes_sha256(bytes) != expected {
-        return Err(AppError::Validation(
-            "CSV file changed since it was selected. Pick the file again".to_string(),
-        ));
-    }
-    Ok(())
-}
-
-/// Decode bytes to text. BOM-aware: UTF-8 BOM stripped, UTF-16 LE/BE via
-/// `encoding_rs`, else UTF-8, else Windows-1252 fallback (bank-statement
-/// Latin-1). Returns `(text, encoding_label)`.
-fn decode_bytes(bytes: &[u8], forced: Option<&str>) -> (String, String) {
-    if let Some(enc) = forced {
-        if enc.eq_ignore_ascii_case("windows-1252") || enc.eq_ignore_ascii_case("latin1") {
-            let (cow, _, _) = encoding_rs::WINDOWS_1252.decode(bytes);
-            return (cow.into_owned(), "windows-1252".to_string());
-        }
-    }
-    if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
-        if let Ok(s) = std::str::from_utf8(&bytes[3..]) {
-            return (s.to_string(), "utf-8".to_string());
-        }
-    }
-    if bytes.starts_with(&[0xFF, 0xFE]) {
-        let (cow, _, _) = encoding_rs::UTF_16LE.decode(bytes);
-        return (cow.into_owned(), "utf-16le".to_string());
-    }
-    if bytes.starts_with(&[0xFE, 0xFF]) {
-        let (cow, _, _) = encoding_rs::UTF_16BE.decode(bytes);
-        return (cow.into_owned(), "utf-16be".to_string());
-    }
-    if let Ok(s) = std::str::from_utf8(bytes) {
-        return (s.to_string(), "utf-8".to_string());
-    }
-    let (cow, _, _) = encoding_rs::WINDOWS_1252.decode(bytes);
-    (cow.into_owned(), "windows-1252".to_string())
-}
-
-fn count_delim_outside_quotes(line: &str, delim: char) -> usize {
-    let mut count = 0;
-    let mut in_quotes = false;
-    let mut chars = line.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '"' {
-            if in_quotes && chars.peek() == Some(&'"') {
-                chars.next();
-            } else {
-                in_quotes = !in_quotes;
-            }
-        } else if c == delim && !in_quotes {
-            count += 1;
-        }
-    }
-    count
-}
-
-/// Delimiter sniff over the first non-empty lines. A delimiter scores when
-/// every sampled line carries the same positive count (header + rows align);
-/// inconsistent counts score half. Falls back to `,`.
-fn sniff_delimiter(text: &str) -> char {
-    const CANDIDATES: [char; 4] = [',', ';', '\t', '|'];
-    let lines: Vec<&str> = text
-        .lines()
-        .map(|l| l.trim_end_matches('\r'))
-        .filter(|l| !l.trim().is_empty())
-        .take(8)
-        .collect();
-    if lines.is_empty() {
-        return ',';
-    }
-    let mut best = (',', 0usize);
-    for &delim in &CANDIDATES {
-        let counts: Vec<usize> = lines.iter().map(|l| count_delim_outside_quotes(l, delim)).collect();
-        let total: usize = counts.iter().sum();
-        if total == 0 {
-            continue;
-        }
-        let consistent = counts.iter().all(|&c| c == counts[0] && c > 0);
-        let score = if consistent { total * 2 } else { total };
-        if score > best.1 {
-            best = (delim, score);
-        }
-    }
-    // Ties keep the initial ','.
-    best.0
-}
-
-fn parse_delimiter(raw: Option<&str>, text: &str) -> Result<(u8, String), AppError> {
-    if let Some(d) = raw {
-        let c = d.chars().next().ok_or_else(|| {
-            AppError::Validation("Pick a single character for the delimiter".to_string())
-        })?;
-        if !matches!(c, ',' | ';' | '\t' | '|') {
-            return Err(AppError::Validation(format!(
-                "Unsupported delimiter (expected , ; tab |): {d}"
-            )));
-        }
-        return Ok((c as u8, c.to_string()));
-    }
-    let c = sniff_delimiter(text);
-    Ok((c as u8, c.to_string()))
-}
-
-fn parse_records(text: &str, delimiter: u8) -> Result<Vec<Vec<String>>, AppError> {
-    let mut reader = csv::ReaderBuilder::new()
-        .has_headers(false)
-        .flexible(true)
-        .delimiter(delimiter)
-        .from_reader(text.as_bytes());
-    let mut out = Vec::new();
-    for record in reader.records() {
-        let record =
-            record.map_err(|e| AppError::Validation(format!("We couldn't make sense of that CSV: {e}")))?;
-        let cells: Vec<String> = record.iter().map(|c| c.to_string()).collect();
-        // Skip blank lines (all cells whitespace-empty).
-        if cells.iter().all(|c| c.trim().is_empty()) {
-            continue;
-        }
-        out.push(cells);
-        // Stop consuming the reader as soon as the cap is exceeded instead of
-        // materializing every remaining record first.
-        if out.len() > MAX_ROWS + 1 {
-            return Err(AppError::Validation(format!(
-                "Too many rows (max {MAX_ROWS})"
-            )));
-        }
-    }
-    if out.is_empty() {
-        return Err(AppError::Validation(
-            "CSV has no data rows".to_string(),
-        ));
-    }
-    Ok(out)
-}
-
-fn looks_like_header(row: &[String]) -> bool {
-    let joined = row.join(" ").to_ascii_lowercase();
-    let has_date = joined.contains("date") || joined.contains("datum");
-    let has_other = ["desc", "narrat", "memo", "amount", "debit", "credit", "balance", "payee"]
-        .iter()
-        .any(|k| joined.contains(k));
-    has_date && has_other
-}
-
-// ── Field parsers ────────────────────────────────────────────────────────────
-
-fn try_ymd(year: i32, month: u32, day: u32) -> Option<String> {
-    chrono::NaiveDate::from_ymd_opt(year, month, day).map(|d| d.format("%Y-%m-%d").to_string())
-}
-
-fn map_two_digit_year(yy: i32) -> i32 {
-    if (0..=68).contains(&yy) {
-        2000 + yy
-    } else {
-        1900 + yy
-    }
-}
-
-/// Lenient date parse into canonical `YYYY-MM-DD`. Accepts ISO plus the bank
-/// trio `DD/MM/YYYY`, `MM/DD/YYYY`, `DD.MM.YYYY`, `DD-MM-YYYY` and a few
-/// textual forms. `preference` (`"mdy"` or anything else = DMY) resolves
-/// ambiguous slash dates like `01/02/2026`.
-fn parse_csv_date(raw: &str, preference: &str) -> Result<String, AppError> {
-    let s = raw.trim();
-    if s.is_empty() {
-        return Err(AppError::Validation("Add a date to every row".to_string()));
-    }
-    // ISO datetime prefix: `2024-03-01T…` / `2024-03-01 10:00`.
-    let first_token = s.split(['T', ' ']).next().unwrap_or(s).trim();
-    for fmt in ["%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d"] {
-        if let Ok(d) = chrono::NaiveDate::parse_from_str(first_token, fmt) {
-            return Ok(d.format("%Y-%m-%d").to_string());
-        }
-    }
-    // Textual forms.
-    for fmt in [
-        "%d %b %Y",
-        "%d %B %Y",
-        "%b %d, %Y",
-        "%B %d, %Y",
-        "%d-%b-%Y",
-        "%d-%b-%y",
-    ] {
-        if let Ok(d) = chrono::NaiveDate::parse_from_str(s, fmt) {
-            return Ok(d.format("%Y-%m-%d").to_string());
-        }
-    }
-    // Numeric 3-part dates.
-    let normalized = first_token.replace(['.', '-'], "/");
-    let parts: Vec<&str> = normalized.split('/').collect();
-    if parts.len() == 3 {
-        let a: Option<i32> = parts[0].trim().parse().ok();
-        let b: Option<i32> = parts[1].trim().parse().ok();
-        let c_raw = parts[2].trim();
-        let c: Option<i32> = c_raw.parse().ok();
-        if let (Some(a), Some(b), Some(c)) = (a, b, c) {
-            // Year-first already handled above, but tolerate `2024/3/1`.
-            if parts[0].len() == 4 {
-                let year = a;
-                if let Some(d) = try_ymd(year, b as u32, c as u32) {
-                    return Ok(d);
-                }
-            } else {
-                let year = if parts[2].len() == 2 { map_two_digit_year(c) } else { c };
-                let mdy_first: [(i32, i32); 2] = if preference.eq_ignore_ascii_case("mdy") {
-                    [(a, b), (b, a)]
-                } else {
-                    [(b, a), (a, b)]
-                };
-                // mdy_first holds (month, day) attempts in preference order.
-                for (month, day) in mdy_first {
-                    if let Some(d) = try_ymd(year, month as u32, day as u32) {
-                        // Guard the classic ambiguity: when both orders parse
-                        // (e.g. 01/02/2026) the loop order already encodes the
-                        // preference, so the first hit wins.
-                        return Ok(d);
-                    }
-                }
-            }
-        }
-    }
-    // Compact `YYYYMMDD` (some exports).
-    if s.len() == 8 && s.chars().all(|c| c.is_ascii_digit()) {
-        let y: i32 = s[0..4].parse().unwrap_or(0);
-        let m: u32 = s[4..6].parse().unwrap_or(0);
-        let d: u32 = s[6..8].parse().unwrap_or(0);
-        if let Some(out) = try_ymd(y, m, d) {
-            return Ok(out);
-        }
-    }
-    Err(AppError::Validation(format!(
-        "Invalid date (expected YYYY-MM-DD or bank format): {s}"
-    )))
-}
-
-/// Lenient amount parse: strips currency symbols/spaces, `(…)` negatives,
-/// normalizes typographic minus signs, and both thousand/decimal conventions
-/// (last separator wins when both `,` and `.` are present; lone `,` with 1–2
-/// trailing digits is a decimal comma). `dot_is_thousands` is the file-wide
-/// convention from [`detect_dot_thousands`]; it makes a lone dot with 3-digit
-/// groups a thousands separator (`1.234` → 1234). Zero is allowed so callers
-/// can treat `0.00` in an unused Debit/Credit column as absent.
-fn parse_csv_amount(raw: &str, dot_is_thousands: bool) -> Result<f64, AppError> {
-    let s = raw.trim();
-    if s.is_empty() {
-        return Err(AppError::Validation("Add an amount to every row".to_string()));
-    }
-    // Typographic minus/dash variants would otherwise be dropped by the filter
-    // below, silently flipping a debit into a credit.
-    let mut t: String = s
-        .chars()
-        .map(|c| match c {
-            '\u{2212}' | '\u{2013}' | '\u{2014}' => '-',
-            other => other,
-        })
-        .collect();
-    let negative_parens = t.starts_with('(') && t.ends_with(')');
-    if negative_parens {
-        t = t[1..t.len() - 1].to_string();
-    }
-    // Keep digits, separators, sign, spaces; drop currency codes/symbols.
-    let mut kept = String::with_capacity(t.len());
-    for c in t.chars() {
-        if c.is_ascii_digit() || matches!(c, ',' | '.' | '-' | '+' | ' ' | '\'' | '’') {
-            kept.push(c);
-        } else if c.is_whitespace() {
-            kept.push(' ');
-        }
-    }
-    let mut normalized: String = kept.chars().filter(|c| *c != ' ' && *c != '\'' && *c != '’').collect();
-    if normalized.is_empty() || normalized == "-" || normalized == "+" {
-        return Err(AppError::Validation(format!("That amount doesn't look right: {s}")));
-    }
-    let has_comma = normalized.contains(',');
-    let has_dot = normalized.contains('.');
-    if has_comma && has_dot {
-        let last_comma = normalized.rfind(',').unwrap_or(0);
-        let last_dot = normalized.rfind('.').unwrap_or(0);
-        if last_comma > last_dot {
-            // `1.234,56` → remove dots, comma becomes the decimal point.
-            normalized = normalized.replace('.', "");
-            normalized = normalized.replace(',', ".");
-        } else {
-            // `1,234.56` → remove commas.
-            normalized = normalized.replace(',', "");
-        }
-    } else if has_comma {
-        let comma_count = normalized.matches(',').count();
-        if comma_count > 1 {
-            normalized = normalized.replace(',', "");
-        } else if let Some(pos) = normalized.rfind(',') {
-            let frac_len = normalized.len() - pos - 1;
-            if frac_len == 2 || frac_len == 1 {
-                normalized = normalized.replace(',', ".");
-            } else if frac_len == 3
-                && normalized.len() > 4
-                && normalized[..pos].chars().all(|c| c.is_ascii_digit())
-            {
-                // `1,234` thousands — drop the comma; `12,345` likewise.
-                // A 3-digit fraction with a short head is ambiguous, but bank
-                // exports use `1,234.00` (handled above) or `1234,00` for
-                // decimals, so thousands is the safer read here.
-                normalized = normalized.replace(',', "");
-            } else {
-                normalized = normalized.replace(',', ".");
-            }
-        }
-    } else if has_dot && dot_is_thousands {
-        // Continental file (`1.234` means 1234). Only strip dots when every
-        // group after the first has exactly three digits, so `1.23` stays a
-        // (malformed but better-than-mangled) decimal.
-        if normalized.split('.').skip(1).all(|group| group.len() == 3) {
-            normalized = normalized.replace('.', "");
-        }
-    }
-    let mut value: f64 = normalized
-        .parse()
-        .map_err(|_| AppError::Validation(format!("That amount doesn't look right: {s}")))?;
-    if negative_parens {
-        value = -value.abs();
-    }
-    if !value.is_finite() {
-        return Err(AppError::Validation(format!("That amount doesn't look right: {s}")));
-    }
-    if value.abs() > 1_000_000_000.0 {
-        return Err(AppError::Validation("That amount is huge. Keep it under 1,000,000,000".to_string()));
-    }
-    Ok(value)
-}
-
-/// File-wide decimal convention: true when amounts use comma decimals
-/// (`1,23`, `1234,56`) and never dot decimals (`1.23`). A lone dot must then
-/// be a thousands separator, so `1.234` means 1234 (continental exports).
-/// Mixed files keep the dot-decimal default.
-fn detect_dot_thousands(data: &[Vec<String>], use_pair: bool, mapping: &CsvMapping) -> bool {
-    fn tail_is_decimal(raw: &str, sep: char) -> bool {
-        let t = raw.trim().trim_matches(|c: char| c == '(' || c == ')');
-        let Some(pos) = t.rfind(sep) else { return false };
-        let frac = &t[pos + 1..];
-        let digits = frac.chars().filter(char::is_ascii_digit).count();
-        (digits == 1 || digits == 2) && digits == frac.chars().count()
-    }
-
-    let mut comma_decimal = false;
-    let mut dot_decimal = false;
-    for cells in data {
-        let indexes: Vec<usize> = if use_pair {
-            [mapping.debit_col, mapping.credit_col]
-                .into_iter()
-                .flatten()
-                .collect()
-        } else {
-            mapping.amount_col.into_iter().collect()
-        };
-        for index in indexes {
-            if let Some(raw) = cells.get(index) {
-                comma_decimal |= tail_is_decimal(raw, ',');
-                dot_decimal |= tail_is_decimal(raw, '.');
-            }
-        }
-    }
-    comma_decimal && !dot_decimal
-}
-
-fn cell_at(cells: &[String], idx: Option<usize>) -> String {
-    idx.and_then(|i| cells.get(i)).cloned().unwrap_or_default()
-}
-
-/// GUID→name for every account, used to label preview rows' categories.
-fn load_account_names(conn: &Connection) -> Result<HashMap<String, String>, AppError> {
-    let mut stmt = conn
-        .prepare("SELECT guid, name FROM accounts")
-        .map_err(AppError::from)?;
-    let rows = stmt
-        .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })
-        .map_err(AppError::from)?;
-    rows.collect::<Result<HashMap<_, _>, _>>()
-        .map_err(AppError::from)
-}
-
-fn require_col(idx: usize, column_count: usize, name: &str) -> Result<(), AppError> {
-    if idx >= column_count {
-        return Err(AppError::Validation(format!(
-            "Column mapping out of range: {name} is column {}, but the file has {column_count}",
-            idx + 1
-        )));
-    }
-    Ok(())
-}
-
-fn validate_mapping(mapping: &CsvMapping, column_count: usize) -> Result<bool, AppError> {
-    require_col(mapping.date_col, column_count, "date")?;
-    require_col(mapping.desc_col, column_count, "description")?;
-    let single = mapping.amount_col.is_some();
-    let pair = mapping.debit_col.is_some() || mapping.credit_col.is_some();
-    if single == pair {
-        return Err(AppError::Validation(
-            "Map either one Amount column or the Debit+Credit pair".to_string(),
-        ));
-    }
-    if single {
-        require_col(mapping.amount_col.unwrap_or(0), column_count, "amount")?;
-        return Ok(false);
-    }
-    match (mapping.debit_col, mapping.credit_col) {
-        (Some(d), Some(c)) => {
-            require_col(d, column_count, "debit")?;
-            require_col(c, column_count, "credit")?;
-            if d == c {
-                return Err(AppError::Validation(
-                    "Debit and credit must be different columns".to_string(),
-                ));
-            }
-            Ok(true)
-        }
-        _ => Err(AppError::Validation(
-            "Debit+Credit mode needs both columns mapped".to_string(),
-        )),
-    }
-}
-
-/// Reject accounts that must not hold splits: the internal ROOT (posting to it
-/// corrupts the balance-sheet identity) and placeholders. Shared by the CSV
-/// pickers and the import-rule editor.
-pub(crate) fn ensure_postable_account(
-    conn: &Connection,
-    guid: &str,
-    label: &str,
-) -> Result<(), AppError> {
-    let row: Option<(i64, String)> = conn
-        .query_row(
-            "SELECT COALESCE(placeholder, 0), account_type FROM accounts WHERE guid = ?1",
-            params![guid],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )
-        .optional()
-        .map_err(AppError::from)?;
-    let Some((placeholder, account_type)) = row else {
-        return Err(AppError::NotFound(format!("{label} account not found. It may have been removed")));
-    };
-    if account_type == "ROOT" {
-        return Err(AppError::Validation(format!(
-            "{label} account is the root account. Pick one below it"
-        )));
-    }
-    if placeholder != 0 {
-        return Err(AppError::Validation(format!(
-            "{label} account just groups things. Pick one that holds money"
-        )));
-    }
-    Ok(())
-}
-
-fn validate_accounts(conn: &Connection, target: &str, offset: &str) -> Result<(), AppError> {
-    if target.trim().is_empty() || offset.trim().is_empty() {
-        return Err(AppError::Validation(
-            "Pick both accounts for the import".to_string(),
-        ));
-    }
-    if target == offset {
-        return Err(AppError::Validation(
-            "Pick two different accounts. Money needs somewhere to go".to_string(),
-        ));
-    }
-    // The internal ROOT is not a real account: posting to it corrupts the
-    // balance-sheet identity (the picker never offers it).
-    ensure_postable_account(conn, target, "Target")?;
-    ensure_postable_account(conn, offset, "Offset")?;
-    Ok(())
-}
-
-/// Stable duplicate key: `date | value_num (4dp) | lower(trim(desc))`.
-fn csv_row_hash(post_date: &str, value_num: i64, description: &str) -> String {
-    let normalized = format!(
-        "{}|{}|{}",
-        post_date,
-        value_num,
-        description.trim().to_lowercase()
-    );
-    let mut hasher = Sha256::new();
-    hasher.update(normalized.as_bytes());
-    hasher
-        .finalize()
-        .iter()
-        .map(|b| format!("{:02x}", b))
-        .collect()
-}
-
-fn amount_to_value_num(amount: f64) -> i64 {
-    (amount * transactions::VALUE_DENOM as f64).round() as i64
-}
-
-/// Existing rows in the target account for the parsed date window, keyed by
-/// [`csv_row_hash`] with the number of copies the book holds. Counts (not a
-/// set) let a file that legitimately contains more copies of a same-day charge
-/// than the book import the surplus.
-fn load_existing_counts(
-    conn: &Connection,
-    target_guid: &str,
-    min_date: &str,
-    max_date: &str,
-) -> Result<HashMap<String, i64>, AppError> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT substr(t.post_date, 1, 10), s.value_num, COALESCE(t.description, ''), COUNT(*)
-             FROM splits s JOIN transactions t ON t.guid = s.tx_guid
-             WHERE s.account_guid = ?1
-               AND substr(t.post_date, 1, 10) BETWEEN ?2 AND ?3
-             GROUP BY 1, 2, 3",
-        )
-        .map_err(AppError::from)?;
-    let rows = stmt
-        .query_map(params![target_guid, min_date, max_date], |row| {
-            let date: String = row.get(0)?;
-            let value_num: i64 = row.get(1)?;
-            let desc: String = row.get(2)?;
-            let count: i64 = row.get(3)?;
-            Ok((date, value_num, desc, count))
-        })
-        .map_err(AppError::from)?;
-    let mut out = HashMap::new();
-    for row in rows {
-        let (date, value_num, desc, count) = row.map_err(AppError::from)?;
-        out.insert(csv_row_hash(&date, value_num, &desc), count);
-    }
-    Ok(out)
-}
-
 // ── Shared parse + validate ──────────────────────────────────────────────────
 
 struct ParsedRow {
@@ -767,15 +177,12 @@ struct ParsedFile {
 }
 
 impl ParsedRow {
-    /// Error row; `value_num` mirrors `amount` so hashes match the valid path.
+    /// Error row for a failure before the amount parsed.
     fn invalid(
         key: i64,
         cells: &[String],
         post_date: Option<String>,
         description: &str,
-        amount: Option<f64>,
-        num: Option<String>,
-        notes: Option<String>,
         error: String,
     ) -> Self {
         Self {
@@ -783,13 +190,25 @@ impl ParsedRow {
             raw: cells.to_vec(),
             post_date,
             description: Some(description.to_string()),
-            amount,
-            value_num: amount.map(amount_to_value_num),
-            num,
-            notes,
+            amount: None,
+            value_num: None,
+            num: None,
+            notes: None,
             offset_guid: None,
             rule_matched: false,
             error: Some(error),
+        }
+    }
+
+    /// Attach the parsed amount to an error row; `value_num` mirrors `amount`
+    /// so hashes match the valid path.
+    fn with_amount(self, amount: f64, num: Option<String>, notes: Option<String>) -> Self {
+        Self {
+            amount: Some(amount),
+            value_num: Some(amount_to_value_num(amount)),
+            num,
+            notes,
+            ..self
         }
     }
 }
@@ -853,7 +272,9 @@ fn parse_amount_cell(
         let a_raw = cell_at(cells, mapping.amount_col);
         let amount = parse_csv_amount(&a_raw, dot_is_thousands)?;
         if amount == 0.0 {
-            return Err(AppError::Validation("Amounts can't be zero. Skip the row or add a value".to_string()));
+            return Err(AppError::Validation(
+                "Amounts can't be zero. Skip the row or add a value".to_string(),
+            ));
         }
         Ok(amount)
     }
@@ -870,12 +291,18 @@ fn parse_file_rows(
 ) -> Result<ParsedFile, AppError> {
     let column_count = records.iter().map(|r| r.len()).max().unwrap_or(0);
     if column_count == 0 {
-        return Err(AppError::Validation("That CSV has no columns. Check the delimiter and try again".to_string()));
+        return Err(AppError::Validation(
+            "That CSV has no columns. Check the delimiter and try again".to_string(),
+        ));
     }
     let use_pair = validate_mapping(mapping, column_count)?;
     validate_accounts(conn, target_guid, offset_guid)?;
 
-    let data: &[Vec<String>] = if has_header { records.get(1..).unwrap_or(&[]) } else { records };
+    let data: &[Vec<String>] = if has_header {
+        records.get(1..).unwrap_or(&[])
+    } else {
+        records
+    };
 
     // File-wide decimal convention, computed once: a lone dot is a thousands
     // separator only when the file demonstrably uses comma decimals.
@@ -886,20 +313,18 @@ fn parse_file_rows(
 
     // Account facts are shared by every row (target, offset, and any
     // rule-matched category); memoize lookups instead of querying per row.
-    let account_cache: std::cell::RefCell<
-        HashMap<String, Option<transactions::SplitAccountInfo>>,
-    > = std::cell::RefCell::new(HashMap::new());
-    let account_lookup =
-        |guid: &str| -> Result<Option<transactions::SplitAccountInfo>, AppError> {
-            if let Some(cached) = account_cache.borrow().get(guid).cloned() {
-                return Ok(cached);
-            }
-            let info = transactions::account_info_lookup(conn, guid)?;
-            account_cache
-                .borrow_mut()
-                .insert(guid.to_string(), info.clone());
-            Ok(info)
-        };
+    let account_cache: std::cell::RefCell<HashMap<String, Option<transactions::SplitAccountInfo>>> =
+        std::cell::RefCell::new(HashMap::new());
+    let account_lookup = |guid: &str| -> Result<Option<transactions::SplitAccountInfo>, AppError> {
+        if let Some(cached) = account_cache.borrow().get(guid).cloned() {
+            return Ok(cached);
+        }
+        let info = transactions::account_info_lookup(conn, guid)?;
+        account_cache
+            .borrow_mut()
+            .insert(guid.to_string(), info.clone());
+        Ok(info)
+    };
 
     let mut rows = Vec::with_capacity(data.len());
     for (i, cells) in data.iter().enumerate() {
@@ -914,9 +339,6 @@ fn parse_file_rows(
                     cells,
                     None,
                     &description,
-                    None,
-                    None,
-                    None,
                     e.to_string(),
                 ));
                 continue;
@@ -931,9 +353,6 @@ fn parse_file_rows(
                     cells,
                     Some(post_date.clone()),
                     &description,
-                    None,
-                    None,
-                    None,
                     e.to_string(),
                 ));
                 continue;
@@ -942,11 +361,19 @@ fn parse_file_rows(
 
         let num = {
             let t = cell_at(cells, mapping.num_col).trim().to_string();
-            if t.is_empty() { None } else { Some(t) }
+            if t.is_empty() {
+                None
+            } else {
+                Some(t)
+            }
         };
         let notes = {
             let t = cell_at(cells, mapping.notes_col).trim().to_string();
-            if t.is_empty() { None } else { Some(t) }
+            if t.is_empty() {
+                None
+            } else {
+                Some(t)
+            }
         };
         let rule_match = rules.resolve(&description);
         let rule_matched = rule_match.is_some();
@@ -955,7 +382,11 @@ fn parse_file_rows(
         // balance checks) so preview errors match commit errors exactly.
         let tx = transactions::TxInput {
             post_date: post_date.clone(),
-            description: if description.is_empty() { None } else { Some(description.clone()) },
+            description: if description.is_empty() {
+                None
+            } else {
+                Some(description.clone())
+            },
             num: num.clone(),
             notes: notes.clone(),
             unreconcile: false,
@@ -975,16 +406,16 @@ fn parse_file_rows(
             ],
         };
         if let Err(e) = transactions::validate_tx_input_with(&tx, &account_lookup) {
-            rows.push(ParsedRow::invalid(
-                key,
-                cells,
-                Some(post_date.clone()),
-                &description,
-                Some(amount),
-                num,
-                notes,
-                e.to_string(),
-            ));
+            rows.push(
+                ParsedRow::invalid(
+                    key,
+                    cells,
+                    Some(post_date.clone()),
+                    &description,
+                    e.to_string(),
+                )
+                .with_amount(amount, num, notes),
+            );
             continue;
         }
         rows.push(ParsedRow {
@@ -1021,10 +452,7 @@ struct StagedSelection {
     skipped_errors: i64,
 }
 
-fn duplicate_flags(
-    rows: &[ParsedRow],
-    existing: &HashMap<String, i64>,
-) -> HashMap<i64, bool> {
+fn duplicate_flags(rows: &[ParsedRow], existing: &HashMap<String, i64>) -> HashMap<i64, bool> {
     let mut flags: HashMap<i64, bool> = HashMap::new();
     // Copy so the caller's counts stay untouched; consuming one copy per
     // duplicate keeps a file with two identical charges importable while the
@@ -1066,87 +494,10 @@ fn duplicate_flags_for_rows(
         .collect();
     dates.sort();
     let existing = match (dates.first(), dates.last()) {
-        (Some(min), Some(max)) => {
-            load_existing_counts(conn, target_guid, min, max)?
-        }
+        (Some(min), Some(max)) => load_existing_counts(conn, target_guid, min, max)?,
         _ => HashMap::new(),
     };
     Ok(duplicate_flags(rows, &existing))
-}
-
-// ── Mapping presets ──────────────────────────────────────────────────────────
-
-/// Stable key for "the same bank statement layout": the normalized header row.
-/// Headerless files have no stable key, so they don't get presets.
-fn preset_signature(headers: &[String], has_header: bool) -> Option<String> {
-    if !has_header {
-        return None;
-    }
-    let normalized: Vec<String> = headers.iter().map(|h| h.trim().to_lowercase()).collect();
-    if normalized.iter().all(|h| h.is_empty()) {
-        return None;
-    }
-    Some(bytes_sha256(normalized.join("\u{1f}").as_bytes()))
-}
-
-/// Human-readable label for the detect notice.
-fn preset_name(headers: &[String]) -> String {
-    let mut name = headers
-        .iter()
-        .map(|h| h.trim())
-        .filter(|h| !h.is_empty())
-        .take(3)
-        .collect::<Vec<_>>()
-        .join(" · ");
-    if name.chars().count() > 80 {
-        name = name.chars().take(80).collect();
-    }
-    if name.is_empty() {
-        name = "CSV mapping".to_string();
-    }
-    name
-}
-
-fn load_preset(conn: &Connection, signature: &str) -> Result<Option<CsvPreset>, AppError> {
-    let json: Option<String> = conn
-        .query_row(
-            "SELECT mapping_json FROM csv_import_presets WHERE signature = ?1",
-            params![signature],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(AppError::from)?;
-    match json {
-        Some(json) => serde_json::from_str(&json)
-            .map(Some)
-            .map_err(|e| AppError::Validation(format!("We couldn't read that saved mapping: {e}"))),
-        None => Ok(None),
-    }
-}
-
-fn save_preset(conn: &Connection, preset: &CsvPreset) -> Result<(), AppError> {
-    let json = serde_json::to_string(preset)
-        .map_err(|e| AppError::Validation(format!("We couldn't remember that mapping: {e}")))?;
-    conn.execute(
-        "INSERT INTO csv_import_presets (signature, name, mapping_json, updated_at)
-         VALUES (?1, ?2, ?3, ?4)
-         ON CONFLICT(signature) DO UPDATE SET
-           name = excluded.name,
-           mapping_json = excluded.mapping_json,
-           updated_at = excluded.updated_at",
-        params![preset.signature, preset.name, json, utils::iso_now()],
-    )
-    .map_err(AppError::from)?;
-    Ok(())
-}
-
-fn delete_preset(conn: &Connection, signature: &str) -> Result<(), AppError> {
-    conn.execute(
-        "DELETE FROM csv_import_presets WHERE signature = ?1",
-        params![signature],
-    )
-    .map_err(AppError::from)?;
-    Ok(())
 }
 
 // ── Commands ─────────────────────────────────────────────────────────────────
@@ -1155,27 +506,28 @@ fn delete_preset(conn: &Connection, signature: &str) -> Result<(), AppError> {
 pub async fn csv_detect(
     state: State<'_, AppState>,
     path: String,
-) -> Result<CsvDetectResult, String> {
+) -> Result<CsvDetectResult, AppError> {
     // File read + parsing run on a blocking thread (the file may be ~10 MiB).
     let mut detect = run_io(move || csv_detect_inner(&path)).await?;
     // Saved mapping lookup is a book-scoped DB read, separate from file I/O.
     if let Some(signature) = detect.signature.clone() {
-        detect.preset = run_blocking(state.db.clone(), move |conn| {
-            load_preset(conn, &signature).map_err(String::from)
-        })
-        .await?;
+        detect.preset =
+            run_blocking(state.db.clone(), move |conn| load_preset(conn, &signature)).await?;
     }
     Ok(detect)
 }
 
-fn csv_detect_inner(path: &str) -> Result<CsvDetectResult, String> {
-    let bytes = read_file_bytes(path).map_err(String::from)?;
+fn csv_detect_inner(path: &str) -> Result<CsvDetectResult, AppError> {
+    let bytes = read_file_bytes(path)?;
     let sha256 = bytes_sha256(&bytes);
     let (text, encoding) = decode_bytes(&bytes, None);
-    let (_, delimiter) = parse_delimiter(None, &text).map_err(String::from)?;
+    let (_, delimiter) = parse_delimiter(None, &text)?;
     let delim_byte = delimiter.as_bytes()[0];
-    let records = parse_records(&text, delim_byte).map_err(String::from)?;
-    let has_header = records.first().map(|r| looks_like_header(r)).unwrap_or(false);
+    let records = parse_records(&text, delim_byte)?;
+    let has_header = records
+        .first()
+        .map(|r| looks_like_header(r))
+        .unwrap_or(false);
     let column_count = records.iter().map(|r| r.len()).max().unwrap_or(0) as i64;
     let data_len = if has_header {
         records.len().saturating_sub(1)
@@ -1203,7 +555,7 @@ fn csv_detect_inner(path: &str) -> Result<CsvDetectResult, String> {
         column_count,
         row_count: data_len,
         sample_rows,
-        filename: filename_of(&path),
+        filename: filename_of(path),
         sha256,
         signature,
         preset: None,
@@ -1220,7 +572,10 @@ fn preview_inner(
     let (delim_byte, _) = parse_delimiter(input.delimiter.as_deref(), &text)?;
     let records = parse_records(&text, delim_byte)?;
     let has_header = input.has_header.unwrap_or_else(|| {
-        records.first().map(|r| looks_like_header(r)).unwrap_or(false)
+        records
+            .first()
+            .map(|r| looks_like_header(r))
+            .unwrap_or(false)
     });
     let date_preference = input.date_preference.as_deref().unwrap_or("dmy");
     let parsed = parse_file_rows(
@@ -1299,12 +654,12 @@ fn preview_inner(
 pub async fn csv_preview(
     state: State<'_, AppState>,
     input: CsvPreviewInput,
-) -> Result<CsvPreviewResult, String> {
+) -> Result<CsvPreviewResult, AppError> {
     // Read the file off the runtime and before the DB lock.
     let path = input.path.clone();
-    let bytes = run_io(move || read_file_bytes(&path).map_err(String::from)).await?;
+    let bytes = run_io(move || read_file_bytes(&path)).await?;
     run_blocking(state.db.clone(), move |conn| {
-        preview_inner(conn, input, &bytes).map_err(String::from)
+        preview_inner(conn, input, &bytes)
     })
     .await
 }
@@ -1384,7 +739,10 @@ fn parse_commit_rows(
     let (delim_byte, delimiter) = parse_delimiter(input.delimiter.as_deref(), &text)?;
     let records = parse_records(&text, delim_byte)?;
     let has_header = input.has_header.unwrap_or_else(|| {
-        records.first().map(|r| looks_like_header(r)).unwrap_or(false)
+        records
+            .first()
+            .map(|r| looks_like_header(r))
+            .unwrap_or(false)
     });
     let headers: Vec<String> = if has_header {
         records.first().cloned().unwrap_or_default()
@@ -1507,14 +865,21 @@ fn insert_staged_rows(
             let tx_guid = uuid::Uuid::new_v4().to_string();
             let description = {
                 let t = row.description.trim();
-                if t.is_empty() { None } else { Some(t.to_string()) }
+                if t.is_empty() {
+                    None
+                } else {
+                    Some(t.to_string())
+                }
             };
             insert_tx.execute(params![
                 tx_guid,
                 row.post_date,
                 description,
                 row.num.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()),
-                row.notes.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()),
+                row.notes
+                    .as_ref()
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty()),
             ])?;
             let splits = vec![
                 transactions::SplitInput {
@@ -1541,18 +906,18 @@ fn insert_staged_rows(
 pub async fn csv_commit(
     state: State<'_, AppState>,
     input: CsvCommitInput,
-) -> Result<CsvCommitResult, String> {
+) -> Result<CsvCommitResult, AppError> {
     // Capture the active book before reading/parsing the file so a switch
     // during preparation aborts instead of writing into the new book.
     let generation = state
         .book_generation
         .load(std::sync::atomic::Ordering::SeqCst);
     let path = input.path.clone();
-    let bytes = run_io(move || read_file_bytes(&path).map_err(String::from)).await?;
+    let bytes = run_io(move || read_file_bytes(&path)).await?;
     let generation_handle = state.book_generation.clone();
     run_blocking(state.db.clone(), move |conn| {
         ensure_same_book(&generation_handle, generation)?;
-        commit_inner(conn, input, &bytes).map_err(String::from)
+        commit_inner(conn, input, &bytes)
     })
     .await
 }
@@ -1562,9 +927,9 @@ pub async fn csv_commit(
 pub async fn delete_csv_preset(
     state: State<'_, AppState>,
     signature: String,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     run_blocking(state.db.clone(), move |conn| {
-        delete_preset(conn, &signature).map_err(String::from)
+        delete_preset(conn, &signature)
     })
     .await
 }
@@ -1635,9 +1000,21 @@ mod tests {
                 .map(|v| vec!["2024-01-01".to_string(), "x".to_string(), (*v).to_string()])
                 .collect()
         };
-        assert!(detect_dot_thousands(&rows(&["1,23", "1.234"]), false, &mapping()));
-        assert!(!detect_dot_thousands(&rows(&["1,23", "1.23"]), false, &mapping()));
-        assert!(!detect_dot_thousands(&rows(&["1.23", "1.234"]), false, &mapping()));
+        assert!(detect_dot_thousands(
+            &rows(&["1,23", "1.234"]),
+            false,
+            &mapping()
+        ));
+        assert!(!detect_dot_thousands(
+            &rows(&["1,23", "1.23"]),
+            false,
+            &mapping()
+        ));
+        assert!(!detect_dot_thousands(
+            &rows(&["1.23", "1.234"]),
+            false,
+            &mapping()
+        ));
     }
 
     /// The internal ROOT must never be a CSV target/offset, even though the
@@ -1646,7 +1023,10 @@ mod tests {
     fn validate_accounts_rejects_root() {
         let conn = csv_e2e_setup();
         let err = validate_accounts(&conn, "root", "groceries").unwrap_err();
-        assert!(err.to_string().contains("root account"), "unexpected: {err}");
+        assert!(
+            err.to_string().contains("root account"),
+            "unexpected: {err}"
+        );
     }
 
     #[test]
@@ -1732,7 +1112,11 @@ mod tests {
 
     fn write_temp_csv(name: &str, contents: &str) -> String {
         let mut p = std::env::temp_dir();
-        p.push(format!("spendo-{name}-{}-{}.csv", std::process::id(), rand_suffix()));
+        p.push(format!(
+            "spendo-{name}-{}-{}.csv",
+            std::process::id(),
+            rand_suffix()
+        ));
         std::fs::write(&p, contents).unwrap();
         p.to_string_lossy().to_string()
     }
@@ -1853,12 +1237,15 @@ mod tests {
                 offset_account_guid: "groceries".to_string(),
                 date_preference: Some("dmy".to_string()),
                 selected_keys: vec![0, 1],
-            remember_mapping: true,
+                remember_mapping: true,
             },
             &bytes,
         )
         .unwrap_err();
-        assert!(replay.to_string().contains("duplicates or errors"), "{replay}");
+        assert!(
+            replay.to_string().contains("duplicates or errors"),
+            "{replay}"
+        );
 
         std::fs::remove_file(&path).ok();
     }
@@ -1972,7 +1359,9 @@ mod tests {
         assert!(load_preset(&conn, &signature).unwrap().is_none());
 
         commit_inner(&conn, commit_input(&path, &bytes), &bytes).unwrap();
-        let preset = load_preset(&conn, &signature).unwrap().expect("preset saved");
+        let preset = load_preset(&conn, &signature)
+            .unwrap()
+            .expect("preset saved");
         assert_eq!(preset.target_account_guid, "checking");
         assert_eq!(preset.offset_account_guid, "groceries");
         assert_eq!(preset.delimiter, ",");
@@ -2008,7 +1397,8 @@ mod tests {
         )
         .unwrap();
 
-        let csv = "Date,Description,Amount\n2024-01-05,Morning Coffee,-3.50\n2024-01-06,Bakery,-12.00\n";
+        let csv =
+            "Date,Description,Amount\n2024-01-05,Morning Coffee,-3.50\n2024-01-06,Bakery,-12.00\n";
         let path = write_temp_csv("rules", csv);
         let bytes = read_file_bytes(&path).unwrap();
 

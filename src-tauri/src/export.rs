@@ -70,7 +70,7 @@ fn price_for(amount: f64, quantity: f64) -> f64 {
     }
 }
 
-fn fetch_export_transactions_inner(conn: &Connection) -> Result<Vec<ExportSplitRow>, String> {
+fn fetch_export_transactions_inner(conn: &Connection) -> Result<Vec<ExportSplitRow>, AppError> {
     let metas = tree::load_account_metas(conn)?;
     let mut path_cache: HashMap<String, String> = HashMap::new();
     for guid in metas.keys() {
@@ -94,7 +94,7 @@ fn fetch_export_transactions_inner(conn: &Connection) -> Result<Vec<ExportSplitR
         utils::RAW_AMOUNT,
         utils::QUANTITY_AMOUNT,
     );
-    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(&sql)?;
     let rows = stmt
         .query_map([], |row| {
             Ok((
@@ -112,10 +112,8 @@ fn fetch_export_transactions_inner(conn: &Connection) -> Result<Vec<ExportSplitR
                 row.get::<_, String>(11)?,
                 row.get::<_, Option<String>>(12)?,
             ))
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
 
     Ok(rows
         .into_iter()
@@ -159,16 +157,14 @@ fn fetch_export_transactions_inner(conn: &Connection) -> Result<Vec<ExportSplitR
         .collect())
 }
 
-fn fetch_export_accounts_inner(conn: &Connection) -> Result<Vec<ExportAccountRow>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT a.guid, a.parent_guid, a.name, a.account_type, a.code, a.description,
+fn fetch_export_accounts_inner(conn: &Connection) -> Result<Vec<ExportAccountRow>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT a.guid, a.parent_guid, a.name, a.account_type, a.code, a.description,
                     a.placeholder, c.mnemonic, c.namespace
              FROM accounts a
              LEFT JOIN commodities c ON c.guid = a.commodity_guid
              WHERE a.account_type != 'ROOT'",
-        )
-        .map_err(|e| e.to_string())?;
+    )?;
     struct Raw {
         guid: String,
         parent_guid: Option<String>,
@@ -193,10 +189,8 @@ fn fetch_export_accounts_inner(conn: &Connection) -> Result<Vec<ExportAccountRow
                 commodity: row.get(7)?,
                 commodity_namespace: row.get(8)?,
             })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
 
     // Full paths need the complete map (including the excluded ROOT row).
     let metas = tree::load_account_metas(conn)?;
@@ -353,7 +347,9 @@ fn validate_delimiter(raw: &str) -> Result<u8, AppError> {
 
 fn validate_export_path(path: &str) -> Result<(), AppError> {
     if path.trim().is_empty() {
-        return Err(AppError::Validation("Pick where to save that export".to_string()));
+        return Err(AppError::Validation(
+            "Pick where to save that export".to_string(),
+        ));
     }
     Ok(())
 }
@@ -473,29 +469,30 @@ fn account_row_cells(row: &ExportAccountRow) -> Vec<String> {
 pub async fn export_transactions_csv(
     state: State<'_, AppState>,
     input: TransactionsExportInput,
-) -> Result<(), String> {
-    let delimiter = validate_delimiter(&input.delimiter).map_err(String::from)?;
-    validate_export_path(&input.path).map_err(String::from)?;
-    state
-        .ensure_not_active_book(&PathBuf::from(input.path.trim()))
-        .map_err(String::from)?;
+) -> Result<(), AppError> {
+    let delimiter = validate_delimiter(&input.delimiter)?;
+    validate_export_path(&input.path)?;
+    state.ensure_not_active_book(&PathBuf::from(input.path.trim()))?;
     let locale = validate_date_options(
         &input.date_format,
         input.date_parts.as_deref(),
         input.date_separator.as_deref(),
-    )
-    .map_err(String::from)?;
+    )?;
 
-    let rows = run_blocking(state.db.clone(), fetch_export_transactions_inner).await?;
+    let rows = run_blocking(state.db.clone(), |conn| {
+        fetch_export_transactions_inner(conn)
+    })
+    .await?;
     let cells: Vec<Vec<String>> = rows
         .iter()
         .map(|r| split_row_cells(r, locale.as_ref()))
         .collect();
-    let bytes =
-        build_csv_bytes(delimiter, &TRANSACTIONS_EXPORT_HEADERS, &cells).map_err(String::from)?;
+    let bytes = build_csv_bytes(delimiter, &TRANSACTIONS_EXPORT_HEADERS, &cells)?;
     let path = input.path;
-    run_io(move || std::fs::write(&path, bytes).map_err(|e| format!("Failed to write file: {e}")))
-        .await
+    run_io(move || {
+        std::fs::write(&path, bytes).map_err(|e| AppError::Io(format!("Failed to write file: {e}")))
+    })
+    .await
 }
 
 /// Full account-tree CSV written straight to the user's chosen path.
@@ -503,20 +500,19 @@ pub async fn export_transactions_csv(
 pub async fn export_accounts_csv(
     state: State<'_, AppState>,
     input: AccountsExportInput,
-) -> Result<(), String> {
-    let delimiter = validate_delimiter(&input.delimiter).map_err(String::from)?;
-    validate_export_path(&input.path).map_err(String::from)?;
-    state
-        .ensure_not_active_book(&PathBuf::from(input.path.trim()))
-        .map_err(String::from)?;
+) -> Result<(), AppError> {
+    let delimiter = validate_delimiter(&input.delimiter)?;
+    validate_export_path(&input.path)?;
+    state.ensure_not_active_book(&PathBuf::from(input.path.trim()))?;
 
     let rows = run_blocking(state.db.clone(), fetch_export_accounts_inner).await?;
     let cells: Vec<Vec<String>> = rows.iter().map(account_row_cells).collect();
-    let bytes =
-        build_csv_bytes(delimiter, &ACCOUNTS_EXPORT_HEADERS, &cells).map_err(String::from)?;
+    let bytes = build_csv_bytes(delimiter, &ACCOUNTS_EXPORT_HEADERS, &cells)?;
     let path = input.path;
-    run_io(move || std::fs::write(&path, bytes).map_err(|e| format!("Failed to write file: {e}")))
-        .await
+    run_io(move || {
+        std::fs::write(&path, bytes).map_err(|e| AppError::Io(format!("Failed to write file: {e}")))
+    })
+    .await
 }
 
 #[cfg(test)]
@@ -618,11 +614,20 @@ mod tests {
     fn export_date_options_validate_and_format() {
         assert!(validate_date_options("iso", None, None).unwrap().is_none());
         let locale = validate_date_options("locale", Some("dmy"), Some("/")).unwrap();
-        assert_eq!(format_export_date("2024-03-01", locale.as_ref()), "01/03/2024");
+        assert_eq!(
+            format_export_date("2024-03-01", locale.as_ref()),
+            "01/03/2024"
+        );
         let locale = validate_date_options("locale", Some("mdy"), Some(".")).unwrap();
-        assert_eq!(format_export_date("2024-03-01", locale.as_ref()), "03.01.2024");
+        assert_eq!(
+            format_export_date("2024-03-01", locale.as_ref()),
+            "03.01.2024"
+        );
         let locale = validate_date_options("locale", Some("ymd"), Some("-")).unwrap();
-        assert_eq!(format_export_date("2024-03-01", locale.as_ref()), "2024-03-01");
+        assert_eq!(
+            format_export_date("2024-03-01", locale.as_ref()),
+            "2024-03-01"
+        );
         // Malformed input passes through rather than dropping the date.
         assert_eq!(format_export_date("not-a-date", None), "not-a-date");
         assert!(validate_date_options("us", None, None).is_err());

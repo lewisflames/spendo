@@ -46,9 +46,12 @@ fn root_guid(conn: &Connection) -> Result<String, AppError> {
         [],
         |row| row.get(0),
     )
-    .optional()
-    ?
-    .ok_or_else(|| AppError::NotFound("This book is missing its main account. Starting fresh is easiest".to_string()))
+    .optional()?
+    .ok_or_else(|| {
+        AppError::NotFound(
+            "This book is missing its main account. Starting fresh is easiest".to_string(),
+        )
+    })
 }
 
 /// Trimmed name plus all scalar field constraints (required, lengths and
@@ -59,10 +62,15 @@ fn validate_scalar_fields(input: &AccountInput) -> Result<&str, AppError> {
         return Err(AppError::Validation("Give this account a name".to_string()));
     }
     if name.len() > 200 {
-        return Err(AppError::Validation("Keep the account name under 200 characters".to_string()));
+        return Err(AppError::Validation(
+            "Keep the account name under 200 characters".to_string(),
+        ));
     }
     if !ACCOUNT_TYPES.contains(&input.account_type.as_str()) {
-        return Err(AppError::Validation(format!("That account type doesn't look right: {}", input.account_type)));
+        return Err(AppError::Validation(format!(
+            "That account type doesn't look right: {}",
+            input.account_type
+        )));
     }
     // A postable account without a currency would be dropped from ledger/split
     // queries (INNER JOIN commodities) while still counting in balances —
@@ -74,12 +82,16 @@ fn validate_scalar_fields(input: &AccountInput) -> Result<&str, AppError> {
     }
     if let Some(ref code) = input.code {
         if code.len() > 100 {
-            return Err(AppError::Validation("Keep the code under 100 characters".to_string()));
+            return Err(AppError::Validation(
+                "Keep the code under 100 characters".to_string(),
+            ));
         }
     }
     if let Some(ref d) = input.description {
         if d.len() > 500 {
-            return Err(AppError::Validation("Keep the description under 500 characters".to_string()));
+            return Err(AppError::Validation(
+                "Keep the description under 500 characters".to_string(),
+            ));
         }
     }
     Ok(name)
@@ -96,11 +108,12 @@ fn validate_commodity_exists(
                 params![cg],
                 |_| Ok(()),
             )
-            .optional()
-            ?
+            .optional()?
             .is_some();
         if !exists {
-            return Err(AppError::Validation("That currency isn't in this book".to_string()));
+            return Err(AppError::Validation(
+                "That currency isn't in this book".to_string(),
+            ));
         }
     }
     Ok(())
@@ -117,7 +130,9 @@ fn resolve_parent(
         None => root_guid(conn),
         Some(p) => {
             if Some(p.as_str()) == self_guid {
-                return Err(AppError::Validation("An account can't be its own parent".to_string()));
+                return Err(AppError::Validation(
+                    "An account can't be its own parent".to_string(),
+                ));
             }
             let parent_type: Option<String> = conn
                 .query_row(
@@ -125,10 +140,11 @@ fn resolve_parent(
                     params![p],
                     |row| row.get(0),
                 )
-                .optional()
-                ?;
+                .optional()?;
             let Some(pt) = parent_type else {
-                return Err(AppError::NotFound("Parent account not found. It may have been removed".to_string()));
+                return Err(AppError::NotFound(
+                    "Parent account not found. It may have been removed".to_string(),
+                ));
             };
             if pt == "ROOT" {
                 root_guid(conn)
@@ -141,7 +157,8 @@ fn resolve_parent(
                         let Some(c) = current else { break };
                         if c == self_g {
                             return Err(AppError::Validation(
-                                "You can't tuck an account under one of its own children".to_string()
+                                "You can't tuck an account under one of its own children"
+                                    .to_string(),
                             ));
                         }
                         if !visited.insert(c.clone()) {
@@ -153,8 +170,7 @@ fn resolve_parent(
                                 params![c],
                                 |row| row.get::<_, Option<String>>(0),
                             )
-                            .optional()
-                            ?
+                            .optional()?
                             .flatten();
                     }
                 }
@@ -179,11 +195,12 @@ fn validate_sibling_name_unique(
             params![parent, name, self_guid],
             |_| Ok(()),
         )
-        .optional()
-        ?
+        .optional()?
         .is_some();
     if clash {
-        return Err(AppError::Validation("There's already an account with that name here. Try another".to_string()));
+        return Err(AppError::Validation(
+            "There's already an account with that name here. Try another".to_string(),
+        ));
     }
     Ok(())
 }
@@ -220,8 +237,7 @@ fn create_account_inner(conn: &Connection, input: AccountInput) -> Result<String
                 input.placeholder as i64,
                 opt_text(&input.commodity_guid),
             ],
-        )
-        ?;
+        )?;
         Ok(guid.clone())
     })
 }
@@ -237,16 +253,21 @@ fn update_account_inner(
             params![guid],
             |row| row.get(0),
         )
-        .optional()
-        ?;
+        .optional()?;
     let Some(existing_type) = existing_type else {
-        return Err(AppError::NotFound("Account not found. It may have been removed".to_string()));
+        return Err(AppError::NotFound(
+            "Account not found. It may have been removed".to_string(),
+        ));
     };
     if existing_type == "ROOT" {
-        return Err(AppError::Validation("The root account is special. It can't be edited".to_string()));
+        return Err(AppError::Validation(
+            "The root account is special. It can't be edited".to_string(),
+        ));
     }
     if input.account_type == "ROOT" {
-        return Err(AppError::Validation("An account can't become the root account".to_string()));
+        return Err(AppError::Validation(
+            "An account can't become the root account".to_string(),
+        ));
     }
     let parent = validate_account_input(conn, &input, Some(guid))?;
 
@@ -266,8 +287,7 @@ fn update_account_inner(
                 opt_text(&input.commodity_guid),
                 guid,
             ],
-        )
-        ?;
+        )?;
         Ok(())
     })
 }
@@ -281,56 +301,54 @@ fn delete_account_inner(conn: &Connection, guid: &str) -> Result<(), AppError> {
         )
         .optional()?;
     let Some(account_type) = account_type else {
-        return Err(AppError::NotFound("Account not found. It may have been removed".to_string()));
+        return Err(AppError::NotFound(
+            "Account not found. It may have been removed".to_string(),
+        ));
     };
     if account_type == "ROOT" {
-        return Err(AppError::Validation("The root account holds everything together. It can't be deleted".to_string()));
+        return Err(AppError::Validation(
+            "The root account holds everything together. It can't be deleted".to_string(),
+        ));
     }
-    let children: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM accounts WHERE parent_guid = ?1",
-            params![guid],
-            |row| row.get(0),
-        )
-        ?;
+    let children: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM accounts WHERE parent_guid = ?1",
+        params![guid],
+        |row| row.get(0),
+    )?;
     if children > 0 {
         return Err(AppError::Validation(format!(
             "This one still has {children} sub-account{}. Move or delete those first.",
             if children == 1 { "" } else { "s" }
         )));
     }
-    let splits: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM splits WHERE account_guid = ?1",
-            params![guid],
-            |row| row.get(0),
-        )
-        ?;
+    let splits: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM splits WHERE account_guid = ?1",
+        params![guid],
+        |row| row.get(0),
+    )?;
     if splits > 0 {
         return Err(AppError::Validation(format!(
             "This one’s still used by {splits} split{}. Delete or move those transactions first.",
             if splits == 1 { "" } else { "s" }
         )));
     }
-    let budgets: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM budgets WHERE account_guid = ?1",
-            params![guid],
-            |row| row.get(0),
-        )
-        ?;
+    let budgets: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM budgets WHERE account_guid = ?1",
+        params![guid],
+        |row| row.get(0),
+    )?;
     if budgets > 0 {
-        return Err(AppError::Validation("This one still has budgets attached. Remove those budgets first.".to_string()));
+        return Err(AppError::Validation(
+            "This one still has budgets attached. Remove those budgets first.".to_string(),
+        ));
     }
     // Import rules are book config; the FK cascade would drop them silently,
     // so guard like budgets.
-    let rules: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM import_rules WHERE account_guid = ?1",
-            params![guid],
-            |row| row.get(0),
-        )
-        ?;
+    let rules: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM import_rules WHERE account_guid = ?1",
+        params![guid],
+        |row| row.get(0),
+    )?;
     if rules > 0 {
         return Err(AppError::Validation(
             "This one still has import rules pointing at it. Remove those rules first.".to_string(),
@@ -338,31 +356,30 @@ fn delete_account_inner(conn: &Connection, guid: &str) -> Result<(), AppError> {
     }
     // Schedule templates embed account GUIDs in JSON (no FK), so deleting would
     // leave them failing at posting time.
-    let schedules: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM recurring_schedules WHERE instr(template_json, ?1) > 0",
-            params![guid],
-            |row| row.get(0),
-        )
-        ?;
+    let schedules: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM recurring_schedules WHERE instr(template_json, ?1) > 0",
+        params![guid],
+        |row| row.get(0),
+    )?;
     if schedules > 0 {
         return Err(AppError::Validation(
-            "This one is still used by schedules. Update those schedules first."
-                .to_string(),
+            "This one is still used by schedules. Update those schedules first.".to_string(),
         ));
     }
 
     with_tx_err(conn, || {
-        conn.execute("DELETE FROM accounts WHERE guid = ?1", params![guid])
-            ?;
+        conn.execute("DELETE FROM accounts WHERE guid = ?1", params![guid])?;
         Ok(())
     })
 }
 
 #[tauri::command]
-pub async fn create_account(state: State<'_, AppState>, input: AccountInput) -> Result<String, String> {
+pub async fn create_account(
+    state: State<'_, AppState>,
+    input: AccountInput,
+) -> Result<String, AppError> {
     run_blocking(state.db.clone(), move |conn| {
-        create_account_inner(conn, input).map_err(String::from)
+        create_account_inner(conn, input)
     })
     .await
 }
@@ -372,17 +389,17 @@ pub async fn update_account(
     state: State<'_, AppState>,
     guid: String,
     input: AccountInput,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     run_blocking(state.db.clone(), move |conn| {
-        update_account_inner(conn, &guid, input).map_err(String::from)
+        update_account_inner(conn, &guid, input)
     })
     .await
 }
 
 #[tauri::command]
-pub async fn delete_account(state: State<'_, AppState>, guid: String) -> Result<(), String> {
+pub async fn delete_account(state: State<'_, AppState>, guid: String) -> Result<(), AppError> {
     run_blocking(state.db.clone(), move |conn| {
-        delete_account_inner(conn, &guid).map_err(String::from)
+        delete_account_inner(conn, &guid)
     })
     .await
 }
@@ -472,9 +489,11 @@ mod tests {
         let upd = input("Food", Some("assets"));
         update_account_inner(&conn, &g1, upd).expect("update runs");
         let name: String = conn
-            .query_row("SELECT name FROM accounts WHERE guid = ?1", params![g1], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT name FROM accounts WHERE guid = ?1",
+                params![g1],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(name, "Food");
     }
@@ -501,7 +520,10 @@ mod tests {
             [],
         )
         .unwrap();
-        assert!(delete_account_inner(&conn, "checking").unwrap_err().to_string().contains("split"));
+        assert!(delete_account_inner(&conn, "checking")
+            .unwrap_err()
+            .to_string()
+            .contains("split"));
         // Delete blocked with budgets (the FK cascade would drop them silently).
         conn.execute(
             "INSERT INTO budgets (guid, account_guid, year, amount, created_at)
@@ -517,7 +539,10 @@ mod tests {
             params![leaf],
         )
         .unwrap();
-        assert!(delete_account_inner(&conn, &leaf).unwrap_err().to_string().contains("budget"));
+        assert!(delete_account_inner(&conn, &leaf)
+            .unwrap_err()
+            .to_string()
+            .contains("budget"));
         // Clean leaf deletes.
         delete_account_inner(&conn, &child).expect("delete runs");
     }

@@ -21,7 +21,6 @@
   import BudgetYearStepper from '$lib/features/budgets/budget-year-stepper.svelte';
   import { accountNameMap } from '$lib/features/budgets/budget-utils';
   import { useBudgetYear } from '$lib/hooks/use-budget-year.svelte';
-  import { isNotFoundMessage } from '$lib/utils/error';
   import BookGate from '$lib/components/shared/book-gate.svelte';
 
   let accountGuid = $derived(page.params.accountGuid);
@@ -69,7 +68,7 @@
   // Treat that as an empty state so a year without a target shows the
   // consistent EmptyState instead of an ErrorCard; genuine failures still
   // use ErrorCard. Uses the shared not-found helper with the other details.
-  let isMissing = $derived(detail === null && isNotFoundMessage(res.error));
+  let isMissing = $derived(detail === null && res.errorKind === 'notFound');
   let formError = $state<string | null>(null);
 
   let showEditDialog = $state(false);

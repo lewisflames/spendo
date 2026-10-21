@@ -18,27 +18,32 @@ import type {
   SplitDetail,
   TransactionDetail,
   TransactionRow,
-  MockPayloads
+  CommandPayloads,
+  Command,
+  BackendError
 } from '$lib/tauri';
+import { errMsg, isBackendError } from '$lib/utils/error';
 import {
   ACCOUNTS,
   BUDGET_PLANS,
   COMMODITIES,
   CREDIT_NORMAL_TYPES,
-  INVESTMENT_TYPES,
   MARKET_PRICES,
   REPORT_CURRENCY,
-  SAMPLE_IMAGE_DATA_URL,
-  SAMPLE_TEXT_DATA_URL,
   SCHEDULES,
   TRANSACTIONS,
-  categoryOf,
   todayIso,
   type FixtureAccount,
   type FixtureScheduleDef,
   type FixtureSplit,
   type FixtureTx
 } from './fixtures';
+import { INVESTMENT_ACCOUNT_TYPES, nodeCategory } from '$lib/features/accounts/account-types';
+
+/** Missing-entity rejection, shaped like the Rust `AppError::NotFound` payload. */
+function notFound(message: string): BackendError {
+  return { kind: 'notFound', message };
+}
 
 // ── state ──────────────────────────────────────────────────────────────────
 
@@ -49,7 +54,6 @@ interface AttachmentRecord {
   mimeType: string;
   byteSize: number;
   createdAt: string;
-  isImage: boolean;
 }
 
 interface TxInputLike {
@@ -188,7 +192,7 @@ function investmentTotals(guid: string): { shares: number; cost: number } {
     for (const split of tx.splits) {
       if (!guids.has(split.accountGuid)) continue;
       const acc = account(split.accountGuid);
-      if (!acc || !INVESTMENT_TYPES.has(acc.accountType)) continue;
+      if (!acc || !INVESTMENT_ACCOUNT_TYPES.has(acc.accountType)) continue;
       shares += split.quantity ?? 0;
       cost += split.raw;
     }
@@ -204,7 +208,7 @@ function marketPrice(mnemonic: string | null | undefined): number | null {
 function nodeBalance(guid: string): number {
   const acc = account(guid);
   if (!acc) return 0;
-  if (INVESTMENT_TYPES.has(acc.accountType)) {
+  if (INVESTMENT_ACCOUNT_TYPES.has(acc.accountType)) {
     const { shares, cost } = investmentTotals(guid);
     const price = marketPrice(acc.commodity);
     return price === null ? cost : shares * price;
@@ -242,7 +246,10 @@ const CATEGORY_ROOTS = ['assets', 'liabilities', 'equity', 'income', 'expenses']
 function cashTotalForCategory(category: string): number {
   const guids = new Set(
     state.accounts
-      .filter((a) => categoryOf(a.accountType) === category && !INVESTMENT_TYPES.has(a.accountType))
+      .filter(
+        (a) =>
+          nodeCategory(a.accountType) === category && !INVESTMENT_ACCOUNT_TYPES.has(a.accountType)
+      )
       .map((a) => a.guid)
   );
   let sum = 0;
@@ -257,7 +264,7 @@ function cashTotalForCategory(category: string): number {
 function unrealizedGains(): number {
   let total = 0;
   for (const acc of state.accounts) {
-    if (!INVESTMENT_TYPES.has(acc.accountType)) continue;
+    if (!INVESTMENT_ACCOUNT_TYPES.has(acc.accountType)) continue;
     const { shares, cost } = investmentTotals(acc.guid);
     const price = marketPrice(acc.commodity);
     if (price !== null) total += shares * price - cost;
@@ -278,13 +285,13 @@ function dataSummary(): DataSummary {
   };
 }
 
-function homeData(): MockPayloads['fetch_home_data'] {
+function homeData(): CommandPayloads['fetch_home_data'] {
   if (state.bookPath === null) return { hasData: false, summary: null };
   const summary = dataSummary();
   return { hasData: summary.totalTransactions > 0, summary };
 }
 
-function emptyBookResult(): MockPayloads['open_book'] {
+function emptyBookResult(): CommandPayloads['open_book'] {
   const summary = dataSummary();
   return { hasData: summary.totalTransactions > 0, summary };
 }
@@ -312,14 +319,15 @@ function isoLocal(date: Date): string {
 
 // ── accounts ───────────────────────────────────────────────────────────────
 
-function accountsResult(): MockPayloads['fetch_accounts'] {
+function accountsResult(): CommandPayloads['fetch_accounts'] {
   const trees = CATEGORY_ROOTS.map((guid) => accountNode(account(guid)!)).filter(Boolean);
-  const byType: MockPayloads['fetch_accounts']['byType'] = {};
+  const byType: CommandPayloads['fetch_accounts']['byType'] = {};
   for (const category of ['ASSET', 'LIABILITY', 'EQUITY', 'INCOME', 'EXPENSE']) {
-    const root = trees.find((t) => categoryOf(t.accountType) === category);
+    const root = trees.find((t) => nodeCategory(t.accountType) === category);
     byType[category] = {
       count: state.accounts.filter(
-        (a) => a.accountType !== 'ROOT' && !a.placeholder && categoryOf(a.accountType) === category
+        (a) =>
+          a.accountType !== 'ROOT' && !a.placeholder && nodeCategory(a.accountType) === category
       ).length,
       totalBalance: root?.balance ?? 0
     };
@@ -330,7 +338,7 @@ function accountsResult(): MockPayloads['fetch_accounts'] {
   const unrealized = unrealizedGains();
   const retained = cashTotalForCategory('INCOME') - cashTotalForCategory('EXPENSE');
   const missingPrices = state.accounts
-    .filter((a) => INVESTMENT_TYPES.has(a.accountType) && marketPrice(a.commodity) === null)
+    .filter((a) => INVESTMENT_ACCOUNT_TYPES.has(a.accountType) && marketPrice(a.commodity) === null)
     .map((a) => ({ mnemonic: a.commodity ?? a.name, commodityGuid: a.commodityGuid }));
   return {
     trees,
@@ -362,10 +370,10 @@ function toSplitDetail(tx: FixtureTx, split: FixtureSplit, index: number): Split
   };
 }
 
-function accountDetail(args: Record<string, unknown>): MockPayloads['fetch_account_detail'] {
+function accountDetail(args: Record<string, unknown>): CommandPayloads['fetch_account_detail'] {
   const guid = String(args.guid);
   const acc = account(guid);
-  if (!acc) throw new Error(`[mock] Unknown account ${guid}`);
+  if (!acc) throw notFound(`[mock] Unknown account ${guid}`);
   const pageSize = Number(args.pageSize) || 25;
   const page = Math.max(1, Number(args.page) || 1);
   const dateFrom = args.dateFrom ? String(args.dateFrom) : null;
@@ -419,29 +427,31 @@ function accountDetail(args: Record<string, unknown>): MockPayloads['fetch_accou
   const safePage = Math.min(page, totalPages);
   const pageRows = sorted.slice((safePage - 1) * pageSize, safePage * pageSize);
 
-  const transactions: MockPayloads['fetch_account_detail']['transactions'] = pageRows.map((tx) => {
-    const entry = runningByGuid.get(tx.guid)!;
-    const relevant = tx.splits.filter((s) => inSubtree.has(s.accountGuid));
-    const counterAccounts = [
-      ...new Set(
-        tx.splits
-          .filter((s) => !inSubtree.has(s.accountGuid))
-          .map((s) => account(s.accountGuid)?.name ?? 'Unknown')
-      )
-    ];
-    return {
-      guid: tx.guid,
-      postDate: tx.postDate,
-      description: tx.description,
-      num: tx.num ?? null,
-      notes: tx.notes ?? null,
-      splits: tx.splits.map((s, i) => toSplitDetail(tx, s, i)),
-      counterAccounts,
-      amount: entry.delta,
-      runningBalance: entry.running,
-      reconcileState: relevant[0]?.reconcileState ?? 'n'
-    };
-  });
+  const transactions: CommandPayloads['fetch_account_detail']['transactions'] = pageRows.map(
+    (tx) => {
+      const entry = runningByGuid.get(tx.guid)!;
+      const relevant = tx.splits.filter((s) => inSubtree.has(s.accountGuid));
+      const counterAccounts = [
+        ...new Set(
+          tx.splits
+            .filter((s) => !inSubtree.has(s.accountGuid))
+            .map((s) => account(s.accountGuid)?.name ?? 'Unknown')
+        )
+      ];
+      return {
+        guid: tx.guid,
+        postDate: tx.postDate,
+        description: tx.description,
+        num: tx.num ?? null,
+        notes: tx.notes ?? null,
+        splits: tx.splits.map((s, i) => toSplitDetail(tx, s, i)),
+        counterAccounts,
+        amount: entry.delta,
+        runningBalance: entry.running,
+        reconcileState: relevant[0]?.reconcileState ?? 'n'
+      };
+    }
+  );
 
   let totalIncome = 0;
   let totalExpenses = 0;
@@ -495,7 +505,7 @@ function accountDetail(args: Record<string, unknown>): MockPayloads['fetch_accou
   };
 }
 
-function accountBalanceTrend(guid: string): MockPayloads['fetch_account_balance_trend'] {
+function accountBalanceTrend(guid: string): CommandPayloads['fetch_account_balance_trend'] {
   const inSubtree = subtreeGuids(guid);
   const points: { date: string; balance: number }[] = [];
   const today = new Date();
@@ -565,7 +575,7 @@ function filterTxs(filters: Record<string, unknown> | null | undefined): Fixture
   return rows;
 }
 
-function transactionsResult(args: Record<string, unknown>): MockPayloads['fetch_transactions'] {
+function transactionsResult(args: Record<string, unknown>): CommandPayloads['fetch_transactions'] {
   const pageSize = Number(args.pageSize) || 25;
   const page = Math.max(1, Number(args.page) || 1);
   const sortBy = (args.sortBy ? String(args.sortBy) : 'date') as 'date' | 'description' | 'amount';
@@ -597,7 +607,7 @@ function transactionsResult(args: Record<string, unknown>): MockPayloads['fetch_
   };
 }
 
-function heatmap(args: Record<string, unknown>): MockPayloads['fetch_transaction_heatmap'] {
+function heatmap(args: Record<string, unknown>): CommandPayloads['fetch_transaction_heatmap'] {
   const counts = new Map<string, number>();
   for (const tx of filterTxs(args.filters as Record<string, unknown> | null | undefined)) {
     counts.set(tx.postDate, (counts.get(tx.postDate) ?? 0) + 1);
@@ -607,7 +617,7 @@ function heatmap(args: Record<string, unknown>): MockPayloads['fetch_transaction
     .sort((a, b) => a.date.localeCompare(b.date));
 }
 
-function transactionDetail(guid: string): MockPayloads['fetch_transaction'] {
+function transactionDetail(guid: string): CommandPayloads['fetch_transaction'] {
   const tx = state.transactions.find((t) => t.guid === guid);
   if (!tx) return null;
   const transaction: TransactionDetail = {
@@ -663,7 +673,7 @@ function updateTransaction(args: Record<string, unknown>): void {
   const guid = String(args.guid);
   const input = args.input as TxInputLike;
   const tx = state.transactions.find((t) => t.guid === guid);
-  if (!tx) throw new Error(`[mock] Unknown transaction ${guid}`);
+  if (!tx) throw notFound(`[mock] Unknown transaction ${guid}`);
   if (!input.unreconcile && hasLockedSplits(tx)) {
     throw new Error(
       'Cannot edit. This transaction has cleared or reconciled splits. Unreconcile it first'
@@ -686,7 +696,7 @@ function updateTransaction(args: Record<string, unknown>): void {
 
 function deleteTransaction(guid: string, unreconcile = false): void {
   const index = state.transactions.findIndex((t) => t.guid === guid);
-  if (index === -1) throw new Error(`[mock] Unknown transaction ${guid}`);
+  if (index === -1) throw notFound(`[mock] Unknown transaction ${guid}`);
   if (!unreconcile && hasLockedSplits(state.transactions[index])) {
     throw new Error(
       'Cannot delete. This transaction has cleared or reconciled splits. Unreconcile it first'
@@ -698,7 +708,7 @@ function deleteTransaction(guid: string, unreconcile = false): void {
 
 // ── books / settings ───────────────────────────────────────────────────────
 
-function bookSettings(): MockPayloads['get_book_settings'] {
+function bookSettings(): CommandPayloads['get_book_settings'] {
   return { ...state.bookSettings };
 }
 
@@ -854,7 +864,7 @@ const elapsedMonths = (year: number): number => {
   return now.getMonth() + 1;
 };
 
-function budgetActualRows(year: number): MockPayloads['fetch_budget_vs_actual'] {
+function budgetActualRows(year: number): CommandPayloads['fetch_budget_vs_actual'] {
   const elapsed = elapsedMonths(year);
   return state.budgets
     .filter((b) => b.year === year)
@@ -883,10 +893,10 @@ function budgetActualRows(year: number): MockPayloads['fetch_budget_vs_actual'] 
     });
 }
 
-function budgetDetail(accountGuid: string, year: number): MockPayloads['fetch_budget_detail'] {
+function budgetDetail(accountGuid: string, year: number): CommandPayloads['fetch_budget_detail'] {
   const acc = account(accountGuid);
   const plan = budgetFor(accountGuid, year);
-  if (!acc || !plan) throw new Error(`[mock] No budget for ${accountGuid} in ${year}`);
+  if (!acc || !plan) throw notFound(`[mock] No budget for ${accountGuid} in ${year}`);
   const elapsed = elapsedMonths(year);
   const actual = actualFor(accountGuid, year);
   const monthly = Array.from({ length: 12 }, (_, i) => {
@@ -996,10 +1006,10 @@ function holdingFor(acc: FixtureAccount) {
 }
 
 function investmentAccounts(): FixtureAccount[] {
-  return state.accounts.filter((a) => INVESTMENT_TYPES.has(a.accountType));
+  return state.accounts.filter((a) => INVESTMENT_ACCOUNT_TYPES.has(a.accountType));
 }
 
-function portfolioData(): MockPayloads['fetch_portfolio_data'] {
+function portfolioData(): CommandPayloads['fetch_portfolio_data'] {
   const holdings = investmentAccounts().map(holdingFor);
   const totalMarketValue = holdings.reduce((sum, h) => sum + h.marketValue, 0);
   const totalCostBasis = holdings.reduce((sum, h) => sum + h.costBasis, 0);
@@ -1019,7 +1029,7 @@ function portfolioData(): MockPayloads['fetch_portfolio_data'] {
   };
 }
 
-function allocationTargets(): MockPayloads['fetch_allocation_targets'] {
+function allocationTargets(): CommandPayloads['fetch_allocation_targets'] {
   return [...state.allocationTargets.entries()]
     .map(([commodityGuid, targetPct]) => ({ commodityGuid, targetPct }))
     .sort((a, b) => {
@@ -1029,10 +1039,10 @@ function allocationTargets(): MockPayloads['fetch_allocation_targets'] {
     });
 }
 
-function holdingDetail(args: Record<string, unknown>): MockPayloads['fetch_holding_detail'] {
+function holdingDetail(args: Record<string, unknown>): CommandPayloads['fetch_holding_detail'] {
   const commodityGuid = String(args.commodityGuid);
   const acc = investmentAccounts().find((a) => a.commodityGuid === commodityGuid);
-  if (!acc) throw new Error(`[mock] Unknown holding ${commodityGuid}`);
+  if (!acc) throw notFound(`[mock] Unknown holding ${commodityGuid}`);
   const holding = holdingFor(acc);
   const pageSize = Number(args.pageSize) || 25;
   const page = Math.max(1, Number(args.page) || 1);
@@ -1092,7 +1102,7 @@ function holdingDetail(args: Record<string, unknown>): MockPayloads['fetch_holdi
 
 function periodTotals(from: string, to: string, category: string): Map<string, number> {
   const guids = new Set(
-    state.accounts.filter((a) => categoryOf(a.accountType) === category).map((a) => a.guid)
+    state.accounts.filter((a) => nodeCategory(a.accountType) === category).map((a) => a.guid)
   );
   const totals = new Map<string, number>();
   for (const tx of visibleTxs()) {
@@ -1138,7 +1148,7 @@ function pnlRows(
   return rows;
 }
 
-function pnlReport(args: Record<string, unknown>): MockPayloads['fetch_pnl_report'] {
+function pnlReport(args: Record<string, unknown>): CommandPayloads['fetch_pnl_report'] {
   const dateFrom = String(args.dateFrom);
   const dateTo = String(args.dateTo);
   const prevDateFrom = args.prevDateFrom ? String(args.prevDateFrom) : dateFrom;
@@ -1178,7 +1188,7 @@ function pnlReport(args: Record<string, unknown>): MockPayloads['fetch_pnl_repor
   };
 }
 
-function pnlTrend(args: Record<string, unknown>): MockPayloads['fetch_pnl_trend'] {
+function pnlTrend(args: Record<string, unknown>): CommandPayloads['fetch_pnl_trend'] {
   const dateFrom = String(args.dateFrom);
   const dateTo = String(args.dateTo);
   const months: string[] = [];
@@ -1266,7 +1276,9 @@ function lastReconciledBatch(accountGuid: string): MockReconcileBatch | null {
   return { fromDate, throughDate, guids };
 }
 
-function reconcileSummary(accountGuid: string): MockPayloads['fetch_reconcile_summaries'][number] {
+function reconcileSummary(
+  accountGuid: string
+): CommandPayloads['fetch_reconcile_summaries'][number] {
   let unreconciledCount = 0;
   let clearedCount = 0;
   let unclearedTotal = 0;
@@ -1304,7 +1316,7 @@ function applyMockUpdates(
       throw new Error(`[mock] Invalid reconcile state '${change.state}'. Expected 'n' or 'c'`);
     }
     const found = findSplit(change.splitGuid);
-    if (!found) throw new Error('A split was not found. It may have been removed');
+    if (!found) throw notFound('A split was not found. It may have been removed');
     if (found.split.accountGuid !== accountGuid) {
       throw new Error(`Split ${change.splitGuid} does not belong to this account`);
     }
@@ -1343,16 +1355,16 @@ function restoreReconcileStates(
   for (const entry of snapshot) entry.split.reconcileState = entry.state;
 }
 
-function reconcileInfo(args: Record<string, unknown>): MockPayloads['fetch_reconcile_info'] {
+function reconcileInfo(args: Record<string, unknown>): CommandPayloads['fetch_reconcile_info'] {
   const accountGuid = String(args.accountGuid);
   const statementDate = String(args.statementDate);
   const acc = account(accountGuid);
-  if (!acc) throw new Error(`[mock] Unknown account ${accountGuid}`);
+  if (!acc) throw notFound(`[mock] Unknown account ${accountGuid}`);
   if (statementDate > todayIso()) {
     throw new Error('That statement date is in the future. Use today or earlier');
   }
   let startingBalance = 0;
-  const candidates: MockPayloads['fetch_reconcile_info']['candidates'] = [];
+  const candidates: CommandPayloads['fetch_reconcile_info']['candidates'] = [];
   for (const tx of visibleTxs()) {
     if (tx.postDate > statementDate) continue;
     tx.splits.forEach((split, index) => {
@@ -1436,7 +1448,7 @@ for (const tx of state.transactions) {
 // ── handlers ───────────────────────────────────────────────────────────────
 
 type HandlerMap = {
-  [K in keyof MockPayloads]: (args: Record<string, unknown>) => MockPayloads[K];
+  [K in keyof CommandPayloads]: (args: Record<string, unknown>) => CommandPayloads[K];
 };
 
 const handlers: HandlerMap = {
@@ -1446,7 +1458,7 @@ const handlers: HandlerMap = {
   fetch_nav_roots: () =>
     ['ASSET', 'LIABILITY', 'EQUITY', 'INCOME', 'EXPENSE'].map((category) => {
       const root = state.accounts.find(
-        (a) => a.parentGuid === 'root' && categoryOf(a.accountType) === category
+        (a) => a.parentGuid === 'root' && nodeCategory(a.accountType) === category
       );
       return { category, guid: root?.guid ?? null, name: root?.name ?? null };
     }),
@@ -1458,7 +1470,7 @@ const handlers: HandlerMap = {
       tx.splits.some(
         (s) =>
           reconcileState(s) === 'n' &&
-          categoryOf(account(s.accountGuid)?.accountType ?? '') === 'ASSET'
+          nodeCategory(account(s.accountGuid)?.accountType ?? '') === 'ASSET'
       )
     ).length
   }),
@@ -1492,7 +1504,7 @@ const handlers: HandlerMap = {
     const guid = String(args.guid);
     const input = args.input as AccountInputLike;
     const acc = account(guid);
-    if (!acc) throw new Error(`[mock] Unknown account ${guid}`);
+    if (!acc) throw notFound(`[mock] Unknown account ${guid}`);
     const commodity = COMMODITIES.find((c) => c.guid === input.commodityGuid);
     Object.assign(acc, {
       name: input.name,
@@ -1508,7 +1520,7 @@ const handlers: HandlerMap = {
   delete_account: (args) => {
     const guid = String(args.guid);
     const acc = account(guid);
-    if (!acc) throw new Error(`[mock] Unknown account ${guid}`);
+    if (!acc) throw notFound(`[mock] Unknown account ${guid}`);
     const removed = subtreeGuids(guid);
     state.accounts = state.accounts.filter((a) => !removed.has(a.guid));
     state.transactions = state.transactions.filter(
@@ -1578,7 +1590,7 @@ const handlers: HandlerMap = {
   fetch_schedules: () => state.schedules,
   fetch_schedule: (args) => {
     const schedule = state.schedules.find((s) => s.guid === args.guid);
-    if (!schedule) throw new Error(`[mock] Unknown schedule ${args.guid}`);
+    if (!schedule) throw notFound(`[mock] Unknown schedule ${args.guid}`);
     return schedule;
   },
   create_schedule: (args) => {
@@ -1602,7 +1614,7 @@ const handlers: HandlerMap = {
   },
   update_schedule: (args) => {
     const schedule = state.schedules.find((s) => s.guid === args.guid);
-    if (!schedule) throw new Error(`[mock] Unknown schedule ${args.guid}`);
+    if (!schedule) throw notFound(`[mock] Unknown schedule ${args.guid}`);
     const input = args.input as ScheduleInputLike;
     const updated = buildSchedule({
       guid: schedule.guid,
@@ -1626,7 +1638,7 @@ const handlers: HandlerMap = {
   },
   set_schedule_active: (args) => {
     const schedule = state.schedules.find((s) => s.guid === args.guid);
-    if (!schedule) throw new Error(`[mock] Unknown schedule ${args.guid}`);
+    if (!schedule) throw notFound(`[mock] Unknown schedule ${args.guid}`);
     schedule.active = Boolean(args.active);
     return schedule;
   },
@@ -1679,7 +1691,7 @@ const handlers: HandlerMap = {
   fetch_holding_detail: (args) => holdingDetail(args),
   fetch_allocation_targets: () => allocationTargets(),
   save_allocation_targets: (args) => {
-    const targets = (args.targets ?? []) as MockPayloads['fetch_allocation_targets'];
+    const targets = (args.targets ?? []) as CommandPayloads['fetch_allocation_targets'];
     state.allocationTargets = new Map(targets.map((t) => [t.commodityGuid, Number(t.targetPct)]));
     return allocationTargets();
   },
@@ -1841,8 +1853,7 @@ const handlers: HandlerMap = {
         filename,
         mimeType,
         byteSize: 48_000 + filename.length * 137,
-        createdAt: nowIso(),
-        isImage: mimeType.startsWith('image/')
+        createdAt: nowIso()
       };
       state.attachments.push(record);
       return {
@@ -1857,15 +1868,6 @@ const handlers: HandlerMap = {
   },
   delete_attachment: (args) => {
     state.attachments = state.attachments.filter((a) => a.guid !== args.guid);
-  },
-  fetch_attachment_data: (args) => {
-    const record = state.attachments.find((a) => a.guid === args.guid);
-    if (!record) throw new Error(`[mock] Unknown attachment ${args.guid}`);
-    return {
-      filename: record.filename,
-      mimeType: record.mimeType,
-      dataUrl: record.isImage ? SAMPLE_IMAGE_DATA_URL : SAMPLE_TEXT_DATA_URL
-    };
   },
   export_attachment: () => undefined,
   open_attachment: () => undefined,
@@ -2052,7 +2054,7 @@ const handlers: HandlerMap = {
   update_import_rule: (args) => {
     const input = args.input as Omit<ImportRuleLike, 'id'>;
     const rule = state.importRules.find((r) => r.id === Number(args.id));
-    if (!rule) throw new Error('[mock] Unknown import rule');
+    if (!rule) throw notFound('[mock] Unknown import rule');
     Object.assign(rule, input);
     return {
       ...rule,
@@ -2068,7 +2070,7 @@ const handlers: HandlerMap = {
   move_import_rule: (args) => {
     const ordered = [...state.importRules].sort((a, b) => a.priority - b.priority || a.id - b.id);
     const index = ordered.findIndex((r) => r.id === Number(args.id));
-    if (index < 0) throw new Error('[mock] Unknown import rule');
+    if (index < 0) throw notFound('[mock] Unknown import rule');
     const target = index + Number(args.direction);
     if (target >= 0 && target < ordered.length) {
       const current = ordered[index];
@@ -2198,7 +2200,7 @@ function accountPath(acc: FixtureAccount | undefined): string {
   return parts.join(':');
 }
 
-function importResult(): MockPayloads['import_gnucash'] {
+function importResult(): CommandPayloads['import_gnucash'] {
   const summary = dataSummary();
   return {
     accountsAdded: 12,
@@ -2224,7 +2226,10 @@ function importResult(): MockPayloads['import_gnucash'] {
 
 /** Commands with a deliberately inert implementation (dialogs/paths need Tauri). */
 
-export async function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+export async function mockInvoke<K extends Command>(
+  cmd: K,
+  args?: Record<string, unknown>
+): Promise<CommandPayloads[K]> {
   const handler = (
     handlers as Record<string, ((a: Record<string, unknown>) => unknown) | undefined>
   )[cmd];
@@ -2236,5 +2241,11 @@ export async function mockInvoke<T>(cmd: string, args?: Record<string, unknown>)
   }
   // A small delay keeps async loading states (skeletons, spinners) observable.
   await new Promise((resolve) => setTimeout(resolve, 20));
-  return handler(args ?? {}) as T;
+  try {
+    return handler(args ?? {}) as CommandPayloads[K];
+  } catch (e) {
+    // Commands reject with a serialized `AppError`; plain mock errors stand
+    // in for the backend's validation failures.
+    throw isBackendError(e) ? e : { kind: 'validation', message: errMsg(e, String(e)) };
+  }
 }

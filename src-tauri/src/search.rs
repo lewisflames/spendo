@@ -1,3 +1,4 @@
+use crate::db::AppError;
 use rusqlite::Connection;
 use serde::Serialize;
 use tauri::State;
@@ -72,10 +73,9 @@ fn search_accounts_inner(
     conn: &Connection,
     like: &str,
     limit: i64,
-) -> Result<Vec<SearchAccount>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT guid, name, account_type, code, description
+) -> Result<Vec<SearchAccount>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT guid, name, account_type, code, description
              FROM accounts
              WHERE account_type != 'ROOT'
                AND (name LIKE '%' || ?1 || '%' ESCAPE '\\'
@@ -83,44 +83,32 @@ fn search_accounts_inner(
                     OR description LIKE '%' || ?1 || '%' ESCAPE '\\')
              ORDER BY name COLLATE NOCASE
              LIMIT ?2",
-        )
-        .map_err(|e| e.to_string())?;
-    let rows: Vec<(String, String, String, Option<String>, Option<String>)> = stmt
+    )?;
+    let mut accounts: Vec<SearchAccount> = stmt
         .query_map(rusqlite::params![like, limit], |row| {
-            Ok((
-                row.get(0)?,
-                row.get(1)?,
-                row.get(2)?,
-                row.get(3)?,
-                row.get(4)?,
-            ))
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+            Ok(SearchAccount {
+                guid: row.get(0)?,
+                name: row.get(1)?,
+                full_path: String::new(),
+                account_type: row.get(2)?,
+                code: row.get(3)?,
+                description: row.get(4)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
     // One account index for all path walks instead of queries per ancestor.
     let metas = tree::load_account_metas(conn)?;
-    Ok(rows
-        .into_iter()
-        .map(|(guid, name, account_type, code, description)| {
-            let full_path = tree::full_account_path(&guid, &metas, " : ");
-            SearchAccount {
-                guid,
-                name,
-                full_path,
-                account_type,
-                code,
-                description,
-            }
-        })
-        .collect())
+    for account in &mut accounts {
+        account.full_path = tree::full_account_path(&account.guid, &metas, " : ");
+    }
+    Ok(accounts)
 }
 
 fn search_transactions_inner(
     conn: &Connection,
     like: &str,
     limit: i64,
-) -> Result<Vec<SearchTransaction>, String> {
+) -> Result<Vec<SearchTransaction>, AppError> {
     let sql = format!(
         "SELECT guid, post_date, description, num
          FROM transactions t
@@ -134,7 +122,7 @@ fn search_transactions_inner(
          LIMIT ?2",
         utils::VISIBLE_TX_FILTER
     );
-    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(&sql)?;
     let rows = stmt
         .query_map(rusqlite::params![like, limit], |row| {
             Ok(SearchTransaction {
@@ -143,10 +131,8 @@ fn search_transactions_inner(
                 description: row.get(2)?,
                 num: row.get(3)?,
             })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
 }
 
@@ -154,13 +140,12 @@ fn search_holdings_inner(
     conn: &Connection,
     like: &str,
     limit: i64,
-) -> Result<Vec<SearchHolding>, String> {
+) -> Result<Vec<SearchHolding>, AppError> {
     // Mirror the portfolio universe: non-currency commodities that either
     // have investment splits or at least one stored price (sold-out /
     // watch-only rows stay reachable, anything else has no detail page).
-    let mut stmt = conn
-        .prepare(
-            "SELECT c.guid, c.mnemonic, c.fullname, c.namespace
+    let mut stmt = conn.prepare(
+        "SELECT c.guid, c.mnemonic, c.fullname, c.namespace
              FROM commodities c
              WHERE c.namespace != 'CURRENCY'
                AND c.namespace != 'template'
@@ -173,8 +158,7 @@ fn search_holdings_inner(
                                WHERE p.commodity_guid = c.guid))
              ORDER BY c.mnemonic COLLATE NOCASE
              LIMIT ?2",
-        )
-        .map_err(|e| e.to_string())?;
+    )?;
     let rows = stmt
         .query_map(rusqlite::params![like, limit], |row| {
             Ok(SearchHolding {
@@ -183,10 +167,8 @@ fn search_holdings_inner(
                 full_name: row.get(2)?,
                 namespace: row.get(3)?,
             })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
 }
 
@@ -194,12 +176,11 @@ fn search_budgets_inner(
     conn: &Connection,
     like: &str,
     limit: i64,
-) -> Result<Vec<SearchBudget>, String> {
+) -> Result<Vec<SearchBudget>, AppError> {
     // Account-only UX: one row per matching budgeted account with its most
     // recent budget year for direct navigation.
-    let mut stmt = conn
-        .prepare(
-            "SELECT a.guid, a.name, MAX(b.year) as year
+    let mut stmt = conn.prepare(
+        "SELECT a.guid, a.name, MAX(b.year) as year
              FROM budgets b
              JOIN accounts a ON a.guid = b.account_guid
              WHERE a.name LIKE '%' || ?1 || '%' ESCAPE '\\'
@@ -207,8 +188,7 @@ fn search_budgets_inner(
              GROUP BY a.guid
              ORDER BY a.name COLLATE NOCASE
              LIMIT ?2",
-        )
-        .map_err(|e| e.to_string())?;
+    )?;
     let rows = stmt
         .query_map(rusqlite::params![like, limit], |row| {
             Ok(SearchBudget {
@@ -216,10 +196,8 @@ fn search_budgets_inner(
                 account_name: row.get(1)?,
                 year: row.get(2)?,
             })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
 }
 
@@ -227,7 +205,7 @@ fn search_global_inner(
     conn: &Connection,
     query: &str,
     limit_per_group: Option<i64>,
-) -> Result<GlobalSearchResult, String> {
+) -> Result<GlobalSearchResult, AppError> {
     let trimmed = query.trim();
     if trimmed.chars().count() < MIN_QUERY_LEN {
         return Ok(empty_result());
@@ -247,7 +225,7 @@ pub async fn search_global(
     state: State<'_, AppState>,
     query: String,
     limit_per_group: Option<i64>,
-) -> Result<GlobalSearchResult, String> {
+) -> Result<GlobalSearchResult, AppError> {
     run_blocking(state.db.clone(), move |conn| {
         search_global_inner(conn, &query, limit_per_group)
     })

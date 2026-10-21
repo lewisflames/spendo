@@ -71,7 +71,9 @@ pub(crate) fn ensure_default_roots(conn: &Connection) -> Result<Vec<String>, App
 pub(crate) fn normalize_mnemonic(raw: &str) -> Result<String, AppError> {
     let mnemonic = raw.trim().to_uppercase();
     if mnemonic.len() != 3 || !mnemonic.chars().all(|c| c.is_ascii_uppercase()) {
-        return Err(AppError::Validation(format!("Use a 3-letter code like EUR, not '{raw}'")));
+        return Err(AppError::Validation(format!(
+            "Use a 3-letter code like EUR, not '{raw}'"
+        )));
     }
     Ok(mnemonic)
 }
@@ -111,7 +113,9 @@ fn set_base_currency_inner(conn: &Connection, currency: &str) -> Result<HomeData
         )
         .optional()?;
     let Some((root_guid, _)) = root else {
-        return Err(AppError::NotFound("No database yet. Create an empty book first".to_string()));
+        return Err(AppError::NotFound(
+            "No database yet. Create an empty book first".to_string(),
+        ));
     };
 
     let existing_guid: Option<String> = conn
@@ -138,8 +142,7 @@ fn set_base_currency_inner(conn: &Connection, currency: &str) -> Result<HomeData
     conn.execute(
         "UPDATE accounts SET commodity_guid = ?1 WHERE guid = ?2",
         rusqlite::params![commodity_guid, root_guid],
-    )
-    ?;
+    )?;
 
     Ok(HomeDataResult {
         has_data: true,
@@ -151,9 +154,9 @@ fn set_base_currency_inner(conn: &Connection, currency: &str) -> Result<HomeData
 pub async fn set_base_currency(
     state: State<'_, AppState>,
     currency: String,
-) -> Result<HomeDataResult, String> {
+) -> Result<HomeDataResult, AppError> {
     run_blocking(state.db.clone(), move |conn| {
-        set_base_currency_inner(conn, &currency).map_err(String::from)
+        set_base_currency_inner(conn, &currency)
     })
     .await
 }
@@ -235,7 +238,10 @@ mod tests {
     #[test]
     fn rejects_invalid_mnemonics() {
         for bad in ["", "EU", "EURO", "E1R", " us "] {
-            assert!(normalize_mnemonic(bad).is_err(), "expected error for '{bad}'");
+            assert!(
+                normalize_mnemonic(bad).is_err(),
+                "expected error for '{bad}'"
+            );
         }
     }
 

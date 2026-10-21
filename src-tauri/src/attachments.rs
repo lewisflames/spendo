@@ -1,4 +1,3 @@
-use base64::Engine;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -36,15 +35,6 @@ pub struct AttachmentInfo {
     pub created_at: String,
 }
 
-/// Preview payload: the bytes as a `data:` URL ready for an `<img src>`.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AttachmentData {
-    pub filename: String,
-    pub mime_type: String,
-    pub data_url: String,
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AttachmentAddInput {
@@ -60,7 +50,7 @@ struct PreparedAttachment {
     data: Vec<u8>,
 }
 
-fn mime_for_path(path: &Path) -> Result<&'static str, String> {
+fn mime_for_path(path: &Path) -> Result<&'static str, AppError> {
     let extension = path
         .extension()
         .and_then(|ext| ext.to_str())
@@ -71,47 +61,52 @@ fn mime_for_path(path: &Path) -> Result<&'static str, String> {
         .find(|(candidate, _)| *candidate == extension)
         .map(|(_, mime)| *mime)
         .ok_or_else(|| {
-            if extension.is_empty() {
+            AppError::Validation(if extension.is_empty() {
                 format!("Unsupported file type: {}", path.display())
             } else {
                 format!("Unsupported file type: .{extension}")
-            }
+            })
         })
 }
 
 /// Read + validate one picked/dropped file. Runs before the DB lock is taken
 /// (disk I/O never happens while holding the connection).
-fn prepare_attachment(path: &str) -> Result<PreparedAttachment, String> {
+fn prepare_attachment(path: &str) -> Result<PreparedAttachment, AppError> {
     let source = Path::new(path);
     let filename = source
         .file_name()
         .and_then(|name| name.to_str())
         .map(|name| name.trim().to_string())
         .filter(|name| !name.is_empty())
-        .ok_or_else(|| format!("Unreadable file name: {}", source.display()))?;
+        .ok_or_else(|| {
+            AppError::Validation(format!("Unreadable file name: {}", source.display()))
+        })?;
     let mime_type = mime_for_path(source)?;
     let metadata = std::fs::metadata(source)
-        .map_err(|e| format!("Failed to read {}: {e}", source.display()))?;
+        .map_err(|e| AppError::Io(format!("Failed to read {}: {e}", source.display())))?;
     if !metadata.is_file() {
-        return Err(format!("Not a file: {}", source.display()));
+        return Err(AppError::Validation(format!(
+            "Not a file: {}",
+            source.display()
+        )));
     }
     if metadata.len() == 0 {
-        return Err(format!("{filename} is empty"));
+        return Err(AppError::Validation(format!("{filename} is empty")));
     }
     if metadata.len() > MAX_ATTACHMENT_BYTES {
-        return Err(format!(
+        return Err(AppError::Validation(format!(
             "{filename} is larger than {} MB",
             MAX_ATTACHMENT_BYTES / (1024 * 1024)
-        ));
+        )));
     }
-    let data =
-        std::fs::read(source).map_err(|e| format!("Failed to read {}: {e}", source.display()))?;
+    let data = std::fs::read(source)
+        .map_err(|e| AppError::Io(format!("Failed to read {}: {e}", source.display())))?;
     // The file could have grown between `metadata` and `read`.
     if data.len() as u64 > MAX_ATTACHMENT_BYTES {
-        return Err(format!(
+        return Err(AppError::Validation(format!(
             "{filename} is larger than {} MB",
             MAX_ATTACHMENT_BYTES / (1024 * 1024)
-        ));
+        )));
     }
     let filename: String = filename.chars().take(255).collect();
     Ok(PreparedAttachment {
@@ -176,7 +171,9 @@ fn insert_attachments(
     prepared: Vec<PreparedAttachment>,
 ) -> Result<Vec<AttachmentInfo>, AppError> {
     if prepared.is_empty() {
-        return Err(AppError::Validation("Pick a file to attach first".to_string()));
+        return Err(AppError::Validation(
+            "Pick a file to attach first".to_string(),
+        ));
     }
     if prepared.len() > MAX_ATTACHMENTS_PER_TX {
         return Err(AppError::Validation(format!(
@@ -232,17 +229,13 @@ fn insert_attachments(
                 // Books created before the multi-attachment schema still carry
                 // `UNIQUE(tx_guid)` (no migrations by design). Surface that as
                 // guidance instead of a raw constraint message.
-                let extended_code = match &e {
-                    rusqlite::Error::SqliteFailure(err, _) => Some(err.extended_code),
-                    _ => None,
-                };
-                if extended_code == Some(rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE) {
-                    return Err(AppError::Validation(
+                return Err(match AppError::from(e) {
+                    AppError::Db(db) if db.is_unique() => AppError::Validation(
                         "This book holds one attachment per transaction. Clear your data or start a new book to add more"
                             .to_string(),
-                    ));
-                }
-                return Err(AppError::from(e));
+                    ),
+                    other => other,
+                });
             }
             infos.push(AttachmentInfo {
                 guid,
@@ -274,28 +267,16 @@ fn fetch_blob(conn: &Connection, guid: &str) -> Result<(String, String, Vec<u8>)
         |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
     )
     .optional()?
-    .ok_or_else(|| {
-        AppError::NotFound("Attachment not found. It may have been removed".to_string())
-    })
-}
-
-fn attachment_data_inner(conn: &Connection, guid: &str) -> Result<AttachmentData, AppError> {
-    let (filename, mime_type, data) = fetch_blob(conn, guid)?;
-    let encoded = base64::engine::general_purpose::STANDARD.encode(&data);
-    Ok(AttachmentData {
-        data_url: format!("data:{mime_type};base64,{encoded}"),
-        filename,
-        mime_type,
-    })
+    .ok_or_else(|| AppError::NotFound("Attachment not found. It may have been removed".to_string()))
 }
 
 #[tauri::command]
 pub async fn fetch_attachments(
     state: State<'_, AppState>,
     tx_guid: String,
-) -> Result<Vec<AttachmentInfo>, String> {
+) -> Result<Vec<AttachmentInfo>, AppError> {
     run_blocking(state.db.clone(), move |conn| {
-        list_attachments(conn, &tx_guid).map_err(String::from)
+        list_attachments(conn, &tx_guid)
     })
     .await
 }
@@ -304,7 +285,7 @@ pub async fn fetch_attachments(
 pub async fn add_attachments(
     state: State<'_, AppState>,
     input: AttachmentAddInput,
-) -> Result<Vec<AttachmentInfo>, String> {
+) -> Result<Vec<AttachmentInfo>, AppError> {
     let tx_guid = input.tx_guid;
     // Disk I/O first (house rule): read + validate the file before touching
     // the DB lock; a bad file fails with its own message.
@@ -317,26 +298,15 @@ pub async fn add_attachments(
     })
     .await?;
     run_blocking(state.db.clone(), move |conn| {
-        insert_attachments(conn, &tx_guid, prepared).map_err(String::from)
+        insert_attachments(conn, &tx_guid, prepared)
     })
     .await
 }
 
 #[tauri::command]
-pub async fn delete_attachment(state: State<'_, AppState>, guid: String) -> Result<(), String> {
+pub async fn delete_attachment(state: State<'_, AppState>, guid: String) -> Result<(), AppError> {
     run_blocking(state.db.clone(), move |conn| {
-        delete_attachment_inner(conn, &guid).map_err(String::from)
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn fetch_attachment_data(
-    state: State<'_, AppState>,
-    guid: String,
-) -> Result<AttachmentData, String> {
-    run_blocking(state.db.clone(), move |conn| {
-        attachment_data_inner(conn, &guid).map_err(String::from)
+        delete_attachment_inner(conn, &guid)
     })
     .await
 }
@@ -346,16 +316,12 @@ pub async fn export_attachment(
     state: State<'_, AppState>,
     guid: String,
     dest_path: String,
-) -> Result<(), String> {
-    state
-        .ensure_not_active_book(Path::new(dest_path.trim()))
-        .map_err(String::from)?;
-    let (_, _, data) = run_blocking(state.db.clone(), move |conn| {
-        fetch_blob(conn, &guid).map_err(String::from)
-    })
-    .await?;
+) -> Result<(), AppError> {
+    state.ensure_not_active_book(Path::new(dest_path.trim()))?;
+    let (_, _, data) = run_blocking(state.db.clone(), move |conn| fetch_blob(conn, &guid)).await?;
     run_io(move || {
-        std::fs::write(&dest_path, data).map_err(|e| format!("Failed to write file: {e}"))
+        std::fs::write(&dest_path, data)
+            .map_err(|e| AppError::Io(format!("Failed to write file: {e}")))
     })
     .await
 }
@@ -368,27 +334,26 @@ pub async fn open_attachment(
     app: AppHandle,
     state: State<'_, AppState>,
     guid: String,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let blob_guid = guid.clone();
-    let (filename, _, data) = run_blocking(state.db.clone(), move |conn| {
-        fetch_blob(conn, &blob_guid).map_err(String::from)
-    })
-    .await?;
+    let (filename, _, data) =
+        run_blocking(state.db.clone(), move |conn| fetch_blob(conn, &blob_guid)).await?;
     let path = run_io(move || {
         let dir = app
             .path()
             .app_cache_dir()
-            .map_err(|e| format!("Failed to locate the cache folder: {e}"))?
+            .map_err(|e| AppError::Io(format!("Failed to locate the cache folder: {e}")))?
             .join("attachment-previews");
         std::fs::create_dir_all(&dir)
-            .map_err(|e| format!("Failed to create preview folder: {e}"))?;
+            .map_err(|e| AppError::Io(format!("Failed to create preview folder: {e}")))?;
         let file = dir.join(format!("{guid}-{}", sanitize_file_name(&filename)));
-        std::fs::write(&file, data).map_err(|e| format!("Failed to write preview file: {e}"))?;
+        std::fs::write(&file, data)
+            .map_err(|e| AppError::Io(format!("Failed to write preview file: {e}")))?;
         Ok(file)
     })
     .await?;
     tauri_plugin_opener::open_path(path.to_string_lossy().to_string(), None::<&str>)
-        .map_err(|e| format!("Failed to open file: {e}"))
+        .map_err(|e| AppError::Io(format!("Failed to open file: {e}")))
 }
 
 #[cfg(test)]
@@ -442,15 +407,10 @@ mod tests {
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0], infos[0]);
 
-        let data = attachment_data_inner(&conn, &infos[0].guid).unwrap();
-        assert_eq!(data.filename, "receipt.pdf");
-        assert_eq!(
-            data.data_url,
-            format!(
-                "data:application/pdf;base64,{}",
-                base64::engine::general_purpose::STANDARD.encode(b"fake-pdf-bytes")
-            )
-        );
+        let (filename, mime_type, data) = fetch_blob(&conn, &infos[0].guid).unwrap();
+        assert_eq!(filename, "receipt.pdf");
+        assert_eq!(mime_type, "application/pdf");
+        assert_eq!(data, b"fake-pdf-bytes");
 
         delete_attachment_inner(&conn, &infos[0].guid).unwrap();
         assert!(list_attachments(&conn, "t1").unwrap().is_empty());
@@ -467,16 +427,26 @@ mod tests {
         let txt = write_file(&dir, "notes.txt", b"hi");
         assert!(prepare_attachment(&txt)
             .unwrap_err()
+            .to_string()
             .contains("Unsupported"));
         // Accepted image types prepare fine.
-        for name in ["photo.png", "photo.jpg", "photo.jpeg", "anim.gif", "img.webp"] {
+        for name in [
+            "photo.png",
+            "photo.jpg",
+            "photo.jpeg",
+            "anim.gif",
+            "img.webp",
+        ] {
             let path = write_file(&dir, name, b"hi");
             let ok = prepared(&path);
             assert!(!ok.filename.is_empty(), "unexpected empty name for {name}");
         }
         // Empty file.
         let empty = write_file(&dir, "empty.pdf", b"");
-        assert!(prepare_attachment(&empty).unwrap_err().contains("empty"));
+        assert!(prepare_attachment(&empty)
+            .unwrap_err()
+            .to_string()
+            .contains("empty"));
         // Missing file.
         let missing = dir.join("nope.pdf");
         assert!(prepare_attachment(&missing.to_string_lossy()).is_err());
@@ -488,6 +458,7 @@ mod tests {
             .unwrap();
         assert!(prepare_attachment(&big.to_string_lossy())
             .unwrap_err()
+            .to_string()
             .contains("larger than"));
 
         std::fs::remove_dir_all(&dir).ok();
@@ -508,10 +479,7 @@ mod tests {
             .map(|_| prepared(&first))
             .collect();
         let err = insert_attachments(&conn, "t1", too_many).unwrap_err();
-        assert!(
-            err.to_string().contains("at most"),
-            "unexpected: {err}"
-        );
+        assert!(err.to_string().contains("at most"), "unexpected: {err}");
 
         // Adding files accumulates instead of replacing.
         let infos = insert_attachments(&conn, "t1", vec![prepared(&first)]).unwrap();
@@ -528,12 +496,12 @@ mod tests {
             let path = write_file(&dir, &format!("f{i}.pdf"), b"z");
             insert_attachments(&conn, "t1", vec![prepared(&path)]).unwrap();
         }
-        assert_eq!(list_attachments(&conn, "t1").unwrap().len(), MAX_ATTACHMENTS_PER_TX);
-        let err = insert_attachments(&conn, "t1", vec![prepared(&first)]).unwrap_err();
-        assert!(
-            err.to_string().contains("at most"),
-            "unexpected: {err}"
+        assert_eq!(
+            list_attachments(&conn, "t1").unwrap().len(),
+            MAX_ATTACHMENTS_PER_TX
         );
+        let err = insert_attachments(&conn, "t1", vec![prepared(&first)]).unwrap_err();
+        assert!(err.to_string().contains("at most"), "unexpected: {err}");
 
         std::fs::remove_dir_all(&dir).ok();
     }

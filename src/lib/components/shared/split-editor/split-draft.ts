@@ -1,4 +1,5 @@
 import type { SplitInput } from '$lib/tauri';
+import { INVESTMENT_ACCOUNT_TYPES } from '$lib/features/accounts/account-types';
 
 export interface SplitDraft {
   key: number;
@@ -19,9 +20,6 @@ export function makeSplitDraft(key: number): SplitDraft {
     memo: ''
   };
 }
-
-/** Account types whose splits carry a share quantity distinct from the amount. */
-export const INVESTMENT_ACCOUNT_TYPES = new Set(['STOCK', 'MUTUAL', 'FUND']);
 
 export function isInvestmentAccountType(t: string | null | undefined): boolean {
   return !!t && INVESTMENT_ACCOUNT_TYPES.has(t.toUpperCase());

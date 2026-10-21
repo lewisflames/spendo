@@ -1,3 +1,4 @@
+use crate::db::AppError;
 use rusqlite::Connection;
 use serde::Serialize;
 use tauri::State;
@@ -25,35 +26,31 @@ pub struct HomeDataResult {
     pub summary: Option<DataSummary>,
 }
 
-pub fn get_summary(conn: &Connection) -> Result<DataSummary, String> {
+pub fn get_summary(conn: &Connection) -> Result<DataSummary, AppError> {
     let currency = fx::get_report_currency_mnemonic(conn)?.unwrap_or_else(|| "Unknown".to_string());
 
-    let total_accounts: i64 = conn
-        .query_row("SELECT COUNT(*) FROM accounts", [], |row| row.get(0))
-        .map_err(|e| e.to_string())?;
+    let total_accounts: i64 =
+        conn.query_row("SELECT COUNT(*) FROM accounts", [], |row| row.get(0))?;
 
     // Same visibility window as every other page: future-dated transactions
     // must not inflate totals, the displayed date range or net worth.
-    let total_transactions: i64 = conn
-        .query_row(
-            // Alias the table: VISIBLE_TX_FILTER qualifies its column as `t`.
-            &format!(
-                "SELECT COUNT(*) FROM transactions t WHERE {}",
-                utils::VISIBLE_TX_FILTER
-            ),
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|e| e.to_string())?;
+    let total_transactions: i64 = conn.query_row(
+        // Alias the table: VISIBLE_TX_FILTER qualifies its column as `t`.
+        &format!(
+            "SELECT COUNT(*) FROM transactions t WHERE {}",
+            utils::VISIBLE_TX_FILTER
+        ),
+        [],
+        |row| row.get(0),
+    )?;
 
     let (earliest_date, latest_date) = utils::visible_tx_window(conn)?;
 
     // Net worth in report currency: cash per account currency converted at latest FX,
     // investments marked to market with report-currency-normalized prices.
     let cash_rows: Vec<(String, String, f64, f64, f64)> = {
-        let mut stmt = conn
-            .prepare(&format!(
-                "SELECT c.guid, c.mnemonic,
+        let mut stmt = conn.prepare(&format!(
+            "SELECT c.guid, c.mnemonic,
                         COALESCE(SUM(CASE WHEN a.account_type IN ({})
                             THEN {} ELSE 0 END), 0) as cash_assets,
                         COALESCE(SUM(CASE WHEN a.account_type IN ({})
@@ -66,22 +63,24 @@ pub fn get_summary(conn: &Connection) -> Result<DataSummary, String> {
                  JOIN transactions t ON t.guid = s.tx_guid
                  WHERE {}
                  GROUP BY c.guid, c.mnemonic",
-                utils::cash_like_types_sql(),
-                utils::RAW_AMOUNT,
-                utils::investment_types_sql(),
-                utils::QUANTITY_AMOUNT,
-                utils::liability_types_sql(),
-                utils::RAW_AMOUNT,
-                utils::VISIBLE_TX_FILTER
+            utils::cash_like_types_sql(),
+            utils::RAW_AMOUNT,
+            utils::investment_types_sql(),
+            utils::QUANTITY_AMOUNT,
+            utils::liability_types_sql(),
+            utils::RAW_AMOUNT,
+            utils::VISIBLE_TX_FILTER
+        ))?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
             ))
-            .map_err(|e| e.to_string())?;
-        let rows = stmt
-            .query_map([], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?))
-            })
-            .map_err(|e| e.to_string())?;
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()?
     };
 
     let fx_map = fx::get_fx_map(conn, None)?;
@@ -111,16 +110,12 @@ pub fn get_summary(conn: &Connection) -> Result<DataSummary, String> {
 }
 
 #[tauri::command]
-pub async fn fetch_home_data(state: State<'_, AppState>) -> Result<HomeDataResult, String> {
+pub async fn fetch_home_data(state: State<'_, AppState>) -> Result<HomeDataResult, AppError> {
     // A book being open is not the same as a book having data: a cleared or
     // freshly seeded book still needs its shell so pages can show their empty
     // states and the import paths stay reachable. `has_data` keeps tracking
     // whether accounts exist; only `summary` is tied to the book being open.
-    let book_open = state
-        .db_path
-        .lock()
-        .map_err(|e| e.to_string())?
-        .is_some();
+    let book_open = state.db_path.lock()?.is_some();
     run_blocking(state.db.clone(), move |conn| {
         if !book_open {
             return Ok(HomeDataResult {
@@ -129,9 +124,8 @@ pub async fn fetch_home_data(state: State<'_, AppState>) -> Result<HomeDataResul
             });
         }
 
-        let cnt: i64 = conn
-            .query_row("SELECT COUNT(*) as cnt FROM accounts", [], |row| row.get(0))
-            .map_err(|e| e.to_string())?;
+        let cnt: i64 =
+            conn.query_row("SELECT COUNT(*) as cnt FROM accounts", [], |row| row.get(0))?;
 
         Ok(HomeDataResult {
             has_data: cnt > 0,

@@ -60,16 +60,14 @@ pub struct PriceHistoryEntry {
     pub currency: String,
 }
 
-pub fn list_commodities(conn: &Connection) -> Result<Vec<CommodityInfo>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT guid, mnemonic, namespace, fullname
+pub fn list_commodities(conn: &Connection) -> Result<Vec<CommodityInfo>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT guid, mnemonic, namespace, fullname
              FROM commodities
              WHERE namespace != 'CURRENCY'
              AND namespace != 'template'
              ORDER BY namespace, mnemonic",
-        )
-        .map_err(|e| e.to_string())?;
+    )?;
 
     let rows = stmt
         .query_map([], |row| {
@@ -79,22 +77,26 @@ pub fn list_commodities(conn: &Connection) -> Result<Vec<CommodityInfo>, String>
                 namespace: row.get(2)?,
                 full_name: row.get(3)?,
             })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
 
     Ok(rows)
+}
+
+/// One stored price row: `price` is in the `quote` currency as of `date`.
+struct RawPrice {
+    commodity_guid: String,
+    mnemonic: String,
+    price: f64,
+    date: String,
+    /// Quote currency mnemonic.
+    quote: String,
 }
 
 /// Latest `rn`-th price row per commodity. Keyed by commodity GUID (a
 /// mnemonic can repeat across namespaces, e.g. the same ticker on two
 /// exchanges) with the mnemonic kept for display only.
-/// Returns `(commodity_guid, mnemonic, price, date, quote_currency_mnemonic)`.
-fn nth_price_raw(
-    conn: &Connection,
-    rn: u32,
-) -> Result<Vec<(String, String, f64, String, String)>, String> {
+fn nth_price_raw(conn: &Connection, rn: u32) -> Result<Vec<RawPrice>, AppError> {
     let mut stmt = conn
         .prepare(&format!(
             "SELECT guid, mnemonic, price, date, quote FROM (
@@ -109,63 +111,57 @@ fn nth_price_raw(
                     WHERE c.namespace != 'CURRENCY'
                  ) WHERE rn = ?1",
             utils::PRICE_AMOUNT
-        ))
-        .map_err(|e| e.to_string())?;
+        ))?;
 
     let rows = stmt
         .query_map([rn], |row| {
-            Ok((
-                row.get(0)?,
-                row.get(1)?,
-                row.get(2)?,
-                row.get(3)?,
-                row.get(4)?,
-            ))
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+            Ok(RawPrice {
+                commodity_guid: row.get(0)?,
+                mnemonic: row.get(1)?,
+                price: row.get(2)?,
+                date: row.get(3)?,
+                quote: row.get(4)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
 
     Ok(rows)
 }
 
-fn get_latest_live_prices(conn: &Connection) -> Result<Vec<PriceEntry>, String> {
+fn get_latest_live_prices(conn: &Connection) -> Result<Vec<PriceEntry>, AppError> {
     Ok(nth_price_raw(conn, 1)?
         .into_iter()
-        .map(|(_guid, mnemonic, price, date, currency)| PriceEntry {
-            mnemonic,
-            price,
-            price_date: date,
-            currency,
+        .map(|p| PriceEntry {
+            mnemonic: p.mnemonic,
+            price: p.price,
+            price_date: p.date,
+            currency: p.quote,
         })
         .collect())
 }
 
-pub fn get_last_refresh_timestamp(conn: &Connection) -> Result<Option<String>, String> {
-    let result: Option<String> = conn
-        .query_row("SELECT MAX(refreshed_at) FROM refresh_log", [], |row| {
+pub fn get_last_refresh_timestamp(conn: &Connection) -> Result<Option<String>, AppError> {
+    let result: Option<String> =
+        conn.query_row("SELECT MAX(refreshed_at) FROM refresh_log", [], |row| {
             row.get(0)
-        })
-        .map_err(|e| e.to_string())?;
+        })?;
     Ok(result)
 }
 
 pub fn get_price_history(
     conn: &Connection,
     commodity_guid: &str,
-) -> Result<Vec<PriceHistoryEntry>, String> {
-    let mut stmt = conn
-        .prepare(&format!(
-            "SELECT p.date,
+) -> Result<Vec<PriceHistoryEntry>, AppError> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT p.date,
                     {} as price,
                     cur.mnemonic as currency
              FROM prices p
              JOIN commodities cur ON cur.guid = p.currency_guid
              WHERE p.commodity_guid = ?1
              ORDER BY p.date ASC",
-            utils::PRICE_AMOUNT
-        ))
-        .map_err(|e| e.to_string())?;
+        utils::PRICE_AMOUNT
+    ))?;
 
     let rows = stmt
         .query_map([commodity_guid], |row| {
@@ -174,10 +170,8 @@ pub fn get_price_history(
                 price: row.get(1)?,
                 currency: row.get(2)?,
             })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
 
     Ok(rows)
 }
@@ -198,10 +192,14 @@ pub struct SymbolOverride {
 fn normalize_symbol(input: &str) -> Result<String, AppError> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
-        return Err(AppError::Validation("Enter a Yahoo symbol, like AAPL".to_string()));
+        return Err(AppError::Validation(
+            "Enter a Yahoo symbol, like AAPL".to_string(),
+        ));
     }
     if trimmed.len() > 32 {
-        return Err(AppError::Validation("Keep the symbol under 32 characters".to_string()));
+        return Err(AppError::Validation(
+            "Keep the symbol under 32 characters".to_string(),
+        ));
     }
     if trimmed
         .chars()
@@ -216,20 +214,15 @@ fn normalize_symbol(input: &str) -> Result<String, AppError> {
 
 /// commodity_guid -> override symbol. Errors propagate: the table is created
 /// by `init_db`, so a failure here means a real DB problem, not a legacy book.
-fn symbol_override_map(conn: &Connection) -> Result<HashMap<String, String>, String> {
-    let mut stmt = conn
-        .prepare("SELECT commodity_guid, symbol FROM symbol_overrides")
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })
-        .map_err(|e| e.to_string())?;
-    rows.collect::<Result<HashMap<_, _>, _>>()
-        .map_err(|e| e.to_string())
+fn symbol_override_map(conn: &Connection) -> Result<HashMap<String, String>, AppError> {
+    let mut stmt = conn.prepare("SELECT commodity_guid, symbol FROM symbol_overrides")?;
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    Ok(rows.collect::<Result<HashMap<_, _>, _>>()?)
 }
 
-fn fetch_symbol_overrides_inner(conn: &Connection) -> Result<Vec<SymbolOverride>, String> {
+fn fetch_symbol_overrides_inner(conn: &Connection) -> Result<Vec<SymbolOverride>, AppError> {
     let commodities = list_commodities(conn)?;
     let overrides = symbol_override_map(conn)?;
     Ok(commodities
@@ -272,18 +265,14 @@ pub(crate) struct PendingPriceWrites {
     fx_prices: Vec<(String, Vec<(i64, f64)>)>,
 }
 
-pub(crate) fn read_price_data(conn: &Connection) -> Result<PriceFetchPlan, String> {
+pub(crate) fn read_price_data(conn: &Connection) -> Result<PriceFetchPlan, AppError> {
     let commodities = list_commodities(conn)?;
 
     let already_fetched: HashSet<String> = {
-        let mut stmt = conn
-            .prepare("SELECT DISTINCT commodity_guid FROM prices")
-            .map_err(|e| e.to_string())?;
+        let mut stmt = conn.prepare("SELECT DISTINCT commodity_guid FROM prices")?;
         let rows = stmt
-            .query_map([], |row| row.get::<_, String>(0))
-            .map_err(|e| e.to_string())?
-            .collect::<Result<HashSet<_>, _>>()
-            .map_err(|e| e.to_string())?;
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<Result<HashSet<_>, _>>()?;
         rows
     };
 
@@ -291,16 +280,13 @@ pub(crate) fn read_price_data(conn: &Connection) -> Result<PriceFetchPlan, Strin
     // Failures here must propagate: silently degrading to empty dates turns an
     // incremental refresh into a full 10-year refetch for every symbol.
     let latest_dates: HashMap<String, String> = {
-        let mut stmt = conn
-            .prepare("SELECT commodity_guid, MAX(date) FROM prices GROUP BY commodity_guid")
-            .map_err(|e| e.to_string())?;
+        let mut stmt =
+            conn.prepare("SELECT commodity_guid, MAX(date) FROM prices GROUP BY commodity_guid")?;
         let rows = stmt
             .query_map([], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })
-            .map_err(|e| e.to_string())?
-            .collect::<Result<HashMap<_, _>, _>>()
-            .map_err(|e| e.to_string())?;
+            })?
+            .collect::<Result<HashMap<_, _>, _>>()?;
         rows
     };
 
@@ -346,7 +332,7 @@ fn write_history_prices(
     commodity_guid: &str,
     currency_guid: &str,
     history: &[(i64, f64)],
-) -> Result<bool, String> {
+) -> Result<bool, AppError> {
     if history.is_empty() {
         return Ok(false);
     }
@@ -369,14 +355,13 @@ fn write_history_prices(
     conn.execute(
         "DELETE FROM prices WHERE commodity_guid = ?1 AND substr(date, 1, 10) BETWEEN ?2 AND ?3",
         rusqlite::params![commodity_guid, min_date, max_date],
-    )
-    .map_err(|e| e.to_string())?;
+    )?;
 
     let insert_sql = format!(
         "INSERT OR REPLACE INTO prices (guid, commodity_guid, currency_guid, value_num, value_denom, date)
          VALUES (?1, ?2, ?3, ?4, {PRICE_SCALE}, ?5)"
     );
-    let mut insert = conn.prepare(&insert_sql).map_err(|e| e.to_string())?;
+    let mut insert = conn.prepare(&insert_sql)?;
 
     let mut wrote = false;
     for (date_str, price) in &dated {
@@ -388,15 +373,13 @@ fn write_history_prices(
         }
         let price_guid = format!("{}-{}", commodity_guid, date_str);
         let value_num = (*price * PRICE_SCALE as f64).round() as i64;
-        insert
-            .execute(rusqlite::params![
-                price_guid,
-                commodity_guid,
-                currency_guid,
-                value_num,
-                date_str
-            ])
-            .map_err(|e| e.to_string())?;
+        insert.execute(rusqlite::params![
+            price_guid,
+            commodity_guid,
+            currency_guid,
+            value_num,
+            date_str
+        ])?;
         wrote = true;
     }
     Ok(wrote)
@@ -405,7 +388,7 @@ fn write_history_prices(
 pub(crate) fn write_price_data(
     conn: &Connection,
     data: &PendingPriceWrites,
-) -> Result<bool, String> {
+) -> Result<bool, AppError> {
     let PendingPriceWrites {
         writes,
         report_currency_guid,
@@ -428,8 +411,7 @@ pub(crate) fn write_price_data(
                 [mnemonic],
                 |row| row.get::<_, String>(0),
             )
-            .optional()
-            .map_err(|e| e.to_string())?
+            .optional()?
         else {
             continue;
         };
@@ -470,7 +452,7 @@ fn register_symbol(
 
 pub(crate) async fn fetch_prices_remote(
     pre: PriceFetchPlan,
-) -> Result<(PricesResult, PendingPriceWrites), String> {
+) -> Result<(PricesResult, PendingPriceWrites), AppError> {
     let now = utils::iso_now();
     let symbols = plan_symbols(&pre)?;
     let outcome = fetch_all_histories(&symbols).await;
@@ -493,7 +475,7 @@ struct SymbolPlan {
     period2: i64,
 }
 
-fn plan_symbols(pre: &PriceFetchPlan) -> Result<SymbolPlan, String> {
+fn plan_symbols(pre: &PriceFetchPlan) -> Result<SymbolPlan, AppError> {
     // Crypto pairs quote in the report currency when supported, else EUR (converted via FX at read time).
     let crypto_suffix = match &pre.report_currency {
         Some(r) if SUPPORTED_CRYPTO_FIAT.contains(&r.as_str()) => format!("-{}", r),
@@ -505,7 +487,7 @@ fn plan_symbols(pre: &PriceFetchPlan) -> Result<SymbolPlan, String> {
     let tomorrow = today.succ_opt().unwrap_or(today);
     let period2 = tomorrow
         .and_hms_opt(0, 0, 0)
-        .ok_or_else(|| "Failed to construct period2 timestamp".to_string())?
+        .ok_or_else(|| AppError::Io("Failed to construct period2 timestamp".to_string()))?
         .and_utc()
         .timestamp();
 
@@ -515,8 +497,10 @@ fn plan_symbols(pre: &PriceFetchPlan) -> Result<SymbolPlan, String> {
     let mut symbol_period1: HashMap<String, Option<i64>> = HashMap::new();
 
     for c in &pre.commodities {
-        let period1_for_c: Option<i64> =
-            pre.latest_dates.get(&c.guid).and_then(|d| date_to_period1(d));
+        let period1_for_c: Option<i64> = pre
+            .latest_dates
+            .get(&c.guid)
+            .and_then(|d| date_to_period1(d));
 
         // Per-commodity free-text override wins verbatim (single Yahoo fetch,
         // no heuristic suffix expansion).
@@ -829,47 +813,42 @@ fn assemble_result(
 }
 
 /// Latest price per commodity GUID, normalized to the report currency.
-pub fn get_cached_prices_map(conn: &Connection) -> Result<HashMap<String, f64>, String> {
+pub fn get_cached_prices_map(conn: &Connection) -> Result<HashMap<String, f64>, AppError> {
     Ok(latest_prices_normalized(conn, 1)?
         .into_iter()
-        .map(|(guid, _, price, _, _)| (guid, price))
+        .map(|p| (p.commodity_guid, p.price))
         .collect())
 }
 
+/// Price map keyed by commodity GUID: (price, price date).
+type PriceDateMap = HashMap<String, (f64, String)>;
+
 /// Latest and second-latest price maps in one pass: one `nth_price_raw` scan
 /// per rank and a single `FxHistory::load` shared by both normalizations.
-pub fn get_cached_price_maps(
-    conn: &Connection,
-) -> Result<
-    (
-        HashMap<String, (f64, String)>,
-        HashMap<String, (f64, String)>,
-    ),
-    String,
-> {
+pub fn get_cached_price_maps(conn: &Connection) -> Result<(PriceDateMap, PriceDateMap), AppError> {
     let latest = nth_price_raw(conn, 1)?;
     let prev = nth_price_raw(conn, 2)?;
     if latest.is_empty() && prev.is_empty() {
         return Ok((HashMap::new(), HashMap::new()));
     }
-    let report_mnemonic = fx::get_report_currency_mnemonic(conn)?.unwrap_or_default();
+    let report_mnemonic = fx::report_currency_or_empty(conn)?;
     let fx_history = fx::FxHistory::load(conn)?;
     // One rate map per distinct price date instead of one query per commodity.
     let mut rates_by_date: HashMap<String, HashMap<String, f64>> = HashMap::new();
-    let normalize = |rows: Vec<(String, String, f64, String, String)>,
+    let normalize = |rows: Vec<RawPrice>,
                      rates_by_date: &mut HashMap<String, HashMap<String, f64>>|
-     -> HashMap<String, (f64, String)> {
+     -> PriceDateMap {
         rows.into_iter()
-            .map(|(guid, _mnemonic, price, date, quote)| {
-                let normalized = if quote == report_mnemonic {
-                    price
+            .map(|p| {
+                let normalized = if p.quote == report_mnemonic {
+                    p.price
                 } else {
                     let rates = rates_by_date
-                        .entry(date.clone())
-                        .or_insert_with(|| fx_history.map_for_date(&date));
-                    price * rates.get(&quote).copied().unwrap_or(1.0)
+                        .entry(p.date.clone())
+                        .or_insert_with(|| fx_history.map_for_date(&p.date));
+                    p.price * rates.get(&p.quote).copied().unwrap_or(1.0)
                 };
-                (guid, (normalized, date))
+                (p.commodity_guid, (normalized, p.date))
             })
             .collect()
     };
@@ -878,33 +857,29 @@ pub fn get_cached_price_maps(
     Ok((latest_map, prev_map))
 }
 
-/// Latest-price rows normalized to the report currency, keyed by commodity
-/// GUID: (guid, mnemonic, price, price date, quote mnemonic). Single
+/// Latest-price rows with `price` normalized to the report currency. Single
 /// window-function scan plus one FX-history scan shared by every cached-price
 /// map above.
-fn latest_prices_normalized(
-    conn: &Connection,
-    rn: u32,
-) -> Result<Vec<(String, String, f64, String, String)>, String> {
+fn latest_prices_normalized(conn: &Connection, rn: u32) -> Result<Vec<RawPrice>, AppError> {
     let rows = nth_price_raw(conn, rn)?;
     if rows.is_empty() {
         return Ok(vec![]);
     }
-    let report_mnemonic = fx::get_report_currency_mnemonic(conn)?.unwrap_or_default();
+    let report_mnemonic = fx::report_currency_or_empty(conn)?;
     let fx_history = fx::FxHistory::load(conn)?;
     // One rate map per distinct price date instead of one query per commodity.
     let mut rates_by_date: HashMap<String, HashMap<String, f64>> = HashMap::new();
     rows.into_iter()
-        .map(|(guid, mnemonic, price, date, quote)| {
-            let normalized = if quote == report_mnemonic {
-                price
+        .map(|p| {
+            let price = if p.quote == report_mnemonic {
+                p.price
             } else {
                 let rates = rates_by_date
-                    .entry(date.clone())
-                    .or_insert_with(|| fx_history.map_for_date(&date));
-                price * rates.get(&quote).copied().unwrap_or(1.0)
+                    .entry(p.date.clone())
+                    .or_insert_with(|| fx_history.map_for_date(&p.date));
+                p.price * rates.get(&p.quote).copied().unwrap_or(1.0)
             };
-            Ok((guid, mnemonic, normalized, date, quote))
+            Ok(RawPrice { price, ..p })
         })
         .collect()
 }
@@ -912,17 +887,17 @@ fn latest_prices_normalized(
 /// Quote currency mnemonic per commodity GUID (from each commodity's latest
 /// price), used as the cost-basis currency proxy for stock accounts. One query
 /// instead of one lookup per commodity.
-pub fn latest_quote_currencies(conn: &Connection) -> Result<HashMap<String, String>, String> {
+pub fn latest_quote_currencies(conn: &Connection) -> Result<HashMap<String, String>, AppError> {
     Ok(nth_price_raw(conn, 1)?
         .into_iter()
-        .map(|(guid, _, _, _, quote)| (guid, quote))
+        .map(|p| (p.commodity_guid, p.quote))
         .collect())
 }
 
 #[tauri::command]
 pub async fn fetch_symbol_overrides(
     state: State<'_, AppState>,
-) -> Result<Vec<SymbolOverride>, String> {
+) -> Result<Vec<SymbolOverride>, AppError> {
     db::run_blocking(state.db.clone(), fetch_symbol_overrides_inner).await
 }
 
@@ -966,10 +941,10 @@ pub async fn set_symbol_override(
     state: State<'_, AppState>,
     commodity_guid: String,
     symbol: String,
-) -> Result<SymbolOverride, String> {
+) -> Result<SymbolOverride, AppError> {
     let normalized = normalize_symbol(&symbol)?;
     db::run_blocking(state.db.clone(), move |conn| {
-        set_symbol_override_inner(conn, commodity_guid, normalized).map_err(String::from)
+        set_symbol_override_inner(conn, commodity_guid, normalized)
     })
     .await
 }
@@ -986,9 +961,9 @@ fn delete_symbol_override_inner(conn: &Connection, commodity_guid: &str) -> Resu
 pub async fn delete_symbol_override(
     state: State<'_, AppState>,
     commodity_guid: String,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     db::run_blocking(state.db.clone(), move |conn| {
-        delete_symbol_override_inner(conn, &commodity_guid).map_err(String::from)
+        delete_symbol_override_inner(conn, &commodity_guid)
     })
     .await
 }
@@ -1024,7 +999,7 @@ pub(crate) fn write_prices_and_log(
 }
 
 #[tauri::command]
-pub async fn refresh_prices(state: State<'_, AppState>) -> Result<PricesResult, String> {
+pub async fn refresh_prices(state: State<'_, AppState>) -> Result<PricesResult, AppError> {
     let generation = state.book_generation.load(Ordering::SeqCst);
     let pre = db::run_blocking(state.db.clone(), read_price_data).await?;
 
@@ -1036,11 +1011,12 @@ pub async fn refresh_prices(state: State<'_, AppState>) -> Result<PricesResult, 
     let gen_check = state.book_generation.clone();
     db::run_blocking(state.db.clone(), move |conn| {
         if gen_check.load(Ordering::SeqCst) != generation {
-            return Err(
-                "Book changed while prices were refreshing. Those results were discarded".to_string(),
-            );
+            return Err(AppError::Validation(
+                "Book changed while prices were refreshing. Those results were discarded"
+                    .to_string(),
+            ));
         }
-        write_prices_and_log(conn, &write_data).map_err(String::from)
+        write_prices_and_log(conn, &write_data)
     })
     .await?;
 

@@ -1,3 +1,4 @@
+use crate::db::AppError;
 use rusqlite::Connection;
 use serde::Serialize;
 use tauri::State;
@@ -16,21 +17,18 @@ pub struct NavBadges {
     pub uncleared_transactions: i64,
 }
 
-fn nav_badges_inner(conn: &Connection) -> Result<NavBadges, String> {
-    let due_schedules: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM recurring_schedules
+fn nav_badges_inner(conn: &Connection) -> Result<NavBadges, AppError> {
+    let due_schedules: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM recurring_schedules
              WHERE active = 1 AND next_due_date IS NOT NULL
                AND substr(next_due_date, 1, 10) <= date('now', 'localtime')",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|e| e.to_string())?;
+        [],
+        |row| row.get(0),
+    )?;
 
-    let uncleared_transactions: i64 = conn
-        .query_row(
-            &format!(
-                "SELECT COUNT(DISTINCT s.tx_guid)
+    let uncleared_transactions: i64 = conn.query_row(
+        &format!(
+            "SELECT COUNT(DISTINCT s.tx_guid)
                  FROM splits s
                  JOIN transactions t ON t.guid = s.tx_guid
                  JOIN accounts a ON a.guid = s.account_guid
@@ -38,14 +36,13 @@ fn nav_badges_inner(conn: &Connection) -> Result<NavBadges, String> {
                    AND a.placeholder = 0
                    AND a.account_type IN ({}, {})
                    AND {}",
-                utils::cash_like_types_sql(),
-                utils::liability_types_sql(),
-                utils::VISIBLE_TX_FILTER
-            ),
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|e| e.to_string())?;
+            utils::cash_like_types_sql(),
+            utils::liability_types_sql(),
+            utils::VISIBLE_TX_FILTER
+        ),
+        [],
+        |row| row.get(0),
+    )?;
 
     Ok(NavBadges {
         due_schedules,
@@ -54,7 +51,7 @@ fn nav_badges_inner(conn: &Connection) -> Result<NavBadges, String> {
 }
 
 #[tauri::command]
-pub async fn fetch_nav_badges(state: State<'_, AppState>) -> Result<NavBadges, String> {
+pub async fn fetch_nav_badges(state: State<'_, AppState>) -> Result<NavBadges, AppError> {
     run_blocking(state.db.clone(), nav_badges_inner).await
 }
 

@@ -5,7 +5,6 @@
   import { Textarea } from '$lib/components/ui/textarea';
   import { Button } from '$lib/components/ui/button';
   import * as Card from '$lib/components/ui/card';
-  import * as Dialog from '$lib/components/ui/dialog';
   import IconCardHeader from '$lib/components/shared/icon-card-header.svelte';
   import { ChevronLeft, Info } from '@lucide/svelte';
   import { DatePicker } from '$lib/components/shared/date-picker';
@@ -13,6 +12,16 @@
   import { toast } from '$lib/components/ui/sonner';
   import DescriptionCombobox from '$lib/features/transactions/description-combobox.svelte';
   import TransactionAttachments from '$lib/features/transactions/transaction-attachments.svelte';
+  import UnreconcileConfirmDialog from '$lib/features/transactions/unreconcile-confirm-dialog.svelte';
+  import DeleteTransactionDialog from '$lib/features/transactions/delete-transaction-dialog.svelte';
+  import DiscardChangesDialog from '$lib/features/transactions/discard-changes-dialog.svelte';
+  import {
+    readLastAccounts,
+    readRecipes,
+    writeLastAccounts,
+    writeRecipes,
+    type TxRecipe
+  } from '$lib/features/transactions/entry-memory';
   import {
     SplitEditor,
     autoFillIndex,
@@ -41,23 +50,7 @@
   import { unsavedChanges } from '$lib/stores/unsaved-changes.svelte';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
 
-  const LAST_ACCOUNTS_KEY = 'tx-last-accounts';
-  const RECENT_RECIPES_KEY = 'tx-recent-recipes';
   const SPLIT_ID_PREFIX = 'tx-split';
-
-  /** One remembered transaction shape, keyed by its description. */
-  interface RecipeSplit {
-    accountGuid: string;
-    amount: string;
-    quantity: string;
-    showQuantity: boolean;
-    memo: string;
-  }
-
-  interface TxRecipe {
-    description: string;
-    splits: RecipeSplit[];
-  }
 
   let {
     mode = 'create',
@@ -102,49 +95,6 @@
   function nextKey(): number {
     keySeq += 1;
     return keySeq;
-  }
-
-  function readStoredArray(key: string): string[] {
-    try {
-      const raw = localStorage.getItem(key);
-      if (!raw) return [];
-      const parsed: unknown = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : [];
-    } catch {
-      return [];
-    }
-  }
-
-  function writeStoredArray(key: string, values: string[]): void {
-    try {
-      localStorage.setItem(key, JSON.stringify(values.slice(0, 20)));
-    } catch {
-      // Storage full or unavailable — entry speed hints are best-effort.
-    }
-  }
-
-  function readStoredRecipes(): TxRecipe[] {
-    try {
-      const raw = localStorage.getItem(RECENT_RECIPES_KEY);
-      if (!raw) return [];
-      const parsed: unknown = JSON.parse(raw);
-      if (!Array.isArray(parsed)) return [];
-      return parsed.filter((v): v is TxRecipe => {
-        if (!v || typeof v !== 'object') return false;
-        const r = v as { description?: unknown; splits?: unknown };
-        return typeof r.description === 'string' && Array.isArray(r.splits);
-      });
-    } catch {
-      return [];
-    }
-  }
-
-  function writeStoredRecipes(recipes: TxRecipe[]): void {
-    try {
-      localStorage.setItem(RECENT_RECIPES_KEY, JSON.stringify(recipes.slice(0, 20)));
-    } catch {
-      // Storage full or unavailable — entry speed hints are best-effort.
-    }
   }
 
   // The edit page mounts this form only after the payload resolves, so the
@@ -203,7 +153,7 @@
   let formError = $state('');
   let showErrors = $state(false);
   let didPrefillAccounts = $state(false);
-  let recipes = $state<TxRecipe[]>(untrack(() => readStoredRecipes()));
+  let recipes = $state<TxRecipe[]>(untrack(() => readRecipes()));
   let pendingSaveMode = $state<'save' | 'next'>('save');
   // Set while a successful save/delete/discard navigates, so the
   // beforeNavigate guard doesn’t ask a second time.
@@ -242,7 +192,7 @@
       didPrefillAccounts = true;
       return;
     }
-    const last = untrack(() => readStoredArray(LAST_ACCOUNTS_KEY)).filter((g) => knownGuids.has(g));
+    const last = untrack(() => readLastAccounts()).filter((g) => knownGuids.has(g));
     if (last.length > 0) {
       for (let i = 0; i < splits.length && i < last.length; i += 1) {
         splits[i].accountGuid = last[i];
@@ -340,7 +290,7 @@
 
   function rememberForNextTime(usedSplits: SplitDraft[], desc: string) {
     const valid = usedSplits.map((s) => s.accountGuid).filter((g) => knownGuids.has(g));
-    if (valid.length > 0) writeStoredArray(LAST_ACCOUNTS_KEY, valid);
+    if (valid.length > 0) writeLastAccounts(valid);
     const trimmed = desc.trim();
     if (!trimmed) return;
     const recipe: TxRecipe = {
@@ -355,7 +305,7 @@
     };
     const next = [recipe, ...recipes.filter((r) => r.description !== trimmed)];
     recipes = next;
-    writeStoredRecipes(next);
+    writeRecipes(next);
   }
 
   /** Description picked a remembered transaction: restore its splits while no
@@ -837,85 +787,19 @@
     bind:pendingPaths={pendingAttachments}
   />
 
-  <Dialog.Root bind:open={confirmUnreconcileOpen}>
-    <Dialog.Content class="max-h-[90vh] overflow-y-auto sm:max-w-lg">
-      <Dialog.Header>
-        <Dialog.Title>Save and unreconcile?</Dialog.Title>
-        <Dialog.Description>
-          Saving re-creates this transaction’s splits, so every cleared or reconciled split goes
-          back to New. Reconciled splits also drop out of the account’s starting balance for its
-          next reconciliation, and all of them show up again as candidates.
-        </Dialog.Description>
-      </Dialog.Header>
-      <Dialog.Footer>
-        <Button
-          variant="outline"
-          onclick={() => (confirmUnreconcileOpen = false)}
-          disabled={saving}
-        >
-          Cancel
-        </Button>
-        <Button
-          onclick={() => {
-            confirmUnreconcileOpen = false;
-            void saveNow(true, pendingSaveMode);
-          }}
-          disabled={saving}
-        >
-          {saving ? 'Saving…' : 'Save anyway'}
-        </Button>
-      </Dialog.Footer>
-    </Dialog.Content>
-  </Dialog.Root>
+  <UnreconcileConfirmDialog
+    bind:open={confirmUnreconcileOpen}
+    {saving}
+    onConfirm={() => void saveNow(true, pendingSaveMode)}
+  />
 
-  <Dialog.Root bind:open={deleteDialogOpen}>
-    <Dialog.Content class="max-h-[90vh] overflow-y-auto sm:max-w-lg">
-      <Dialog.Header>
-        <Dialog.Title>Delete this one?</Dialog.Title>
-        <Dialog.Description>
-          It’ll be gone for good, splits and all.
-          {#if attachmentCount > 0}
-            Its {plural(attachmentCount, 'attachment')} are deleted permanently too.
-          {/if}
-        </Dialog.Description>
-      </Dialog.Header>
-      {#if hasLockedSplits}
-        <p
-          role="note"
-          class="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300"
-        >
-          {plural(lockedSplitCount, 'split')} here {lockedSplitCount === 1 ? 'is' : 'are'} cleared or
-          reconciled. Deleting removes them from the account’s reconciliation history.
-        </p>
-      {/if}
-      <Dialog.Footer>
-        <Button variant="outline" onclick={() => (deleteDialogOpen = false)} disabled={deleting}>
-          Cancel
-        </Button>
-        <Button variant="destructive" onclick={handleDeleteConfirm} disabled={deleting}>
-          {deleting ? 'Deleting…' : 'Yes, delete'}
-        </Button>
-      </Dialog.Footer>
-    </Dialog.Content>
-  </Dialog.Root>
+  <DeleteTransactionDialog
+    bind:open={deleteDialogOpen}
+    {attachmentCount}
+    {lockedSplitCount}
+    {deleting}
+    onConfirm={handleDeleteConfirm}
+  />
 
-  <Dialog.Root
-    bind:open={discardDialogOpen}
-    onOpenChange={(open) => {
-      if (!open) resolveDiscard(false);
-    }}
-  >
-    <Dialog.Content class="max-h-[90vh] overflow-y-auto sm:max-w-lg">
-      <Dialog.Header>
-        <Dialog.Title>Lose your changes?</Dialog.Title>
-        <Dialog.Description>
-          You’ve got unsaved edits. Leave now and you’ll lose them.
-        </Dialog.Description>
-      </Dialog.Header>
-      <Dialog.Footer>
-        <Button variant="outline" onclick={() => resolveDiscard(false)}>Keep editing</Button>
-        <Button variant="destructive" onclick={() => resolveDiscard(true)}>Discard changes</Button>
-      </Dialog.Footer>
-    </Dialog.Content>
-  </Dialog.Root>
+  <DiscardChangesDialog bind:open={discardDialogOpen} onResolve={resolveDiscard} />
 </div>

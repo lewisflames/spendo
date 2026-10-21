@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { Command } from '$lib/tauri';
 import { mockInvoke } from './mock-invoke';
 
 /**
@@ -9,22 +10,27 @@ import { mockInvoke } from './mock-invoke';
  */
 describe('mockInvoke', () => {
   it('rejects unknown commands with a pointer to the mock', async () => {
-    await expect(mockInvoke('not_a_command')).rejects.toThrow(/No fixture for 'not_a_command'/);
+    await expect(mockInvoke('not_a_command' as Command)).rejects.toThrow(
+      /No fixture for 'not_a_command'/
+    );
+  });
+
+  it('rejects with serialized backend errors', async () => {
+    await expect(mockInvoke('fetch_holding_detail', { commodityGuid: 'nope' })).rejects.toEqual({
+      kind: 'notFound',
+      message: '[mock] Unknown holding nope'
+    });
+    await expect(
+      mockInvoke('create_transaction', { input: { postDate: '', splits: [] } })
+    ).rejects.toMatchObject({ kind: 'validation' });
   });
 
   it('boots the shell with a balanced book', async () => {
-    const home = await mockInvoke<{ hasData: boolean; summary: { totalTransactions: number } }>(
-      'fetch_home_data'
-    );
+    const home = await mockInvoke('fetch_home_data');
     expect(home.hasData).toBe(true);
-    expect(home.summary.totalTransactions).toBeGreaterThan(0);
+    expect(home.summary?.totalTransactions).toBeGreaterThan(0);
 
-    const accounts = await mockInvoke<{
-      trees: unknown[];
-      reportCurrency: string;
-      balanceCheck: number;
-      byType: Record<string, { totalBalance: number }>;
-    }>('fetch_accounts');
+    const accounts = await mockInvoke('fetch_accounts');
     expect(accounts.trees).toHaveLength(5);
     expect(accounts.reportCurrency).toBe('USD');
     // Every fixture transaction is balanced, so the identity must hold.
@@ -34,11 +40,7 @@ describe('mockInvoke', () => {
   });
 
   it('paginates transactions with balanced splits', async () => {
-    const page = await mockInvoke<{
-      transactions: { guid: string; splits: { amount: number }[]; totalAmount: number }[];
-      total: number;
-      totalPages: number;
-    }>('fetch_transactions', { page: 1, pageSize: 10 });
+    const page = await mockInvoke('fetch_transactions', { page: 1, pageSize: 10 });
     expect(page.transactions).toHaveLength(10);
     expect(page.total).toBeGreaterThan(10);
     expect(page.totalPages).toBeGreaterThan(1);
@@ -53,25 +55,23 @@ describe('mockInvoke', () => {
   });
 
   it('serves the payloads every page loads', async () => {
-    const home = await mockInvoke<{ summary: { currency: string } }>('fetch_home_data');
-    expect(home.summary.currency).toBe('USD');
+    const home = await mockInvoke('fetch_home_data');
+    expect(home.summary?.currency).toBe('USD');
 
-    const detail = await mockInvoke<{ account: { guid: string }; transactions: unknown[] }>(
-      'fetch_account_detail',
-      { guid: 'checking', page: 1, pageSize: 10 }
-    );
+    const detail = await mockInvoke('fetch_account_detail', {
+      guid: 'checking',
+      page: 1,
+      pageSize: 10
+    });
     expect(detail.account.guid).toBe('checking');
     expect(detail.transactions.length).toBeGreaterThan(0);
 
-    const txList = await mockInvoke<{ transactions: { guid: string }[] }>('fetch_transactions', {
+    const txList = await mockInvoke('fetch_transactions', {
       page: 1,
       pageSize: 5
     });
     const guid = txList.transactions[0].guid;
-    const tx = await mockInvoke<{ transaction: { guid: string; splits: unknown[] } } | null>(
-      'fetch_transaction',
-      { guid }
-    );
+    const tx = await mockInvoke('fetch_transaction', { guid });
     expect(tx?.transaction.guid).toBe(guid);
     expect(tx?.transaction.splits.length).toBeGreaterThanOrEqual(2);
 
@@ -96,8 +96,8 @@ describe('mockInvoke', () => {
   });
 
   it('round-trips a created transaction', async () => {
-    const before = await mockInvoke<{ summary: { totalTransactions: number } }>('fetch_home_data');
-    const guid = await mockInvoke<string>('create_transaction', {
+    const before = await mockInvoke('fetch_home_data');
+    const guid = await mockInvoke('create_transaction', {
       input: {
         postDate: '2026-09-19',
         description: 'Mock smoke test',
@@ -107,21 +107,16 @@ describe('mockInvoke', () => {
         ]
       }
     });
-    const after = await mockInvoke<{ summary: { totalTransactions: number } }>('fetch_home_data');
-    expect(after.summary.totalTransactions).toBe(before.summary.totalTransactions + 1);
+    const after = await mockInvoke('fetch_home_data');
+    expect(after.summary?.totalTransactions).toBe(before.summary!.totalTransactions + 1);
 
-    const created = await mockInvoke<{ transaction: { description: string } }>(
-      'fetch_transaction',
-      {
-        guid
-      }
-    );
-    expect(created.transaction.description).toBe('Mock smoke test');
+    const created = await mockInvoke('fetch_transaction', {
+      guid
+    });
+    expect(created?.transaction.description).toBe('Mock smoke test');
 
     await mockInvoke('delete_transaction', { guid });
-    const reverted = await mockInvoke<{ summary: { totalTransactions: number } }>(
-      'fetch_home_data'
-    );
-    expect(reverted.summary.totalTransactions).toBe(before.summary.totalTransactions);
+    const reverted = await mockInvoke('fetch_home_data');
+    expect(reverted.summary?.totalTransactions).toBe(before.summary!.totalTransactions);
   });
 });

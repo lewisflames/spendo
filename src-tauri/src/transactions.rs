@@ -1,4 +1,4 @@
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -181,24 +181,32 @@ pub struct HeatmapPoint {
 fn validate_post_date(post_date: &str) -> Result<String, AppError> {
     let trimmed = post_date.trim();
     if trimmed.is_empty() {
-        return Err(AppError::Validation("Pick a date for this transaction".to_string()));
+        return Err(AppError::Validation(
+            "Pick a date for this transaction".to_string(),
+        ));
     }
-    let normalized = utils::validate_iso_date(trimmed).map_err(AppError::Validation)?;
+    let normalized = utils::validate_iso_date(trimmed)?;
     // Local "today" so users east of UTC can post their current day (matches
     // the frontend's `todayStr` and the visibility window).
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     if normalized > today {
-        return Err(AppError::Validation("Future dates stay out of balances. Use today or earlier".to_string()));
+        return Err(AppError::Validation(
+            "Future dates stay out of balances. Use today or earlier".to_string(),
+        ));
     }
     Ok(normalized)
 }
 
 fn to_value_rational(amount: f64) -> Result<(i64, i64), AppError> {
     if !amount.is_finite() {
-        return Err(AppError::Validation("Split amounts need to be real numbers".to_string()));
+        return Err(AppError::Validation(
+            "Split amounts need to be real numbers".to_string(),
+        ));
     }
     if amount.abs() > 1_000_000_000.0 {
-        return Err(AppError::Validation("That split amount is huge. Keep it under 1,000,000,000".to_string()));
+        return Err(AppError::Validation(
+            "That split amount is huge. Keep it under 1,000,000,000".to_string(),
+        ));
     }
     let scaled = amount * VALUE_DENOM as f64;
     let rounded = scaled.round();
@@ -216,10 +224,14 @@ fn to_value_rational(amount: f64) -> Result<(i64, i64), AppError> {
 
 fn to_quantity_rational(qty: f64) -> Result<(i64, i64), AppError> {
     if !qty.is_finite() {
-        return Err(AppError::Validation("Share counts need to be real numbers".to_string()));
+        return Err(AppError::Validation(
+            "Share counts need to be real numbers".to_string(),
+        ));
     }
     if qty.abs() > 1_000_000_000.0 {
-        return Err(AppError::Validation("That share count is huge. Keep it under 1,000,000,000".to_string()));
+        return Err(AppError::Validation(
+            "That share count is huge. Keep it under 1,000,000,000".to_string(),
+        ));
     }
     let num = (qty * QUANTITY_DENOM as f64).round() as i64;
     Ok((num, QUANTITY_DENOM))
@@ -291,16 +303,22 @@ pub(crate) fn validate_tx_body_with(
     lookup: &dyn Fn(&str) -> Result<Option<SplitAccountInfo>, AppError>,
 ) -> Result<(), AppError> {
     if input.splits.len() < 2 {
-        return Err(AppError::Validation("A transaction needs at least two splits so both sides balance".to_string()));
+        return Err(AppError::Validation(
+            "A transaction needs at least two splits so both sides balance".to_string(),
+        ));
     }
     if input.splits.len() > 50 {
-        return Err(AppError::Validation("Keep it to 50 splits or fewer".to_string()));
+        return Err(AppError::Validation(
+            "Keep it to 50 splits or fewer".to_string(),
+        ));
     }
     let mut sum = 0.0;
     for (i, s) in input.splits.iter().enumerate() {
         let n = i + 1;
         if s.account_guid.trim().is_empty() {
-            return Err(AppError::Validation(format!("Split {n}: choose an account")));
+            return Err(AppError::Validation(format!(
+                "Split {n}: choose an account"
+            )));
         }
         let account = lookup(s.account_guid.trim())?;
         let Some(SplitAccountInfo {
@@ -308,7 +326,9 @@ pub(crate) fn validate_tx_body_with(
             account_type,
         }) = account
         else {
-            return Err(AppError::NotFound(format!("Split {n}: account not found. It may have been removed")));
+            return Err(AppError::NotFound(format!(
+                "Split {n}: account not found. It may have been removed"
+            )));
         };
         // The internal ROOT is not a real account: posting to it corrupts the
         // balance-sheet identity (the picker never offers it).
@@ -318,19 +338,25 @@ pub(crate) fn validate_tx_body_with(
             )));
         }
         if placeholder != 0 {
-            return Err(AppError::Validation(format!("Split {n}: placeholder accounts just group things. Pick a real one")));
+            return Err(AppError::Validation(format!(
+                "Split {n}: placeholder accounts just group things. Pick a real one"
+            )));
         }
         if !s.amount.is_finite() {
             return Err(AppError::Validation(format!("Split {n}: enter an amount")));
         }
         if let Some(q) = s.quantity {
             if !q.is_finite() {
-                return Err(AppError::Validation(format!("Split {n}: enter the share count as a number")));
+                return Err(AppError::Validation(format!(
+                    "Split {n}: enter the share count as a number"
+                )));
             }
         }
         if let Some(ref memo) = s.memo {
             if memo.len() > 500 {
-                return Err(AppError::Validation(format!("Split {n}: keep the memo under 500 characters")));
+                return Err(AppError::Validation(format!(
+                    "Split {n}: keep the memo under 500 characters"
+                )));
             }
         }
         sum += s.amount;
@@ -342,17 +368,23 @@ pub(crate) fn validate_tx_body_with(
     }
     if let Some(ref d) = input.description {
         if d.len() > 500 {
-            return Err(AppError::Validation("Keep the description under 500 characters".to_string()));
+            return Err(AppError::Validation(
+                "Keep the description under 500 characters".to_string(),
+            ));
         }
     }
     if let Some(ref n) = input.num {
         if n.len() > 100 {
-            return Err(AppError::Validation("Keep the number under 100 characters".to_string()));
+            return Err(AppError::Validation(
+                "Keep the number under 100 characters".to_string(),
+            ));
         }
     }
     if let Some(ref n) = input.notes {
         if n.len() > 2000 {
-            return Err(AppError::Validation("Keep notes under 2000 characters".to_string()));
+            return Err(AppError::Validation(
+                "Keep notes under 2000 characters".to_string(),
+            ));
         }
     }
 
@@ -371,10 +403,8 @@ fn build_filter_conditions(
     w.push_raw(utils::VISIBLE_TX_FILTER);
 
     if let Some(ref f) = filters {
-        let from = utils::validate_optional_iso_date(f.date_from.as_deref())
-            .map_err(AppError::Validation)?;
-        let to = utils::validate_optional_iso_date(f.date_to.as_deref())
-            .map_err(AppError::Validation)?;
+        let from = utils::validate_optional_iso_date(f.date_from.as_deref())?;
+        let to = utils::validate_optional_iso_date(f.date_to.as_deref())?;
         sql::push_tx_date_search(&mut w, from.as_deref(), to.as_deref(), f.search.as_deref());
     }
 
@@ -382,7 +412,10 @@ fn build_filter_conditions(
 }
 
 /// Per-transaction split rows plus the FX-converted transaction total.
-type SplitMaps = (std::collections::HashMap<String, Vec<SplitData>>, std::collections::HashMap<String, f64>);
+type SplitMaps = (
+    std::collections::HashMap<String, Vec<SplitData>>,
+    std::collections::HashMap<String, f64>,
+);
 
 /// Report currency + FX history shared by one list/detail command (loading the
 /// full history once instead of once per helper).
@@ -391,9 +424,9 @@ struct FxContext {
     history: fx::FxHistory,
 }
 
-fn load_fx_context(conn: &Connection) -> Result<FxContext, String> {
+fn load_fx_context(conn: &Connection) -> Result<FxContext, AppError> {
     Ok(FxContext {
-        report_currency: fx::get_report_currency_mnemonic(conn)?.unwrap_or_default(),
+        report_currency: fx::report_currency_or_empty(conn)?,
         history: fx::FxHistory::load(conn)?,
     })
 }
@@ -404,7 +437,7 @@ fn load_fx_context(conn: &Connection) -> Result<FxContext, String> {
 /// ordering/totals are unaffected.
 const MAX_IN_PARAMS: usize = sql::MAX_IN_PARAMS;
 
-fn fetch_splits_for_txns(conn: &Connection, guids: &[String]) -> Result<SplitMaps, String> {
+fn fetch_splits_for_txns(conn: &Connection, guids: &[String]) -> Result<SplitMaps, AppError> {
     let ctx = load_fx_context(conn)?;
     fetch_splits_for_txns_with(conn, guids, &ctx)
 }
@@ -413,7 +446,7 @@ fn fetch_splits_for_txns_with(
     conn: &Connection,
     guids: &[String],
     ctx: &FxContext,
-) -> Result<SplitMaps, String> {
+) -> Result<SplitMaps, AppError> {
     if guids.is_empty() {
         return Ok((
             std::collections::HashMap::new(),
@@ -456,7 +489,7 @@ fn fetch_splits_for_txns_with(
             sql::in_clause(chunk.len())
         );
 
-        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+        let mut stmt = conn.prepare(&sql)?;
         let param_refs = sql::string_param_refs(chunk);
 
         let rows: Vec<(String, SplitData, f64, String)> = stmt
@@ -481,10 +514,8 @@ fn fetch_splits_for_txns_with(
                     row.get::<_, f64>(6)?,    // signed_amount
                     row.get::<_, String>(7)?, // post_date
                 ))
-            })
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?;
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
 
         for (tx_guid, split, signed_amount, post_date) in rows {
             // Sorted by rational magnitude desc, then signed asc (outflow leg
@@ -511,7 +542,7 @@ struct TxRow {
     notes: Option<String>,
 }
 
-fn map_tx_rows(conn: &Connection, rows: Vec<TxRow>) -> Result<Vec<TransactionRow>, String> {
+fn map_tx_rows(conn: &Connection, rows: Vec<TxRow>) -> Result<Vec<TransactionRow>, AppError> {
     let ctx = load_fx_context(conn)?;
     map_tx_rows_with(conn, rows, &ctx)
 }
@@ -520,7 +551,7 @@ fn map_tx_rows_with(
     conn: &Connection,
     rows: Vec<TxRow>,
     ctx: &FxContext,
-) -> Result<Vec<TransactionRow>, String> {
+) -> Result<Vec<TransactionRow>, AppError> {
     let guids: Vec<String> = rows.iter().map(|r| r.guid.clone()).collect();
     let (split_map, total_map) = fetch_splits_for_txns_with(conn, &guids, ctx)?;
 
@@ -550,7 +581,7 @@ fn fetch_tx_totals(
     where_clause: &str,
     params: &[Box<dyn rusqlite::types::ToSql>],
     ctx: &FxContext,
-) -> Result<Vec<(String, f64)>, String> {
+) -> Result<Vec<(String, f64)>, AppError> {
     let signed = utils::signed_amount_expr(utils::RAW_AMOUNT, "a.account_type");
     let sql = format!(
         "SELECT guid, post_date, signed_amount, commodity FROM (
@@ -569,20 +600,13 @@ fn fetch_tx_totals(
          ) WHERE rn = 1",
         raw = utils::RAW_AMOUNT,
     );
-    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(&sql)?;
     let refs = sql::param_refs(params);
     let rows: Vec<(String, String, Option<f64>, Option<String>)> = stmt
         .query_map(refs.as_slice(), |row| {
-            Ok((
-                row.get(0)?,
-                row.get(1)?,
-                row.get(2)?,
-                row.get(3)?,
-            ))
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
 
     Ok(rows
         .into_iter()
@@ -605,17 +629,15 @@ fn fetch_transactions_inner(
     filters: Option<Filters>,
     sort_by: Option<&str>,
     sort_dir: Option<&str>,
-) -> Result<TransactionsResult, String> {
+) -> Result<TransactionsResult, AppError> {
     let w = build_filter_conditions(&filters, 0)?;
     let where_clause = w.where_clause();
 
     let count_sql = format!("SELECT COUNT(*) as cnt FROM transactions t{where_clause}");
-    let mut count_stmt = conn.prepare(&count_sql).map_err(|e| e.to_string())?;
+    let mut count_stmt = conn.prepare(&count_sql)?;
     let param_refs = sql::param_refs(&w.params);
 
-    let total: i64 = count_stmt
-        .query_row(param_refs.as_slice(), |row| row.get(0))
-        .map_err(|e| e.to_string())?;
+    let total: i64 = count_stmt.query_row(param_refs.as_slice(), |row| row.get(0))?;
 
     let (page_size, total_pages, safe_page, offset) = utils::paginate(total, page, page_size);
 
@@ -653,7 +675,7 @@ fn fetch_transactions_inner(
                  WHERE guid IN ({})",
                 sql::in_clause(chunk.len())
             );
-            let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+            let mut stmt = conn.prepare(&sql)?;
             let param_refs = sql::string_param_refs(chunk);
             let rows = stmt
                 .query_map(param_refs.as_slice(), |row| {
@@ -664,10 +686,8 @@ fn fetch_transactions_inner(
                         num: row.get(3)?,
                         notes: row.get(4)?,
                     })
-                })
-                .map_err(|e| e.to_string())?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| e.to_string())?;
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
             for row in rows {
                 rows_by_guid.insert(row.guid.clone(), row);
             }
@@ -701,7 +721,7 @@ fn fetch_transactions_inner(
         "SELECT guid, post_date, description, num, notes FROM transactions t{where_clause} {order_clause} LIMIT ? OFFSET ?"
     );
 
-    let mut query_stmt = conn.prepare(&query_sql).map_err(|e| e.to_string())?;
+    let mut query_stmt = conn.prepare(&query_sql)?;
     let all_params: Vec<Box<dyn rusqlite::types::ToSql>> = w
         .params
         .into_iter()
@@ -721,10 +741,8 @@ fn fetch_transactions_inner(
                 num: row.get(3)?,
                 notes: row.get(4)?,
             })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
 
     let transactions = map_tx_rows(conn, rows)?;
 
@@ -742,7 +760,7 @@ fn fetch_transactions_inner(
 fn fetch_transaction_heatmap_inner(
     conn: &Connection,
     filters: Option<Filters>,
-) -> Result<Vec<HeatmapPoint>, String> {
+) -> Result<Vec<HeatmapPoint>, AppError> {
     let w = build_filter_conditions(&filters, 0)?;
     let where_clause = w.where_clause();
 
@@ -752,7 +770,7 @@ fn fetch_transaction_heatmap_inner(
          GROUP BY day
          ORDER BY day"
     );
-    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(&sql)?;
     let param_refs = sql::param_refs(&w.params);
 
     let points = stmt
@@ -761,10 +779,8 @@ fn fetch_transaction_heatmap_inner(
                 date: row.get(0)?,
                 count: row.get(1)?,
             })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
 
     Ok(points)
 }
@@ -777,7 +793,7 @@ pub async fn fetch_transactions(
     filters: Option<Filters>,
     sort_by: Option<String>,
     sort_dir: Option<String>,
-) -> Result<TransactionsResult, String> {
+) -> Result<TransactionsResult, AppError> {
     run_blocking(state.db.clone(), move |conn| {
         fetch_transactions_inner(
             conn,
@@ -795,7 +811,7 @@ pub async fn fetch_transactions(
 pub async fn fetch_transaction_heatmap(
     state: State<'_, AppState>,
     filters: Option<Filters>,
-) -> Result<Vec<HeatmapPoint>, String> {
+) -> Result<Vec<HeatmapPoint>, AppError> {
     run_blocking(state.db.clone(), move |conn| {
         fetch_transaction_heatmap_inner(conn, filters)
     })
@@ -811,7 +827,7 @@ fn neighbor_guid(
     post_date: &str,
     guid: &str,
     above: bool,
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, AppError> {
     let (op, order) = if above {
         (">", "ORDER BY t.post_date ASC, t.guid ASC")
     } else {
@@ -828,13 +844,13 @@ fn neighbor_guid(
     );
     conn.query_row(&sql, rusqlite::params![post_date, guid], |row| row.get(0))
         .optional()
-        .map_err(|e| e.to_string())
+        .map_err(AppError::from)
 }
 
 fn fetch_transaction_inner(
     conn: &Connection,
     guid: &str,
-) -> Result<Option<TransactionDetailResult>, String> {
+) -> Result<Option<TransactionDetailResult>, AppError> {
     let base = conn
         .query_row(
             &format!(
@@ -854,8 +870,7 @@ fn fetch_transaction_inner(
                 })
             },
         )
-        .optional()
-        .map_err(|e| e.to_string())?;
+        .optional()?;
 
     let Some(base) = base else {
         return Ok(None);
@@ -863,13 +878,11 @@ fn fetch_transaction_inner(
 
     let guids = [base.guid.clone()];
     let (split_map, total_map) = fetch_splits_for_txns(conn, &guids)?;
-    let attachment_count: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM attachments WHERE tx_guid = ?1",
-            [&base.guid],
-            |row| row.get(0),
-        )
-        .map_err(|e| e.to_string())?;
+    let attachment_count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM attachments WHERE tx_guid = ?1",
+        [&base.guid],
+        |row| row.get(0),
+    )?;
 
     let transaction = TransactionDetail {
         guid: base.guid.clone(),
@@ -901,8 +914,11 @@ fn fetch_transaction_inner(
 pub async fn fetch_transaction(
     state: State<'_, AppState>,
     guid: String,
-) -> Result<Option<TransactionDetailResult>, String> {
-    run_blocking(state.db.clone(), move |conn| fetch_transaction_inner(conn, &guid)).await
+) -> Result<Option<TransactionDetailResult>, AppError> {
+    run_blocking(state.db.clone(), move |conn| {
+        fetch_transaction_inner(conn, &guid)
+    })
+    .await
 }
 
 // ── Manual editor: create / update / delete ─────────────────────────────────
@@ -937,16 +953,14 @@ pub(crate) fn insert_split_rows(
 
     // One prepared statement reused for every split (and across calls through
     // the connection-level cache), instead of re-preparing per leg.
-    let mut insert = conn
-        .prepare_cached(
-            "INSERT INTO splits
+    let mut insert = conn.prepare_cached(
+        "INSERT INTO splits
               (guid, tx_guid, account_guid, value_num, value_denom,
                quantity_num, quantity_denom, reconcile_state, reconciled, memo)
               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'n', 0, ?8)",
-        )?;
+    )?;
     let mut guids = Vec::with_capacity(splits.len());
-    for (s, (value_num, value_denom, quantity_num, quantity_denom)) in
-        splits.iter().zip(converted)
+    for (s, (value_num, value_denom, quantity_num, quantity_denom)) in splits.iter().zip(converted)
     {
         let split_guid = uuid::Uuid::new_v4().to_string();
         insert.execute(params![
@@ -996,18 +1010,13 @@ fn create_transaction_inner(conn: &Connection, input: TxInput) -> Result<String,
                 opt_text(&input.num),
                 opt_text(&input.notes),
             ],
-        )
-        ?;
+        )?;
         insert_split_rows(conn, &tx_guid, &input.splits)?;
         Ok(tx_guid.clone())
     })
 }
 
-fn update_transaction_inner(
-    conn: &Connection,
-    guid: &str,
-    input: TxInput,
-) -> Result<(), AppError> {
+fn update_transaction_inner(conn: &Connection, guid: &str, input: TxInput) -> Result<(), AppError> {
     let post_date = validate_tx_input(conn, &input)?;
     let exists: bool = conn
         .query_row(
@@ -1015,11 +1024,12 @@ fn update_transaction_inner(
             params![guid],
             |_| Ok(()),
         )
-        .optional()
-        ?
+        .optional()?
         .is_some();
     if !exists {
-        return Err(AppError::NotFound("Transaction not found. It may have been deleted or replaced".to_string()));
+        return Err(AppError::NotFound(
+            "Transaction not found. It may have been deleted or replaced".to_string(),
+        ));
     }
     // Manual edits delete + re-insert splits as `'n'`, so saving a cleared or
     // reconciled transaction wipes its reconciliation state. The edit form
@@ -1040,10 +1050,8 @@ fn update_transaction_inner(
                 opt_text(&input.notes),
                 guid,
             ],
-        )
-        ?;
-        conn.execute("DELETE FROM splits WHERE tx_guid = ?1", params![guid])
-            ?;
+        )?;
+        conn.execute("DELETE FROM splits WHERE tx_guid = ?1", params![guid])?;
         insert_split_rows(conn, guid, &input.splits)?;
         Ok(())
     })
@@ -1060,21 +1068,20 @@ fn delete_transaction_inner(
             params![guid],
             |_| Ok(()),
         )
-        .optional()
-        ?
+        .optional()?
         .is_some();
     if !exists {
-        return Err(AppError::NotFound("Transaction not found. It may have been deleted or replaced".to_string()));
+        return Err(AppError::NotFound(
+            "Transaction not found. It may have been deleted or replaced".to_string(),
+        ));
     }
     if !unreconcile {
         reject_when_reconciled(conn, guid, "delete")?;
     }
 
     with_tx_err(conn, || {
-        conn.execute("DELETE FROM splits WHERE tx_guid = ?1", params![guid])
-            ?;
-        conn.execute("DELETE FROM transactions WHERE guid = ?1", params![guid])
-            ?;
+        conn.execute("DELETE FROM splits WHERE tx_guid = ?1", params![guid])?;
+        conn.execute("DELETE FROM transactions WHERE guid = ?1", params![guid])?;
         Ok(())
     })
 }
@@ -1083,9 +1090,9 @@ fn delete_transaction_inner(
 pub async fn create_transaction(
     state: State<'_, AppState>,
     input: TxInput,
-) -> Result<String, String> {
+) -> Result<String, AppError> {
     run_blocking(state.db.clone(), move |conn| {
-        create_transaction_inner(conn, input).map_err(String::from)
+        create_transaction_inner(conn, input)
     })
     .await
 }
@@ -1095,9 +1102,9 @@ pub async fn update_transaction(
     state: State<'_, AppState>,
     guid: String,
     input: TxInput,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     run_blocking(state.db.clone(), move |conn| {
-        update_transaction_inner(conn, &guid, input).map_err(String::from)
+        update_transaction_inner(conn, &guid, input)
     })
     .await
 }
@@ -1107,10 +1114,10 @@ pub async fn delete_transaction(
     state: State<'_, AppState>,
     guid: String,
     unreconcile: Option<bool>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let unreconcile = unreconcile.unwrap_or(false);
     run_blocking(state.db.clone(), move |conn| {
-        delete_transaction_inner(conn, &guid, unreconcile).map_err(String::from)
+        delete_transaction_inner(conn, &guid, unreconcile)
     })
     .await
 }
@@ -1245,12 +1252,7 @@ mod tests {
         assert_eq!(detail.transaction.splits.len(), 2);
         assert_eq!(detail.transaction.post_date, "2024-03-01");
         // Raw amounts round-trip with fixed-denominator precision.
-        let mut amounts: Vec<f64> = detail
-            .transaction
-            .splits
-            .iter()
-            .map(|s| s.amount)
-            .collect();
+        let mut amounts: Vec<f64> = detail.transaction.splits.iter().map(|s| s.amount).collect();
         amounts.sort_by(|a, b| a.total_cmp(b));
         assert!((amounts[0] + 42.10).abs() < 1e-6);
         assert!((amounts[1] - 42.10).abs() < 1e-6);
@@ -1291,7 +1293,7 @@ mod tests {
         assert_eq!(to_value_rational(0.1234).unwrap(), (1234, VALUE_DENOM));
         assert_eq!(to_value_rational(-42.1).unwrap(), (-421_000, VALUE_DENOM));
         // Near the upper bound, f64 error must not cause false rejections.
-        assert!(to_value_rational(999_999_999.9999).is_ok());
+        assert!(to_value_rational(999_999_999.999_9).is_ok());
     }
 
     /// Regression: malformed filter dates used to make `date(?, '+1 day')`
@@ -1312,7 +1314,10 @@ mod tests {
             None,
         )
         .unwrap_err();
-        assert!(err.contains("Invalid date"), "unexpected: {err}");
+        assert!(
+            err.to_string().contains("Invalid date"),
+            "unexpected: {err}"
+        );
 
         let err = fetch_transaction_heatmap_inner(
             &conn,
@@ -1323,7 +1328,10 @@ mod tests {
             }),
         )
         .unwrap_err();
-        assert!(err.contains("Invalid date"), "unexpected: {err}");
+        assert!(
+            err.to_string().contains("Invalid date"),
+            "unexpected: {err}"
+        );
     }
 
     #[test]
@@ -1332,7 +1340,10 @@ mod tests {
         let mut input = balanced_input();
         input.splits[0].account_guid = "root".to_string();
         let err = create_transaction_inner(&conn, input).unwrap_err();
-        assert!(err.to_string().contains("root account"), "unexpected: {err}");
+        assert!(
+            err.to_string().contains("root account"),
+            "unexpected: {err}"
+        );
     }
 
     #[test]
@@ -1345,19 +1356,31 @@ mod tests {
         // Placeholder account.
         let mut bad = balanced_input();
         bad.splits[1].account_guid = "placeholder".to_string();
-        assert!(create_transaction_inner(&conn, bad).unwrap_err().to_string().contains("placeholder"));
+        assert!(create_transaction_inner(&conn, bad)
+            .unwrap_err()
+            .to_string()
+            .contains("placeholder"));
         // Future date hard-block.
         let mut bad = balanced_input();
         bad.post_date = "2099-01-01".to_string();
-        assert!(create_transaction_inner(&conn, bad).unwrap_err().to_string().contains("Future"));
+        assert!(create_transaction_inner(&conn, bad)
+            .unwrap_err()
+            .to_string()
+            .contains("Future"));
         // Single split.
         let mut bad = balanced_input();
         bad.splits.truncate(1);
-        assert!(create_transaction_inner(&conn, bad).unwrap_err().to_string().contains("two splits"));
+        assert!(create_transaction_inner(&conn, bad)
+            .unwrap_err()
+            .to_string()
+            .contains("two splits"));
         // Unknown account.
         let mut bad = balanced_input();
         bad.splits[0].account_guid = "nope".to_string();
-        assert!(create_transaction_inner(&conn, bad).unwrap_err().to_string().contains("not found"));
+        assert!(create_transaction_inner(&conn, bad)
+            .unwrap_err()
+            .to_string()
+            .contains("not found"));
     }
 
     #[test]
@@ -1376,7 +1399,9 @@ mod tests {
         assert_eq!(detail.transaction.splits.len(), 2);
 
         delete_transaction_inner(&conn, &guid, false).expect("delete runs");
-        assert!(fetch_transaction_inner(&conn, &guid).expect("query runs").is_none());
+        assert!(fetch_transaction_inner(&conn, &guid)
+            .expect("query runs")
+            .is_none());
     }
 
     #[test]

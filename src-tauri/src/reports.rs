@@ -1,9 +1,10 @@
+use crate::db::AppError;
 use rusqlite::Connection;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use tauri::State;
 
-use crate::db::{AppState, run_blocking};
+use crate::db::{run_blocking, AppState};
 use crate::fx;
 use crate::tree;
 use crate::utils;
@@ -67,13 +68,11 @@ struct AccountMeta {
 /// its parent link. P&L buckets only carry accounts with in-window splits, so
 /// without this the tree walker promotes children of inactive placeholders to
 /// roots (flattened tables).
-fn fetch_account_meta(conn: &Connection) -> Result<HashMap<String, AccountMeta>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT guid, name, description, code, account_type, parent_guid, placeholder
+fn fetch_account_meta(conn: &Connection) -> Result<HashMap<String, AccountMeta>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT guid, name, description, code, account_type, parent_guid, placeholder
              FROM accounts WHERE account_type != 'ROOT'",
-        )
-        .map_err(|e| e.to_string())?;
+    )?;
     let rows = stmt
         .query_map([], |row| {
             Ok((
@@ -87,10 +86,8 @@ fn fetch_account_meta(conn: &Connection) -> Result<HashMap<String, AccountMeta>,
                     placeholder: row.get::<_, i64>(6)? != 0,
                 },
             ))
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<HashMap<_, _>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<HashMap<_, _>, _>>()?;
     Ok(rows)
 }
 
@@ -219,12 +216,11 @@ fn fetch_monthly_buckets(
     conn: &Connection,
     date_from: &str,
     date_to: &str,
-) -> Result<Vec<MonthlyBucket>, String> {
+) -> Result<Vec<MonthlyBucket>, AppError> {
     let amount = utils::signed_amount_expr(utils::RAW_AMOUNT, "a.account_type");
     let visible_now = utils::VISIBLE_NOW_EXPR;
-    let mut stmt = conn
-        .prepare(&format!(
-            "SELECT a.guid, a.name, a.description, a.code, a.account_type, a.parent_guid,
+    let mut stmt = conn.prepare(&format!(
+        "SELECT a.guid, a.name, a.description, a.code, a.account_type, a.parent_guid,
                     a.placeholder, c.mnemonic as commodity, strftime('%Y-%m', t.post_date) as month,
                     SUM({amount}) as total
              FROM splits s
@@ -237,8 +233,7 @@ fn fetch_monthly_buckets(
              GROUP BY a.guid, a.name, a.description, a.code, a.account_type, a.parent_guid,
                       a.placeholder, c.mnemonic, month
              ORDER BY month, a.name"
-        ))
-        .map_err(|e| e.to_string())?;
+    ))?;
     let rows = stmt
         .query_map([date_from, date_to], |row| {
             Ok(MonthlyBucket {
@@ -253,10 +248,8 @@ fn fetch_monthly_buckets(
                 month: row.get(8)?,
                 raw: row.get(9)?,
             })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
 }
 
@@ -281,8 +274,8 @@ struct ConvertedBucket {
 fn convert_buckets(
     conn: &Connection,
     buckets: &[MonthlyBucket],
-) -> Result<(Vec<ConvertedBucket>, Vec<String>, String), String> {
-    let report = fx::get_report_currency_mnemonic(conn)?.unwrap_or_default();
+) -> Result<(Vec<ConvertedBucket>, Vec<String>, String), AppError> {
+    let report = fx::report_currency_or_empty(conn)?;
     let fx_history = fx::FxHistory::load(conn)?;
     let mut missing = HashSet::new();
     let mut maps: HashMap<String, HashMap<String, f64>> = HashMap::new();
@@ -452,7 +445,7 @@ fn fetch_pnl_window(
     conn: &Connection,
     date_from: &str,
     date_to: &str,
-) -> Result<PnlWindow, String> {
+) -> Result<PnlWindow, AppError> {
     let buckets = fetch_monthly_buckets(conn, date_from, date_to)?;
     let (converted, missing, report_currency) = convert_buckets(conn, &buckets)?;
     let rows = roll_up_buckets(&converted);
@@ -469,7 +462,7 @@ fn resolve_pnl_prev_window(
     date_to: &str,
     prev_date_from: Option<&str>,
     prev_date_to: Option<&str>,
-) -> Result<(String, String), String> {
+) -> Result<(String, String), AppError> {
     Ok(match (prev_date_from, prev_date_to) {
         (Some(pf), Some(pt)) => (pf.to_string(), pt.to_string()),
         (Some(pf), None) => (pf.to_string(), date_from.to_string()),
@@ -514,13 +507,15 @@ fn fetch_pnl_report_inner(
     date_to: &str,
     prev_date_from: Option<&str>,
     prev_date_to: Option<&str>,
-) -> Result<ProfitLossReport, String> {
+) -> Result<ProfitLossReport, AppError> {
     let date_from = utils::validate_iso_date(date_from)?;
     let date_to = utils::validate_iso_date(date_to)?;
     let prev_date_from = utils::validate_optional_iso_date(prev_date_from)?;
     let prev_date_to = utils::validate_optional_iso_date(prev_date_to)?;
     if date_from > date_to {
-        return Err("Start date is after end date. Flip them around".to_string());
+        return Err(AppError::Validation(
+            "Start date is after end date. Flip them around".to_string(),
+        ));
     }
     let current = fetch_pnl_window(conn, &date_from, &date_to)?;
 
@@ -655,11 +650,13 @@ fn fetch_pnl_trend_inner(
     conn: &Connection,
     date_from: &str,
     date_to: &str,
-) -> Result<Vec<PnlTrendPoint>, String> {
+) -> Result<Vec<PnlTrendPoint>, AppError> {
     let date_from = utils::validate_iso_date(date_from)?;
     let date_to = utils::validate_iso_date(date_to)?;
     if date_from > date_to {
-        return Err("Start date is after end date. Flip them around".to_string());
+        return Err(AppError::Validation(
+            "Start date is after end date. Flip them around".to_string(),
+        ));
     }
     let buckets = fetch_monthly_buckets(conn, &date_from, &date_to)?;
     let (converted, _, _) = convert_buckets(conn, &buckets)?;
@@ -693,7 +690,7 @@ pub async fn fetch_pnl_report(
     date_to: String,
     prev_date_from: Option<String>,
     prev_date_to: Option<String>,
-) -> Result<ProfitLossReport, String> {
+) -> Result<ProfitLossReport, AppError> {
     run_blocking(state.db.clone(), move |conn| {
         fetch_pnl_report_inner(
             conn,
@@ -711,7 +708,7 @@ pub async fn fetch_pnl_trend(
     state: State<'_, AppState>,
     date_from: String,
     date_to: String,
-) -> Result<Vec<PnlTrendPoint>, String> {
+) -> Result<Vec<PnlTrendPoint>, AppError> {
     run_blocking(state.db.clone(), move |conn| {
         fetch_pnl_trend_inner(conn, &date_from, &date_to)
     })
@@ -828,9 +825,7 @@ mod tests {
     #[test]
     fn pnl_rejects_inverted_range() {
         let conn = setup_pnl_fixture();
-        assert!(
-            fetch_pnl_report_inner(&conn, "2024-04-01", "2024-01-01", None, None).is_err()
-        );
+        assert!(fetch_pnl_report_inner(&conn, "2024-04-01", "2024-01-01", None, None).is_err());
     }
 
     #[test]
@@ -1057,7 +1052,9 @@ mod tests {
         assert_eq!(report.total_income, 2000.0);
         assert_eq!(report.total_income_prev, 500.0);
         // Zero-only branches stay hidden.
-        assert!(report.income_rows.iter().all(|r| r.account_name != "Other Leaf"
-            && r.account_name != "Other Top"));
+        assert!(report
+            .income_rows
+            .iter()
+            .all(|r| r.account_name != "Other Leaf" && r.account_name != "Other Top"));
     }
 }

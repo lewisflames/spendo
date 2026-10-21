@@ -40,7 +40,9 @@ fn validate_rule_input(conn: &Connection, input: &ImportRuleInput) -> Result<(),
     }
     let pattern = input.pattern.trim();
     if pattern.is_empty() {
-        return Err(AppError::Validation("Tell us what text to look for".to_string()));
+        return Err(AppError::Validation(
+            "Tell us what text to look for".to_string(),
+        ));
     }
     if pattern.chars().count() > MAX_PATTERN_CHARS {
         return Err(AppError::Validation(format!(
@@ -74,7 +76,9 @@ fn fetch_rule(conn: &Connection, id: i64) -> Result<ImportRule, AppError> {
     )
     .optional()
     .map_err(AppError::from)?
-    .ok_or_else(|| AppError::NotFound("Import rule not found. It may have been deleted".to_string()))
+    .ok_or_else(|| {
+        AppError::NotFound("Import rule not found. It may have been deleted".to_string())
+    })
 }
 
 fn fetch_import_rules_inner(conn: &Connection) -> Result<Vec<ImportRule>, AppError> {
@@ -151,7 +155,9 @@ fn update_import_rule_inner(
         )
         .map_err(AppError::from)?;
     if changed == 0 {
-        return Err(AppError::NotFound("Import rule not found. It may have been deleted".to_string()));
+        return Err(AppError::NotFound(
+            "Import rule not found. It may have been deleted".to_string(),
+        ));
     }
     fetch_rule(conn, id)
 }
@@ -161,7 +167,9 @@ fn delete_import_rule_inner(conn: &Connection, id: i64) -> Result<(), AppError> 
         .execute("DELETE FROM import_rules WHERE id = ?1", params![id])
         .map_err(AppError::from)?;
     if changed == 0 {
-        return Err(AppError::NotFound("Import rule not found. It may have been deleted".to_string()));
+        return Err(AppError::NotFound(
+            "Import rule not found. It may have been deleted".to_string(),
+        ));
     }
     Ok(())
 }
@@ -181,7 +189,8 @@ fn move_import_rule_inner(
         ));
     }
     let mut indexed: Vec<(i64, i64)> = {
-        let mut stmt = conn.prepare("SELECT id, priority FROM import_rules ORDER BY priority ASC, id ASC")?;
+        let mut stmt =
+            conn.prepare("SELECT id, priority FROM import_rules ORDER BY priority ASC, id ASC")?;
         let rows = stmt
             .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
             .collect::<Result<Vec<_>, _>>()?;
@@ -284,7 +293,9 @@ pub(crate) fn resolve_account(
     conn: &Connection,
     description: &str,
 ) -> Result<Option<String>, AppError> {
-    Ok(RuleMatcher::load(conn)?.resolve(description).map(str::to_string))
+    Ok(RuleMatcher::load(conn)?
+        .resolve(description)
+        .map(str::to_string))
 }
 
 /// Accounts referenced by rules. The GnuCash orphan sweep must skip them: the
@@ -304,20 +315,17 @@ pub(crate) fn rule_account_guids(conn: &Connection) -> Result<Vec<String>, AppEr
 // ── Commands ─────────────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub async fn fetch_import_rules(state: State<'_, AppState>) -> Result<Vec<ImportRule>, String> {
-    run_blocking(state.db.clone(), |conn| {
-        fetch_import_rules_inner(conn).map_err(String::from)
-    })
-    .await
+pub async fn fetch_import_rules(state: State<'_, AppState>) -> Result<Vec<ImportRule>, AppError> {
+    run_blocking(state.db.clone(), fetch_import_rules_inner).await
 }
 
 #[tauri::command]
 pub async fn create_import_rule(
     state: State<'_, AppState>,
     input: ImportRuleInput,
-) -> Result<ImportRule, String> {
+) -> Result<ImportRule, AppError> {
     run_blocking(state.db.clone(), move |conn| {
-        create_import_rule_inner(conn, &input).map_err(String::from)
+        create_import_rule_inner(conn, &input)
     })
     .await
 }
@@ -327,17 +335,17 @@ pub async fn update_import_rule(
     state: State<'_, AppState>,
     id: i64,
     input: ImportRuleInput,
-) -> Result<ImportRule, String> {
+) -> Result<ImportRule, AppError> {
     run_blocking(state.db.clone(), move |conn| {
-        update_import_rule_inner(conn, id, &input).map_err(String::from)
+        update_import_rule_inner(conn, id, &input)
     })
     .await
 }
 
 #[tauri::command]
-pub async fn delete_import_rule(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+pub async fn delete_import_rule(state: State<'_, AppState>, id: i64) -> Result<(), AppError> {
     run_blocking(state.db.clone(), move |conn| {
-        delete_import_rule_inner(conn, id).map_err(String::from)
+        delete_import_rule_inner(conn, id)
     })
     .await
 }
@@ -347,9 +355,9 @@ pub async fn move_import_rule(
     state: State<'_, AppState>,
     id: i64,
     direction: i64,
-) -> Result<Vec<ImportRule>, String> {
+) -> Result<Vec<ImportRule>, AppError> {
     run_blocking(state.db.clone(), move |conn| {
-        move_import_rule_inner(conn, id, direction).map_err(String::from)
+        move_import_rule_inner(conn, id, direction)
     })
     .await
 }
@@ -405,7 +413,9 @@ mod tests {
             Some("groceries")
         );
         // `equals` needs the whole trimmed description.
-        assert!(resolve_account(&conn, "weekly shop extra").unwrap().is_none());
+        assert!(resolve_account(&conn, "weekly shop extra")
+            .unwrap()
+            .is_none());
         assert!(resolve_account(&conn, "").unwrap().is_none());
         assert!(resolve_account(&conn, "unrelated").unwrap().is_none());
     }
@@ -413,7 +423,8 @@ mod tests {
     #[test]
     fn crud_round_trips_and_validates() {
         let conn = setup();
-        let created = create_import_rule_inner(&conn, &rule(1, "contains", "  coffee  ", "coffee")).unwrap();
+        let created =
+            create_import_rule_inner(&conn, &rule(1, "contains", "  coffee  ", "coffee")).unwrap();
         assert_eq!(created.pattern, "coffee");
         assert_eq!(created.account_name, "Coffee");
 
@@ -464,7 +475,8 @@ mod tests {
 
         // A legacy tie is normalized before the swap so the move is visible.
         // Id order (first, second, third) beats the old swapped priorities.
-        conn.execute("UPDATE import_rules SET priority = 1", []).unwrap();
+        conn.execute("UPDATE import_rules SET priority = 1", [])
+            .unwrap();
         let tied = move_import_rule_inner(&conn, second.id, -1).unwrap();
         assert_eq!(
             tied.iter().map(|r| r.id).collect::<Vec<_>>(),

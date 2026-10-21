@@ -7,12 +7,24 @@ import { invoke as tauriInvoke, isTauri } from '@tauri-apps/api/core';
  * build-time constant, so the mock and its fixtures are dropped from production
  * bundles.
  */
-const invoke = <T>(cmd: string, args?: Record<string, unknown>): Promise<T> => {
+const invoke = <K extends Command>(
+  cmd: K,
+  args?: Record<string, unknown>
+): Promise<CommandPayloads[K]> => {
   if (import.meta.env.DEV && !isTauri()) {
-    return import('./dev/mock-invoke').then((mock) => mock.mockInvoke<T>(cmd, args));
+    return import('./dev/mock-invoke').then((mock) => mock.mockInvoke(cmd, args));
   }
-  return tauriInvoke<T>(cmd, args);
+  return tauriInvoke<CommandPayloads[K]>(cmd, args);
 };
+
+/** Variant of the Rust `AppError` a command failed with. */
+export type BackendErrorKind = 'notFound' | 'validation' | 'io' | 'db' | 'internal';
+
+/** Every command rejects with this shape (serialized `AppError`). */
+export interface BackendError {
+  kind: BackendErrorKind;
+  message: string;
+}
 
 interface HomeDataResult {
   hasData: boolean;
@@ -249,8 +261,7 @@ export interface AccountDetailResult {
   parent: ParentAccountInfo | null;
 }
 
-export const fetchHomeData = (): Promise<HomeDataResult> =>
-  invoke<HomeDataResult>('fetch_home_data');
+export const fetchHomeData = (): Promise<HomeDataResult> => invoke('fetch_home_data');
 
 /** One ACCOUNTS sidebar destination: the top-level account for a category. */
 export interface NavRoot {
@@ -259,16 +270,16 @@ export interface NavRoot {
   name: string | null;
 }
 
-export const fetchNavRoots = (): Promise<NavRoot[]> => invoke<NavRoot[]>('fetch_nav_roots');
+export const fetchNavRoots = (): Promise<NavRoot[]> => invoke('fetch_nav_roots');
 
 export interface NavBadges {
   dueSchedules: number;
   unclearedTransactions: number;
 }
 
-export const fetchNavBadges = (): Promise<NavBadges> => invoke<NavBadges>('fetch_nav_badges');
+export const fetchNavBadges = (): Promise<NavBadges> => invoke('fetch_nav_badges');
 
-export const clearAppDb = (): Promise<void> => invoke<void>('clear_app_db');
+export const clearAppDb = (): Promise<void> => invoke('clear_app_db');
 
 // ── Books (document model: one active `.spendo` file opened in place) ──
 
@@ -277,7 +288,7 @@ interface ActiveBook {
   path: string | null;
 }
 
-export const fetchActiveBook = (): Promise<ActiveBook> => invoke<ActiveBook>('fetch_active_book');
+export const fetchActiveBook = (): Promise<ActiveBook> => invoke('fetch_active_book');
 
 interface EmptyBookResult {
   hasData: boolean;
@@ -290,17 +301,16 @@ interface CloseBookResult {
   summary: DataSummary | null;
 }
 
-export const openBook = (path: string): Promise<EmptyBookResult> =>
-  invoke<EmptyBookResult>('open_book', { path });
+export const openBook = (path: string): Promise<EmptyBookResult> => invoke('open_book', { path });
 
 export const createBookAt = (path: string, currency: string): Promise<EmptyBookResult> =>
-  invoke<EmptyBookResult>('create_book_at', { path, currency });
+  invoke('create_book_at', { path, currency });
 
 export const saveBookAs = (path: string): Promise<EmptyBookResult> =>
-  invoke<EmptyBookResult>('save_book_as', { path });
+  invoke('save_book_as', { path });
 
 /** Close the active book and return to the book-less placeholder. */
-export const closeBook = (): Promise<CloseBookResult> => invoke<CloseBookResult>('close_book');
+export const closeBook = (): Promise<CloseBookResult> => invoke('close_book');
 
 // ── Book-scoped settings (travel with the `.spendo` file) ──
 
@@ -317,11 +327,10 @@ export interface BookSettings {
   exportDateFormat: ExportDateFormat;
 }
 
-export const getBookSettings = (): Promise<BookSettings> =>
-  invoke<BookSettings>('get_book_settings');
+export const getBookSettings = (): Promise<BookSettings> => invoke('get_book_settings');
 
 export const setBookSetting = (key: string, value: string): Promise<BookSettings> =>
-  invoke<BookSettings>('set_book_setting', { key, value });
+  invoke('set_book_setting', { key, value });
 
 export interface GnuCashPreview {
   path: string;
@@ -347,7 +356,7 @@ export interface GnuCashPreview {
   skippedSchedules: { name: string; reason: string }[];
 }
 
-export interface GnuCashImportInput {
+interface GnuCashImportInput {
   path: string;
   filename: string;
   /** Hash returned by `previewGnucashImport`; the merge refuses stale files. */
@@ -357,10 +366,10 @@ export interface GnuCashImportInput {
 }
 
 export const previewGnucashImport = (path: string, filename: string): Promise<GnuCashPreview> =>
-  invoke<GnuCashPreview>('preview_gnucash_import', { path, filename });
+  invoke('preview_gnucash_import', { path, filename });
 
 export const importGnucash = (input: GnuCashImportInput): Promise<ImportResult> =>
-  invoke<ImportResult>('import_gnucash', { input });
+  invoke('import_gnucash', { input });
 
 // ── CSV import (bank-statement wizard: detect → map → preview → commit) ──
 
@@ -448,18 +457,17 @@ export interface CsvCommitResult {
   label: string;
 }
 
-export const csvDetect = (path: string): Promise<CsvDetectResult> =>
-  invoke<CsvDetectResult>('csv_detect', { path });
+export const csvDetect = (path: string): Promise<CsvDetectResult> => invoke('csv_detect', { path });
 
 export const csvPreview = (input: CsvPreviewInput): Promise<CsvPreviewResult> =>
-  invoke<CsvPreviewResult>('csv_preview', { input });
+  invoke('csv_preview', { input });
 
 export const csvCommit = (
   input: CsvPreviewInput & { selectedKeys: number[]; rememberMapping: boolean }
-): Promise<CsvCommitResult> => invoke<CsvCommitResult>('csv_commit', { input });
+): Promise<CsvCommitResult> => invoke('csv_commit', { input });
 
 export const deleteCsvPreset = (signature: string): Promise<void> =>
-  invoke<void>('delete_csv_preset', { signature });
+  invoke('delete_csv_preset', { signature });
 
 // ── Import rules (CSV row description → category) ──
 
@@ -481,35 +489,31 @@ export interface ImportRuleInput {
   accountGuid: string;
 }
 
-export const fetchImportRules = (): Promise<ImportRule[]> =>
-  invoke<ImportRule[]>('fetch_import_rules');
+export const fetchImportRules = (): Promise<ImportRule[]> => invoke('fetch_import_rules');
 
 export const createImportRule = (input: ImportRuleInput): Promise<ImportRule> =>
-  invoke<ImportRule>('create_import_rule', { input });
+  invoke('create_import_rule', { input });
 
 export const updateImportRule = (id: number, input: ImportRuleInput): Promise<ImportRule> =>
-  invoke<ImportRule>('update_import_rule', { id, input });
+  invoke('update_import_rule', { id, input });
 
-export const deleteImportRule = (id: number): Promise<void> =>
-  invoke<void>('delete_import_rule', { id });
+export const deleteImportRule = (id: number): Promise<void> => invoke('delete_import_rule', { id });
 
 /** Move a rule one slot up (-1) or down (1); returns the reordered list. */
 export const moveImportRule = (id: number, direction: -1 | 1): Promise<ImportRule[]> =>
-  invoke<ImportRule[]>('move_import_rule', { id, direction });
+  invoke('move_import_rule', { id, direction });
 
 export const setBaseCurrency = (currency: string): Promise<EmptyBookResult> =>
-  invoke<EmptyBookResult>('set_base_currency', { currency });
+  invoke('set_base_currency', { currency });
 
-export const fetchAccounts = (): Promise<AccountsResult> =>
-  invoke<AccountsResult>('fetch_accounts');
+export const fetchAccounts = (): Promise<AccountsResult> => invoke('fetch_accounts');
 
 export interface BookCurrency {
   guid: string;
   mnemonic: string;
 }
 
-export const fetchBookCurrencies = (): Promise<BookCurrency[]> =>
-  invoke<BookCurrency[]>('fetch_book_currencies');
+export const fetchBookCurrencies = (): Promise<BookCurrency[]> => invoke('fetch_book_currencies');
 
 export interface AccountInput {
   name: string;
@@ -522,13 +526,12 @@ export interface AccountInput {
 }
 
 export const createAccount = (input: AccountInput): Promise<string> =>
-  invoke<string>('create_account', { input });
+  invoke('create_account', { input });
 
 export const updateAccount = (guid: string, input: AccountInput): Promise<void> =>
-  invoke<void>('update_account', { guid, input });
+  invoke('update_account', { guid, input });
 
-export const deleteAccount = (guid: string): Promise<void> =>
-  invoke<void>('delete_account', { guid });
+export const deleteAccount = (guid: string): Promise<void> => invoke('delete_account', { guid });
 
 export interface SplitInput {
   accountGuid: string;
@@ -548,13 +551,13 @@ export interface TxInput {
 }
 
 export const createTransaction = (input: TxInput): Promise<string> =>
-  invoke<string>('create_transaction', { input });
+  invoke('create_transaction', { input });
 
 export const updateTransaction = (guid: string, input: TxInput): Promise<void> =>
-  invoke<void>('update_transaction', { guid, input });
+  invoke('update_transaction', { guid, input });
 
 export const deleteTransaction = (guid: string, unreconcile = false): Promise<void> =>
-  invoke<void>('delete_transaction', { guid, unreconcile });
+  invoke('delete_transaction', { guid, unreconcile });
 
 export const fetchTransactions = (
   page: number,
@@ -563,7 +566,7 @@ export const fetchTransactions = (
   sortBy?: TxSortKey,
   sortDir?: SortDir
 ): Promise<TransactionsResult> =>
-  invoke<TransactionsResult>('fetch_transactions', {
+  invoke('fetch_transactions', {
     page,
     pageSize,
     filters: filters ?? null,
@@ -572,11 +575,11 @@ export const fetchTransactions = (
   });
 
 export const fetchTransactionHeatmap = (filters?: Filters): Promise<HeatmapPoint[]> =>
-  invoke<HeatmapPoint[]>('fetch_transaction_heatmap', { filters: filters ?? null });
+  invoke('fetch_transaction_heatmap', { filters: filters ?? null });
 
 /** `null` when no transaction with that GUID exists. */
 export const fetchTransaction = (guid: string): Promise<TransactionDetailResult | null> =>
-  invoke<TransactionDetailResult | null>('fetch_transaction', { guid });
+  invoke('fetch_transaction', { guid });
 
 // ── Attachments (receipts/documents stored inside the book) ──
 
@@ -588,37 +591,26 @@ export interface AttachmentInfo {
   createdAt: string;
 }
 
-/** Preview payload: bytes as a `data:` URL ready for an `<img src>`. */
-interface AttachmentData {
-  filename: string;
-  mimeType: string;
-  dataUrl: string;
-}
-
 interface AttachmentAddInput {
   txGuid: string;
   paths: string[];
 }
 
 export const fetchAttachments = (txGuid: string): Promise<AttachmentInfo[]> =>
-  invoke<AttachmentInfo[]>('fetch_attachments', { txGuid });
+  invoke('fetch_attachments', { txGuid });
 
 /** One bad file fails the whole batch with its own message. */
 export const addAttachments = (input: AttachmentAddInput): Promise<AttachmentInfo[]> =>
-  invoke<AttachmentInfo[]>('add_attachments', { input });
+  invoke('add_attachments', { input });
 
 export const deleteAttachment = (guid: string): Promise<void> =>
-  invoke<void>('delete_attachment', { guid });
-
-export const fetchAttachmentData = (guid: string): Promise<AttachmentData> =>
-  invoke<AttachmentData>('fetch_attachment_data', { guid });
+  invoke('delete_attachment', { guid });
 
 export const exportAttachment = (guid: string, destPath: string): Promise<void> =>
-  invoke<void>('export_attachment', { guid, destPath });
+  invoke('export_attachment', { guid, destPath });
 
 /** Writes to the app cache and opens the OS default app for the type. */
-export const openAttachment = (guid: string): Promise<void> =>
-  invoke<void>('open_attachment', { guid });
+export const openAttachment = (guid: string): Promise<void> => invoke('open_attachment', { guid });
 
 // ── Recurring schedules (manual remind + post; in-app reminders only) ──
 
@@ -671,33 +663,32 @@ export interface ScheduleInput {
   splits: SplitInput[];
 }
 
-export const fetchSchedules = (): Promise<Schedule[]> => invoke<Schedule[]>('fetch_schedules');
+export const fetchSchedules = (): Promise<Schedule[]> => invoke('fetch_schedules');
 
 export const fetchSchedule = (guid: string): Promise<Schedule> =>
-  invoke<Schedule>('fetch_schedule', { guid });
+  invoke('fetch_schedule', { guid });
 
 export const createSchedule = (input: ScheduleInput): Promise<Schedule> =>
-  invoke<Schedule>('create_schedule', { input });
+  invoke('create_schedule', { input });
 
 export const updateSchedule = (guid: string, input: ScheduleInput): Promise<Schedule> =>
-  invoke<Schedule>('update_schedule', { guid, input });
+  invoke('update_schedule', { guid, input });
 
-export const deleteSchedule = (guid: string): Promise<void> =>
-  invoke<void>('delete_schedule', { guid });
+export const deleteSchedule = (guid: string): Promise<void> => invoke('delete_schedule', { guid });
 
 export const setScheduleActive = (guid: string, active: boolean): Promise<Schedule> =>
-  invoke<Schedule>('set_schedule_active', { guid, active });
+  invoke('set_schedule_active', { guid, active });
 
 /** Posts the due occurrence; resolves with the new transaction GUID. */
 export const postScheduleOccurrence = (guid: string): Promise<string> =>
-  invoke<string>('post_schedule_occurrence', { guid });
+  invoke('post_schedule_occurrence', { guid });
 
 /** Skips the due occurrence; resolves with the new pointer (`null` = completed). */
 export const skipScheduleOccurrence = (guid: string): Promise<string | null> =>
-  invoke<string | null>('skip_schedule_occurrence', { guid });
+  invoke('skip_schedule_occurrence', { guid });
 
 /** Full-book transactions CSV written straight to the chosen path. */
-export interface TransactionsExportInput {
+interface TransactionsExportInput {
   path: string;
   delimiter: ',' | ';';
   /** `iso` keeps `YYYY-MM-DD`; `locale` uses the probe-derived parts. */
@@ -707,16 +698,16 @@ export interface TransactionsExportInput {
 }
 
 /** Full account-tree CSV written straight to the chosen path. */
-export interface AccountsExportInput {
+interface AccountsExportInput {
   path: string;
   delimiter: ',' | ';';
 }
 
 export const exportTransactionsCsv = (input: TransactionsExportInput): Promise<void> =>
-  invoke<void>('export_transactions_csv', { input });
+  invoke('export_transactions_csv', { input });
 
 export const exportAccountsCsv = (input: AccountsExportInput): Promise<void> =>
-  invoke<void>('export_accounts_csv', { input });
+  invoke('export_accounts_csv', { input });
 
 /** Full-book GnuCash SQLite export written straight to the chosen path. */
 export interface GnuCashExportResult {
@@ -733,9 +724,9 @@ export interface GnuCashExportResult {
 }
 
 export const exportGnuCash = (path: string): Promise<GnuCashExportResult> =>
-  invoke<GnuCashExportResult>('export_gnucash', { input: { path } });
+  invoke('export_gnucash', { input: { path } });
 
-export const refreshPrices = (): Promise<PricesResult> => invoke<PricesResult>('refresh_prices');
+export const refreshPrices = (): Promise<PricesResult> => invoke('refresh_prices');
 
 export const fetchAccountDetail = (
   guid: string,
@@ -747,7 +738,7 @@ export const fetchAccountDetail = (
   sortBy?: TxSortKey,
   sortDir?: SortDir
 ): Promise<AccountDetailResult> =>
-  invoke<AccountDetailResult>('fetch_account_detail', {
+  invoke('fetch_account_detail', {
     guid,
     page,
     pageSize,
@@ -759,7 +750,7 @@ export const fetchAccountDetail = (
   });
 
 export const fetchAccountBalanceTrend = (guid: string): Promise<AccountBalancePoint[]> =>
-  invoke<AccountBalancePoint[]>('fetch_account_balance_trend', { guid });
+  invoke('fetch_account_balance_trend', { guid });
 
 // ── Reports ──
 
@@ -800,7 +791,7 @@ export const fetchPnlReport = (
   prevDateFrom?: string,
   prevDateTo?: string
 ): Promise<ProfitLossReport> =>
-  invoke<ProfitLossReport>('fetch_pnl_report', {
+  invoke('fetch_pnl_report', {
     dateFrom,
     dateTo,
     prevDateFrom: prevDateFrom ?? null,
@@ -815,7 +806,7 @@ export interface PnlTrendPoint {
 }
 
 export const fetchPnlTrend = (dateFrom: string, dateTo: string): Promise<PnlTrendPoint[]> =>
-  invoke<PnlTrendPoint[]>('fetch_pnl_trend', { dateFrom, dateTo });
+  invoke('fetch_pnl_trend', { dateFrom, dateTo });
 
 export interface MissingPrice {
   mnemonic: string;
@@ -831,13 +822,13 @@ interface SymbolOverride {
 }
 
 export const fetchSymbolOverrides = (): Promise<SymbolOverride[]> =>
-  invoke<SymbolOverride[]>('fetch_symbol_overrides');
+  invoke('fetch_symbol_overrides');
 
 export const setSymbolOverride = (commodityGuid: string, symbol: string): Promise<SymbolOverride> =>
-  invoke<SymbolOverride>('set_symbol_override', { commodityGuid, symbol });
+  invoke('set_symbol_override', { commodityGuid, symbol });
 
 export const deleteSymbolOverride = (commodityGuid: string): Promise<void> =>
-  invoke<void>('delete_symbol_override', { commodityGuid });
+  invoke('delete_symbol_override', { commodityGuid });
 
 // ── Budgets ──
 
@@ -904,19 +895,19 @@ export const setBudgetYearAmount = (
   accountGuid: string,
   year: number,
   amount: number
-): Promise<Budget> => invoke<Budget>('set_budget_year_amount', { accountGuid, year, amount });
+): Promise<Budget> => invoke('set_budget_year_amount', { accountGuid, year, amount });
 
 export const fetchBudgetYears = (accountGuid: string): Promise<number[]> =>
-  invoke<number[]>('fetch_budget_years', { accountGuid });
+  invoke('fetch_budget_years', { accountGuid });
 
 export const deleteBudgetYear = (accountGuid: string, year: number): Promise<void> =>
-  invoke<void>('delete_budget_year', { accountGuid, year });
+  invoke('delete_budget_year', { accountGuid, year });
 
 export const fetchBudgetVsActual = (year: number): Promise<BudgetActualRow[]> =>
-  invoke<BudgetActualRow[]>('fetch_budget_vs_actual', { year });
+  invoke('fetch_budget_vs_actual', { year });
 
 export const fetchBudgetDetail = (accountGuid: string, year: number): Promise<BudgetDetail> =>
-  invoke<BudgetDetail>('fetch_budget_detail', {
+  invoke('fetch_budget_detail', {
     accountGuid,
     year
   });
@@ -927,7 +918,7 @@ export interface BudgetDateRange {
 }
 
 export const fetchBudgetDateRange = (): Promise<BudgetDateRange> =>
-  invoke<BudgetDateRange>('fetch_budget_date_range');
+  invoke('fetch_budget_date_range');
 
 // ── Portfolio ──
 
@@ -999,8 +990,7 @@ interface HoldingDetail {
   totalPages: number;
 }
 
-export const fetchPortfolioData = (): Promise<PortfolioData> =>
-  invoke<PortfolioData>('fetch_portfolio_data');
+export const fetchPortfolioData = (): Promise<PortfolioData> => invoke('fetch_portfolio_data');
 
 export const fetchHoldingDetail = (
   commodityGuid: string,
@@ -1008,7 +998,7 @@ export const fetchHoldingDetail = (
   pageSize: number,
   search?: string
 ): Promise<HoldingDetail> =>
-  invoke<HoldingDetail>('fetch_holding_detail', {
+  invoke('fetch_holding_detail', {
     commodityGuid,
     page,
     pageSize,
@@ -1022,10 +1012,10 @@ interface AllocationTarget {
 }
 
 export const fetchAllocationTargets = (): Promise<AllocationTarget[]> =>
-  invoke<AllocationTarget[]>('fetch_allocation_targets');
+  invoke('fetch_allocation_targets');
 
 export const saveAllocationTargets = (targets: AllocationTarget[]): Promise<AllocationTarget[]> =>
-  invoke<AllocationTarget[]>('save_allocation_targets', { targets });
+  invoke('save_allocation_targets', { targets });
 
 // ── Reconciliation (statement workflow for cash-like accounts) ──
 
@@ -1110,15 +1100,14 @@ export interface ReopenReconcileResult {
 export const fetchReconcileInfo = (
   accountGuid: string,
   statementDate: string
-): Promise<ReconcileInfo> =>
-  invoke<ReconcileInfo>('fetch_reconcile_info', { accountGuid, statementDate });
+): Promise<ReconcileInfo> => invoke('fetch_reconcile_info', { accountGuid, statementDate });
 
 export const markReconcileSplits = (
   accountGuid: string,
   statementDate: string,
   updates: { splitGuid: string; state: string }[]
 ): Promise<MarkReconcileResult> =>
-  invoke<MarkReconcileResult>('mark_reconcile_splits', {
+  invoke('mark_reconcile_splits', {
     input: { accountGuid, statementDate, updates } satisfies MarkReconcileInput
   });
 
@@ -1128,15 +1117,15 @@ export const finishReconciliation = (
   endingBalance: number,
   updates: { splitGuid: string; state: string }[]
 ): Promise<FinishReconcileResult> =>
-  invoke<FinishReconcileResult>('finish_reconciliation', {
+  invoke('finish_reconciliation', {
     input: { accountGuid, statementDate, endingBalance, updates } satisfies FinishReconcileInput
   });
 
 export const reopenLastReconciliation = (accountGuid: string): Promise<ReopenReconcileResult> =>
-  invoke<ReopenReconcileResult>('reopen_last_reconciliation', { accountGuid });
+  invoke('reopen_last_reconciliation', { accountGuid });
 
 export const fetchReconcileSummaries = (): Promise<ReconcileAccountSummary[]> =>
-  invoke<ReconcileAccountSummary[]>('fetch_reconcile_summaries');
+  invoke('fetch_reconcile_summaries');
 
 // ── Global search (Ctrl+K palette) ──
 
@@ -1178,14 +1167,15 @@ interface GlobalSearchResult {
 }
 
 export const searchGlobal = (query: string, limitPerGroup?: number): Promise<GlobalSearchResult> =>
-  invoke<GlobalSearchResult>('search_global', { query, limitPerGroup: limitPerGroup ?? null });
+  invoke('search_global', { query, limitPerGroup: limitPerGroup ?? null });
 
 /**
- * Payload types of every backend command, grouped for the dev fixture backend
- * (`$lib/dev/mock-invoke.ts`). Keeping them in one map avoids exporting each
- * private leaf type individually.
+ * Payload type of every backend command. `invoke` is typed against it, so a
+ * misspelled command or a wrapper whose return type disagrees with the map
+ * fails type-checking; the dev fixture backend (`$lib/dev/mock-invoke.ts`)
+ * implements one handler per key.
  */
-export type MockPayloads = {
+export type CommandPayloads = {
   add_attachments: AttachmentInfo[];
   clear_app_db: void;
   close_book: CloseBookResult;
@@ -1214,7 +1204,6 @@ export type MockPayloads = {
   fetch_accounts: AccountsResult;
   fetch_active_book: ActiveBook;
   fetch_allocation_targets: AllocationTarget[];
-  fetch_attachment_data: AttachmentData;
   fetch_attachments: AttachmentInfo[];
   fetch_book_currencies: BookCurrency[];
   fetch_budget_date_range: BudgetDateRange;
@@ -1262,3 +1251,5 @@ export type MockPayloads = {
   update_schedule: Schedule;
   update_transaction: void;
 };
+
+export type Command = keyof CommandPayloads;

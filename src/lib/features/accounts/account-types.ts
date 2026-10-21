@@ -16,8 +16,6 @@ const TYPE_TO_CATEGORY: Record<string, string> = {
   TRADING: 'EQUITY'
 };
 
-export const CATEGORY_ORDER = ['ASSET', 'LIABILITY', 'EQUITY', 'INCOME', 'EXPENSE'];
-
 /** Creatable account types (mirrors backend `ACCOUNT_TYPES`; ROOT is internal). */
 export const ACCOUNT_TYPES = [
   'ASSET',
@@ -36,6 +34,9 @@ export const ACCOUNT_TYPES = [
   'EQUITY',
   'TRADING'
 ];
+
+/** Account types whose splits carry a share quantity distinct from the amount. */
+export const INVESTMENT_ACCOUNT_TYPES: ReadonlySet<string> = new Set(['STOCK', 'MUTUAL', 'FUND']);
 
 /** Category of an account type, falling back to the raw type when unknown. */
 export function nodeCategory(accountType: string): string {

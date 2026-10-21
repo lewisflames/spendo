@@ -1,5 +1,5 @@
 use chrono::{NaiveDate, Utc};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use tauri::State;
@@ -7,8 +7,8 @@ use tauri::State;
 use crate::db::{run_blocking, with_tx_err, AppError, AppState};
 use crate::fx;
 use crate::prices::{
-    get_cached_price_maps, get_last_refresh_timestamp,
-    get_price_history, latest_quote_currencies, list_commodities, PriceHistoryEntry,
+    get_cached_price_maps, get_last_refresh_timestamp, get_price_history, latest_quote_currencies,
+    list_commodities, PriceHistoryEntry,
 };
 use crate::sql;
 use crate::utils;
@@ -142,16 +142,12 @@ struct PriceEvent {
 }
 
 /// Commodity GUIDs that have at least one stored price row.
-fn priced_commodity_guids(conn: &Connection) -> Result<HashSet<String>, String> {
-    let mut stmt = conn
-        .prepare("SELECT DISTINCT commodity_guid FROM prices")
-        .map_err(|e| e.to_string())?;
+fn priced_commodity_guids(conn: &Connection) -> Result<HashSet<String>, AppError> {
+    let mut stmt = conn.prepare("SELECT DISTINCT commodity_guid FROM prices")?;
     let rows = stmt
-        .query_map([], |row| row.get::<_, String>(0))
-        .map_err(|e| e.to_string())?
-        .collect::<Result<HashSet<_>, _>>()
-        .map_err(|e| e.to_string());
-    rows
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<Result<HashSet<_>, _>>();
+    rows.map_err(AppError::from)
 }
 
 /// Aggregated investment-account splits grouped by (commodity, account),
@@ -159,7 +155,7 @@ fn priced_commodity_guids(conn: &Connection) -> Result<HashSet<String>, String> 
 fn load_holding_splits(
     conn: &Connection,
     filter: Option<&str>,
-) -> Result<Vec<HoldingSplit>, String> {
+) -> Result<Vec<HoldingSplit>, AppError> {
     let mut sql = format!(
         "SELECT a.commodity_guid, c.mnemonic, c.fullname, c.namespace,
 				s.account_guid, a.name AS account_name, a.description AS account_description,
@@ -183,7 +179,7 @@ fn load_holding_splits(
     }
     sql.push_str(" GROUP BY a.commodity_guid, s.account_guid ORDER BY c.mnemonic");
 
-    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(&sql)?;
     let rows = stmt
         .query_map(sql::param_refs(&params).as_slice(), |row| {
             Ok(HoldingSplit {
@@ -198,10 +194,8 @@ fn load_holding_splits(
                 shares: row.get(8)?,
                 cost: row.get(9)?,
             })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
 
     Ok(rows)
 }
@@ -236,7 +230,7 @@ struct HoldingUniverse {
 fn build_holdings(
     conn: &Connection,
     filter: Option<&str>,
-) -> Result<Vec<PortfolioHolding>, String> {
+) -> Result<Vec<PortfolioHolding>, AppError> {
     let rows = load_holding_splits(conn, filter)?;
     let universe = resolve_holding_universe(conn, &rows, filter)?;
     let commodity_map = build_commodity_groups(conn, &rows, &universe)?;
@@ -249,7 +243,7 @@ fn resolve_holding_universe(
     conn: &Connection,
     rows: &[HoldingSplit],
     filter: Option<&str>,
-) -> Result<HoldingUniverse, String> {
+) -> Result<HoldingUniverse, AppError> {
     let mut meta_by_guid: HashMap<String, CommodityMeta> = HashMap::new();
     let mut with_splits: HashSet<String> = HashSet::new();
     for r in rows {
@@ -277,20 +271,18 @@ fn resolve_holding_universe(
                     })
                 },
             )
-            .map_err(|e| match e {
-                rusqlite::Error::QueryReturnedNoRows => {
-                    format!("Commodity not found: {guid}")
-                }
-                other => other.to_string(),
-            })?;
+            .optional()?
+            .ok_or_else(|| AppError::NotFound(format!("Commodity not found: {guid}")))?;
         meta_by_guid.insert(guid.to_string(), meta);
     } else {
         for c in list_commodities(conn)? {
-            meta_by_guid.entry(c.guid.clone()).or_insert_with(|| CommodityMeta {
-                mnemonic: c.mnemonic,
-                full_name: c.full_name,
-                namespace: c.namespace,
-            });
+            meta_by_guid
+                .entry(c.guid.clone())
+                .or_insert_with(|| CommodityMeta {
+                    mnemonic: c.mnemonic,
+                    full_name: c.full_name,
+                    namespace: c.namespace,
+                });
         }
     }
 
@@ -309,8 +301,8 @@ fn build_commodity_groups(
     conn: &Connection,
     rows: &[HoldingSplit],
     universe: &HoldingUniverse,
-) -> Result<HashMap<String, CommodityGroup>, String> {
-    let report_currency = fx::get_report_currency_mnemonic(conn)?.unwrap_or_default();
+) -> Result<HashMap<String, CommodityGroup>, AppError> {
+    let report_currency = fx::report_currency_or_empty(conn)?;
     let fx_map = fx::get_fx_map(conn, None)?;
     // Cost-basis currency per commodity: its latest price quote currency.
     let quote_currencies = latest_quote_currencies(conn)?;
@@ -372,7 +364,7 @@ fn build_commodity_groups(
 fn value_commodity_groups(
     conn: &Connection,
     commodity_map: HashMap<String, CommodityGroup>,
-) -> Result<Vec<PortfolioHolding>, String> {
+) -> Result<Vec<PortfolioHolding>, AppError> {
     let (prices_with_date_map, prev_prices_map) = get_cached_price_maps(conn)?;
 
     let holdings: Vec<PortfolioHolding> = commodity_map
@@ -381,7 +373,10 @@ fn value_commodity_groups(
             let price_info = prices_with_date_map.get(&guid);
             let price = price_info.map(|p| p.0);
             let price_date = price_info.map(|p| p.1.clone());
-            let prev_price = prev_prices_map.get(&guid).map(|p| p.0).filter(|_| price.is_some());
+            let prev_price = prev_prices_map
+                .get(&guid)
+                .map(|p| p.0)
+                .filter(|_| price.is_some());
             let market_value = group.total_shares * price.unwrap_or(0.0);
             let avg_cost = if group.total_shares != 0.0 {
                 group.total_cost / group.total_shares
@@ -417,17 +412,19 @@ fn value_commodity_groups(
 fn build_value_trend(
     conn: &Connection,
     filter: Option<&str>,
-) -> Result<Vec<PortfolioValuePoint>, String> {
+) -> Result<Vec<PortfolioValuePoint>, AppError> {
     let inputs = load_trend_inputs(conn, filter)?;
     if inputs.events.is_empty() {
         return Ok(vec![]);
     }
-    let first_date_str = inputs.events[0]
-        .post_date
-        .get(..10)
-        .ok_or_else(|| format!("Invalid first date: {}", inputs.events[0].post_date))?;
+    let first_date_str = inputs.events[0].post_date.get(..10).ok_or_else(|| {
+        AppError::Validation(format!(
+            "Invalid first date: {}",
+            inputs.events[0].post_date
+        ))
+    })?;
     let first_date = NaiveDate::parse_from_str(first_date_str, "%Y-%m-%d")
-        .map_err(|e| format!("Invalid first date: {e}"))?;
+        .map_err(|e| AppError::Validation(format!("Invalid first date: {e}")))?;
     let end_date = Utc::now().date_naive();
     accumulate_trend(&inputs, sample_trend_dates(first_date, end_date))
 }
@@ -442,7 +439,7 @@ struct TrendInputs {
     guid_to_quote: HashMap<String, String>,
 }
 
-fn load_trend_inputs(conn: &Connection, filter: Option<&str>) -> Result<TrendInputs, String> {
+fn load_trend_inputs(conn: &Connection, filter: Option<&str>) -> Result<TrendInputs, AppError> {
     // Load split events ordered by date (optionally one commodity only)
     let mut events_sql = format!(
         "SELECT a.commodity_guid, t.post_date,
@@ -466,7 +463,7 @@ fn load_trend_inputs(conn: &Connection, filter: Option<&str>) -> Result<TrendInp
     }
     events_sql.push_str(" ORDER BY t.post_date ASC");
 
-    let mut stmt = conn.prepare(&events_sql).map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(&events_sql)?;
     let events: Vec<SplitEvent> = stmt
         .query_map(sql::param_refs(&event_params).as_slice(), |row| {
             Ok(SplitEvent {
@@ -475,10 +472,8 @@ fn load_trend_inputs(conn: &Connection, filter: Option<&str>) -> Result<TrendInp
                 shares_delta: row.get(2)?,
                 cost_delta: row.get(3)?,
             })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
 
     // Load price records ordered by date (with their quote currency). Keyed by
     // commodity GUID: mnemonics can repeat across namespaces, so the trend must
@@ -500,7 +495,7 @@ fn load_trend_inputs(conn: &Connection, filter: Option<&str>) -> Result<TrendInp
     }
     prices_sql.push_str(" ORDER BY p.date ASC");
 
-    let mut price_stmt = conn.prepare(&prices_sql).map_err(|e| e.to_string())?;
+    let mut price_stmt = conn.prepare(&prices_sql)?;
     let price_events: Vec<PriceEvent> = price_stmt
         .query_map(sql::param_refs(&price_params).as_slice(), |row| {
             Ok(PriceEvent {
@@ -509,14 +504,12 @@ fn load_trend_inputs(conn: &Connection, filter: Option<&str>) -> Result<TrendInp
                 price: row.get(2)?,
                 quote: row.get(3)?,
             })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
 
     // FX rate history per currency (quoted in the report currency), for normalizing
     // prices and cost basis per date. Same source `account_detail.rs` uses.
-    let report_currency = fx::get_report_currency_mnemonic(conn)?.unwrap_or_default();
+    let report_currency = fx::report_currency_or_empty(conn)?;
     let fx_history = fx::FxHistory::load(conn)?;
 
     // Get commodity_guid → mnemonic for market value computation
@@ -533,15 +526,13 @@ fn load_trend_inputs(conn: &Connection, filter: Option<&str>) -> Result<TrendInp
         guid_params.push(Box::new(g.to_string()));
     }
 
-    let mut guid_stmt = conn.prepare(&guid_sql).map_err(|e| e.to_string())?;
+    let mut guid_stmt = conn.prepare(&guid_sql)?;
     let mut guid_to_mnemonic: HashMap<String, String> = HashMap::new();
     let mappings: Vec<(String, String)> = guid_stmt
         .query_map(sql::param_refs(&guid_params).as_slice(), |row| {
             Ok((row.get(0)?, row.get(1)?))
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
     for (guid, mnemonic) in mappings {
         guid_to_mnemonic.insert(guid, mnemonic);
     }
@@ -571,7 +562,10 @@ fn load_trend_inputs(conn: &Connection, filter: Option<&str>) -> Result<TrendInp
 /// `end` so the trend stops at the current value.
 fn sample_trend_dates(first: NaiveDate, end: NaiveDate) -> Vec<NaiveDate> {
     let total_days = (end - first).num_days().max(0);
-    let stride = i64::max(1, (total_days as f64 / TREND_SAMPLE_TARGET as f64).ceil() as i64);
+    let stride = i64::max(
+        1,
+        (total_days as f64 / TREND_SAMPLE_TARGET as f64).ceil() as i64,
+    );
 
     let mut sample_dates: Vec<NaiveDate> = Vec::new();
     let mut cursor = first;
@@ -591,7 +585,7 @@ fn sample_trend_dates(first: NaiveDate, end: NaiveDate) -> Vec<NaiveDate> {
 fn accumulate_trend(
     inputs: &TrendInputs,
     sample_dates: Vec<NaiveDate>,
-) -> Result<Vec<PortfolioValuePoint>, String> {
+) -> Result<Vec<PortfolioValuePoint>, AppError> {
     let events = &inputs.events;
     let price_events = &inputs.price_events;
     let fx_history = &inputs.fx_history;
@@ -612,7 +606,10 @@ fn accumulate_trend(
         // commodity's own quote currency)
         while event_idx < events.len() {
             let prefix = events[event_idx].post_date.get(..10).ok_or_else(|| {
-                format!("Invalid post_date: {}", events[event_idx].post_date)
+                AppError::Validation(format!(
+                    "Invalid post_date: {}",
+                    events[event_idx].post_date
+                ))
             })?;
             if prefix > date_str.as_str() {
                 break;
@@ -694,7 +691,7 @@ struct XirrInputs {
 
 /// Investment split events plus contemporary FX (optionally one commodity).
 /// Lighter than `load_trend_inputs` (no price history) for the XIRR pass.
-fn load_xirr_inputs(conn: &Connection, filter: Option<&str>) -> Result<XirrInputs, String> {
+fn load_xirr_inputs(conn: &Connection, filter: Option<&str>) -> Result<XirrInputs, AppError> {
     let mut events_sql = format!(
         "SELECT a.commodity_guid, t.post_date,
 				{} AS shares_delta,
@@ -717,7 +714,7 @@ fn load_xirr_inputs(conn: &Connection, filter: Option<&str>) -> Result<XirrInput
     }
     events_sql.push_str(" ORDER BY t.post_date ASC");
 
-    let mut stmt = conn.prepare(&events_sql).map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(&events_sql)?;
     let events: Vec<SplitEvent> = stmt
         .query_map(sql::param_refs(&event_params).as_slice(), |row| {
             Ok(SplitEvent {
@@ -726,12 +723,10 @@ fn load_xirr_inputs(conn: &Connection, filter: Option<&str>) -> Result<XirrInput
                 shares_delta: row.get(2)?,
                 cost_delta: row.get(3)?,
             })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
 
-    let report_currency = fx::get_report_currency_mnemonic(conn)?.unwrap_or_default();
+    let report_currency = fx::report_currency_or_empty(conn)?;
     let fx_history = fx::FxHistory::load(conn)?;
 
     // Cost-basis currency per commodity: its latest price quote currency.
@@ -746,12 +741,10 @@ fn load_xirr_inputs(conn: &Connection, filter: Option<&str>) -> Result<XirrInput
         guid_sql.push_str(" AND a.commodity_guid = ?1");
         guid_params.push(Box::new(g.to_string()));
     }
-    let mut guid_stmt = conn.prepare(&guid_sql).map_err(|e| e.to_string())?;
+    let mut guid_stmt = conn.prepare(&guid_sql)?;
     let guids: Vec<String> = guid_stmt
-        .query_map(sql::param_refs(&guid_params).as_slice(), |row| row.get(0))
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        .query_map(sql::param_refs(&guid_params).as_slice(), |row| row.get(0))?
+        .collect::<Result<Vec<_>, _>>()?;
 
     let quote_currencies = latest_quote_currencies(conn)?;
     let mut guid_to_quote: HashMap<String, String> = HashMap::new();
@@ -779,7 +772,7 @@ fn xirr_percent(flows: &[(NaiveDate, f64)]) -> Option<f64> {
         return None;
     }
     let mut sorted: Vec<(NaiveDate, f64)> = flows.to_vec();
-    sorted.sort_by(|a, b| a.0.cmp(&b.0));
+    sorted.sort_by_key(|f| f.0);
     if !sorted.iter().any(|(_, a)| *a > 0.0) || !sorted.iter().any(|(_, a)| *a < 0.0) {
         return None;
     }
@@ -993,7 +986,8 @@ fn total_xirr(
     total_market_value: f64,
     end_date: NaiveDate,
 ) -> Option<f64> {
-    let mut flows = cash_flows_from_events(events, guid_to_quote, fx_history, report_currency, None);
+    let mut flows =
+        cash_flows_from_events(events, guid_to_quote, fx_history, report_currency, None);
     if flows.is_empty() {
         return None;
     }
@@ -1032,7 +1026,7 @@ fn finalize_totals(mut holdings: Vec<PortfolioHolding>) -> (f64, f64, f64, Vec<P
     )
 }
 
-fn fetch_portfolio_data_inner(conn: &Connection) -> Result<PortfolioData, String> {
+fn fetch_portfolio_data_inner(conn: &Connection) -> Result<PortfolioData, AppError> {
     let mut holdings = build_holdings(conn, None)?;
     let xirr_inputs = load_xirr_inputs(conn, None)?;
     let end_date = Utc::now().date_naive();
@@ -1205,7 +1199,7 @@ fn fetch_holding_transactions(
     page: i64,
     page_size: i64,
     search: Option<&str>,
-) -> Result<HoldingTxPage, String> {
+) -> Result<HoldingTxPage, AppError> {
     // Trimmed, empty searches match everything (the frontend sends None, but
     // direct callers shouldn't have to).
     let search = search.map(str::trim).filter(|s| !s.is_empty());
@@ -1231,8 +1225,7 @@ fn fetch_holding_transactions(
         utils::VISIBLE_TX_FILTER,
     );
     // ?1 is the commodity GUID; the search reuses ?2 three times.
-    let mut params: Vec<Box<dyn rusqlite::ToSql>> =
-        vec![Box::new(commodity_guid.to_string())];
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(commodity_guid.to_string())];
     if let Some(q) = search {
         sql.push_str(
             " AND (t.description LIKE '%' || ?2 || '%' ESCAPE '\\' \
@@ -1243,7 +1236,7 @@ fn fetch_holding_transactions(
     }
     sql.push_str(" GROUP BY t.guid ORDER BY t.post_date ASC, t.guid ASC");
 
-    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(&sql)?;
 
     let mut rows: Vec<HoldingTxRow> = stmt
         .query_map(sql::param_refs(&params).as_slice(), |row| {
@@ -1271,10 +1264,8 @@ fn fetch_holding_transactions(
                 shares_delta: row.get(7)?,
                 value_delta: row.get(8)?,
             })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
 
     let total = rows.len() as i64;
     let (page_size, total_pages, safe_page, offset) = utils::paginate(total, page, page_size);
@@ -1333,7 +1324,7 @@ fn fetch_holding_detail_inner(
     page: i64,
     page_size: i64,
     search: Option<&str>,
-) -> Result<HoldingDetail, String> {
+) -> Result<HoldingDetail, AppError> {
     // Allocation is relative to the whole portfolio, so it is derived from the
     // unfiltered holdings rather than the single-commodity aggregation.
     let all_holdings = build_holdings(conn, None)?;
@@ -1342,7 +1333,7 @@ fn fetch_holding_detail_inner(
     let mut holding = all_holdings
         .into_iter()
         .find(|h| h.commodity_guid == commodity_guid)
-        .ok_or_else(|| format!("Holding not found: {commodity_guid}"))?;
+        .ok_or_else(|| AppError::NotFound(format!("Holding not found: {commodity_guid}")))?;
     holding.allocation_pct = if total_market_value != 0.0 {
         (holding.market_value / total_market_value) * 100.0
     } else {
@@ -1378,7 +1369,7 @@ fn fetch_holding_detail_inner(
 }
 
 #[tauri::command]
-pub async fn fetch_portfolio_data(state: State<'_, AppState>) -> Result<PortfolioData, String> {
+pub async fn fetch_portfolio_data(state: State<'_, AppState>) -> Result<PortfolioData, AppError> {
     run_blocking(state.db.clone(), fetch_portfolio_data_inner).await
 }
 
@@ -1389,7 +1380,7 @@ pub async fn fetch_holding_detail(
     page: i64,
     page_size: i64,
     search: Option<String>,
-) -> Result<HoldingDetail, String> {
+) -> Result<HoldingDetail, AppError> {
     run_blocking(state.db.clone(), move |conn| {
         fetch_holding_detail_inner(conn, &commodity_guid, page, page_size, search.as_deref())
     })
@@ -1399,9 +1390,9 @@ pub async fn fetch_holding_detail(
 #[tauri::command]
 pub async fn fetch_allocation_targets(
     state: State<'_, AppState>,
-) -> Result<Vec<AllocationTarget>, String> {
+) -> Result<Vec<AllocationTarget>, AppError> {
     run_blocking(state.db.clone(), |conn| {
-        fetch_allocation_targets_inner(conn).map_err(String::from)
+        fetch_allocation_targets_inner(conn)
     })
     .await
 }
@@ -1410,9 +1401,9 @@ pub async fn fetch_allocation_targets(
 pub async fn save_allocation_targets(
     state: State<'_, AppState>,
     targets: Vec<AllocationTargetInput>,
-) -> Result<Vec<AllocationTarget>, String> {
+) -> Result<Vec<AllocationTarget>, AppError> {
     run_blocking(state.db.clone(), move |conn| {
-        save_allocation_targets_inner(conn, &targets).map_err(String::from)
+        save_allocation_targets_inner(conn, &targets)
     })
     .await
 }
@@ -1439,9 +1430,27 @@ mod tests {
             [],
         )
         .unwrap();
-        add_activity(&conn, "t1", "2024-01-10", "Buy AAPL", Some("B1"), Some("first buy"), 10, 1000);
+        add_activity(
+            &conn,
+            "t1",
+            "2024-01-10",
+            "Buy AAPL",
+            Some("B1"),
+            Some("first buy"),
+            10,
+            1000,
+        );
         add_activity(&conn, "t2", "2024-02-05", "Buy AAPL", None, None, 5, 550);
-        add_activity(&conn, "t3", "2024-03-01", "Sell AAPL", Some("S1"), Some("trim"), -8, -960);
+        add_activity(
+            &conn,
+            "t3",
+            "2024-03-01",
+            "Sell AAPL",
+            Some("S1"),
+            Some("trim"),
+            -8,
+            -960,
+        );
         conn
     }
 
@@ -1721,11 +1730,9 @@ mod tests {
         let conn = setup_valued_portfolio();
         assert!(fetch_allocation_targets_inner(&conn).unwrap().is_empty());
 
-        let saved = save_allocation_targets_inner(
-            &conn,
-            &[target("c-aapl", 60.0), target("c-xyz", 40.0)],
-        )
-        .unwrap();
+        let saved =
+            save_allocation_targets_inner(&conn, &[target("c-aapl", 60.0), target("c-xyz", 40.0)])
+                .unwrap();
         // Mnemonic order (AAPL before XYZ), values preserved.
         assert_eq!(saved.len(), 2);
         assert_eq!(saved[0].commodity_guid, "c-aapl");
@@ -1743,7 +1750,9 @@ mod tests {
         assert_eq!(fetch_allocation_targets_inner(&conn).unwrap(), replaced);
 
         // An empty list clears the book's targets.
-        assert!(save_allocation_targets_inner(&conn, &[]).unwrap().is_empty());
+        assert!(save_allocation_targets_inner(&conn, &[])
+            .unwrap()
+            .is_empty());
         assert!(fetch_allocation_targets_inner(&conn).unwrap().is_empty());
     }
 
@@ -1780,11 +1789,9 @@ mod tests {
         // Failed writes leave the stored state untouched, and boundary values
         // (0 and 100, sum exactly 100) are accepted.
         assert!(fetch_allocation_targets_inner(&conn).unwrap().is_empty());
-        let saved = save_allocation_targets_inner(
-            &conn,
-            &[target("c-aapl", 100.0), target("c-xyz", 0.0)],
-        )
-        .unwrap();
+        let saved =
+            save_allocation_targets_inner(&conn, &[target("c-aapl", 100.0), target("c-xyz", 0.0)])
+                .unwrap();
         assert_eq!(saved.len(), 2);
         assert_eq!(saved[1].target_pct, 0.0);
     }

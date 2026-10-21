@@ -219,7 +219,11 @@ pub(crate) fn first_occurrence_on_or_after(
             occurrence
         }
         "month" | "year" => {
-            let step = if period_type == "month" { mult } else { 12 * mult };
+            let step = if period_type == "month" {
+                mult
+            } else {
+                12 * mult
+            };
             let month_diff = (from.year() as i64 * 12 + from.month0() as i64)
                 - (anchor.year() as i64 * 12 + anchor.month0() as i64);
             let mut k = month_diff.div_euclid(step).max(0);
@@ -264,8 +268,11 @@ fn validate_frequency(raw: &str) -> Result<String, AppError> {
 }
 
 fn parse_iso_date(raw: &str, field: &str) -> Result<String, AppError> {
-    utils::validate_iso_date(raw)
-        .map_err(|_| AppError::Validation(format!("That {field} doesn't look right (use YYYY-MM-DD): {raw}")))
+    utils::validate_iso_date(raw).map_err(|_| {
+        AppError::Validation(format!(
+            "That {field} doesn't look right (use YYYY-MM-DD): {raw}"
+        ))
+    })
 }
 
 fn parse_stored_date(raw: &str) -> Result<NaiveDate, AppError> {
@@ -436,10 +443,7 @@ fn has_room_again(
 
 // ── Row → wire ───────────────────────────────────────────────────────────────
 
-fn account_names(
-    conn: &Connection,
-    guids: &[String],
-) -> Result<HashMap<String, String>, AppError> {
+fn account_names(conn: &Connection, guids: &[String]) -> Result<HashMap<String, String>, AppError> {
     let mut uniq: Vec<String> = guids
         .iter()
         .cloned()
@@ -545,10 +549,7 @@ fn fetch_schedule_inner(conn: &Connection, guid: &str) -> Result<Schedule, AppEr
 
 // ── CRUD inners ──────────────────────────────────────────────────────────────
 
-fn create_schedule_inner(
-    conn: &Connection,
-    input: ScheduleInput,
-) -> Result<Schedule, AppError> {
+fn create_schedule_inner(conn: &Connection, input: ScheduleInput) -> Result<Schedule, AppError> {
     let v = validate_schedule_input(conn, &input)?;
     let guid = uuid::Uuid::new_v4().to_string();
     let created_at = utils::iso_now();
@@ -616,12 +617,7 @@ fn update_schedule_inner(
             .to_string(),
         );
     }
-    next = apply_caps(
-        next,
-        v.max_occurrences,
-        passed,
-        v.end_date.as_deref(),
-    );
+    next = apply_caps(next, v.max_occurrences, passed, v.end_date.as_deref());
     let template_json = serde_json::to_string(&v.template)
         .map_err(|e| AppError::Validation(format!("We couldn't save that schedule: {e}")))?;
     conn.execute(
@@ -743,7 +739,10 @@ fn definition_differs(row: &ScheduleRow, v: &ValidatedSchedule) -> Result<bool, 
     {
         return Ok(true);
     }
-    Ok(!template_eq(&parse_template(&row.template_json)?, &v.template))
+    Ok(!template_eq(
+        &parse_template(&row.template_json)?,
+        &v.template,
+    ))
 }
 
 /// Pointer rule for re-imports: forward-only, never revive a locally completed
@@ -909,10 +908,7 @@ pub(crate) fn schedule_account_guids(conn: &Connection) -> Result<Vec<String>, A
 /// Materialize the due occurrence as a real transaction and advance the
 /// pointer atomically. Posting is manual-only: due dates are always ≤ today,
 /// so the manual future-date block is never bypassed.
-fn post_schedule_occurrence_inner(
-    conn: &Connection,
-    guid: &str,
-) -> Result<String, AppError> {
+fn post_schedule_occurrence_inner(conn: &Connection, guid: &str) -> Result<String, AppError> {
     let row = fetch_row(conn, guid)?;
     if !row.active {
         return Err(AppError::Validation(
@@ -1003,10 +999,9 @@ fn skip_schedule_occurrence_inner(
     let due = row.next_due_date.clone().ok_or_else(|| {
         AppError::Validation("Schedule is completed. No occurrences remain".to_string())
     })?;
-    let advanced =
-        next_occurrence(parse_stored_date(&due)?, &row.frequency, row.interval_mult)?
-            .format("%Y-%m-%d")
-            .to_string();
+    let advanced = next_occurrence(parse_stored_date(&due)?, &row.frequency, row.interval_mult)?
+        .format("%Y-%m-%d")
+        .to_string();
     let skipped = row.skipped_count + 1;
     let next = apply_caps(
         Some(advanced),
@@ -1035,9 +1030,9 @@ fn skip_schedule_occurrence_inner(
 pub async fn create_schedule(
     state: State<'_, AppState>,
     input: ScheduleInput,
-) -> Result<Schedule, String> {
+) -> Result<Schedule, AppError> {
     run_blocking(state.db.clone(), move |conn| {
-        create_schedule_inner(conn, input).map_err(String::from)
+        create_schedule_inner(conn, input)
     })
     .await
 }
@@ -1047,17 +1042,17 @@ pub async fn update_schedule(
     state: State<'_, AppState>,
     guid: String,
     input: ScheduleInput,
-) -> Result<Schedule, String> {
+) -> Result<Schedule, AppError> {
     run_blocking(state.db.clone(), move |conn| {
-        update_schedule_inner(conn, &guid, input).map_err(String::from)
+        update_schedule_inner(conn, &guid, input)
     })
     .await
 }
 
 #[tauri::command]
-pub async fn delete_schedule(state: State<'_, AppState>, guid: String) -> Result<(), String> {
+pub async fn delete_schedule(state: State<'_, AppState>, guid: String) -> Result<(), AppError> {
     run_blocking(state.db.clone(), move |conn| {
-        delete_schedule_inner(conn, &guid).map_err(String::from)
+        delete_schedule_inner(conn, &guid)
     })
     .await
 }
@@ -1067,25 +1062,25 @@ pub async fn set_schedule_active(
     state: State<'_, AppState>,
     guid: String,
     active: bool,
-) -> Result<Schedule, String> {
+) -> Result<Schedule, AppError> {
     run_blocking(state.db.clone(), move |conn| {
-        set_schedule_active_inner(conn, &guid, active).map_err(String::from)
+        set_schedule_active_inner(conn, &guid, active)
     })
     .await
 }
 
 #[tauri::command]
-pub async fn fetch_schedules(state: State<'_, AppState>) -> Result<Vec<Schedule>, String> {
-    run_blocking(state.db.clone(), |conn| {
-        fetch_schedules_inner(conn).map_err(String::from)
-    })
-    .await
+pub async fn fetch_schedules(state: State<'_, AppState>) -> Result<Vec<Schedule>, AppError> {
+    run_blocking(state.db.clone(), fetch_schedules_inner).await
 }
 
 #[tauri::command]
-pub async fn fetch_schedule(state: State<'_, AppState>, guid: String) -> Result<Schedule, String> {
+pub async fn fetch_schedule(
+    state: State<'_, AppState>,
+    guid: String,
+) -> Result<Schedule, AppError> {
     run_blocking(state.db.clone(), move |conn| {
-        fetch_schedule_inner(conn, &guid).map_err(String::from)
+        fetch_schedule_inner(conn, &guid)
     })
     .await
 }
@@ -1096,9 +1091,9 @@ pub async fn fetch_schedule(state: State<'_, AppState>, guid: String) -> Result<
 pub async fn post_schedule_occurrence(
     state: State<'_, AppState>,
     guid: String,
-) -> Result<String, String> {
+) -> Result<String, AppError> {
     run_blocking(state.db.clone(), move |conn| {
-        post_schedule_occurrence_inner(conn, &guid).map_err(String::from)
+        post_schedule_occurrence_inner(conn, &guid)
     })
     .await
 }
@@ -1109,9 +1104,9 @@ pub async fn post_schedule_occurrence(
 pub async fn skip_schedule_occurrence(
     state: State<'_, AppState>,
     guid: String,
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, AppError> {
     run_blocking(state.db.clone(), move |conn| {
-        skip_schedule_occurrence_inner(conn, &guid).map_err(String::from)
+        skip_schedule_occurrence_inner(conn, &guid)
     })
     .await
 }
@@ -1174,9 +1169,18 @@ mod tests {
 
     #[test]
     fn next_occurrence_handles_all_frequencies() {
-        assert_eq!(next_occurrence(d("2024-01-01"), "daily", 1).unwrap(), d("2024-01-02"));
-        assert_eq!(next_occurrence(d("2024-01-01"), "daily", 3).unwrap(), d("2024-01-04"));
-        assert_eq!(next_occurrence(d("2024-01-01"), "weekly", 1).unwrap(), d("2024-01-08"));
+        assert_eq!(
+            next_occurrence(d("2024-01-01"), "daily", 1).unwrap(),
+            d("2024-01-02")
+        );
+        assert_eq!(
+            next_occurrence(d("2024-01-01"), "daily", 3).unwrap(),
+            d("2024-01-04")
+        );
+        assert_eq!(
+            next_occurrence(d("2024-01-01"), "weekly", 1).unwrap(),
+            d("2024-01-08")
+        );
         assert_eq!(
             next_occurrence(d("2024-01-01"), "biweekly", 1).unwrap(),
             d("2024-01-15")
@@ -1424,7 +1428,10 @@ mod tests {
         input.end_date = Some("2024-01-01".to_string());
         let s = create_schedule_inner(&conn, input).unwrap();
         // Skipping the only in-range occurrence completes the schedule.
-        assert_eq!(skip_schedule_occurrence_inner(&conn, &s.guid).unwrap(), None);
+        assert_eq!(
+            skip_schedule_occurrence_inner(&conn, &s.guid).unwrap(),
+            None
+        );
     }
 
     #[test]
