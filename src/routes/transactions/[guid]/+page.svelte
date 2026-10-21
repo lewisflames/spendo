@@ -8,15 +8,12 @@
   import * as ButtonGroup from '$lib/components/ui/button-group';
   import {
     ArrowLeft,
-    ArrowLeftRight,
     ChevronLeft,
     ChevronRight,
-    CircleCheck,
     Copy,
     CopyPlus,
     Pencil,
-    Receipt,
-    Calendar
+    Receipt
   } from '@lucide/svelte';
   import { toast } from '$lib/components/ui/sonner';
   import { dbBootstrapping, dbSession } from '$lib/stores/db.svelte';
@@ -24,7 +21,6 @@
   import type { SplitDetail } from '$lib/tauri';
   import {
     clampZero,
-    EMPTY_DASH,
     formatDate as fmtDate,
     formatNumber,
     formatSessionCurrency as fmt,
@@ -40,7 +36,8 @@
   import BookGate from '$lib/components/shared/book-gate.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import PageSkeleton from '$lib/components/shared/page-skeleton.svelte';
-  import KpiCard from '$lib/components/shared/kpi-card.svelte';
+  import OverflowMenu from '$lib/components/shared/overflow-menu.svelte';
+  import { PAGE_META } from '$lib/features/nav/page-meta';
   import EmptyState from '$lib/components/shared/empty-state.svelte';
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import NavRow from '$lib/components/shared/nav-row.svelte';
@@ -102,11 +99,11 @@
   <title>
     {detail ? `${detail.description || 'Transaction'} · Spendo` : 'Transaction · Spendo'}
   </title>
-  <meta name="description" content="Transaction details and splits." />
+  <meta name="description" content="Details and splits" />
 </svelte:head>
 
-<BookGate title="Transaction" description="Transaction details and splits.">
-  <div class="flex flex-col gap-6">
+<BookGate title="Transaction" description="Details and splits">
+  <div class="page-stack">
     {#if (res.loading || dbBootstrapping.value) && !detail}
       <PageSkeleton variant="transaction-detail" />
     {:else if detail}
@@ -114,21 +111,19 @@
       {#if res.error}
         <ErrorCard message={res.error} onRetry={() => res.reload()} />
       {/if}
-      <PageHeader title={d.description || 'Transaction'}>
+      <PageHeader
+        title={d.description || 'Transaction'}
+        breadcrumbs={[{ label: PAGE_META.transactions.title, href: resolve('/transactions') }]}
+      >
         {#snippet description()}
-          {d.notes ?? EMPTY_DASH}{#if d.num}&nbsp;&middot; #{d.num}{/if}
+          {d.notes ?? ''}
         {/snippet}
-        <Button variant="outline" href={resolve('/transactions')}>
-          <ArrowLeft aria-hidden="true" class="size-4" />
-          Transactions
-        </Button>
         <ButtonGroup.Root>
           <Button
             variant="outline"
             size="icon"
             disabled={!prevGuid || res.loading}
             aria-label="Previous transaction"
-            title="Previous transaction"
             onclick={() => {
               if (prevGuid) void openTransaction(prevGuid);
             }}
@@ -140,7 +135,6 @@
             size="icon"
             disabled={!nextGuid || res.loading}
             aria-label="Next transaction"
-            title="Next transaction"
             onclick={() => {
               if (nextGuid) void openTransaction(nextGuid);
             }}
@@ -148,46 +142,41 @@
             <ChevronRight aria-hidden="true" class="size-4" />
           </Button>
         </ButtonGroup.Root>
-        <Button
-          variant="outline"
-          size="icon"
-          onclick={copyGuid}
-          aria-label="Copy GUID"
-          title="Copy GUID"
-        >
-          <Copy aria-hidden="true" class="size-4" />
-        </Button>
-        <Button variant="outline" onclick={duplicateTransaction} aria-label="Duplicate transaction">
-          <CopyPlus aria-hidden="true" class="size-4" />
-          Duplicate
-        </Button>
         <Button href={resolve('/transactions/[guid]/edit', { guid: d.guid })}>
           <Pencil aria-hidden="true" class="size-4" />
           Edit
         </Button>
+        <OverflowMenu
+          actions={[
+            { label: 'Duplicate', icon: CopyPlus, onSelect: duplicateTransaction },
+            { label: 'Copy GUID', icon: Copy, onSelect: () => void copyGuid() }
+          ]}
+        />
       </PageHeader>
 
-      <div class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-        <KpiCard title="Date" value={fmtDate(d.postDate)}>
-          {#snippet icon()}
-            <Calendar aria-hidden="true" class="size-4 text-muted-foreground" />
-          {/snippet}
-        </KpiCard>
-        <KpiCard
-          title="Total amount"
-          value={fmt(clampZero(d.totalAmount))}
-          valueClass={signColor(d.totalAmount)}
-        >
-          {#snippet icon()}
-            <ArrowLeftRight aria-hidden="true" class="size-4 text-muted-foreground" />
-          {/snippet}
-        </KpiCard>
-        <KpiCard title="Reconciled" value="{reconciledCount}/{d.splits.length}">
-          {#snippet icon()}
-            <CircleCheck aria-hidden="true" class="size-4 text-muted-foreground" />
-          {/snippet}
-        </KpiCard>
-      </div>
+      <!-- Facts about the transaction, not metrics: a compact strip instead of KPI cards. -->
+      <dl class="flex flex-wrap gap-x-8 gap-y-3 rounded-lg border bg-muted/25 px-4 py-3 text-sm">
+        <div class="flex flex-col gap-0.5">
+          <dt class="text-xs text-muted-foreground">Date</dt>
+          <dd class="font-medium">{fmtDate(d.postDate)}</dd>
+        </div>
+        <div class="flex flex-col gap-0.5">
+          <dt class="text-xs text-muted-foreground">Total</dt>
+          <dd class="font-medium tabular-nums {signColor(d.totalAmount)}">
+            {fmt(clampZero(d.totalAmount))}
+          </dd>
+        </div>
+        <div class="flex flex-col gap-0.5">
+          <dt class="text-xs text-muted-foreground">Reconciled</dt>
+          <dd class="font-medium tabular-nums">{reconciledCount} of {d.splits.length} splits</dd>
+        </div>
+        {#if d.num}
+          <div class="flex flex-col gap-0.5">
+            <dt class="text-xs text-muted-foreground">Number</dt>
+            <dd class="font-medium tabular-nums">#{d.num}</dd>
+          </div>
+        {/if}
+      </dl>
 
       <!-- Keep the previous table visible (dimmed) during prev/next refetches
            so the page doesn’t jump. -->

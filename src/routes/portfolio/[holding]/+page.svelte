@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { PAGE_META } from '$lib/features/nav/page-meta';
   import { page } from '$app/state';
   import { resolve } from '$app/paths';
   import { Button } from '$lib/components/ui/button';
@@ -119,18 +120,18 @@
 
 <svelte:head>
   <title>{name} · Spendo</title>
-  <meta name="description" content="Holding detail: price history, value trend and accounts." />
+  <meta name="description" content="Price history, value trend and accounts" />
 </svelte:head>
 
-<BookGate title="Holding" description="Investment holding detail">
+<BookGate title="Holding" description="Price history, value trend and accounts">
   {#if dbBootstrapping.value || (res.loading && !res.data && !res.error)}
-    <div class="flex flex-col gap-6">
+    <div class="page-stack">
       <PageSkeleton variant="holding" />
     </div>
   {:else if res.data}
     {@const holding = res.data.holding}
 
-    <div class="flex flex-col gap-6">
+    <div class="page-stack">
       {#if res.error}
         <ErrorCard message={res.error} onRetry={() => res.reload()} />
       {/if}
@@ -143,12 +144,8 @@
         refreshing={priceRefresh.refreshing}
         onRefresh={() => void priceRefresh.refresh()}
         onEditSymbol={() => (symbolDialogOpen = true)}
-      >
-        <Button variant="outline" href={resolve('/portfolio')}>
-          <ArrowLeft aria-hidden="true" class="size-4" />
-          Portfolio
-        </Button>
-      </HoldingDetailHeader>
+        breadcrumbs={[{ label: PAGE_META.portfolio.title, href: resolve('/portfolio') }]}
+      />
 
       <!-- KPI summary cards -->
       <HoldingKpiCards {holding} {priceCurrency} />
@@ -164,7 +161,7 @@
       {/key}
 
       <!-- Charts (previous data stays visible, dimmed, while refetching) -->
-      <DimWrapper active={res.loading} class="grid grid-cols-1 gap-6 xl:grid-cols-2">
+      <DimWrapper active={res.loading} class="grid grid-cols-1 gap-6 @5xl:grid-cols-2">
         <TimeSeriesChart
           title="Price history"
           description={priceHistoryDescription}

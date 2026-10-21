@@ -40,7 +40,7 @@
     </Card.Description>
   </Card.Header>
   <Card.Content class="flex flex-col gap-4">
-    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+    <div class="grid grid-cols-1 gap-4 @xl:grid-cols-2">
       <div class="flex flex-col gap-1.5">
         <label for="reconcile-statement-date" class="text-sm font-medium">Statement date</label>
         <DatePicker

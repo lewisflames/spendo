@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { PAGE_META } from '$lib/features/nav/page-meta';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
   import AppearanceCard from '$lib/features/settings/appearance-card.svelte';
@@ -12,6 +13,8 @@
   import { loadBookSettings } from '$lib/stores/book-settings.svelte';
   import { errMsg } from '$lib/utils/error';
   import { toast } from '$lib/components/ui/sonner';
+
+  const meta = PAGE_META.settings;
 
   const DEFAULT_CUSTOM_PRIMARY = '#3b82f6';
 
@@ -42,12 +45,12 @@
 </script>
 
 <svelte:head>
-  <title>Settings · Spendo</title>
-  <meta name="description" content="Configure Spendo preferences" />
+  <title>{meta.title} · Spendo</title>
+  <meta name="description" content={meta.description} />
 </svelte:head>
 
-<div class="flex flex-col gap-6">
-  <PageHeader title="Settings" description="Make Spendo yours" />
+<div class="page-stack">
+  <PageHeader title={meta.title} description={meta.description} />
 
   {#if bookSettingsError}
     <ErrorCard message={bookSettingsError} onRetry={() => void refreshBookSettings()} />

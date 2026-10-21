@@ -62,7 +62,10 @@ Frontend work is done when `bun run check`, `bun run lint` and `bun run test` pa
 ## Frontend conventions
 
 - Row-click navigation goes through `$lib/utils/navigation.ts` (`handleRowClick(e, go)` + `openTransaction`/`openAccount`/`openHolding`/`openBudget`); keep real `<a>` elements for keyboard and middle-click.
-- Sidebar groups, labels, icons, chords and palette `Go to` commands come from `$lib/features/nav/nav-items.ts`; account-root targets resolve from `$lib/stores/nav.svelte.ts` (`refreshNav` runs from the layout effect). Add pages by extending `NAV_GROUPS`, not the sidebar template.
+- Sidebar groups, labels, icons, chords and palette `Go to` commands come from `$lib/features/nav/nav-items.ts`; badges come from `$lib/stores/nav.svelte.ts` (`refreshNav` runs from the layout effect). Add pages by extending `NAV_GROUPS`, not the sidebar template.
+- Page titles and descriptions live once in `$lib/features/nav/page-meta.ts` (`PAGE_META`) and feed `PageHeader`, `BookGate`, `<title>`, breadcrumbs and the sidebar. Copy is sentence case, plain and short (warmth only in empty states); descriptions carry no trailing period.
+- `/` is home: the Overview with a book open, the welcome screen without one. Detail and form pages show `PageHeader` `breadcrumbs` instead of back buttons; secondary header actions go in `OverflowMenu`, keeping one primary action visible.
+- Page roots use the `page-stack` utility (`page-form` narrows create/edit pages); density only swaps `--page-padding`/`--page-gap`. Page grids use container-query variants (`@xl:`, `@3xl:`…) against the `@container` main column, not viewport breakpoints; dialogs keep viewport variants.
 - Every book switch (open/new/save-as/close, copy path) goes through `$lib/features/book/book-actions.ts`, and book-scoped transfers (GnuCash import, CSV wizard link, full-book CSV exports) through `$lib/features/book/import-export-actions.ts`; never re-implement these dialogs or session updates. The GnuCash confirm dialog is store-driven (`gnucash-import-dialog-state.svelte.ts` + `gnucash-import-dialog.svelte`, mounted in the layout).
 - Table sort state uses `useTableSort<K>(defaults, descFirst)` from `$lib/hooks/`.
 - URL state composes factories from `use-url-params.svelte.ts` (`pageParam`, `debouncedSearchParam`, `dateParam`, `yearParam`); free-form specs only when none fits.

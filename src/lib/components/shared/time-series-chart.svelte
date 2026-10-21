@@ -125,7 +125,7 @@
 
 <Card.Root>
   <Card.Header>
-    <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+    <div class="flex flex-col gap-3 @xl:flex-row @xl:items-start @xl:justify-between @xl:gap-4">
       <div class="flex min-w-0 flex-col gap-1">
         <Card.Title class="truncate">{title}</Card.Title>
         {#if description}

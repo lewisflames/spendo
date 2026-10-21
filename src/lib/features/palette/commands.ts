@@ -20,8 +20,7 @@ import {
   SunMoon,
   Upload
 } from '@lucide/svelte';
-import { NAV_GROUPS, navHref } from '$lib/features/nav/nav-items';
-import { navRoots } from '$lib/stores/nav.svelte';
+import { NAV_GROUPS } from '$lib/features/nav/nav-items';
 import { appSettings, resolveTheme, saveSettings } from '$lib/stores/settings.svelte';
 import { keyboardShortcutsDialog } from '$lib/stores/ui.svelte';
 import { activeBookPath, dbSession } from '$lib/stores/db.svelte';
@@ -53,8 +52,7 @@ export interface PaletteCommand {
   run: () => void | Promise<void>;
 }
 
-/** Page navigation mirrors the sidebar config, so the two can never drift.
- * Dynamic targets (account roots) resolve at run time from the nav store. */
+/** Page navigation mirrors the sidebar config, so the two can never drift. */
 const goToCommands: PaletteCommand[] = NAV_GROUPS.flatMap((group) =>
   group.items.map((item): PaletteCommand => ({
     id: `go-${item.id}`,
@@ -62,11 +60,8 @@ const goToCommands: PaletteCommand[] = NAV_GROUPS.flatMap((group) =>
     group: 'Go to',
     icon: item.icon,
     keywords: item.keywords,
-    when: () => navHref(item, navRoots.value) !== null,
-    run: () => {
-      const href = navHref(item, navRoots.value);
-      if (href) void goto(resolve(href));
-    }
+    when: () => dbSession.value !== null,
+    run: () => goto(resolve(item.href))
   }))
 );
 

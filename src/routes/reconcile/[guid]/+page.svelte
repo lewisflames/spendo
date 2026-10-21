@@ -1,11 +1,13 @@
 <script lang="ts">
+  import { PAGE_META } from '$lib/features/nav/page-meta';
+  import OverflowMenu from '$lib/components/shared/overflow-menu.svelte';
   import { page } from '$app/state';
   import { beforeNavigate, goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { isTauri } from '@tauri-apps/api/core';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { SvelteSet } from 'svelte/reactivity';
-  import { ArrowLeft, CalendarDays, CircleCheck, Undo2, X } from '@lucide/svelte';
+  import { CalendarDays, CircleCheck, Undo2, X } from '@lucide/svelte';
   import { toast } from '$lib/components/ui/sonner';
   import { Button } from '$lib/components/ui/button';
   import { dbSession, dbBootstrapping, refreshSession } from '$lib/stores/db.svelte';
@@ -414,33 +416,23 @@
 
 <svelte:head>
   <title>{res.data ? `Reconcile ${res.data.accountName} · Spendo` : 'Reconcile · Spendo'}</title>
-  <meta name="description" content="Reconcile an account against a bank statement." />
+  <meta name="description" content="Tick cleared transactions until the difference is zero" />
 </svelte:head>
 
 <svelte:window onkeydown={onWindowKeydown} />
 
-<BookGate
-  title="Reconcile"
-  description="Check off cleared transactions until the difference is zero, then finish."
->
-  <div class="flex flex-col gap-6">
-    <PageHeader title={res.data ? `Reconcile ${res.data.accountName}` : 'Reconcile'}>
+<BookGate title="Reconcile" description="Tick cleared transactions until the difference is zero">
+  <div class="page-stack">
+    <PageHeader
+      title={res.data ? `Reconcile ${res.data.accountName}` : 'Reconcile'}
+      breadcrumbs={[{ label: PAGE_META.reconcile.title, href: resolve('/reconcile') }]}
+    >
       {#snippet description()}
         {#if res.data?.accountDescription}
           {res.data.accountDescription} &middot;
         {/if}
-        Check off cleared transactions until the difference is zero, then finish.
+        Tick cleared transactions until the difference is zero, then finish.
       {/snippet}
-      <Button variant="outline" href={resolve('/reconcile')}>
-        <ArrowLeft aria-hidden="true" class="size-4" />
-        Reconcile
-      </Button>
-      {#if res.data && res.data.lastReconciledDate && res.data.lastReconciledCount > 0}
-        <Button variant="outline" onclick={() => (undoOpen = true)}>
-          <Undo2 aria-hidden="true" class="size-4" />
-          Undo last statement
-        </Button>
-      {/if}
       <Button
         variant="outline"
         disabled={!dirty || saving || finishing}
@@ -455,6 +447,13 @@
       >
         {finishing ? 'Finishing…' : 'Finish reconciliation'}
       </Button>
+      {#if res.data && res.data.lastReconciledDate && res.data.lastReconciledCount > 0}
+        <OverflowMenu
+          actions={[
+            { label: 'Undo last statement', icon: Undo2, onSelect: () => (undoOpen = true) }
+          ]}
+        />
+      {/if}
     </PageHeader>
 
     {#if (res.loading || dbBootstrapping.value) && !res.data && !res.error}

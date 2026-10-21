@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { PAGE_META } from '$lib/features/nav/page-meta';
   import { dbBootstrapping, dbSession } from '$lib/stores/db.svelte';
   import { fetchAccounts } from '$lib/tauri';
   import BookGate from '$lib/components/shared/book-gate.svelte';
@@ -13,6 +14,8 @@
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import { formatSessionCurrency } from '$lib/utils/format.svelte';
 
+  const meta = PAGE_META.balanceSheet;
+
   const res = useAsyncData({
     enabled: () => !!dbSession.value,
     fetch: () => fetchAccounts(),
@@ -24,13 +27,13 @@
 </script>
 
 <svelte:head>
-  <title>Balance sheet · Spendo</title>
-  <meta name="description" content="What you own and owe, in one statement." />
+  <title>{meta.title} · Spendo</title>
+  <meta name="description" content={meta.description} />
 </svelte:head>
 
-<BookGate title="Balance sheet" description="What you own and owe, at a glance">
-  <div class="flex flex-col gap-6">
-    <PageHeader title="Balance sheet" description="What you own and owe, as of today" />
+<BookGate title={meta.title} description={meta.description}>
+  <div class="page-stack">
+    <PageHeader title={meta.title} description={meta.description} />
 
     {#if (res.loading || dbBootstrapping.value) && !res.data}
       <PageSkeleton variant="balance-sheet" />

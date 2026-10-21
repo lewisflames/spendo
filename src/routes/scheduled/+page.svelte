@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { PAGE_META } from '$lib/features/nav/page-meta';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
   import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
   import {
@@ -23,6 +24,8 @@
   import { formatDate, plural, sessionCurrency } from '$lib/utils/format.svelte';
   import { today as sharedToday } from '$lib/utils/date-utils.svelte';
   import { errMsg } from '$lib/utils/error';
+
+  const meta = PAGE_META.scheduled;
 
   let currency = $derived(sessionCurrency());
   let today = $derived(sharedToday.value);
@@ -90,20 +93,20 @@
 </script>
 
 <svelte:head>
-  <title>Scheduled · Spendo</title>
+  <title>{meta.title} · Spendo</title>
   <meta
     name="description"
     content="Bills and paychecks you revisit. You stay in control. Nothing posts on its own."
   />
 </svelte:head>
 
-<BookGate title="Scheduled" description="Bills and paychecks, on repeat">
-  <div class="flex flex-col gap-6">
+<BookGate title={meta.title} description={meta.description}>
+  <div class="page-stack">
     <PageHeader
-      title="Scheduled"
+      title={meta.title}
       description={res.data
-        ? `Bills and paychecks on repeat · ${plural(res.data.length, 'schedule')}`
-        : 'Bills and paychecks, on repeat'}
+        ? `${meta.description} · ${plural(res.data.length, 'schedule')}`
+        : meta.description}
     >
       {#if dbSession.value}
         <Button href={resolve('/scheduled/new')}>

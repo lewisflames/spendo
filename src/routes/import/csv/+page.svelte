@@ -1,25 +1,25 @@
 <script lang="ts">
+  import { PAGE_META } from '$lib/features/nav/page-meta';
   import BookGate from '$lib/components/shared/book-gate.svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import CsvImporter from '$lib/features/csv-import/csv-importer.svelte';
-  import { Button } from '$lib/components/ui/button';
   import { resolve } from '$app/paths';
-  import { ArrowLeft } from '@lucide/svelte';
+
+  const meta = PAGE_META.importCsv;
 </script>
 
 <svelte:head>
-  <title>Import CSV · Spendo</title>
-  <meta name="description" content="Import bank-statement CSV with column mapping and preview." />
+  <title>{meta.title} · Spendo</title>
+  <meta name="description" content={meta.description} />
 </svelte:head>
 
-<BookGate title="Import CSV" description="Match your columns, preview, then bring it in.">
-  <div class="mx-auto flex w-full max-w-5xl flex-col gap-6">
-    <PageHeader title="Import CSV" description="Match your columns, preview, then bring it in.">
-      <Button variant="outline" href={resolve('/transactions')}>
-        <ArrowLeft aria-hidden="true" class="size-4" />
-        Transactions
-      </Button>
-    </PageHeader>
+<BookGate title={meta.title} description={meta.description}>
+  <div class="page-form page-stack">
+    <PageHeader
+      title={meta.title}
+      description={meta.description}
+      breadcrumbs={[{ label: PAGE_META.transactions.title, href: resolve('/transactions') }]}
+    />
     <CsvImporter />
   </div>
 </BookGate>

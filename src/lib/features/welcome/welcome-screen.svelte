@@ -34,9 +34,9 @@
       });
   });
 
-  /** `book-actions` navigates nothing itself, so welcome lands on the ledger. */
+  /** `book-actions` navigates nothing itself, so welcome lands on the Overview. */
   async function enterApp() {
-    await goto(resolve('/transactions'));
+    await goto(resolve('/'));
   }
 
   async function handleNew() {

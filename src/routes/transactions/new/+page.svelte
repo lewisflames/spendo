@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { PAGE_META } from '$lib/features/nav/page-meta';
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { page } from '$app/state';
@@ -51,10 +52,10 @@
 <BookGate
   title={duplicateGuid ? 'Duplicate transaction' : 'New transaction'}
   description={duplicateGuid
-    ? 'Duplicate a transaction with splits'
-    : 'Create a transaction with splits'}
+    ? 'Copy a transaction and its splits'
+    : 'Record a transaction with splits'}
 >
-  <div class="mx-auto flex w-full max-w-5xl flex-col gap-6">
+  <div class="page-form page-stack">
     {#if duplicateGuid}
       {#if dupRes.loading && !dupRes.data}
         <PageSkeleton variant="form" />
@@ -66,7 +67,8 @@
           <TransactionForm
             mode="create"
             title="Duplicate transaction"
-            headerDescription="Both sides should balance."
+            headerDescription="Both sides must balance."
+            breadcrumbs={[{ label: PAGE_META.transactions.title, href: resolve('/transactions') }]}
             saveLabel="Create duplicate"
             initial={template}
             onSaved={handleSaved}
@@ -85,7 +87,8 @@
       <TransactionForm
         mode="create"
         title="New transaction"
-        headerDescription="Both sides should balance."
+        headerDescription="Both sides must balance."
+        breadcrumbs={[{ label: PAGE_META.transactions.title, href: resolve('/transactions') }]}
         onSaved={handleSaved}
         onSavedAndNew={handleSavedAndNew}
         onCancel={() => void goto(resolve('/transactions'))}

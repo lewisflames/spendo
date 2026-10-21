@@ -2,7 +2,8 @@
   import type { Snippet } from 'svelte';
   import { Button } from '$lib/components/ui/button';
   import { Pencil, RefreshCw } from '@lucide/svelte';
-  import PageHeader from '$lib/components/layout/page-header.svelte';
+  import PageHeader, { type Breadcrumb } from '$lib/components/layout/page-header.svelte';
+  import OverflowMenu from '$lib/components/shared/overflow-menu.svelte';
   import type { PortfolioHolding } from '$lib/tauri';
 
   let {
@@ -11,6 +12,7 @@
     refreshing,
     onRefresh,
     onEditSymbol,
+    breadcrumbs = [],
     children = undefined
   }: {
     holding: PortfolioHolding;
@@ -18,6 +20,7 @@
     refreshing: boolean;
     onRefresh: () => void;
     onEditSymbol: () => void;
+    breadcrumbs?: Breadcrumb[];
     children?: Snippet;
   } = $props();
 
@@ -26,7 +29,7 @@
   );
 </script>
 
-<PageHeader title={name}>
+<PageHeader title={name} {breadcrumbs}>
   {#snippet description()}
     {holding.mnemonic} · {holding.namespace}{#if positionLabel}
       · {positionLabel}{/if}
@@ -38,13 +41,5 @@
     <RefreshCw aria-hidden="true" class="size-4 {refreshing ? 'animate-spin' : ''}" />
     {refreshing ? 'Refreshing…' : 'Refresh prices'}
   </Button>
-  <Button
-    variant="outline"
-    onclick={onEditSymbol}
-    aria-label="Edit Yahoo symbol"
-    title="Edit Yahoo symbol"
-  >
-    <Pencil aria-hidden="true" class="size-4" />
-    Edit symbol
-  </Button>
+  <OverflowMenu actions={[{ label: 'Edit Yahoo symbol', icon: Pencil, onSelect: onEditSymbol }]} />
 </PageHeader>

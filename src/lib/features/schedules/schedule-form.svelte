@@ -8,9 +8,10 @@
   import * as Card from '$lib/components/ui/card';
   import * as Dialog from '$lib/components/ui/dialog';
   import IconCardHeader from '$lib/components/shared/icon-card-header.svelte';
-  import { Info, Repeat } from '@lucide/svelte';
+  import { Info, Repeat, Trash2 } from '@lucide/svelte';
   import { DatePicker } from '$lib/components/shared/date-picker';
-  import PageHeader from '$lib/components/layout/page-header.svelte';
+  import PageHeader, { type Breadcrumb } from '$lib/components/layout/page-header.svelte';
+  import OverflowMenu from '$lib/components/shared/overflow-menu.svelte';
   import {
     SplitEditor,
     draftFromSplit,
@@ -42,6 +43,7 @@
     guid = null,
     initial = null,
     title,
+    breadcrumbs = [],
     headerDescription,
     onSaved,
     onDeleted,
@@ -51,6 +53,7 @@
     guid?: string | null;
     initial?: Schedule | null;
     title: string;
+    breadcrumbs?: Breadcrumb[];
     headerDescription: string;
     onSaved?: (schedule: Schedule) => void;
     onDeleted?: () => void;
@@ -301,19 +304,8 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<div class="flex w-full flex-col gap-6">
-  <PageHeader {title} description={headerText}>
-    {#if mode === 'edit'}
-      <Button
-        type="button"
-        variant="outline"
-        onclick={() => (deleteDialogOpen = true)}
-        disabled={saving || deleting}
-        title="Delete schedule"
-      >
-        Delete
-      </Button>
-    {/if}
+<div class="page-stack w-full">
+  <PageHeader {title} description={headerText} {breadcrumbs}>
     <Button type="button" variant="outline" onclick={requestCancel} disabled={saving || deleting}>
       Cancel
     </Button>
@@ -324,6 +316,19 @@
     >
       {saving ? 'Saving…' : mode === 'edit' ? 'Save changes' : 'Create schedule'}
     </Button>
+    {#if mode === 'edit'}
+      <OverflowMenu
+        actions={[
+          {
+            label: 'Delete',
+            icon: Trash2,
+            destructive: true,
+            disabled: saving || deleting,
+            onSelect: () => (deleteDialogOpen = true)
+          }
+        ]}
+      />
+    {/if}
   </PageHeader>
 
   <Card.Root>
@@ -350,7 +355,7 @@
           <p role="alert" class="text-xs text-destructive">{nameError}</p>
         {/if}
       </div>
-      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div class="grid grid-cols-1 gap-4 @xl:grid-cols-2">
         <div class="flex flex-col gap-1.5">
           <label for="sched-desc" class="text-sm font-medium">Description</label>
           <Input
@@ -388,7 +393,7 @@
       {/snippet}
     </IconCardHeader>
     <Card.Content class="flex flex-col gap-4">
-      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div class="grid grid-cols-1 gap-4 @xl:grid-cols-2 @3xl:grid-cols-3">
         <div class="flex flex-col gap-1.5">
           <label for="sched-freq" class="text-sm font-medium">Repeats</label>
           <Select.Root

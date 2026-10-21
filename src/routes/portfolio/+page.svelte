@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { PAGE_META } from '$lib/features/nav/page-meta';
   import { Briefcase, TrendingDown, TrendingUp, RefreshCw, Pencil } from '@lucide/svelte';
   import { SvelteMap } from 'svelte/reactivity';
   import { dbBootstrapping, dbSession, activeBookPath } from '$lib/stores/db.svelte';
@@ -30,6 +31,8 @@
   import { loadBookSettings } from '$lib/stores/book-settings.svelte';
   import { openHolding } from '$lib/utils/navigation';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
+
+  const meta = PAGE_META.portfolio;
 
   const res = useAsyncData({
     enabled: () => !!dbSession.value,
@@ -124,7 +127,7 @@
   });
 
   let headerDescription = $derived.by(() => {
-    let desc = 'Investment holdings overview';
+    let desc: string = meta.description;
     if (res.data) {
       desc += ` · ${plural(res.data.holdings.length, 'holding')}`;
     }
@@ -142,13 +145,13 @@
 </script>
 
 <svelte:head>
-  <title>Portfolio · Spendo</title>
-  <meta name="description" content="Investment holdings overview." />
+  <title>{meta.title} · Spendo</title>
+  <meta name="description" content={meta.description} />
 </svelte:head>
 
-<BookGate title="Portfolio" description="What you hold and how it’s doing">
-  <div class="flex flex-col gap-6">
-    <PageHeader title="Portfolio" description={headerDescription}>
+<BookGate title={meta.title} description={meta.description}>
+  <div class="page-stack">
+    <PageHeader title={meta.title} description={headerDescription}>
       {#if dbSession.value}
         <Button
           variant="outline"
@@ -205,7 +208,7 @@
       <DimWrapper active={res.loading} class="flex flex-col gap-6">
         {#if d.holdings.length > 0}
           <!-- KPI summary cards -->
-          <div class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+          <div class="grid grid-cols-1 gap-6 @xl:grid-cols-2 @4xl:grid-cols-4">
             <KpiCard title="Market value" value={fmt(d.totalMarketValue)}>
               {#snippet icon()}
                 <TrendingUp aria-hidden="true" class="size-4 text-muted-foreground" />
@@ -249,13 +252,13 @@
           </div>
 
           <!-- Performance + allocation -->
-          <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
-            <div class="lg:col-span-2">
+          <div class="grid grid-cols-1 gap-6 @3xl:grid-cols-3">
+            <div class="@3xl:col-span-2">
               <PortfolioChart data={d.valueTrend} loading={false} />
             </div>
 
             <!-- Allocation pie chart -->
-            <div class="lg:col-span-1">
+            <div class="@3xl:col-span-1">
               <AllocationPie
                 data={pieData}
                 title="Allocation"

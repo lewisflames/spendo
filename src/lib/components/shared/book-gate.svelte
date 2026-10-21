@@ -18,7 +18,7 @@
 {#if dbSession.value || dbBootstrapping.value}
   {@render children()}
 {:else}
-  <div class="flex flex-col gap-6">
+  <div class="page-stack">
     <PageHeader {title} {description} />
     <EmptyBookPrompt />
   </div>

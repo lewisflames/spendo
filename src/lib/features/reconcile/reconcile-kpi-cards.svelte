@@ -31,7 +31,7 @@
   );
 </script>
 
-<div class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+<div class="grid grid-cols-1 gap-6 @xl:grid-cols-2 @4xl:grid-cols-4">
   <KpiCard title="Starting (reconciled)" value={fmt(startingBalance)}>
     {#snippet icon()}
       <Wallet aria-hidden="true" class="size-4 text-muted-foreground" />

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { PAGE_META } from '$lib/features/nav/page-meta';
   import { Plus, Scale } from '@lucide/svelte';
   import { dbSession, dbBootstrapping } from '$lib/stores/db.svelte';
   import { fetchAccounts, fetchReconcileSummaries } from '$lib/tauri';
@@ -20,6 +21,8 @@
   import ReconcileAccountTable from '$lib/features/reconcile/reconcile-account-table.svelte';
   import { flattenReconcilableAccounts } from '$lib/features/reconcile/reconcile-accounts';
   import { openAccountDialog } from '$lib/features/accounts/account-dialog-state.svelte';
+
+  const meta = PAGE_META.reconcile;
 
   let searchInput = $state('');
   let search = useDebouncedSearch(() => searchInput);
@@ -63,21 +66,21 @@
   );
 
   let description = $derived.by(() => {
-    if (!res.data) return 'Match your books to the bank';
-    const base = `Match your books to the bank · ${plural(filtered.length, 'account')} you can reconcile`;
+    if (!res.data) return meta.description;
+    const base = `${meta.description} · ${plural(filtered.length, 'account')} you can reconcile`;
     if (search.value || attentionCount === 0) return base;
     return `${base} · ${plural(attentionCount, 'account')} needing attention`;
   });
 </script>
 
 <svelte:head>
-  <title>Reconcile · Spendo</title>
-  <meta name="description" content="Match your books to a bank statement." />
+  <title>{meta.title} · Spendo</title>
+  <meta name="description" content={meta.description} />
 </svelte:head>
 
-<BookGate title="Reconcile" description="Match your books to the bank">
-  <div class="flex flex-col gap-6">
-    <PageHeader title="Reconcile" {description}></PageHeader>
+<BookGate title={meta.title} description={meta.description}>
+  <div class="page-stack">
+    <PageHeader title={meta.title} {description}></PageHeader>
 
     <FilterBar>
       <SearchInput

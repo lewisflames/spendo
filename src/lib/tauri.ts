@@ -249,14 +249,12 @@ export interface AccountDetailResult {
 
 export const fetchHomeData = (): Promise<HomeDataResult> => invoke('fetch_home_data');
 
-/** One ACCOUNTS sidebar destination: the top-level account for a category. */
-export interface NavRoot {
+/** The top-level account for a category (`fetch_nav_roots`; currently unused by the UI). */
+interface NavRoot {
   category: string;
   guid: string | null;
   name: string | null;
 }
-
-export const fetchNavRoots = (): Promise<NavRoot[]> => invoke('fetch_nav_roots');
 
 export interface NavBadges {
   dueSchedules: number;

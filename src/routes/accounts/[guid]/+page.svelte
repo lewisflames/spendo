@@ -2,7 +2,7 @@
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
-  import { Pencil, Plus, CircleCheck, ArrowLeft } from '@lucide/svelte';
+  import { Pencil, Plus, CircleCheck } from '@lucide/svelte';
   import { toast } from '$lib/components/ui/sonner';
   import { Button } from '$lib/components/ui/button';
   import AccountDialog, { type AccountInitial } from '$lib/features/accounts/account-dialog.svelte';
@@ -33,6 +33,8 @@
   import AccountLedger from '$lib/features/accounts/account-ledger.svelte';
   import { isReconcilable } from '$lib/features/reconcile/math';
   import { openAccount } from '$lib/utils/navigation';
+  import OverflowMenu, { type OverflowAction } from '$lib/components/shared/overflow-menu.svelte';
+  import { PAGE_META } from '$lib/features/nav/page-meta';
 
   let guid = $derived(page.params.guid);
   let pageSize = $derived(appSettings.value.pageSize);
@@ -156,6 +158,24 @@
   // before/after the pie data never changes the grid shape mid-paint.
   let chartsLoading = $derived((res.loading || dbBootstrapping.value) && !res.data);
   let showPie = $derived(!chartsLoading && hasPieData);
+
+  let breadcrumbs = $derived([
+    { label: PAGE_META.accounts.title, href: resolve('/accounts') },
+    ...(parentInfo
+      ? [{ label: parentInfo.name, href: resolve('/accounts/[guid]', { guid: parentInfo.guid }) }]
+      : [])
+  ]);
+
+  let moreActions = $derived.by((): OverflowAction[] => {
+    const a = res.data?.account;
+    if (!a || !guid) return [];
+    return [
+      ...(isReconcilable(a.accountType, a.placeholder)
+        ? [{ label: 'Reconcile', icon: CircleCheck, href: resolve('/reconcile/[guid]', { guid }) }]
+        : []),
+      { label: 'New sub-account', icon: Plus, onSelect: () => (createOpen = true) }
+    ];
+  });
 </script>
 
 <svelte:head>
@@ -163,36 +183,18 @@
   <meta name="description" content="What’s come and gone for this account." />
 </svelte:head>
 
-<BookGate title="Account" description="What’s come and gone, and where you stand.">
-  <div class="flex flex-col gap-6">
+<BookGate title="Account" description={PAGE_META.accounts.description}>
+  <div class="page-stack">
     {#if (res.loading || dbBootstrapping.value) && !res.data}
       <PageHeaderSkeleton />
     {:else if res.data}
-      <AccountDetailHeader account={res.data.account} summary={res.data.summary}>
+      <AccountDetailHeader account={res.data.account} summary={res.data.summary} {breadcrumbs}>
         {#if dbSession.value}
-          {#if res.data.parent}
-            <Button
-              variant="outline"
-              href={resolve('/accounts/[guid]', { guid: res.data.parent.guid })}
-            >
-              <ArrowLeft aria-hidden="true" class="size-4" />
-              Parent
-            </Button>
-          {/if}
-          {#if guid && res.data && isReconcilable(res.data.account.accountType, res.data.account.placeholder)}
-            <Button variant="outline" href={resolve('/reconcile/[guid]', { guid })}>
-              <CircleCheck aria-hidden="true" class="size-4" />
-              Reconcile
-            </Button>
-          {/if}
           <Button variant="outline" onclick={() => (editOpen = true)}>
             <Pencil aria-hidden="true" class="size-4" />
             Edit
           </Button>
-          <Button onclick={() => (createOpen = true)}>
-            <Plus aria-hidden="true" class="size-4" />
-            Sub-account
-          </Button>
+          <OverflowMenu actions={moreActions} />
         {/if}
       </AccountDetailHeader>
       {#if guid}
@@ -210,7 +212,7 @@
             onDeleted={() => {
               toast.success('Account deleted');
               if (res.data?.parent) void openAccount(res.data.parent.guid);
-              else void goto(resolve('/reports/balance-sheet'));
+              else void goto(resolve('/accounts'));
             }}
             onError={(msg) => toast.error(msg)}
           />
@@ -240,8 +242,8 @@
       and the trend chart instance is never remounted by the loading/settle
       transition, so independent fetch timing can’t shift layout. -->
     {#if guid}
-      <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <div class={showPie || chartsLoading ? 'lg:col-span-2' : 'lg:col-span-3'}>
+      <div class="grid grid-cols-1 gap-6 @3xl:grid-cols-3">
+        <div class={showPie || chartsLoading ? '@3xl:col-span-2' : '@3xl:col-span-3'}>
           {#if dbSession.value}
             <BalanceTrendChart {guid} accountType={res.data?.account.accountType} />
           {:else}

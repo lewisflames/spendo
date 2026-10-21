@@ -6,9 +6,10 @@
   import { Button } from '$lib/components/ui/button';
   import * as Card from '$lib/components/ui/card';
   import IconCardHeader from '$lib/components/shared/icon-card-header.svelte';
-  import { ChevronLeft, Info } from '@lucide/svelte';
+  import { ChevronLeft, CopyPlus, Info, Trash2 } from '@lucide/svelte';
   import { DatePicker } from '$lib/components/shared/date-picker';
-  import PageHeader from '$lib/components/layout/page-header.svelte';
+  import PageHeader, { type Breadcrumb } from '$lib/components/layout/page-header.svelte';
+  import OverflowMenu, { type OverflowAction } from '$lib/components/shared/overflow-menu.svelte';
   import { toast } from '$lib/components/ui/sonner';
   import DescriptionCombobox from '$lib/features/transactions/description-combobox.svelte';
   import TransactionAttachments from '$lib/features/transactions/transaction-attachments.svelte';
@@ -58,6 +59,7 @@
     initial = null,
     title,
     headerDescription,
+    breadcrumbs = [],
     saveLabel,
     prevGuid = null,
     nextGuid = null,
@@ -74,6 +76,7 @@
     initial?: TransactionDetail | null;
     title: string;
     headerDescription: string;
+    breadcrumbs?: Breadcrumb[];
     /** Overrides the primary action label in create mode (e.g. "Create duplicate"). */
     saveLabel?: string;
     /** Edit mode: adjacent transactions for Previous / Save & next. */
@@ -146,6 +149,35 @@
       : `${modKey}+S saves.`
   );
   let headerText = $derived(headerDescription ? `${headerDescription} ${saveHint}` : saveHint);
+
+  // Edit-only secondary actions live in the header’s overflow menu.
+  let moreActions = $derived.by((): OverflowAction[] => {
+    if (mode !== 'edit') return [];
+    return [
+      ...(onNavigateTo
+        ? [
+            {
+              label: 'Previous transaction',
+              icon: ChevronLeft,
+              disabled: !prevGuid || busy,
+              onSelect: () => {
+                if (prevGuid) onNavigateTo(prevGuid);
+              }
+            }
+          ]
+        : []),
+      ...(onDuplicate
+        ? [{ label: 'Duplicate', icon: CopyPlus, disabled: busy, onSelect: onDuplicate }]
+        : []),
+      {
+        label: 'Delete',
+        icon: Trash2,
+        disabled: busy,
+        destructive: true,
+        onSelect: () => (deleteDialogOpen = true)
+      }
+    ];
+  });
 
   let primaryLabel = $derived(
     saveLabel ?? (mode === 'edit' ? 'Save changes' : 'Create transaction')
@@ -591,43 +623,8 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<div class="flex w-full flex-col gap-6">
-  <PageHeader {title} description={headerText}>
-    {#if mode === 'edit'}
-      {#if onNavigateTo}
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          onclick={() => prevGuid && onNavigateTo(prevGuid)}
-          disabled={!prevGuid || busy}
-          aria-label="Previous transaction"
-          title="Previous transaction"
-        >
-          <ChevronLeft aria-hidden="true" class="size-4" />
-        </Button>
-      {/if}
-      <Button
-        type="button"
-        variant="outline"
-        onclick={() => (deleteDialogOpen = true)}
-        disabled={busy}
-        title="Delete transaction"
-      >
-        Delete
-      </Button>
-      {#if onDuplicate}
-        <Button
-          type="button"
-          variant="outline"
-          onclick={onDuplicate}
-          disabled={busy}
-          title="Duplicate transaction"
-        >
-          Duplicate
-        </Button>
-      {/if}
-    {/if}
+<div class="page-stack w-full">
+  <PageHeader {title} description={headerText} {breadcrumbs}>
     <Button type="button" variant="outline" onclick={requestCancel} disabled={busy}>Cancel</Button>
     {#if mode === 'create' && onSavedAndNew}
       <Button
@@ -659,6 +656,7 @@
     >
       {saving ? 'Saving…' : primaryLabel}
     </Button>
+    <OverflowMenu actions={moreActions} />
   </PageHeader>
 
   <Card.Root>
@@ -683,7 +681,7 @@
           autofocus
         />
       </div>
-      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div class="grid grid-cols-1 gap-4 @xl:grid-cols-2">
         <div class="flex flex-col gap-1.5">
           <label for="tx-date" class="text-sm font-medium">Date</label>
           <DatePicker

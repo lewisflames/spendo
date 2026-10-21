@@ -105,9 +105,9 @@
         {detect.delimiter === '\t' ? 'tab' : `“${detect.delimiter}”`}
       </Card.Description>
     </Card.Header>
-    <Card.Content class="grid gap-4 md:grid-cols-2">
+    <Card.Content class="grid gap-4 @2xl:grid-cols-2">
       {#if presetApplied}
-        <div class="flex items-center gap-2 md:col-span-2">
+        <div class="flex items-center gap-2 @2xl:col-span-2">
           <p class="text-sm text-muted-foreground">We reused your saved mapping for this layout.</p>
           <Button variant="ghost" size="sm" onclick={onForgetPreset}>Forget</Button>
         </div>
@@ -148,7 +148,7 @@
           </Select.Content>
         </Select.Root>
       </div>
-      <div class="flex items-center gap-2 md:col-span-2">
+      <div class="flex items-center gap-2 @2xl:col-span-2">
         <Checkbox checked={usePair} onCheckedChange={(v) => (usePair = v === true)} id="csv-pair" />
         <label for="csv-pair" class="text-sm"
           >This file splits money in and out into two columns</label
@@ -192,7 +192,7 @@
           </Select.Root>
         </div>
       {:else}
-        <div class="flex flex-col gap-2 md:col-span-2">
+        <div class="flex flex-col gap-2 @2xl:col-span-2">
           <label for="csv-amount-col" class="text-sm font-medium">Amount column</label>
           <Select.Root
             type="single"
@@ -307,7 +307,7 @@
           </Select.Content>
         </Select.Root>
       </div>
-      <div class="flex items-center gap-2 md:col-span-2">
+      <div class="flex items-center gap-2 @2xl:col-span-2">
         <Checkbox
           checked={hasHeader}
           onCheckedChange={(v) => (hasHeader = v === true)}
@@ -316,7 +316,7 @@
         <label for="csv-header" class="text-sm">First row is a header</label>
       </div>
       {#if hasSignature}
-        <div class="flex items-center gap-2 md:col-span-2">
+        <div class="flex items-center gap-2 @2xl:col-span-2">
           <Checkbox
             checked={rememberMapping}
             onCheckedChange={(v) => (rememberMapping = v === true)}

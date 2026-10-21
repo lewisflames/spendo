@@ -4,23 +4,22 @@ import {
   ArrowLeftRight,
   Briefcase,
   CalendarClock,
-  Coins,
-  CreditCard,
   Landmark,
+  LayoutDashboard,
   PiggyBank,
   Receipt,
   Scale,
-  ScrollText,
-  TrendingDown,
-  TrendingUp
+  ScrollText
 } from '@lucide/svelte';
-import type { NavRoot } from '$lib/tauri';
+import { PAGE_META } from './page-meta';
 
 export type NavBadgeKey = 'reconcile' | 'scheduled';
 
 /** `g`-chord targets for the app’s primary pages. */
 export const NAV_CHORD_TARGETS = {
+  h: '/',
   t: '/transactions',
+  c: '/accounts',
   r: '/reconcile',
   a: '/reports/balance-sheet',
   s: '/scheduled',
@@ -37,11 +36,10 @@ export interface NavItem {
   icon: Component;
   /** Palette / global search keywords. */
   keywords: string[];
-  /** Static route, or a resolver over the fetched account roots (`null` hides the item). */
-  href: Pathname | ((roots: NavRoot[]) => Pathname | null);
+  href: Pathname;
   /** `g`-chord key, shown in collapsed tooltips and the shortcuts help. */
   chord?: NavChordKey;
-  match: (pathname: string, roots: NavRoot[]) => boolean;
+  match: (pathname: string) => boolean;
   badge?: NavBadgeKey;
 }
 
@@ -50,38 +48,43 @@ export interface NavGroup {
   items: NavItem[];
 }
 
-function rootGuid(roots: NavRoot[], category: string): string | null {
-  return roots.find((root) => root.category === category)?.guid ?? null;
-}
-
-function rootHref(roots: NavRoot[], category: string): Pathname | null {
-  const guid = rootGuid(roots, category);
-  return guid ? `/accounts/${guid}` : null;
-}
-
-function rootMatch(pathname: string, roots: NavRoot[], category: string): boolean {
-  const guid = rootGuid(roots, category);
-  return (
-    guid !== null && (pathname === `/accounts/${guid}` || pathname.startsWith(`/accounts/${guid}/`))
-  );
-}
-
 export const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Ledger',
     items: [
       {
+        id: 'overview',
+        label: PAGE_META.overview.title,
+        icon: LayoutDashboard,
+        keywords: ['overview', 'home', 'dashboard', 'summary', 'net worth'],
+        href: '/',
+        chord: 'h',
+        match: (pathname) => pathname === '/'
+      },
+      {
         id: 'transactions',
-        label: 'Transactions',
+        label: PAGE_META.transactions.title,
         icon: ArrowLeftRight,
         keywords: ['transactions', 'ledger', 'journal'],
         href: '/transactions',
         chord: 't',
-        match: (pathname) => pathname === '/transactions' || pathname.startsWith('/transactions/')
+        match: (pathname) =>
+          pathname === '/transactions' ||
+          pathname.startsWith('/transactions/') ||
+          pathname.startsWith('/import/')
+      },
+      {
+        id: 'accounts',
+        label: PAGE_META.accounts.title,
+        icon: Landmark,
+        keywords: ['accounts', 'assets', 'liabilities', 'equity', 'income', 'expenses', 'bank'],
+        href: '/accounts',
+        chord: 'c',
+        match: (pathname) => pathname === '/accounts' || pathname.startsWith('/accounts/')
       },
       {
         id: 'reconcile',
-        label: 'Reconcile',
+        label: PAGE_META.reconcile.title,
         icon: Scale,
         keywords: ['reconcile', 'reconciliation', 'bank statement', 'cleared'],
         href: '/reconcile',
@@ -92,56 +95,11 @@ export const NAV_GROUPS: NavGroup[] = [
     ]
   },
   {
-    label: 'Accounts',
-    items: [
-      {
-        id: 'assets',
-        label: 'Assets',
-        icon: Landmark,
-        keywords: ['assets', 'bank', 'cash', 'investments'],
-        href: (roots) => rootHref(roots, 'ASSET'),
-        match: (pathname, roots) => rootMatch(pathname, roots, 'ASSET')
-      },
-      {
-        id: 'liabilities',
-        label: 'Liabilities',
-        icon: CreditCard,
-        keywords: ['liabilities', 'debt', 'credit card', 'loans'],
-        href: (roots) => rootHref(roots, 'LIABILITY'),
-        match: (pathname, roots) => rootMatch(pathname, roots, 'LIABILITY')
-      },
-      {
-        id: 'equity',
-        label: 'Equity',
-        icon: Coins,
-        keywords: ['equity', 'opening balances', 'net worth'],
-        href: (roots) => rootHref(roots, 'EQUITY'),
-        match: (pathname, roots) => rootMatch(pathname, roots, 'EQUITY')
-      },
-      {
-        id: 'income',
-        label: 'Income',
-        icon: TrendingUp,
-        keywords: ['income', 'revenue', 'salary'],
-        href: (roots) => rootHref(roots, 'INCOME'),
-        match: (pathname, roots) => rootMatch(pathname, roots, 'INCOME')
-      },
-      {
-        id: 'expenses',
-        label: 'Expenses',
-        icon: TrendingDown,
-        keywords: ['expenses', 'spending', 'costs'],
-        href: (roots) => rootHref(roots, 'EXPENSE'),
-        match: (pathname, roots) => rootMatch(pathname, roots, 'EXPENSE')
-      }
-    ]
-  },
-  {
     label: 'Planning',
     items: [
       {
         id: 'scheduled',
-        label: 'Scheduled',
+        label: PAGE_META.scheduled.title,
         icon: CalendarClock,
         keywords: ['scheduled', 'recurring', 'bills', 'subscriptions'],
         href: '/scheduled',
@@ -151,7 +109,7 @@ export const NAV_GROUPS: NavGroup[] = [
       },
       {
         id: 'budgets',
-        label: 'Budgets',
+        label: PAGE_META.budgets.title,
         icon: PiggyBank,
         keywords: ['budgets', 'budgeting', 'plan'],
         href: '/budgets',
@@ -165,7 +123,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       {
         id: 'pnl',
-        label: 'Profit & loss',
+        label: PAGE_META.pnl.title,
         icon: Receipt,
         keywords: ['profit', 'loss', 'pnl', 'income', 'expenses', 'report'],
         href: '/reports/pnl',
@@ -174,7 +132,7 @@ export const NAV_GROUPS: NavGroup[] = [
       },
       {
         id: 'balance-sheet',
-        label: 'Balance sheet',
+        label: PAGE_META.balanceSheet.title,
         icon: ScrollText,
         keywords: ['balance sheet', 'accounts', 'assets', 'liabilities', 'equity', 'net worth'],
         href: '/reports/balance-sheet',
@@ -183,7 +141,7 @@ export const NAV_GROUPS: NavGroup[] = [
       },
       {
         id: 'portfolio',
-        label: 'Portfolio',
+        label: PAGE_META.portfolio.title,
         icon: Briefcase,
         keywords: ['portfolio', 'investments', 'holdings', 'stocks'],
         href: '/portfolio',
@@ -193,12 +151,3 @@ export const NAV_GROUPS: NavGroup[] = [
     ]
   }
 ];
-
-/** Resolved href for an item (`null` = not navigable yet / missing root). */
-export function navHref(item: NavItem, roots: NavRoot[]): Pathname | null {
-  return typeof item.href === 'function' ? item.href(roots) : item.href;
-}
-
-export function navItemActive(item: NavItem, pathname: string, roots: NavRoot[]): boolean {
-  return item.match(pathname, roots);
-}

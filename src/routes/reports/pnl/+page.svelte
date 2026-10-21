@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { PAGE_META } from '$lib/features/nav/page-meta';
   import { dbBootstrapping, dbSession } from '$lib/stores/db.svelte';
   import { untrack } from 'svelte';
   import { fetchPnlReport, fetchPnlTrend } from '$lib/tauri';
@@ -26,6 +27,8 @@
   import { page } from '$app/state';
   import { ReportPeriodPicker as DateRangePicker } from '$lib/components/shared/report-period-picker';
   import { buildTree, flattenAll } from '$lib/features/reports/report-tree';
+
+  const meta = PAGE_META.pnl;
 
   // Shared period state + URL-param restore; must precede useAsyncData so the
   // first fetch already uses values from the URL.
@@ -106,16 +109,13 @@
 </script>
 
 <svelte:head>
-  <title>Profit &amp; loss · Spendo</title>
-  <meta name="description" content="Profit and loss statement for a selected period." />
+  <title>{meta.title} · Spendo</title>
+  <meta name="description" content={meta.description} />
 </svelte:head>
 
-<BookGate title="Profit & loss" description="What came in and what went out">
-  <div class="flex flex-col gap-6">
-    <PageHeader
-      title="Profit & loss"
-      description="Income and expense statement for a selected period"
-    >
+<BookGate title={meta.title} description={meta.description}>
+  <div class="page-stack">
+    <PageHeader title={meta.title} description={meta.description}>
       <DateRangePicker
         bind:value={range.value}
         presets={PNL_PRESETS}
@@ -132,7 +132,10 @@
       <PageSkeleton variant="pnl" />
     {:else}
       <!-- Net income KPI summary cards -->
-      <DimWrapper active={res.loading} class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+      <DimWrapper
+        active={res.loading}
+        class="grid grid-cols-1 gap-6 @xl:grid-cols-2 @4xl:grid-cols-4"
+      >
         <KpiCard
           title="Net income"
           value={pnlData ? fmt(pnlData.netIncome) : EMPTY_DASH}

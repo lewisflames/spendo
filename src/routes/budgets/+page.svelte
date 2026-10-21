@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { PAGE_META } from '$lib/features/nav/page-meta';
   import { Button } from '$lib/components/ui/button';
   import { SearchInput } from '$lib/components/shared/search-input';
   import FilterBar from '$lib/components/shared/filter-bar.svelte';
@@ -35,6 +36,8 @@
     BUDGET_COLUMNS,
     BUDGET_DEFAULT_COLUMNS
   } from '$lib/features/budgets/budgets-table.svelte';
+
+  const meta = PAGE_META.budgets;
 
   const budgetCols = useColumnVisibility(BUDGET_DEFAULT_COLUMNS, 'cols:budgets');
 
@@ -121,17 +124,17 @@
 </script>
 
 <svelte:head>
-  <title>Budgets · Spendo</title>
-  <meta name="description" content="What you plan to spend this year." />
+  <title>{meta.title} · Spendo</title>
+  <meta name="description" content={meta.description} />
 </svelte:head>
 
-<BookGate title="Budgets" description="What you plan to spend. Leftovers roll over">
-  <div class="flex flex-col gap-6">
+<BookGate title={meta.title} description={meta.description}>
+  <div class="page-stack">
     <PageHeader
-      title="Budgets"
+      title={meta.title}
       description={rows !== null
-        ? `What you plan to spend · ${plural(rows.length, 'budget')}`
-        : 'What you plan to spend'}
+        ? `${meta.description} · ${plural(rows.length, 'budget')}`
+        : meta.description}
     >
       <BudgetYearStepper
         bind:yearSel={by.yearSel}
@@ -164,7 +167,10 @@
     {#if rows === null && !res.error}
       <PageSkeleton variant="budgets" />
     {:else if rows !== null}
-      <DimWrapper active={yearLoading} class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+      <DimWrapper
+        active={yearLoading}
+        class="grid grid-cols-1 gap-6 @xl:grid-cols-2 @3xl:grid-cols-3"
+      >
         <KpiCard title="Effective budget" value={fmt(clampZero(totalEffective))}>
           {#snippet icon()}
             <Wallet aria-hidden="true" class="size-4 text-muted-foreground" />

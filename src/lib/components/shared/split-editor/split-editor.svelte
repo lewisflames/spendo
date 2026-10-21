@@ -65,8 +65,8 @@
   // Tailwind sees both class strings in this file, so either grid is generated.
   let gridCols = $derived(
     showQtyColumn
-      ? 'sm:grid-cols-[minmax(0,2fr)_9rem_7rem_minmax(0,1.5fr)_auto]'
-      : 'sm:grid-cols-[minmax(0,2fr)_9rem_minmax(0,1.5fr)_auto]'
+      ? '@xl:grid-cols-[minmax(0,2fr)_9rem_7rem_minmax(0,1.5fr)_auto]'
+      : '@xl:grid-cols-[minmax(0,2fr)_9rem_minmax(0,1.5fr)_auto]'
   );
 
   let typeByGuid = $derived(new Map(options.map((o) => [o.guid, o.accountType])));
@@ -204,7 +204,7 @@
 
   <div class="overflow-hidden rounded-lg border">
     <div
-      class="hidden gap-2 border-b bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground sm:grid {gridCols}"
+      class="hidden gap-2 border-b bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground @xl:grid {gridCols}"
     >
       <span>Account</span>
       <span>Amount</span>
@@ -220,8 +220,10 @@
         {@const label = rowLabel(s, i)}
         {@const remainder = remainderFor(i, splits)}
         {@const price = unitPrice(s)}
-        <div class="grid grid-cols-2 gap-2 p-3 sm:items-center sm:gap-2 sm:px-3 sm:py-2 {gridCols}">
-          <div class="col-span-2 sm:col-span-1">
+        <div
+          class="grid grid-cols-2 gap-2 p-3 @xl:items-center @xl:gap-2 @xl:px-3 @xl:py-2 {gridCols}"
+        >
+          <div class="col-span-2 @xl:col-span-1">
             <AccountPicker
               id="{idPrefix}-{s.key}-account"
               bind:value={s.accountGuid}
@@ -279,7 +281,7 @@
               {/if}
             </div>
           {/if}
-          <div class="col-span-2 sm:col-span-1">
+          <div class="col-span-2 @xl:col-span-1">
             <Input
               id="{idPrefix}-{s.key}-memo"
               bind:value={s.memo}
@@ -288,7 +290,7 @@
               aria-label="{label} memo"
             />
           </div>
-          <div class="col-span-2 flex justify-end gap-0.5 sm:col-span-1 sm:justify-center">
+          <div class="col-span-2 flex justify-end gap-0.5 @xl:col-span-1 @xl:justify-center">
             <Button
               type="button"
               variant="ghost"
@@ -378,7 +380,7 @@
             <p
               id="{idPrefix}-{s.key}-error"
               role="alert"
-              class="col-span-2 text-xs text-destructive sm:col-span-full"
+              class="col-span-2 text-xs text-destructive @xl:col-span-full"
             >
               {errors[i]}
             </p>
