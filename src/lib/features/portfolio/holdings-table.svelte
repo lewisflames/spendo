@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tooltip } from '$lib/attachments/tooltip';
   import * as Table from '$lib/components/ui/table';
   import { Badge } from '$lib/components/ui/badge';
   import { resolve } from '$app/paths';
@@ -316,7 +317,9 @@
                   class="flex flex-col gap-0.5 focus-visible:outline-2 focus-visible:outline-ring"
                 >
                   <span class="flex items-center gap-2 font-medium">
-                    <span class="truncate" title={h.fullName ?? h.mnemonic}
+                    <span
+                      class="truncate"
+                      {@attach tooltip(h.fullName ?? h.mnemonic, { truncated: true })}
                       >{h.fullName ?? h.mnemonic}</span
                     >
                     {#if isClosed}
@@ -349,7 +352,7 @@
                       h.priceDate !== null && priceStaleDays(h.priceDate) > STALE_PRICE_DAYS}
                     <span
                       class={stale ? 'text-warning' : ''}
-                      title={h.priceDate === null ? undefined : formatDate(h.priceDate)}
+                      {@attach tooltip(h.priceDate === null ? undefined : formatDate(h.priceDate))}
                     >
                       {fmt(h.price)}
                     </span>

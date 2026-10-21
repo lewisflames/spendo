@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tooltip } from '$lib/attachments/tooltip';
   import * as Card from '$lib/components/ui/card';
   import { Input } from '$lib/components/ui/input';
   import * as Select from '$lib/components/ui/select';
@@ -108,7 +109,7 @@
             type="button"
             role="radio"
             aria-checked={appSettings.value.accent === a.value}
-            title={a.label}
+            {@attach tooltip(a.label)}
             aria-label={a.label}
             onclick={() => handleAccentSelect(a.value)}
             class={cn(

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tooltip } from '$lib/attachments/tooltip';
   import { parseDate, type DateValue } from '@internationalized/date';
   import { CalendarIcon, X } from '@lucide/svelte';
   import * as Popover from '$lib/components/ui/popover';
@@ -96,7 +97,7 @@
       variant="ghost"
       size="icon-sm"
       aria-label="Clear date"
-      title="Clear date"
+      {@attach tooltip('Clear date')}
       onclick={() => (value = '')}
     >
       <X aria-hidden="true" class="size-3.5" />

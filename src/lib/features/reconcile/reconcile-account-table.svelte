@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tooltip } from '$lib/attachments/tooltip';
   import { resolve } from '$app/paths';
   import * as Table from '$lib/components/ui/table';
   import { Badge } from '$lib/components/ui/badge';
@@ -73,7 +74,11 @@
         </Table.Cell>
         <Table.Cell class="hidden py-2.5 text-right @xl:table-cell">
           {#if row.stats.clearedCount > 0}
-            <Badge variant="warning" title="Cleared marks saved but not finished" class="ml-auto">
+            <Badge
+              variant="warning"
+              {@attach tooltip('Cleared marks saved but not finished')}
+              class="ml-auto"
+            >
               {formatNumber(row.stats.clearedCount)}
             </Badge>
           {:else}

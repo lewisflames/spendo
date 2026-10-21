@@ -287,6 +287,38 @@
   }
 }
 
+/* Page transitions: only the content column cross-fades; the title bar and
+ * sidebar stay put. */
+#main-content {
+  view-transition-name: page;
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+}
+
+::view-transition-old(page) {
+  animation: 90ms ease-out both page-fade-out;
+}
+
+::view-transition-new(page) {
+  animation: 160ms ease-out both page-fade-in;
+}
+
+@keyframes page-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes page-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tooltip } from '$lib/attachments/tooltip';
   import * as Card from '$lib/components/ui/card';
   import { Button } from '$lib/components/ui/button';
   import * as Select from '$lib/components/ui/select';
@@ -108,7 +109,7 @@
     <div class="flex w-full items-center gap-2">
       <code
         class="max-w-full flex-1 truncate rounded bg-muted px-2 py-1 font-mono text-xs text-muted-foreground"
-        title={activePath ?? undefined}
+        {@attach tooltip(activePath ?? undefined, { truncated: true })}
       >
         {activePath ?? 'Nothing open right now'}
       </code>
@@ -118,7 +119,7 @@
         disabled={!activePath}
         onclick={handleCopyPath}
         aria-label="Copy book path"
-        title="Copy book path"
+        {@attach tooltip('Copy book path')}
       >
         {#if copied}
           <Check aria-hidden="true" class="size-4" />

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tooltip } from '$lib/attachments/tooltip';
   import * as Table from '$lib/components/ui/table';
   import { Badge } from '$lib/components/ui/badge';
   import { Button } from '$lib/components/ui/button';
@@ -80,12 +81,14 @@
           <a
             href={resolve('/scheduled/[guid]/edit', { guid: schedule.guid })}
             class="font-medium focus-visible:outline-2 focus-visible:outline-ring"
-            title={schedule.name}
+            {@attach tooltip(schedule.name)}
           >
             {schedule.name}
           </a>
           {#if schedule.description && schedule.description !== schedule.name}
-            <span class="block truncate text-xs text-muted-foreground" title={schedule.description}
+            <span
+              class="block truncate text-xs text-muted-foreground"
+              {@attach tooltip(schedule.description, { truncated: true })}
               >{schedule.description}</span
             >
           {/if}
@@ -120,7 +123,7 @@
                   size="sm"
                   onclick={() => onPost(schedule)}
                   disabled={busy}
-                  title="Post this occurrence to the ledger"
+                  {@attach tooltip('Post this occurrence to the ledger')}
                 >
                   <CalendarCheck aria-hidden="true" class="size-3.5" />
                   Post
@@ -131,7 +134,7 @@
                 size="sm"
                 onclick={() => onSkip(schedule)}
                 disabled={busy}
-                title="Skip this occurrence without posting"
+                {@attach tooltip('Skip this occurrence without posting')}
               >
                 <SkipForward aria-hidden="true" class="size-3.5" />
                 Skip
@@ -143,7 +146,7 @@
                 size="sm"
                 onclick={() => onToggleActive(schedule)}
                 disabled={busy}
-                title={schedule.active ? 'Pause reminders' : 'Resume reminders'}
+                {@attach tooltip(schedule.active ? 'Pause reminders' : 'Resume reminders')}
               >
                 {#if schedule.active}
                   <Pause aria-hidden="true" class="size-3.5" />
@@ -158,7 +161,7 @@
               variant="ghost"
               size="sm"
               href={resolve('/scheduled/[guid]/edit', { guid: schedule.guid })}
-              title="Edit schedule"
+              {@attach tooltip('Edit schedule')}
             >
               <Pencil aria-hidden="true" class="size-3.5" />
               Edit

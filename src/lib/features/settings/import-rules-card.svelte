@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tooltip } from '$lib/attachments/tooltip';
   import * as Card from '$lib/components/ui/card';
   import { Button } from '$lib/components/ui/button';
   import { Badge } from '$lib/components/ui/badge';
@@ -128,7 +129,10 @@
       <ul class="flex flex-col gap-1.5">
         {#each rules as rule, i (rule.id)}
           <li class="flex items-center gap-2 rounded-lg border px-3 py-2">
-            <span class="min-w-0 flex-1 truncate text-sm font-medium" title={rule.pattern}>
+            <span
+              class="min-w-0 flex-1 truncate text-sm font-medium"
+              {@attach tooltip(rule.pattern, { truncated: true })}
+            >
               {rule.pattern}
             </span>
             <Badge variant="outline" class="shrink-0">
@@ -146,7 +150,7 @@
                 variant="ghost"
                 size="icon-sm"
                 aria-label="Move rule up"
-                title="Move up"
+                {@attach tooltip('Move up')}
                 disabled={i === 0 || movingId !== null || deletingId !== null}
                 onclick={() => void moveRule(i, -1)}
               >
@@ -156,7 +160,7 @@
                 variant="ghost"
                 size="icon-sm"
                 aria-label="Move rule down"
-                title="Move down"
+                {@attach tooltip('Move down')}
                 disabled={i === rules.length - 1 || movingId !== null || deletingId !== null}
                 onclick={() => void moveRule(i, 1)}
               >
@@ -166,7 +170,7 @@
                 variant="ghost"
                 size="icon-sm"
                 aria-label="Edit import rule"
-                title="Edit"
+                {@attach tooltip('Edit')}
                 disabled={deletingId !== null}
                 onclick={() => openEdit(rule)}
               >
@@ -195,7 +199,7 @@
                   size="icon-sm"
                   class="text-destructive hover:text-destructive"
                   aria-label="Delete import rule"
-                  title="Delete"
+                  {@attach tooltip('Delete')}
                   disabled={deletingId !== null}
                   onclick={() => void handleDelete(rule)}
                 >

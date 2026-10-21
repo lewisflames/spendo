@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tooltip } from '$lib/attachments/tooltip';
   import { SvelteDate } from 'svelte/reactivity';
   import { dbSession } from '$lib/stores/db.svelte';
   import { fetchTransactionHeatmap } from '$lib/tauri';
@@ -233,7 +234,7 @@
                     ? 'opacity-40'
                     : ''}"
                   style={`background: ${day.background};`}
-                  title={day.title}
+                  {@attach tooltip(day.title)}
                 ></div>
               {/each}
             </div>

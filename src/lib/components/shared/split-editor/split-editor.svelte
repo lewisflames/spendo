@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tooltip } from '$lib/attachments/tooltip';
   import { tick } from 'svelte';
   import { Input } from '$lib/components/ui/input';
   import { Button } from '$lib/components/ui/button';
@@ -244,7 +245,7 @@
               placeholder={autoFill === i && remainder !== null
                 ? formatDraftAmount(remainder)
                 : '0.00'}
-              title="Accepts amounts like 1,000.00, $12.50 or 10+5"
+              {@attach tooltip('Accepts amounts like 1,000.00, $12.50 or 10+5')}
               aria-label="{label} amount"
               aria-invalid={showErrors && parseAmount(s.amount) === null}
               onkeydown={(e) => handleAmountKeydown(e, i)}
@@ -270,7 +271,7 @@
                   size="icon"
                   class="size-8 shrink-0"
                   aria-label="Hide quantity for {label}"
-                  title="Hide quantity"
+                  {@attach tooltip('Hide quantity')}
                   onclick={() => {
                     s.showQuantity = false;
                     s.quantity = '';
@@ -299,7 +300,7 @@
               onclick={() => fillRemainder(i)}
               disabled={remainder === null}
               aria-label="Fill {label} to balance"
-              title="Fill to balance"
+              {@attach tooltip('Fill to balance')}
             >
               <Scale aria-hidden="true" class="size-3.5" />
             </Button>
@@ -325,7 +326,7 @@
                     class="size-7 text-muted-foreground"
                     {...props}
                     aria-label="More actions for {label}"
-                    title="More actions"
+                    {@attach tooltip('More actions')}
                   >
                     <Ellipsis aria-hidden="true" class="size-3.5" />
                   </Button>

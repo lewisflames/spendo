@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tooltip } from '$lib/attachments/tooltip';
   import { page } from '$app/state';
   import { resolve } from '$app/paths';
 
@@ -164,7 +165,7 @@
                 {#if activeBookPath.value}
                   <span
                     class="block truncate text-xs text-muted-foreground"
-                    title={activeBookPath.value}
+                    {@attach tooltip(activeBookPath.value, { truncated: true })}
                   >
                     {bookFolder(activeBookPath.value) ?? activeBookPath.value}
                   </span>

@@ -15,6 +15,7 @@
 </script>
 
 <script lang="ts">
+  import { tooltip } from '$lib/attachments/tooltip';
   import * as Table from '$lib/components/ui/table';
   import { Badge } from '$lib/components/ui/badge';
   import { resolve } from '$app/paths';
@@ -125,7 +126,7 @@
               <a
                 class="block truncate focus-visible:outline-2 focus-visible:outline-ring"
                 href={resolve('/transactions/[guid]', { guid: t.guid })}
-                title={t.description ?? undefined}
+                {@attach tooltip(t.description ?? undefined, { truncated: true })}
               >
                 {#if t.num}<span class="mr-1 text-muted-foreground">#{t.num}</span>{/if}
                 {#if t.description}
@@ -135,7 +136,10 @@
                 {/if}
               </a>
               {#if t.notes}
-                <p class="truncate text-xs font-normal text-muted-foreground" title={t.notes}>
+                <p
+                  class="truncate text-xs font-normal text-muted-foreground"
+                  {@attach tooltip(t.notes, { truncated: true })}
+                >
                   {t.notes}
                 </p>
               {/if}
@@ -184,7 +188,7 @@
             {#if cols.isVisible('runningBalance')}
               <Table.Cell
                 class="py-2.5 text-right text-muted-foreground tabular-nums"
-                title="Share balance after this transaction"
+                {@attach tooltip('Share balance after this transaction')}
               >
                 {formatShares(t.runningShares)}
               </Table.Cell>

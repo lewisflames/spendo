@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tooltip } from '$lib/attachments/tooltip';
   import { resolve } from '$app/paths';
   import * as Table from '$lib/components/ui/table';
   import { Badge } from '$lib/components/ui/badge';
@@ -94,7 +95,7 @@
         }}
         onNavigate={() => onToggle(row.splitGuid, !isChecked)}
       >
-        <Table.Cell class="py-2.5" title="Click to toggle · Shift-click for a range">
+        <Table.Cell class="py-2.5" {@attach tooltip('Click to toggle · Shift-click for a range')}>
           <Checkbox
             checked={isChecked}
             aria-label="Mark {row.description ?? row.postDate} cleared"
@@ -107,7 +108,7 @@
         <Table.Cell class="max-w-md py-2.5 font-medium">
           <a
             href={resolve('/transactions/[guid]', { guid: row.txGuid })}
-            title="Open transaction"
+            {@attach tooltip('Open transaction', { truncated: true })}
             class="block truncate focus-visible:outline-2 focus-visible:outline-ring"
           >
             {#if row.num}<span class="mr-1 text-muted-foreground">#{row.num}</span>{/if}
@@ -118,7 +119,10 @@
             {/if}
           </a>
           {#if row.memo}
-            <p class="truncate text-xs font-normal text-muted-foreground" title={row.memo}>
+            <p
+              class="truncate text-xs font-normal text-muted-foreground"
+              {@attach tooltip(row.memo, { truncated: true })}
+            >
               {row.memo}
             </p>
           {/if}
@@ -127,7 +131,9 @@
           class="hidden max-w-40 truncate py-2.5 text-sm text-muted-foreground @2xl:table-cell"
         >
           {#if row.counterAccounts.length > 0}
-            <span title={row.counterAccounts.join(', ')}>{row.counterAccounts.join(', ')}</span>
+            <span {@attach tooltip(row.counterAccounts.join(', '))}
+              >{row.counterAccounts.join(', ')}</span
+            >
           {:else}
             <EmptyValue />
           {/if}
@@ -140,7 +146,9 @@
             {#if isDuplicate}
               <Badge
                 variant="outline"
-                title="Shares a date and amount with another candidate — check for a duplicate import"
+                {@attach tooltip(
+                  'Shares a date and amount with another candidate — check for a duplicate import'
+                )}
               >
                 Duplicate?
               </Badge>

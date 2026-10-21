@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tooltip } from '$lib/attachments/tooltip';
   import { tick, untrack } from 'svelte';
   import { beforeNavigate, goto } from '$app/navigation';
   import { Input } from '$lib/components/ui/input';
@@ -632,7 +633,7 @@
         variant="outline"
         onclick={() => void handleSaveAndNew()}
         disabled={busy}
-        title={`Save & add another (${modKey}+Shift+S)`}
+        {@attach tooltip(`Save & add another (${modKey}+Shift+S)`)}
       >
         {savingAndNew ? 'Saving…' : 'Save & add another'}
       </Button>
@@ -643,7 +644,7 @@
         variant="outline"
         onclick={() => void handleSaveAndNext()}
         disabled={busy}
-        title={`Save & next (${modKey}+Shift+S)`}
+        {@attach tooltip(`Save & next (${modKey}+Shift+S)`)}
       >
         Save & next
       </Button>
@@ -652,7 +653,7 @@
       type="button"
       onclick={() => void handleSave()}
       disabled={busy}
-      title={canSave ? undefined : 'Check the highlighted fields'}
+      {@attach tooltip(canSave ? undefined : 'Check the highlighted fields')}
     >
       {saving ? 'Saving…' : primaryLabel}
     </Button>
