@@ -33,7 +33,7 @@
     {#if lockedSplitCount > 0}
       <p
         role="note"
-        class="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300"
+        class="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-foreground"
       >
         {plural(lockedSplitCount, 'split')} here {lockedSplitCount === 1 ? 'is' : 'are'} cleared or reconciled.
         Deleting removes them from the account’s reconciliation history.

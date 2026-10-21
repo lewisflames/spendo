@@ -3,11 +3,12 @@
 @plugin '@tailwindcss/typography';
 @custom-variant dark (&:is(.dark *));
 
-/* Bundled monospace font (self-hosted, offline-safe) */
-@import '@fontsource-variable/jetbrains-mono';
+/* Bundled UI font (self-hosted, offline-safe) so macOS and Linux render alike. */
+@import '@fontsource-variable/inter';
 
 @theme {
-  --font-mono: 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 :root {
@@ -84,7 +85,7 @@
 }
 
 /* Preset accents: recolor the primary action tokens on top of the zinc base.
- * `zinc` (default) and `custom` (inline vars on <html>) need no rules here. */
+ * `blue` is the default; `zinc` and `custom` (inline vars on <html>) need no rules here. */
 :root[data-accent='blue'] {
   --primary: oklch(0.546 0.245 262.881);
   --primary-foreground: oklch(0.985 0 0);

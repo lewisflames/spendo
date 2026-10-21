@@ -496,7 +496,7 @@
         onSaved?.(newGuid);
       }
     } catch (e: unknown) {
-      formError = errMsg(e, 'We couldn’t save this transaction. Please try again');
+      formError = errMsg(e, 'We couldn’t save this transaction');
       focusFormError();
     } finally {
       saving = false;
@@ -537,7 +537,7 @@
       showErrors = false;
       focusDescription();
     } catch (e: unknown) {
-      formError = errMsg(e, 'We couldn’t save this transaction. Please try again');
+      formError = errMsg(e, 'We couldn’t save this transaction');
       focusFormError();
     } finally {
       savingAndNew = false;
@@ -563,7 +563,7 @@
       suppressGuard = true;
       onDeleted?.();
     } catch (e: unknown) {
-      formError = errMsg(e, 'We couldn’t delete this transaction. Please try again');
+      formError = errMsg(e, 'We couldn’t delete this transaction');
       deleteDialogOpen = false;
       focusFormError();
     } finally {
@@ -727,7 +727,7 @@
   {#if futureDate}
     <p
       role="note"
-      class="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300"
+      class="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-foreground"
     >
       This transaction is dated {formatDate(postDate)}, in the future. It stays out of balances,
       budgets and net worth.
@@ -755,7 +755,7 @@
   {#if mode === 'edit' && hasLockedSplits}
     <p
       role="note"
-      class="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300"
+      class="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-foreground"
     >
       {plural(lockedSplitCount, 'split')} here {lockedSplitCount === 1 ? 'is' : 'are'} cleared or reconciled.
       Saving puts them back to New; you’ll be asked to confirm.

@@ -158,7 +158,7 @@
       })
       .catch((e: unknown) => {
         if (cancelled) return;
-        onError?.(errMsg(e, 'We couldn’t load your accounts. Please try again'));
+        onError?.(errMsg(e, 'We couldn’t load your accounts'));
       })
       .finally(() => {
         if (!cancelled) loading = false;
@@ -207,7 +207,7 @@
         onSaved?.(newGuid);
       }
     } catch (e: unknown) {
-      formError = errMsg(e, 'We couldn’t save this account. Please try again');
+      formError = errMsg(e, 'We couldn’t save this account');
     } finally {
       saving = false;
     }
@@ -226,7 +226,7 @@
       open = false;
       onDeleted?.();
     } catch (e: unknown) {
-      formError = errMsg(e, 'We couldn’t delete this account. Please try again');
+      formError = errMsg(e, 'We couldn’t delete this account');
     } finally {
       deleting = false;
     }

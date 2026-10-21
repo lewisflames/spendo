@@ -106,14 +106,14 @@
 </script>
 
 <svelte:head>
-  <title>Profit &amp; Loss · Spendo</title>
+  <title>Profit &amp; loss · Spendo</title>
   <meta name="description" content="Profit and loss statement for a selected period." />
 </svelte:head>
 
-<BookGate title="Profit & Loss" description="What came in and what went out">
+<BookGate title="Profit & loss" description="What came in and what went out">
   <div class="flex flex-col gap-6">
     <PageHeader
-      title="Profit & Loss"
+      title="Profit & loss"
       description="Income and expense statement for a selected period"
     >
       <DateRangePicker
@@ -134,7 +134,7 @@
       <!-- Net income KPI summary cards -->
       <DimWrapper active={res.loading} class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
         <KpiCard
-          title="Net Income"
+          title="Net income"
           value={pnlData ? fmt(pnlData.netIncome) : EMPTY_DASH}
           valueClass={pnlData ? signColor(pnlData.netIncome) : ''}
           loading={!pnlData && (res.loading || dbBootstrapping.value)}
@@ -144,7 +144,7 @@
           {/snippet}
         </KpiCard>
         <KpiCard
-          title="Previous Period"
+          title="Previous period"
           value={pnlData && prevNetIncome !== null ? fmt(prevNetIncome) : EMPTY_DASH}
           loading={!pnlData && (res.loading || dbBootstrapping.value)}
         >

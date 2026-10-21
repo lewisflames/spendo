@@ -8,7 +8,7 @@
 </script>
 
 <div class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-  <KpiCard title="Total Balance" value={fmt(currentBalance)}>
+  <KpiCard title="Total balance" value={fmt(currentBalance)}>
     {#snippet icon()}
       <Wallet aria-hidden="true" class="size-4 text-muted-foreground" />
     {/snippet}

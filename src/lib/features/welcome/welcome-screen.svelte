@@ -74,9 +74,9 @@
     const path = paths.find(isSpendoBookPath);
     if (!path) {
       if (paths.some((p) => p.toLowerCase().endsWith('.gnucash'))) {
-        toast.error('Start a book first, then we can bring in that GnuCash file');
+        toast.error('Open a book before importing a GnuCash file');
       } else {
-        toast.error('That’s not a Spendo book. Pick one of those to open');
+        toast.error('Not a Spendo book');
       }
       return;
     }

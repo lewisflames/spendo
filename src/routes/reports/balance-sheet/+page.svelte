@@ -24,13 +24,13 @@
 </script>
 
 <svelte:head>
-  <title>Balance Sheet · Spendo</title>
+  <title>Balance sheet · Spendo</title>
   <meta name="description" content="What you own and owe, in one statement." />
 </svelte:head>
 
-<BookGate title="Balance Sheet" description="What you own and owe, at a glance">
+<BookGate title="Balance sheet" description="What you own and owe, at a glance">
   <div class="flex flex-col gap-6">
-    <PageHeader title="Balance Sheet" description="What you own and owe, as of today" />
+    <PageHeader title="Balance sheet" description="What you own and owe, as of today" />
 
     {#if (res.loading || dbBootstrapping.value) && !res.data}
       <PageSkeleton variant="balance-sheet" />

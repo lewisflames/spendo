@@ -25,7 +25,7 @@
 
 <!-- KPI summary cards -->
 <div class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
-  <KpiCard title="Market Value">
+  <KpiCard title="Market value">
     {#snippet icon()}
       <TrendingUp aria-hidden="true" class="size-4 text-muted-foreground" />
     {/snippet}
@@ -33,7 +33,7 @@
       {fmt(h.marketValue)}
     {/snippet}
   </KpiCard>
-  <KpiCard title="Gain / Loss" valueClass={signColor(h.gainLoss)}>
+  <KpiCard title="Gain / loss" valueClass={signColor(h.gainLoss)}>
     {#snippet icon()}
       {#if h.gainLoss >= 0}
         <TrendingUp aria-hidden="true" class="size-4 text-success" />
@@ -45,7 +45,7 @@
       {formatSignedCurrency(h.gainLoss, currency)}
     {/snippet}
   </KpiCard>
-  <KpiCard title="Current Price">
+  <KpiCard title="Current price">
     {#snippet icon()}
       <ChartLine aria-hidden="true" class="size-4 text-muted-foreground" />
     {/snippet}

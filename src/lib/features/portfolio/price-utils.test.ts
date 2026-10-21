@@ -105,6 +105,6 @@ describe('toastPriceResult', () => {
     toastPriceResult({ prices: [price], errors: [] });
     expect(mockedToast.success).toHaveBeenCalledWith('Prices are up to date');
     toastPriceResult({ prices: [price], errors: [] }, { fixHint: true });
-    expect(mockedToast.success).toHaveBeenCalledWith('Fresh prices are in');
+    expect(mockedToast.success).toHaveBeenCalledWith('Prices refreshed');
   });
 });

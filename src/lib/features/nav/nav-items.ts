@@ -165,7 +165,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       {
         id: 'pnl',
-        label: 'Profit & Loss',
+        label: 'Profit & loss',
         icon: Receipt,
         keywords: ['profit', 'loss', 'pnl', 'income', 'expenses', 'report'],
         href: '/reports/pnl',
@@ -174,7 +174,7 @@ export const NAV_GROUPS: NavGroup[] = [
       },
       {
         id: 'balance-sheet',
-        label: 'Balance Sheet',
+        label: 'Balance sheet',
         icon: ScrollText,
         keywords: ['balance sheet', 'accounts', 'assets', 'liabilities', 'equity', 'net worth'],
         href: '/reports/balance-sheet',

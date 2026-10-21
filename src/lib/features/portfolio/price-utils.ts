@@ -52,6 +52,6 @@ export function toastPriceResult(
       `Prices refreshed with ${plural(errorCount, 'error')}${opts.fixHint ? '. Open Portfolio to fix symbols.' : ''}`
     );
   } else if (result.prices.length > 0) {
-    toast.success(opts.fixHint ? 'Fresh prices are in' : 'Prices are up to date');
+    toast.success(opts.fixHint ? 'Prices refreshed' : 'Prices are up to date');
   }
 }

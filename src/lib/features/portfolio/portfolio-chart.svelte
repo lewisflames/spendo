@@ -9,22 +9,22 @@
 
   let tooltipTotals = [
     {
-      label: 'Gain / Loss',
+      label: 'Gain / loss',
       compute: (d: PortfolioValuePoint) => d.marketValue - d.costBasis
     }
   ];
 </script>
 
 <TimeSeriesChart
-  title="Portfolio Performance"
+  title="Portfolio performance"
   description="What it’s worth versus what you paid, over time"
   {loading}
   emptyMessage="Not enough history to chart yet."
   {data}
   getX={(d: PortfolioValuePoint) => parseLocalDate(d.date)}
   series={[
-    { key: 'marketValue', label: 'Market Value', color: 'var(--color-success)' },
-    { key: 'costBasis', label: 'Cost Basis', color: 'var(--color-warning)' }
+    { key: 'marketValue', label: 'Market value', color: 'var(--color-success)' },
+    { key: 'costBasis', label: 'Cost basis', color: 'var(--color-warning)' }
   ]}
   {currency}
   {tooltipTotals}

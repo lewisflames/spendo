@@ -7,7 +7,7 @@
   import type { Schedule } from '$lib/tauri';
 
   function handleSaved(schedule: Schedule) {
-    toast.success(`“${schedule.name}” is on repeat now`);
+    toast.success(`Schedule “${schedule.name}” created`);
     void goto(resolve('/scheduled'), { replaceState: true });
   }
 </script>

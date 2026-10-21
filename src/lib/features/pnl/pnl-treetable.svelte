@@ -202,13 +202,13 @@
         <Table.Row class="bg-muted/75">
           <Table.Head class="w-[30%] text-muted-foreground">Account</Table.Head>
           <Table.Head class="text-right whitespace-nowrap text-muted-foreground">
-            Current Period
+            Current period
             <span class="block text-xs font-normal text-muted-foreground/70">
               {formatDateRange(pnlData?.dateFrom, pnlData?.dateTo)}
             </span>
           </Table.Head>
           <Table.Head class="text-right whitespace-nowrap text-muted-foreground">
-            Previous Period
+            Previous period
             <span class="block text-xs font-normal text-muted-foreground/70">
               {formatDateRange(pnlData?.prevDateFrom, pnlData?.prevDateTo)}
             </span>
@@ -223,7 +223,7 @@
     {#if pnlData && section === 'income'}
       {@render pnlRows(visibleIncomeRows, true)}
       {@render totalRow(
-        'Total Income',
+        'Total income',
         pnlData.incomeRootGuid,
         pnlData.totalIncome,
         pnlData.totalIncomePrev,
@@ -234,7 +234,7 @@
     {#if pnlData && section === 'expenses'}
       {@render pnlRows(visibleExpenseRows, false)}
       {@render totalRow(
-        'Total Expenses',
+        'Total expenses',
         pnlData.expenseRootGuid,
         pnlData.totalExpenses,
         pnlData.totalExpensesPrev,

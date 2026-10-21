@@ -37,7 +37,7 @@
   function handleResetPreferences() {
     resetSettings();
     customDraft = DEFAULT_CUSTOM_PRIMARY;
-    toast.success('Back to defaults. Fresh start');
+    toast.success('Preferences reset');
   }
 </script>
 

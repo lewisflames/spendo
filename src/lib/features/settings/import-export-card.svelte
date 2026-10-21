@@ -32,7 +32,7 @@
     try {
       await saveBookSetting(field, value);
     } catch (e: unknown) {
-      toast.error(errMsg(e, 'We couldn’t save that preference. Please try again'));
+      toast.error(errMsg(e, 'We couldn’t save that preference'));
     } finally {
       savingPref = false;
     }

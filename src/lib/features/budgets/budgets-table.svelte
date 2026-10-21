@@ -15,7 +15,7 @@
     { id: 'carryIn', label: 'Carry-in' },
     { id: 'spent', label: 'Spent' },
     { id: 'expectedYtd', label: 'Expected YTD' },
-    { id: 'aheadBehind', label: 'Ahead / Behind' },
+    { id: 'aheadBehind', label: 'Ahead / behind' },
     { id: 'pacing', label: 'Pacing' },
     { id: 'remaining', label: 'Remaining' }
   ];
@@ -123,7 +123,7 @@
           <Table.Head class="text-right text-muted-foreground">Expected YTD</Table.Head>
         {/if}
         {#if cols.isVisible('aheadBehind')}
-          <Table.Head class="text-right text-muted-foreground">Ahead / Behind</Table.Head>
+          <Table.Head class="text-right text-muted-foreground">Ahead / behind</Table.Head>
         {/if}
         {#if cols.isVisible('pacing')}
           <Table.Head class="text-left text-muted-foreground">Pacing</Table.Head>

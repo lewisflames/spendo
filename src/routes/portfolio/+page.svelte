@@ -206,17 +206,17 @@
         {#if d.holdings.length > 0}
           <!-- KPI summary cards -->
           <div class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
-            <KpiCard title="Market Value" value={fmt(d.totalMarketValue)}>
+            <KpiCard title="Market value" value={fmt(d.totalMarketValue)}>
               {#snippet icon()}
                 <TrendingUp aria-hidden="true" class="size-4 text-muted-foreground" />
               {/snippet}
             </KpiCard>
-            <KpiCard title="Cost Basis" value={fmt(d.totalCostBasis)}>
+            <KpiCard title="Cost basis" value={fmt(d.totalCostBasis)}>
               {#snippet icon()}
                 <Briefcase aria-hidden="true" class="size-4 text-muted-foreground" />
               {/snippet}
             </KpiCard>
-            <KpiCard title="Gain / Loss" valueClass={signColor(d.totalGainLoss)}>
+            <KpiCard title="Gain / loss" valueClass={signColor(d.totalGainLoss)}>
               {#snippet icon()}
                 {#if d.totalGainLoss >= 0}
                   <TrendingUp aria-hidden="true" class="size-4 text-success" />
@@ -261,7 +261,7 @@
                 title="Allocation"
                 description="By market value"
                 {currency}
-                centerLabel={netWorthSharePct != null ? 'of Net Worth' : null}
+                centerLabel={netWorthSharePct != null ? 'of net worth' : null}
                 centerValue={netWorthSharePct != null ? formatAllocPct(netWorthSharePct) : null}
                 onSelect={(key) => openHolding(key)}
               />

@@ -26,9 +26,9 @@
       refreshSession();
       resetBookSettings();
       clearDialogOpen = false;
-      toast.success('Cleared everything from this book');
+      toast.success('Book cleared');
     } catch (e: unknown) {
-      toast.error(errMsg(e, 'We couldn’t clear your data. Please try again'));
+      toast.error(errMsg(e, 'We couldn’t clear your data'));
     } finally {
       clearing = false;
     }
