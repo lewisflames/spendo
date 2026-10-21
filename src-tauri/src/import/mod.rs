@@ -9,17 +9,16 @@ use crate::db::{self, connect_source_db, init_db, AppError, AppState};
 use crate::home::{get_summary, DataSummary};
 use crate::init;
 use crate::prices::{self, PriceError, PricesResult};
-use crate::schedules::{self, ImportedSchedule, ScheduleInput, ScheduleMerge};
-use crate::transactions::{SplitAccountInfo, SplitInput};
+use crate::schedules;
 use crate::utils;
 
 mod orphans;
 mod rows;
-mod sx;
+mod templates;
 
 use orphans::*;
 use rows::*;
-use sx::*;
+use templates::*;
 
 // ── Traits ──────────────────────────────────────────────────────────────────
 
@@ -66,9 +65,6 @@ pub struct ImportResult {
     pub transactions_orphaned: i64,
     pub splits_orphaned: i64,
     pub commodities_orphaned: i64,
-    pub schedules_added: i64,
-    pub schedules_updated: i64,
-    pub schedules_skipped: i64,
     pub total_accounts: i64,
     pub total_transactions: i64,
     pub summary: DataSummary,
@@ -104,27 +100,12 @@ struct SourceData {
     accounts: Vec<Account>,
     splits: Vec<Split>,
     transactions: Vec<Transaction>,
-    /// Scheduled transactions converted to Spendo schedules, ready to merge by
-    /// GUID. Template accounts/transactions/splits are deliberately NOT part of
-    /// the ordinary entity lists above.
-    schedules: Vec<ImportedSchedule>,
-    /// Schedules the source carries but Spendo cannot represent (readable
-    /// reasons for the confirmation dialog).
-    skipped_schedules: Vec<SkippedSchedule>,
-}
-
-/// A source scheduled transaction Spendo can't import (or converts only
-/// partially), surfaced in the preview so nothing is dropped silently.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SkippedSchedule {
-    pub name: String,
-    pub reason: String,
+    /// Scheduled transactions in the source. They aren't imported (their
+    /// template rows are excluded above); the preview reports the count.
+    schedules_ignored: i64,
 }
 
 fn read_source_data(source: &Connection) -> Result<SourceData, AppError> {
-    let source_schedules = read_source_schedules(source)?;
-
     let mut accounts = read_account(source)?;
     let mut splits = read_split(source)?;
     let transactions = read_source_transaction(source)?;
@@ -132,28 +113,14 @@ fn read_source_data(source: &Connection) -> Result<SourceData, AppError> {
     // Template accounts (each named after its SX GUID) and everything under the
     // book's template root are GnuCash plumbing, not user data: their splits
     // are the schedule templates and their transactions are template rows.
-    // Convert them to schedules first, then drop them from the entity merge
-    // (importing them would add junk accounts and zero-value transactions).
-    let excluded = excluded_template_accounts(source, &accounts, &source_schedules)?;
+    // Drop them from the entity merge (importing them would add junk accounts
+    // and zero-value transactions).
+    let excluded = excluded_template_accounts(source, &accounts)?;
     let template_tx_guids: HashSet<String> = splits
         .iter()
         .filter(|s| excluded.contains(&s.account_guid))
         .map(|s| s.tx_guid.clone())
         .collect();
-    let (schedules, skipped_schedules) = if source_schedules.is_empty() {
-        (Vec::new(), Vec::new())
-    } else {
-        let slots = read_template_slots(source)?;
-        let last_instances = read_last_instance_dates(source)?;
-        build_import_schedules(
-            &source_schedules,
-            &splits,
-            &transactions,
-            &slots,
-            &last_instances,
-        )
-    };
-
     accounts.retain(|a| !excluded.contains(&a.guid));
 
     // GnuCash can carry internal accounts named after their GUID (import
@@ -178,8 +145,7 @@ fn read_source_data(source: &Connection) -> Result<SourceData, AppError> {
         accounts,
         splits,
         transactions,
-        schedules,
-        skipped_schedules,
+        schedules_ignored: count_source_schedules(source)?,
     })
 }
 
@@ -189,11 +155,10 @@ fn read_source_data(source: &Connection) -> Result<SourceData, AppError> {
 /// merge exactly (`process_entities` + orphan sweep) so the confirmation dialog
 /// and the applied `ImportResult` agree; a test pins the two together.
 fn plan_import(
-    conn: &Connection,
     src: &SourceData,
     existing: &ExistingData,
     protected: &HashSet<String>,
-) -> Result<(MergeCounts, Vec<SkippedSchedule>), AppError> {
+) -> MergeCounts {
     fn tally<T: Importable>(
         src: &[T],
         existing: &HashMap<String, T>,
@@ -252,71 +217,7 @@ fn plan_import(
         &mut counts.splits_orphaned,
     );
 
-    let (added, updated, skipped) = plan_schedules(conn, src, existing);
-    counts.schedules_added = added;
-    counts.schedules_updated = updated;
-    counts.schedules_skipped = skipped.len() as i64;
-    Ok((counts, skipped))
-}
-
-/// Schedule half of the preview. Validates each source template with the same
-/// rules the merge will apply, against destination ∪ source accounts (the
-/// merge writes accounts before schedules). Builder-level skips are already in
-/// `src.skipped_schedules`; validation failures join them here.
-fn plan_schedules(
-    conn: &Connection,
-    src: &SourceData,
-    existing: &ExistingData,
-) -> (i64, i64, Vec<SkippedSchedule>) {
-    let map = import_account_map(existing, src);
-    let lookup =
-        |guid: &str| -> Result<Option<SplitAccountInfo>, AppError> { Ok(map.get(guid).cloned()) };
-    let mut added = 0;
-    let mut updated = 0;
-    let mut skipped = src.skipped_schedules.clone();
-    for schedule in &src.schedules {
-        match schedules::plan_imported_schedule(conn, schedule, &lookup) {
-            Ok(ScheduleMerge::Added) => added += 1,
-            Ok(ScheduleMerge::Updated) => updated += 1,
-            Ok(ScheduleMerge::Unchanged) => {}
-            Err(e) => skipped.push(SkippedSchedule {
-                name: schedule.input.name.clone(),
-                reason: e.to_string(),
-            }),
-        }
-    }
-    (added, updated, skipped)
-}
-
-/// Account facts used to validate source templates: destination rows plus the
-/// source rows about to be merged (the preview runs before either exists).
-fn import_account_map(
-    existing: &ExistingData,
-    src: &SourceData,
-) -> HashMap<String, SplitAccountInfo> {
-    let mut map: HashMap<String, SplitAccountInfo> = existing
-        .accounts
-        .iter()
-        .map(|(guid, a)| {
-            (
-                guid.clone(),
-                SplitAccountInfo {
-                    placeholder: a.placeholder,
-                    account_type: a.account_type.clone(),
-                },
-            )
-        })
-        .collect();
-    for a in &src.accounts {
-        map.insert(
-            a.guid.clone(),
-            SplitAccountInfo {
-                placeholder: a.placeholder,
-                account_type: a.account_type.clone(),
-            },
-        );
-    }
-    map
+    counts
 }
 
 /// Names of existing accounts the sweep would delete, sorted and capped for
@@ -359,13 +260,10 @@ pub struct GnuCashPreview {
     pub commodities_added: i64,
     pub commodities_updated: i64,
     pub commodities_orphaned: i64,
-    /// Scheduled transactions merged by GUID (never swept).
-    pub schedules_added: i64,
-    pub schedules_updated: i64,
+    /// Source scheduled transactions, which aren't imported.
+    pub schedules_ignored: i64,
     /// Sample of local account names the sweep would remove.
     pub orphan_account_names: Vec<String>,
-    /// Source schedules Spendo can't represent, with readable reasons.
-    pub skipped_schedules: Vec<SkippedSchedule>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -440,9 +338,6 @@ struct MergeCounts {
     accounts_orphaned: i64,
     transactions_orphaned: i64,
     splits_orphaned: i64,
-    schedules_added: i64,
-    schedules_updated: i64,
-    schedules_skipped: i64,
 }
 
 /// Upsert source rows over the destination, then delete orphans (protected
@@ -463,20 +358,6 @@ fn apply_merge(
         process_entities(conn, &src.transactions, &existing.transactions)?;
     (counts.splits_added, counts.splits_updated) =
         process_entities(conn, &src.splits, &existing.splits)?;
-
-    // Schedules: insert or refresh definitions. Rows the preview reported as
-    // skipped fail validation here too (the account set is identical once the
-    // account merge above has run) and are skipped rather than failing the
-    // whole import.
-    counts.schedules_skipped = src.skipped_schedules.len() as i64;
-    for schedule in &src.schedules {
-        match schedules::apply_imported_schedule(conn, schedule) {
-            Ok(ScheduleMerge::Added) => counts.schedules_added += 1,
-            Ok(ScheduleMerge::Updated) => counts.schedules_updated += 1,
-            Ok(ScheduleMerge::Unchanged) => {}
-            Err(_) => counts.schedules_skipped += 1,
-        }
-    }
 
     if delete_orphans {
         delete_orphans_rows(conn, "splits", "tmp_src_splits", None)?;
@@ -603,9 +484,6 @@ fn import_source_inner(
         transactions_orphaned: counts.transactions_orphaned,
         splits_orphaned: counts.splits_orphaned,
         commodities_orphaned: counts.commodities_orphaned,
-        schedules_added: counts.schedules_added,
-        schedules_updated: counts.schedules_updated,
-        schedules_skipped: counts.schedules_skipped,
         total_accounts,
         total_transactions,
         summary,
@@ -732,7 +610,7 @@ fn preview_source_inner(
     }
     let protected = protected_accounts(dest_conn, &src)?;
     let existing = ExistingData::load(dest_conn)?;
-    let (counts, skipped_schedules) = plan_import(dest_conn, &src, &existing, &protected)?;
+    let counts = plan_import(&src, &existing, &protected);
     Ok(GnuCashPreview {
         path: source_path.to_string(),
         filename: filename.to_string(),
@@ -749,10 +627,8 @@ fn preview_source_inner(
         commodities_added: counts.commodities_added,
         commodities_updated: counts.commodities_updated,
         commodities_orphaned: counts.commodities_orphaned,
-        schedules_added: counts.schedules_added,
-        schedules_updated: counts.schedules_updated,
+        schedules_ignored: src.schedules_ignored,
         orphan_account_names: orphan_account_names(&src, &existing, &protected, 20),
-        skipped_schedules,
     })
 }
 
@@ -1246,7 +1122,7 @@ mod tests {
     /// monthly SX whose template is the two splits of `tpl-tx` on the template
     /// account, with the real accounts and amounts in `sched-xaction/*` KVP
     /// slots and one generated instance (`gen-tx`). `sx-2` has two recurrence
-    /// rules and must be reported as skipped rather than imported.
+    /// rules.
     fn write_sx_source_db(path: &std::path::Path) {
         let src = Connection::open(path).unwrap();
         src.execute_batch(
@@ -1311,11 +1187,10 @@ mod tests {
         .unwrap();
     }
 
-    /// End-to-end SX conversion: source templates become schedules, template
-    /// plumbing is excluded from the entity merge, the pointer skips generated
-    /// instances, and skipped schedules are reported.
+    /// Scheduled transactions aren't imported: the preview counts them, and
+    /// their template plumbing never reaches the entity merge.
     #[test]
-    fn import_converts_scheduled_transactions_and_excludes_templates() {
+    fn import_skips_scheduled_transactions_and_excludes_templates() {
         let dir = std::env::temp_dir().join(format!("spendo-import-sx-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let src_path = dir.join("book.gnucash");
@@ -1325,28 +1200,13 @@ mod tests {
         let dest = Connection::open_in_memory().unwrap();
         init_db(&dest).unwrap();
 
-        // The preview reports the same schedule counts the merge applies.
         let preview = preview_gnucash_inner(&dest, &src_str, "book.gnucash", "hash").unwrap();
-        assert_eq!(preview.schedules_added, 1);
-        assert_eq!(preview.schedules_updated, 0);
-        assert_eq!(preview.skipped_schedules.len(), 1);
-        assert_eq!(preview.skipped_schedules[0].name, "Twice a month");
-        assert!(
-            preview.skipped_schedules[0]
-                .reason
-                .contains("more than one recurrence"),
-            "unexpected: {}",
-            preview.skipped_schedules[0].reason
-        );
+        assert_eq!(preview.schedules_ignored, 2);
 
         let result = import_gnucash_inner(&dest, &src_str, "book.gnucash", "hash", true).unwrap();
-        assert_eq!(result.schedules_added, preview.schedules_added);
-        assert_eq!(result.schedules_updated, preview.schedules_updated);
-        assert_eq!(result.schedules_skipped, 1);
         assert_eq!(result.transactions_added, 2); // t1 + gen-tx, no template tx
         assert_eq!(result.accounts_added, 3); // no template root/accounts
 
-        // Template plumbing never lands in the book.
         for junk in ["tpl-root", "tpl-acct", "tpl-acct-2"] {
             let n: i64 = dest
                 .query_row(
@@ -1357,114 +1217,7 @@ mod tests {
                 .unwrap();
             assert_eq!(n, 0, "template account {junk} leaked");
         }
-        assert_eq!(count(&dest, "recurring_schedules"), 1);
-
-        // The schedule mirrors the SX definition, with the pointer after the
-        // already-generated instance (2026-03-05) rather than at the start.
-        let (name, freq, mult, start, max_occ, posted, next, active, template): (
-            String,
-            String,
-            i64,
-            String,
-            Option<i64>,
-            i64,
-            Option<String>,
-            i64,
-            String,
-        ) = dest
-            .query_row(
-                "SELECT name, frequency, interval_mult, start_date, max_occurrences,
-                        occurrences_posted, next_due_date, active, template_json
-                 FROM recurring_schedules WHERE guid = 'sx-1'",
-                [],
-                |r| {
-                    Ok((
-                        r.get(0)?,
-                        r.get(1)?,
-                        r.get(2)?,
-                        r.get(3)?,
-                        r.get(4)?,
-                        r.get(5)?,
-                        r.get(6)?,
-                        r.get(7)?,
-                        r.get(8)?,
-                    ))
-                },
-            )
-            .unwrap();
-        assert_eq!(name, "Rent");
-        assert_eq!(freq, "monthly");
-        assert_eq!(mult, 1);
-        assert_eq!(start, "2026-01-01");
-        assert_eq!(max_occ, None);
-        assert_eq!(posted, 3);
-        assert_eq!(next.as_deref(), Some("2026-04-05"));
-        assert_eq!(active, 1);
-        let template: serde_json::Value = serde_json::from_str(&template).unwrap();
-        assert_eq!(template["description"], "Monthly rent");
-        assert_eq!(template["num"], "R1");
-        assert_eq!(template["notes"], "Rent note");
-        let splits = template["splits"].as_array().unwrap();
-        assert_eq!(splits.len(), 2);
-        assert!(splits
-            .iter()
-            .any(|s| s["accountGuid"] == "expenses" && s["amount"] == 1000.0));
-        assert!(splits
-            .iter()
-            .any(|s| s["accountGuid"] == "checking" && s["amount"] == -1000.0));
-        assert!(splits.iter().any(|s| s["memo"] == "rent"));
-
-        // A re-import is a no-op.
-        let again = import_gnucash_inner(&dest, &src_str, "book.gnucash", "hash", true).unwrap();
-        assert_eq!(again.schedules_added, 0);
-        assert_eq!(again.schedules_updated, 0);
-
-        std::fs::remove_dir_all(&dir).ok();
-    }
-
-    /// Re-import refreshes the definition but keeps local state: a pause and
-    /// the posts counter survive, and the pointer never moves backwards.
-    #[test]
-    fn reimport_refreshes_definition_but_keeps_local_state() {
-        let dir = std::env::temp_dir().join(format!("spendo-import-sx2-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let src_path = dir.join("book.gnucash");
-        write_sx_source_db(&src_path);
-        let src_str = src_path.to_string_lossy().to_string();
-
-        let dest = Connection::open_in_memory().unwrap();
-        init_db(&dest).unwrap();
-        import_gnucash_inner(&dest, &src_str, "book.gnucash", "hash", true).unwrap();
-
-        // Local decisions: paused and ahead on posts.
-        dest.execute(
-            "UPDATE recurring_schedules
-             SET active = 0, occurrences_posted = 5 WHERE guid = 'sx-1'",
-            [],
-        )
-        .unwrap();
-        // Source edit: renamed.
-        {
-            let src = Connection::open(&src_path).unwrap();
-            src.execute("UPDATE schedxactions SET name = 'Rent v2'", [])
-                .unwrap();
-        }
-
-        let result = import_gnucash_inner(&dest, &src_str, "book.gnucash", "hash2", true).unwrap();
-        assert_eq!(result.schedules_added, 0);
-        assert_eq!(result.schedules_updated, 1);
-        let (name, active, posted, next): (String, i64, i64, Option<String>) = dest
-            .query_row(
-                "SELECT name, active, occurrences_posted, next_due_date
-                 FROM recurring_schedules WHERE guid = 'sx-1'",
-                [],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
-            )
-            .unwrap();
-        assert_eq!(name, "Rent v2");
-        assert_eq!(active, 0);
-        assert_eq!(posted, 5);
-        assert_eq!(next.as_deref(), Some("2026-04-05"));
+        assert_eq!(count(&dest, "recurring_schedules"), 0);
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -1487,45 +1240,16 @@ mod tests {
                       ('local-b', 'Local Fees', 'EXPENSE', NULL, 0, NULL);",
         )
         .unwrap();
-        schedules::apply_imported_schedule(
-            &dest,
-            &ImportedSchedule {
-                guid: "local-sx".to_string(),
-                input: ScheduleInput {
-                    name: "Local".to_string(),
-                    frequency: "monthly".to_string(),
-                    interval_mult: Some(1),
-                    start_date: "2026-01-01".to_string(),
-                    end_date: None,
-                    max_occurrences: None,
-                    description: None,
-                    num: None,
-                    notes: None,
-                    splits: vec![
-                        SplitInput {
-                            account_guid: "local-a".to_string(),
-                            amount: -25.0,
-                            quantity: None,
-                            memo: None,
-                        },
-                        SplitInput {
-                            account_guid: "local-b".to_string(),
-                            amount: 25.0,
-                            quantity: None,
-                            memo: None,
-                        },
-                    ],
-                },
-                active: true,
-                occurrences_posted: 0,
-                next_due_date: Some("2026-01-01".to_string()),
-            },
+        dest.execute(
+            "INSERT INTO recurring_schedules
+              (guid, name, frequency, start_date, next_due_date, template_json, created_at)
+             VALUES ('local-sx', 'Local', 'monthly', '2026-01-01', '2026-01-01', ?1, '')",
+            [r#"{"splits":[{"accountGuid":"local-a","amount":-25.0},{"accountGuid":"local-b","amount":25.0}]}"#],
         )
         .unwrap();
 
-        let result = import_gnucash_inner(&dest, &src_str, "book.gnucash", "hash", true).unwrap();
-        // Local-only accounts survive; only the imported schedule is new.
-        assert_eq!(result.schedules_added, 1);
+        import_gnucash_inner(&dest, &src_str, "book.gnucash", "hash", true).unwrap();
+        // Local-only accounts referenced by the schedule survive the sweep.
         for guid in ["local-a", "local-b"] {
             let n: i64 = dest
                 .query_row(
@@ -1536,7 +1260,7 @@ mod tests {
                 .unwrap();
             assert_eq!(n, 1, "schedule account {guid} was swept");
         }
-        assert_eq!(count(&dest, "recurring_schedules"), 2);
+        assert_eq!(count(&dest, "recurring_schedules"), 1);
 
         std::fs::remove_dir_all(&dir).ok();
     }

@@ -193,67 +193,6 @@ pub(crate) fn next_occurrence(
 
 // ── GnuCash recurrence (import support) ──────────────────────────────────────
 
-/// First occurrence of a GnuCash-style recurrence on/after `from`, used by the
-/// GnuCash import to seed `next_due_date`. Day/week recurrences are fixed
-/// strides from `anchor`; month/year keep the anchor's day-of-month clamped to
-/// short months (GnuCash's own day alignment).
-pub(crate) fn first_occurrence_on_or_after(
-    from: &str,
-    anchor: &str,
-    mult: i64,
-    period_type: &str,
-) -> Option<String> {
-    let from = NaiveDate::parse_from_str(from, "%Y-%m-%d").ok()?;
-    let anchor = NaiveDate::parse_from_str(anchor, "%Y-%m-%d").ok()?;
-    let mult = mult.max(1);
-    let occurrence = match period_type {
-        "day" | "week" => {
-            let step = if period_type == "day" { mult } else { 7 * mult };
-            let diff = (from - anchor).num_days();
-            let mut k = diff.div_euclid(step);
-            let mut occurrence = anchor.checked_add_signed(chrono::Duration::days(k * step))?;
-            while occurrence < from {
-                k += 1;
-                occurrence = anchor.checked_add_signed(chrono::Duration::days(k * step))?;
-            }
-            occurrence
-        }
-        "month" | "year" => {
-            let step = if period_type == "month" {
-                mult
-            } else {
-                12 * mult
-            };
-            let month_diff = (from.year() as i64 * 12 + from.month0() as i64)
-                - (anchor.year() as i64 * 12 + anchor.month0() as i64);
-            let mut k = month_diff.div_euclid(step).max(0);
-            let mut occurrence = add_months_anchored(anchor, k * step)?;
-            while occurrence < from {
-                k += 1;
-                occurrence = add_months_anchored(anchor, k * step)?;
-            }
-            occurrence
-        }
-        _ => return None,
-    };
-    Some(occurrence.format("%Y-%m-%d").to_string())
-}
-
-/// Month arithmetic that keeps `anchor`'s day-of-month, clamped to the target
-/// month's length (Jan 31 → Feb 28 → Mar 31). Unlike [`add_months_clamped`],
-/// which clamps from the current date, the day phase survives short months.
-fn add_months_anchored(anchor: NaiveDate, months: i64) -> Option<NaiveDate> {
-    let total = anchor.year() as i64 * 12 + anchor.month0() as i64 + months;
-    let year = total.div_euclid(12);
-    let month0 = total.rem_euclid(12);
-    if !(1..=9999).contains(&year) {
-        return None;
-    }
-    let month = (month0 + 1) as u32;
-    let day = anchor.day().min(last_day_of_month(year as i32, month));
-    NaiveDate::from_ymd_opt(year as i32, month, day)
-}
-
 // ── Validation ───────────────────────────────────────────────────────────────
 
 fn validate_frequency(raw: &str) -> Result<String, AppError> {
@@ -310,18 +249,7 @@ fn validate_schedule_input(
     conn: &Connection,
     input: &ScheduleInput,
 ) -> Result<ValidatedSchedule, AppError> {
-    validate_schedule_input_with(input, &|guid| {
-        crate::transactions::account_info_lookup(conn, guid)
-    })
-}
-
-/// [`validate_schedule_input`] with the template's account lookup injected, so
-/// the GnuCash import preview can validate against the accounts the merge will
-/// create (source ∪ destination) without writing anything.
-fn validate_schedule_input_with(
-    input: &ScheduleInput,
-    lookup: &dyn Fn(&str) -> Result<Option<crate::transactions::SplitAccountInfo>, AppError>,
-) -> Result<ValidatedSchedule, AppError> {
+    let lookup = |guid: &str| crate::transactions::account_info_lookup(conn, guid);
     let name = input.name.trim().to_string();
     if name.is_empty() {
         return Err(AppError::Validation(
@@ -370,7 +298,7 @@ fn validate_schedule_input_with(
         splits: input.splits.clone(),
         unreconcile: false,
     };
-    crate::transactions::validate_tx_body_with(&probe, lookup)?;
+    crate::transactions::validate_tx_body_with(&probe, &lookup)?;
     Ok(ValidatedSchedule {
         name,
         frequency,
@@ -681,213 +609,6 @@ fn fetch_schedules_inner(conn: &Connection) -> Result<Vec<Schedule>, AppError> {
     rows.into_iter()
         .map(|r| to_schedule_with_names(r, &names))
         .collect()
-}
-
-// ── GnuCash import ───────────────────────────────────────────────────────────
-
-/// One scheduled transaction read from a GnuCash source, ready to merge. The SX
-/// GUID doubles as the Spendo schedule GUID so re-imports update in place.
-pub(crate) struct ImportedSchedule {
-    pub guid: String,
-    pub input: ScheduleInput,
-    pub active: bool,
-    /// Occurrences the source book already generated: seeded on insert and used
-    /// by the occurrence caps.
-    pub occurrences_posted: i64,
-    /// First pending occurrence in the source (`None` = source exhausted).
-    pub next_due_date: Option<String>,
-}
-
-/// What an import merge did (or would do) to one schedule.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ScheduleMerge {
-    Added,
-    Updated,
-    Unchanged,
-}
-
-fn fetch_row_optional(conn: &Connection, guid: &str) -> Result<Option<ScheduleRow>, AppError> {
-    let sql = format!("SELECT {SELECT_COLS} FROM recurring_schedules WHERE guid = ?1");
-    conn.query_row(&sql, params![guid], read_row)
-        .optional()
-        .map_err(AppError::from)
-}
-
-fn template_eq(a: &StoredTemplate, b: &StoredTemplate) -> bool {
-    a.description == b.description
-        && a.num == b.num
-        && a.notes == b.notes
-        && a.splits.len() == b.splits.len()
-        && a.splits.iter().zip(&b.splits).all(|(x, y)| {
-            x.account_guid == y.account_guid
-                && (x.amount - y.amount).abs() <= f64::EPSILON
-                && x.quantity == y.quantity
-                && x.memo == y.memo
-        })
-}
-
-/// Definition comparison for re-imports: `active` is deliberately local (a
-/// pause in Spendo survives a re-import) and pointer/counters are handled by
-/// [`import_next_due`].
-fn definition_differs(row: &ScheduleRow, v: &ValidatedSchedule) -> Result<bool, AppError> {
-    if row.name != v.name
-        || row.frequency != v.frequency
-        || row.interval_mult != v.interval_mult
-        || row.start_date != v.start_date
-        || row.end_date != v.end_date
-        || row.max_occurrences != v.max_occurrences
-    {
-        return Ok(true);
-    }
-    Ok(!template_eq(
-        &parse_template(&row.template_json)?,
-        &v.template,
-    ))
-}
-
-/// Pointer rule for re-imports: forward-only, never revive a locally completed
-/// schedule, complete when the source is exhausted, and always re-apply caps.
-/// Skipped occurrences count toward the caps like posted ones.
-fn import_next_due(
-    existing_next: Option<&str>,
-    imported_next: Option<&str>,
-    max_occurrences: Option<i64>,
-    occurrences_posted: i64,
-    skipped_count: i64,
-    end_date: Option<&str>,
-) -> Option<String> {
-    let candidate = match (existing_next, imported_next) {
-        (None, _) | (Some(_), None) => return None,
-        (Some(e), Some(i)) => {
-            if i > e {
-                i.to_string()
-            } else {
-                e.to_string()
-            }
-        }
-    };
-    apply_caps(
-        Some(candidate),
-        max_occurrences,
-        occurrences_posted + skipped_count,
-        end_date,
-    )
-}
-
-fn schedule_merge_state(
-    existing: Option<&ScheduleRow>,
-    v: &ValidatedSchedule,
-    imported: &ImportedSchedule,
-) -> Result<ScheduleMerge, AppError> {
-    let Some(row) = existing else {
-        return Ok(ScheduleMerge::Added);
-    };
-    let next = import_next_due(
-        row.next_due_date.as_deref(),
-        imported.next_due_date.as_deref(),
-        v.max_occurrences,
-        row.occurrences_posted,
-        row.skipped_count,
-        v.end_date.as_deref(),
-    );
-    let changed = definition_differs(row, v)? || next != row.next_due_date;
-    Ok(if changed {
-        ScheduleMerge::Updated
-    } else {
-        ScheduleMerge::Unchanged
-    })
-}
-
-/// Read-only classification of one imported schedule against the destination
-/// (or, for the import preview, against a look-ahead account set). Mirrors
-/// [`apply_imported_schedule`] exactly so preview counts match the merge.
-pub(crate) fn plan_imported_schedule(
-    conn: &Connection,
-    imported: &ImportedSchedule,
-    lookup: &dyn Fn(&str) -> Result<Option<crate::transactions::SplitAccountInfo>, AppError>,
-) -> Result<ScheduleMerge, AppError> {
-    let v = validate_schedule_input_with(&imported.input, lookup)?;
-    let existing = fetch_row_optional(conn, &imported.guid)?;
-    schedule_merge_state(existing.as_ref(), &v, imported)
-}
-
-/// Insert a source schedule or refresh the definition of the existing row with
-/// the same GUID. Manual fields are preserved: `active` (local pause wins),
-/// `occurrences_posted`, and a pointer that only moves forward.
-pub(crate) fn apply_imported_schedule(
-    conn: &Connection,
-    imported: &ImportedSchedule,
-) -> Result<ScheduleMerge, AppError> {
-    let v = validate_schedule_input_with(&imported.input, &|guid| {
-        crate::transactions::account_info_lookup(conn, guid)
-    })?;
-    let existing = fetch_row_optional(conn, &imported.guid)?;
-    let state = schedule_merge_state(existing.as_ref(), &v, imported)?;
-    if state == ScheduleMerge::Unchanged {
-        return Ok(state);
-    }
-    let template_json = serde_json::to_string(&v.template)
-        .map_err(|e| AppError::Validation(format!("We couldn't save that schedule: {e}")))?;
-    match existing {
-        Some(row) => {
-            let next = import_next_due(
-                row.next_due_date.as_deref(),
-                imported.next_due_date.as_deref(),
-                v.max_occurrences,
-                row.occurrences_posted,
-                row.skipped_count,
-                v.end_date.as_deref(),
-            );
-            conn.execute(
-                "UPDATE recurring_schedules
-                 SET name = ?1, frequency = ?2, interval_mult = ?3, start_date = ?4,
-                     end_date = ?5, max_occurrences = ?6, next_due_date = ?7,
-                     template_json = ?8
-                 WHERE guid = ?9",
-                params![
-                    v.name,
-                    v.frequency,
-                    v.interval_mult,
-                    v.start_date,
-                    v.end_date,
-                    v.max_occurrences,
-                    next,
-                    template_json,
-                    imported.guid,
-                ],
-            )?;
-        }
-        None => {
-            let next = apply_caps(
-                imported.next_due_date.clone(),
-                v.max_occurrences,
-                imported.occurrences_posted,
-                v.end_date.as_deref(),
-            );
-            conn.execute(
-                "INSERT INTO recurring_schedules
-                  (guid, name, frequency, interval_mult, start_date, end_date,
-                   max_occurrences, occurrences_posted, next_due_date, active,
-                   template_json, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-                params![
-                    imported.guid,
-                    v.name,
-                    v.frequency,
-                    v.interval_mult,
-                    v.start_date,
-                    v.end_date,
-                    v.max_occurrences,
-                    imported.occurrences_posted,
-                    next,
-                    if imported.active { 1 } else { 0 },
-                    template_json,
-                    utils::iso_now(),
-                ],
-            )?;
-        }
-    }
-    Ok(state)
 }
 
 /// Account GUIDs referenced by any schedule template. The GnuCash orphan sweep
@@ -1224,39 +945,6 @@ mod tests {
         assert_eq!(
             next_occurrence(d("2023-11-30"), "quarterly", 1).unwrap(),
             d("2024-02-29")
-        );
-    }
-
-    #[test]
-    fn first_occurrence_aligns_to_gnucash_recurrence() {
-        // Fixed strides for day/week (weekly mult 2 = the biweekly stride).
-        assert_eq!(
-            first_occurrence_on_or_after("2026-01-10", "2026-01-01", 2, "day").as_deref(),
-            Some("2026-01-11")
-        );
-        assert_eq!(
-            first_occurrence_on_or_after("2026-01-08", "2026-01-01", 2, "week").as_deref(),
-            Some("2026-01-15")
-        );
-        // Monthly keeps the anchor's day across short months (Jan 31 → Feb 28
-        // → Mar 31), unlike `next_occurrence` which clamps from the pointer.
-        assert_eq!(
-            first_occurrence_on_or_after("2026-02-01", "2026-01-31", 1, "month").as_deref(),
-            Some("2026-02-28")
-        );
-        assert_eq!(
-            first_occurrence_on_or_after("2026-03-01", "2026-01-31", 1, "month").as_deref(),
-            Some("2026-03-31")
-        );
-        // A `from` before the anchor snaps to the anchor.
-        assert_eq!(
-            first_occurrence_on_or_after("2025-12-01", "2026-01-02", 1, "month").as_deref(),
-            Some("2026-01-02")
-        );
-        // Unsupported GnuCash period types have no occurrence.
-        assert_eq!(
-            first_occurrence_on_or_after("2026-01-01", "2026-01-01", 1, "end of month"),
-            None
         );
     }
 

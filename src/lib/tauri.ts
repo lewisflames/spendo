@@ -56,9 +56,6 @@ interface ImportResult {
   transactionsOrphaned: number;
   splitsOrphaned: number;
   commoditiesOrphaned: number;
-  schedulesAdded: number;
-  schedulesUpdated: number;
-  schedulesSkipped: number;
   totalAccounts: number;
   totalTransactions: number;
   summary: DataSummary;
@@ -348,12 +345,9 @@ export interface GnuCashPreview {
   commoditiesAdded: number;
   commoditiesUpdated: number;
   commoditiesOrphaned: number;
-  /** Scheduled transactions merged by GUID (never swept). */
-  schedulesAdded: number;
-  schedulesUpdated: number;
+  /** Source scheduled transactions, which aren’t imported. */
+  schedulesIgnored: number;
   orphanAccountNames: string[];
-  /** Source schedules Spendo can’t represent, with readable reasons. */
-  skippedSchedules: { name: string; reason: string }[];
 }
 
 interface GnuCashImportInput {
