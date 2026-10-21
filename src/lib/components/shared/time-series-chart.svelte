@@ -96,6 +96,20 @@
     if (Number.isNaN(d.getTime())) return `${v ?? ''}`;
     return formatDate(d, { month: 'short', year: 'numeric' });
   }
+  // Bar charts label every band, so "Mon Year" on each one collides; show the
+  // year only on the first bar and on each January.
+  function xBarTickFormatter(v: unknown): string {
+    const d = v instanceof Date ? v : new Date(v as string | number);
+    if (Number.isNaN(d.getTime())) return `${v ?? ''}`;
+    const first = filteredData.length > 0 ? getX(filteredData[0]) : null;
+    const isFirst =
+      first !== null &&
+      first.getFullYear() === d.getFullYear() &&
+      first.getMonth() === d.getMonth();
+    return d.getMonth() === 0 || isFirst
+      ? formatDate(d, { month: 'short', year: 'numeric' })
+      : formatDate(d, { month: 'short' });
+  }
   function yTickFormatter(v: unknown): string {
     if (typeof v !== 'number' || !Number.isFinite(v)) return `${v ?? ''}`;
     // Keep axis labels honest for low-priced series (e.g. a price of 4.25):
@@ -181,7 +195,7 @@
             bandPadding={0.4}
             groupPadding={0.15}
             props={{
-              xAxis: { format: xTickFormatter },
+              xAxis: { format: xBarTickFormatter },
               yAxis: { format: yTickFormatter }
             }}
           >
