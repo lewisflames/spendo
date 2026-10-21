@@ -16,6 +16,17 @@
 
   const meta = PAGE_META.settings;
 
+  /** In-page jump links; ids match the section wrappers below. */
+  const SECTIONS = [
+    { id: 'appearance', label: 'Appearance' },
+    { id: 'display', label: 'Display & lists' },
+    { id: 'book', label: 'Book' },
+    { id: 'reporting', label: 'Reporting' },
+    { id: 'import-export', label: 'Import & export' },
+    { id: 'import-rules', label: 'Import rules' },
+    { id: 'danger-zone', label: 'Danger zone' }
+  ];
+
   const DEFAULT_CUSTOM_PRIMARY = '#3b82f6';
 
   let customDraft = $state(appSettings.value.customPrimary ?? DEFAULT_CUSTOM_PRIMARY);
@@ -56,17 +67,23 @@
     <ErrorCard message={bookSettingsError} onRetry={() => void refreshBookSettings()} />
   {/if}
 
-  <AppearanceCard bind:customDraft />
+  <nav aria-label="Settings sections" class="flex flex-wrap gap-1.5">
+    {#each SECTIONS as section (section.id)}
+      <a
+        href="#{section.id}"
+        class="rounded-full border px-3 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        >{section.label}</a
+      >
+    {/each}
+  </nav>
 
-  <DisplayCard />
-
-  <BookCard />
-
-  <ReportingCard />
-
-  <ImportExportCard />
-
-  <ImportRulesCard />
-
-  <DangerZoneCard onResetPreferences={handleResetPreferences} />
+  <section id="appearance" class="scroll-mt-4"><AppearanceCard bind:customDraft /></section>
+  <section id="display" class="scroll-mt-4"><DisplayCard /></section>
+  <section id="book" class="scroll-mt-4"><BookCard /></section>
+  <section id="reporting" class="scroll-mt-4"><ReportingCard /></section>
+  <section id="import-export" class="scroll-mt-4"><ImportExportCard /></section>
+  <section id="import-rules" class="scroll-mt-4"><ImportRulesCard /></section>
+  <section id="danger-zone" class="scroll-mt-4">
+    <DangerZoneCard onResetPreferences={handleResetPreferences} />
+  </section>
 </div>

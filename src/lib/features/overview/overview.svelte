@@ -26,6 +26,7 @@
   import { navBadges } from '$lib/stores/nav.svelte';
   import { fetchPnlReport, fetchPnlTrend, fetchSchedules, fetchTransactions } from '$lib/tauri';
   import { computePrevRange, todayStr } from '$lib/utils/date-utils.svelte';
+  import { modKeyLabel } from '$lib/utils/platform';
   import {
     clampZero,
     formatDate,
@@ -36,6 +37,7 @@
   } from '$lib/utils/format.svelte';
 
   const meta = PAGE_META.overview;
+  const modKey = modKeyLabel();
   const RECENT_COUNT = 8;
 
   let today = todayStr();
@@ -237,7 +239,7 @@
         </p>
       {:else if recent.data}
         <p class="text-sm text-muted-foreground">
-          No transactions yet. Add one with New transaction in the sidebar.
+          No transactions yet. Add one with New transaction in the sidebar, or press {modKey}+K.
         </p>
       {/if}
     </section>
