@@ -27,6 +27,8 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # full history and tags for the release notes
 
       # package.json is the single version source (tauri.conf.json points at it).
       - name: Verify the tag matches the app version
@@ -37,6 +39,25 @@ jobs:
             echo "Tag $GITHUB_REF_NAME does not match version $version in package.json" >&2
             exit 1
           fi
+
+      # Group the conventional-commit subjects since the previous tag.
+      - name: Write release notes
+        id: notes
+        run: |
+          prev=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || true)
+          range=${prev:+$prev..}HEAD
+          section() {
+            lines=$(git log --format=%s "$range" | grep -E "^$2(\(|:)" | sed 's/^/- /')
+            if [ -n "$lines" ]; then printf '### %s\n\n%s\n\n' "$1" "$lines"; fi
+          }
+          {
+            echo 'body<<EOF'
+            section Features feat
+            section Fixes fix
+            section Performance perf
+            if [ -n "$prev" ]; then echo "**Full changelog**: https://github.com/$GITHUB_REPOSITORY/compare/$prev...$GITHUB_REF_NAME"; fi
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -74,7 +95,7 @@ jobs:
         with:
           tagName: v__VERSION__
           releaseName: 'Spendo v__VERSION__'
-          releaseBody: 'See the assets below to download and install this version.'
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
