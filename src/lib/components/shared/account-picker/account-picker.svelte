@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tooltip } from '$lib/attachments/tooltip';
   import * as Popover from '$lib/components/ui/popover';
   import * as Command from '$lib/components/ui/command';
   import { Button } from '$lib/components/ui/button';
@@ -61,7 +62,7 @@
         role="combobox"
         aria-expanded={open}
         {disabled}
-        title={selected?.label}
+        {@attach tooltip(selected?.label)}
         class={cn('w-full justify-between font-normal', !selected && 'text-muted-foreground')}
       >
         <span class="min-w-0 flex-1 truncate text-left">

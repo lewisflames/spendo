@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tooltip } from '$lib/attachments/tooltip';
   import * as Card from '$lib/components/ui/card';
   import { Button } from '$lib/components/ui/button';
   import IconCardHeader from '$lib/components/shared/icon-card-header.svelte';
@@ -225,7 +226,7 @@
                 variant="ghost"
                 size="icon-sm"
                 aria-label="Remove file"
-                title="Remove file"
+                {@attach tooltip('Remove file')}
                 onclick={() => removePending(path)}
                 disabled={adding}
               >
@@ -286,7 +287,7 @@
                 variant="ghost"
                 size="icon-sm"
                 aria-label="Open file"
-                title="Open file"
+                {@attach tooltip('Open file')}
                 onclick={() => handleOpen(item)}
                 disabled={openBusy || saveBusy || deleting}
               >
@@ -296,7 +297,7 @@
                 variant="ghost"
                 size="icon-sm"
                 aria-label="Save file"
-                title="Save file"
+                {@attach tooltip('Save file')}
                 onclick={() => handleDownload(item)}
                 disabled={openBusy || saveBusy || deleting}
               >
@@ -306,7 +307,7 @@
                 variant="ghost"
                 size="icon-sm"
                 aria-label="Delete attachment"
-                title="Delete attachment"
+                {@attach tooltip('Delete attachment')}
                 onclick={() => handleDelete(item)}
                 disabled={openBusy || saveBusy || deleting}
               >

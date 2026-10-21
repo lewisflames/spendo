@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { goto, afterNavigate } from '$app/navigation';
+  import { goto, afterNavigate, onNavigate } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { page } from '$app/state';
   import { untrack } from 'svelte';
@@ -48,6 +48,21 @@
   });
 
   const prefersDark = new MediaQuery('(prefers-color-scheme: dark)');
+  const prefersReducedMotion = new MediaQuery('(prefers-reduced-motion: reduce)');
+
+  // Short cross-fade of the content column between pages (View Transitions;
+  // see app.css). Same-page URL changes (filters, pagination) and reduced
+  // motion skip it, as do webviews without the API.
+  onNavigate((navigation) => {
+    if (!document.startViewTransition || prefersReducedMotion.current) return;
+    if (navigation.from?.url.pathname === navigation.to?.url.pathname) return;
+    return new Promise((resolve) => {
+      document.startViewTransition(async () => {
+        resolve();
+        await navigation.complete;
+      });
+    });
+  });
 
   // Bootstrap DB state once so deep-linked/refreshed pages see real data
   // (e.g. Settings' "Clear all data" gate) instead of a stale null session.

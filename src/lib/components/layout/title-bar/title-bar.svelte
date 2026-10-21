@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tooltip } from '$lib/attachments/tooltip';
   import { ArrowLeft, ArrowRight } from '@lucide/svelte';
   import { Button } from '$lib/components/ui/button';
   import { SidebarTrigger } from '$lib/components/ui/sidebar/index.js';
@@ -45,7 +46,7 @@
       size="icon-sm"
       class="text-muted-foreground"
       aria-label="Go back"
-      title="Go back"
+      {@attach tooltip('Go back')}
       disabled={!canGoBack}
       onclick={goBack}
     >
@@ -56,7 +57,7 @@
       size="icon-sm"
       class="text-muted-foreground"
       aria-label="Go forward"
-      title="Go forward"
+      {@attach tooltip('Go forward')}
       disabled={!canGoForward}
       onclick={goForward}
     >

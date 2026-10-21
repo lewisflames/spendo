@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tooltip } from '$lib/attachments/tooltip';
   import { PAGE_META } from '$lib/features/nav/page-meta';
   import OverflowMenu from '$lib/components/shared/overflow-menu.svelte';
   import { page } from '$app/state';
@@ -436,7 +437,7 @@
       <Button
         variant="outline"
         disabled={!dirty || saving || finishing}
-        title="Save progress (Ctrl+S)"
+        {@attach tooltip('Save progress (Ctrl+S)')}
         onclick={() => void save()}
       >
         {saving ? 'Saving…' : 'Save progress'}
@@ -496,7 +497,7 @@
             {#if amountFilter !== null}
               <Button
                 variant="outline"
-                title="Clear the amount filter"
+                {@attach tooltip('Clear the amount filter')}
                 onclick={() => (amountFilter = null)}
               >
                 Amount = {formatSignedCurrency(amountFilter, currency)}

@@ -13,6 +13,7 @@
 </script>
 
 <script lang="ts">
+  import { tooltip } from '$lib/attachments/tooltip';
   import { resolve } from '$app/paths';
   import * as Table from '$lib/components/ui/table';
   import { Badge } from '$lib/components/ui/badge';
@@ -163,7 +164,7 @@
           <a
             class="block truncate focus-visible:outline-2 focus-visible:outline-ring"
             href={resolve('/transactions/[guid]', { guid: txn.guid })}
-            title={txn.description ?? undefined}
+            {@attach tooltip(txn.description ?? undefined, { truncated: true })}
           >
             {#if txn.num && showInlineNum}<span class="mr-1 text-muted-foreground">#{txn.num}</span
               >{/if}
@@ -174,7 +175,10 @@
             {/if}
           </a>
           {#if txn.notes}
-            <p class="truncate text-xs font-normal text-muted-foreground" title={txn.notes}>
+            <p
+              class="truncate text-xs font-normal text-muted-foreground"
+              {@attach tooltip(txn.notes, { truncated: true })}
+            >
               {txn.notes}
             </p>
           {/if}
@@ -191,7 +195,10 @@
           {/if}
           {#if isVisible('accounts')}
             {@const accounts = splitAccounts(txn)}
-            <Table.Cell class="max-w-xs py-2.5 text-muted-foreground" title={accounts.join(', ')}>
+            <Table.Cell
+              class="max-w-xs py-2.5 text-muted-foreground"
+              {@attach tooltip(accounts.join(', '))}
+            >
               {@render multiValue(accounts)}
             </Table.Cell>
           {/if}
@@ -208,7 +215,7 @@
           {#if isVisible('transfer')}
             <Table.Cell
               class="max-w-xs py-2.5 text-muted-foreground"
-              title={txn.counterAccounts.join(', ')}
+              {@attach tooltip(txn.counterAccounts.join(', '))}
             >
               {@render multiValue(txn.counterAccounts)}
             </Table.Cell>

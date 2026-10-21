@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tooltip } from '$lib/attachments/tooltip';
   import * as Card from '$lib/components/ui/card';
   import * as Select from '$lib/components/ui/select';
   import * as Table from '$lib/components/ui/table';
@@ -347,7 +348,10 @@
           {#each detect.sampleRows as row, i (i)}
             <Table.Row>
               {#each row as cell, j (j)}
-                <Table.Cell class="max-w-56 truncate py-2" title={cell}>
+                <Table.Cell
+                  class="max-w-56 truncate py-2"
+                  {@attach tooltip(cell, { truncated: true })}
+                >
                   {#if cell}
                     {cell}
                   {:else}

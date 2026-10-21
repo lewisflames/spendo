@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tooltip } from '$lib/attachments/tooltip';
   import { PAGE_META } from '$lib/features/nav/page-meta';
   import { Briefcase, TrendingDown, TrendingUp, RefreshCw, Pencil } from '@lucide/svelte';
   import { SvelteMap } from 'svelte/reactivity';
@@ -157,9 +158,9 @@
           variant="outline"
           onclick={() => (targetsOpen = true)}
           disabled={!canEditTargets}
-          title={eligibleHoldings.length === 0
-            ? 'No priced investment holdings to rebalance'
-            : undefined}
+          {@attach tooltip(
+            eligibleHoldings.length === 0 ? 'No priced investment holdings to rebalance' : undefined
+          )}
         >
           <Pencil aria-hidden="true" class="size-4" />
           Edit targets

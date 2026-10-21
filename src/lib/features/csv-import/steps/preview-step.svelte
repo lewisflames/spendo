@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tooltip } from '$lib/attachments/tooltip';
   import * as Card from '$lib/components/ui/card';
   import * as Table from '$lib/components/ui/table';
   import { Button } from '$lib/components/ui/button';
@@ -120,7 +121,7 @@
               </Table.Cell>
               <Table.Cell
                 class="max-w-md truncate py-2.5 font-medium"
-                title={row.description ?? ''}
+                {@attach tooltip(row.description ?? '', { truncated: true })}
               >
                 {#if row.description}
                   {row.description}
@@ -130,7 +131,9 @@
               </Table.Cell>
               <Table.Cell
                 class="max-w-40 truncate py-2.5 text-muted-foreground"
-                title={row.ruleMatched ? 'Matched an import rule' : 'Fallback category'}
+                {@attach tooltip(row.ruleMatched ? 'Matched an import rule' : 'Fallback category', {
+                  truncated: true
+                })}
               >
                 <span class="flex items-center gap-1">
                   {#if row.ruleMatched}
@@ -151,7 +154,7 @@
               </Table.Cell>
               <Table.Cell class="py-2.5">
                 {#if !row.valid}
-                  <Badge variant="destructive" title={row.error ?? ''}>Error</Badge>
+                  <Badge variant="destructive" {@attach tooltip(row.error ?? '')}>Error</Badge>
                 {:else if row.duplicate}
                   <Badge variant="secondary">Duplicate</Badge>
                 {:else}

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tooltip } from '$lib/attachments/tooltip';
   import { CircleCheck, Scale, Target, Wallet } from '@lucide/svelte';
   import KpiCard from '$lib/components/shared/kpi-card.svelte';
   import { EMPTY_DASH, clampZero, formatCurrency } from '$lib/utils/format.svelte';
@@ -59,7 +60,7 @@
           <button
             type="button"
             class="rounded-sm underline decoration-dotted underline-offset-4 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
-            title="Show the candidates matching this amount"
+            {@attach tooltip('Show the candidates matching this amount')}
             onclick={onFindDifference}
           >
             {fmt(difference)}
