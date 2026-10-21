@@ -9,6 +9,10 @@
   import * as Card from '$lib/components/ui/card';
   import { Skeleton } from '$lib/components/ui/skeleton';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
+  import { Button } from '$lib/components/ui/button';
+  import { ChevronDown } from '@lucide/svelte';
+  import { cn } from '$lib/utils';
+  import { isBoolean, usePersistedState } from '$lib/hooks/use-persisted-state.svelte';
 
   let { filters }: { filters: Filters } = $props();
 
@@ -76,8 +80,12 @@
     return () => clearTimeout(timer);
   });
 
+  // Collapsed by choice (remembered per viewer); a collapsed card skips the
+  // full-scan query entirely.
+  const collapsed = usePersistedState('heatmap:collapsed', false, isBoolean);
+
   const res = useAsyncData({
-    enabled: () => !!dbSession.value && mounted,
+    enabled: () => !!dbSession.value && mounted && !collapsed.value,
     // Reads `debouncedFilters`, so changing a filter refetches (debounced).
     fetch: () => fetchTransactionHeatmap(debouncedFilters),
     label: 'We couldn’t load recent activity'
@@ -194,66 +202,89 @@
   let stripMaxWidth = $derived(columns.length * 37);
 </script>
 
-<Card.Root>
+<Card.Root class={cn(collapsed.value && 'gap-0 py-3')}>
   <Card.Header>
     <Card.Title>Activity</Card.Title>
-    <Card.Description>How busy each day was</Card.Description>
-  </Card.Header>
-  <Card.Content>
-    {#if !mounted || (res.loading && columns.length === 0 && !res.error)}
-      <Skeleton class="h-40 w-full" />
-    {:else if res.error && columns.length === 0}
-      <ErrorCard message={res.error} onRetry={() => res.reload()} />
-    {:else if range.empty}
-      <div
-        class="flex min-h-40 items-center justify-center py-6 text-center text-sm text-muted-foreground"
+    {#if !collapsed.value}
+      <Card.Description>How busy each day was</Card.Description>
+    {/if}
+    <div
+      data-slot="card-action"
+      class="col-start-2 row-span-2 row-start-1 self-start justify-self-end"
+    >
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        class="text-muted-foreground"
+        aria-expanded={!collapsed.value}
+        aria-label={collapsed.value ? 'Show activity' : 'Hide activity'}
+        {@attach tooltip(collapsed.value ? 'Show activity' : 'Hide activity')}
+        onclick={() => (collapsed.value = !collapsed.value)}
       >
-        Quiet around here. Nothing in this stretch.
-      </div>
-    {:else}
-      {#if res.error}
-        <div class="mb-3">
-          <ErrorCard message={res.error} onRetry={() => res.reload()} />
+        <ChevronDown
+          aria-hidden="true"
+          class={cn('size-4 transition-transform duration-150', collapsed.value && '-rotate-90')}
+        />
+      </Button>
+    </div>
+  </Card.Header>
+  {#if !collapsed.value}
+    <Card.Content>
+      {#if !mounted || (res.loading && columns.length === 0 && !res.error)}
+        <Skeleton class="h-40 w-full" />
+      {:else if res.error && columns.length === 0}
+        <ErrorCard message={res.error} onRetry={() => res.reload()} />
+      {:else if range.empty}
+        <div
+          class="flex min-h-40 items-center justify-center py-6 text-center text-sm text-muted-foreground"
+        >
+          Quiet around here. Nothing in this stretch.
+        </div>
+      {:else}
+        {#if res.error}
+          <div class="mb-3">
+            <ErrorCard message={res.error} onRetry={() => res.reload()} />
+          </div>
+        {/if}
+        <div
+          class="mx-auto w-full transition-opacity {res.loading
+            ? 'pointer-events-none opacity-50'
+            : ''}"
+          style={`max-width: ${stripMaxWidth}px;`}
+        >
+          <div role="img" aria-label="Number of transactions per day" class="flex gap-0.5">
+            {#each columns as week (week.key)}
+              <div class="flex min-w-0 flex-1 flex-col gap-0.5">
+                <div class="h-4 text-[10px] leading-4 text-muted-foreground" aria-hidden="true">
+                  {week.label}
+                </div>
+                {#each week.days as day (day.key)}
+                  <div
+                    class="aspect-square w-full rounded-[4px] border border-foreground/10 {day.dimmed
+                      ? 'opacity-40'
+                      : ''}"
+                    style={`background: ${day.background};`}
+                    {@attach tooltip(day.title)}
+                  ></div>
+                {/each}
+              </div>
+            {/each}
+          </div>
+        </div>
+        <div
+          class="mt-3 flex items-center justify-end gap-1 text-[10px] text-muted-foreground"
+          aria-hidden="true"
+        >
+          <span>Less</span>
+          {#each CELL_RAMP as color (color)}
+            <span
+              class="size-3 rounded-[4px] border border-foreground/10"
+              style={`background: ${color};`}
+            ></span>
+          {/each}
+          <span>More</span>
         </div>
       {/if}
-      <div
-        class="mx-auto w-full transition-opacity {res.loading
-          ? 'pointer-events-none opacity-50'
-          : ''}"
-        style={`max-width: ${stripMaxWidth}px;`}
-      >
-        <div role="img" aria-label="Number of transactions per day" class="flex gap-0.5">
-          {#each columns as week (week.key)}
-            <div class="flex min-w-0 flex-1 flex-col gap-0.5">
-              <div class="h-4 text-[10px] leading-4 text-muted-foreground" aria-hidden="true">
-                {week.label}
-              </div>
-              {#each week.days as day (day.key)}
-                <div
-                  class="aspect-square w-full rounded-[4px] border border-foreground/10 {day.dimmed
-                    ? 'opacity-40'
-                    : ''}"
-                  style={`background: ${day.background};`}
-                  {@attach tooltip(day.title)}
-                ></div>
-              {/each}
-            </div>
-          {/each}
-        </div>
-      </div>
-      <div
-        class="mt-3 flex items-center justify-end gap-1 text-[10px] text-muted-foreground"
-        aria-hidden="true"
-      >
-        <span>Less</span>
-        {#each CELL_RAMP as color (color)}
-          <span
-            class="size-3 rounded-[4px] border border-foreground/10"
-            style={`background: ${color};`}
-          ></span>
-        {/each}
-        <span>More</span>
-      </div>
-    {/if}
-  </Card.Content>
+    </Card.Content>
+  {/if}
 </Card.Root>

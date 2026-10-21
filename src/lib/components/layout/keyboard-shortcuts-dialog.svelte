@@ -47,7 +47,9 @@
   <Dialog.Content class="sm:max-w-sm">
     <Dialog.Header>
       <Dialog.Title>Keyboard shortcuts</Dialog.Title>
-      <Dialog.Description>Move a little faster with these.</Dialog.Description>
+      <Dialog.Description>
+        {modKey}+K searches transactions, accounts and commands from anywhere.
+      </Dialog.Description>
     </Dialog.Header>
     <div class="flex flex-col gap-3">
       {#snippet shortcutList(title: string, shortcuts: ShortcutEntry[])}

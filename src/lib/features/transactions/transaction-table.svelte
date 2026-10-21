@@ -18,6 +18,8 @@
   import { resolve } from '$app/paths';
   import * as Table from '$lib/components/ui/table';
   import { Badge } from '$lib/components/ui/badge';
+  import { Button } from '$lib/components/ui/button';
+  import { CopyPlus, Pencil } from '@lucide/svelte';
   import { formatDate as fmtDate, formatSignedCurrency } from '$lib/utils/format.svelte';
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import SortHead from '$lib/components/shared/sort-head.svelte';
@@ -143,11 +145,15 @@
           <Table.Head class="text-right text-muted-foreground">Balance</Table.Head>
         {/if}
       {/if}
+      <Table.Head class="w-0"><span class="sr-only">Actions</span></Table.Head>
     </Table.Row>
   </Table.Header>
   <Table.Body>
     {#each transactions as txn (txn.guid)}
-      <NavRow onNavigate={() => openTransaction(txn.guid)}>
+      <NavRow
+        onNavigate={() => openTransaction(txn.guid)}
+        class="group/row cursor-pointer hover:bg-muted/50"
+      >
         {#if showDate}
           <Table.Cell class="py-2.5 whitespace-nowrap text-muted-foreground tabular-nums">
             {fmtDate(txn.postDate)}
@@ -229,6 +235,36 @@
             </Table.Cell>
           {/if}
         {/if}
+        <!-- Quick actions appear on row hover or keyboard focus, so common
+             edits don’t need a detail page visit. -->
+        <Table.Cell class="w-0 py-1 pr-2 pl-0">
+          <div
+            class="flex justify-end gap-0.5 opacity-0 transition-opacity group-hover/row:opacity-100 focus-within:opacity-100"
+          >
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              class="text-muted-foreground"
+              href={resolve('/transactions/[guid]/edit', { guid: txn.guid })}
+              aria-label="Edit transaction"
+              {@attach tooltip('Edit')}
+            >
+              <Pencil aria-hidden="true" />
+            </Button>
+            <!-- eslint-disable svelte/no-navigation-without-resolve -- query strings can’t go through resolve() -->
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              class="text-muted-foreground"
+              href={`${resolve('/transactions/new')}?duplicate=${encodeURIComponent(txn.guid)}`}
+              aria-label="Duplicate transaction"
+              {@attach tooltip('Duplicate')}
+            >
+              <CopyPlus aria-hidden="true" />
+            </Button>
+            <!-- eslint-enable svelte/no-navigation-without-resolve -->
+          </div>
+        </Table.Cell>
       </NavRow>
     {/each}
   </Table.Body>
