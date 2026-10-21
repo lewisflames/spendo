@@ -15,7 +15,8 @@
     "generate-icons": "cd src-tauri && tauri icon icons/app-icon.svg",
     "tauri": "bun run generate-icons && tauri",
     "tauri:dev": "bun run generate-icons && tauri dev",
-    "tauri:build": "bun run generate-icons && tauri build --features production"
+    "tauri:build": "bun run generate-icons && tauri build --features production",
+    "release": "bun scripts/release.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
