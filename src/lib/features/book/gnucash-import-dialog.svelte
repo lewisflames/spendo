@@ -9,6 +9,7 @@
     gnucashImportDialog
   } from './gnucash-import-dialog-state.svelte';
   import { confirmGnucashImport } from './import-export-actions';
+  import { plural } from '$lib/utils/format.svelte';
 
   let deleteOrphans = $state(true);
 
@@ -28,9 +29,6 @@
     preview ? preview.accountsOrphaned + preview.transactionsOrphaned : 0
   );
   const hasRemovals = $derived(removedCount > 0);
-  const scheduleCount = $derived(preview ? preview.schedulesAdded + preview.schedulesUpdated : 0);
-  const skippedSchedules = $derived(preview?.skippedSchedules ?? []);
-  const shownSkipped = $derived(skippedSchedules.slice(0, 5));
 </script>
 
 {#if preview}
@@ -61,33 +59,11 @@
         </div>
       </div>
 
-      {#if scheduleCount > 0}
+      {#if preview.schedulesIgnored > 0}
         <p class="text-sm text-muted-foreground">
-          {scheduleCount} scheduled
-          {scheduleCount === 1 ? 'transaction' : 'transactions'}
-          {preview.schedulesAdded > 0 && preview.schedulesUpdated > 0
-            ? `(${preview.schedulesAdded} added, ${preview.schedulesUpdated} updated)`
-            : preview.schedulesAdded > 0
-              ? 'added'
-              : 'updated'}
+          {plural(preview.schedulesIgnored, 'scheduled transaction')} won’t be imported. Recreate the
+          ones you need under Scheduled.
         </p>
-      {/if}
-
-      {#if skippedSchedules.length > 0}
-        <div class="rounded-md border p-3 text-sm">
-          <p>
-            {skippedSchedules.length} scheduled
-            {skippedSchedules.length === 1 ? 'transaction' : 'transactions'} can’t be imported.
-          </p>
-          <ul class="mt-2 space-y-1 text-muted-foreground">
-            {#each shownSkipped as skipped, i (i)}
-              <li>{skipped.name}: {skipped.reason}</li>
-            {/each}
-            {#if skippedSchedules.length > shownSkipped.length}
-              <li>and {skippedSchedules.length - shownSkipped.length} more</li>
-            {/if}
-          </ul>
-        </div>
       {/if}
 
       {#if hasRemovals}

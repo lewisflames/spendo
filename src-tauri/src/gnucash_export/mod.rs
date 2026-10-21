@@ -885,7 +885,6 @@ mod tests {
         assert_eq!(result.accounts_added, 9);
         assert_eq!(result.transactions_added, 2);
         assert_eq!(result.splits_added, 4);
-        assert_eq!(result.schedules_added, 1);
 
         let notes: String = dest
             .query_row(
@@ -895,47 +894,6 @@ mod tests {
             )
             .unwrap();
         assert_eq!(notes, "weekly shop");
-
-        let (name, frequency, start, posted, next_due): (String, String, String, i64, String) =
-            dest.query_row(
-                "SELECT name, frequency, start_date, occurrences_posted, next_due_date
-                 FROM recurring_schedules WHERE guid = 'sched1'",
-                [],
-                |row| {
-                    Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                    ))
-                },
-            )
-            .unwrap();
-        assert_eq!(
-            (
-                name.as_str(),
-                frequency.as_str(),
-                start.as_str(),
-                posted,
-                next_due.as_str()
-            ),
-            ("Rent", "monthly", "2026-01-15", 2, "2026-03-15")
-        );
-
-        // Signature, description, notes and memo survive on the template.
-        let template_json: String = dest
-            .query_row(
-                "SELECT template_json FROM recurring_schedules WHERE guid = 'sched1'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        let template: serde_json::Value = serde_json::from_str(&template_json).unwrap();
-        assert_eq!(template["num"], "7");
-        assert_eq!(template["description"], "Rent");
-        assert_eq!(template["notes"], "due on the 15th");
-        assert_eq!(template["splits"][0]["memo"], "flat");
 
         // Template accounts are plumbing: they must not come back as accounts.
         let template_accounts: i64 = dest

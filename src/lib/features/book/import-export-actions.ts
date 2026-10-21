@@ -89,21 +89,10 @@ export async function confirmGnucashImport(deleteOrphans: boolean): Promise<bool
     closeGnucashImportDialog();
     const transactionsChanged =
       result.transactionsAdded + result.transactionsUpdated + result.transactionsOrphaned;
-    const schedulesChanged = result.schedulesAdded + result.schedulesUpdated;
-    if (transactionsChanged || schedulesChanged) {
-      const parts: string[] = [];
-      if (transactionsChanged) {
-        parts.push(`${result.transactionsAdded} added`);
-        if (result.transactionsUpdated) parts.push(`${result.transactionsUpdated} updated`);
-        if (result.transactionsOrphaned) parts.push(`${result.transactionsOrphaned} removed`);
-      }
-      if (result.schedulesAdded) parts.push(`${plural(result.schedulesAdded, 'schedule')} added`);
-      if (result.schedulesUpdated) {
-        parts.push(`${plural(result.schedulesUpdated, 'schedule')} updated`);
-      }
-      if (result.schedulesSkipped) {
-        parts.push(`${plural(result.schedulesSkipped, 'schedule')} skipped`);
-      }
+    if (transactionsChanged) {
+      const parts = [`${result.transactionsAdded} added`];
+      if (result.transactionsUpdated) parts.push(`${result.transactionsUpdated} updated`);
+      if (result.transactionsOrphaned) parts.push(`${result.transactionsOrphaned} removed`);
       toast.success(`Brought in ${preview.filename} (${parts.join(' · ')})`);
     } else {
       toast.warning('No new data imported');
