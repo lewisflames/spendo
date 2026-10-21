@@ -8,11 +8,6 @@ export function ensureCsvExtension(path: string): string {
   return /\.[A-Za-z0-9]+$/.test(path) ? path : `${path}.csv`;
 }
 
-/** Same behavior for GnuCash export defaults. */
-export function ensureGnuCashExtension(path: string): string {
-  return /\.[A-Za-z0-9]+$/.test(path) ? path : `${path}.gnucash`;
-}
-
 /** Display name for a book path: basename minus the `.spendo` extension. */
 export function bookDisplayName(path: string | null): string {
   if (!path) return 'No book open';

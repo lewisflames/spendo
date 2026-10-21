@@ -28,7 +28,6 @@
   } from '$lib/features/book/book-actions';
   import {
     exportAccountsCsvViaDialog,
-    exportGnuCashViaDialog,
     exportTransactionsCsvViaDialog,
     importGnucashViaDialog,
     openCsvImport
@@ -225,10 +224,6 @@
                 <DropdownMenu.Item onclick={() => void exportAccountsCsvViaDialog()}>
                   <FileSpreadsheet aria-hidden="true" />
                   Accounts CSV
-                </DropdownMenu.Item>
-                <DropdownMenu.Item onclick={() => void exportGnuCashViaDialog()}>
-                  <Database aria-hidden="true" />
-                  GnuCash SQLite
                 </DropdownMenu.Item>
               </DropdownMenu.SubContent>
             </DropdownMenu.Sub>

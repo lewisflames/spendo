@@ -9,15 +9,13 @@ import { activeBookPath, dbSession, setDbSession } from '$lib/stores/db.svelte';
 import { appSettings } from '$lib/stores/settings.svelte';
 import {
   exportAccountsCsv,
-  exportGnuCash,
   exportTransactionsCsv,
   importGnucash,
   previewGnucashImport
 } from '$lib/tauri';
-import { ensureCsvExtension, ensureGnuCashExtension } from '$lib/utils/book';
+import { ensureCsvExtension } from '$lib/utils/book';
 import { todayStr } from '$lib/utils/date-utils.svelte';
 import { errMsg } from '$lib/utils/error';
-import { plural } from '$lib/utils/format.svelte';
 import { exportDatePattern, exportFilename } from './exporters';
 import {
   closeGnucashImportDialog,
@@ -127,7 +125,7 @@ async function exportOptions() {
 
 /** Shared save-dialog tail: confirm the path, run the export and announce it.
  * `run` may return the toast message itself when it has more to report than
- * the filename (the GnuCash export summarizes what landed in the file). */
+ * the filename. */
 async function saveExport(
   defaultPath: string,
   filter: { name: string; extensions: string[] },
@@ -202,39 +200,5 @@ export async function exportAccountsCsvViaDialog(): Promise<boolean> {
     ensureCsvExtension,
     (path) => exportAccountsCsv({ path, delimiter: opts.delimiter }),
     'accounts'
-  );
-}
-
-/** Full-book GnuCash SQLite export (accounts, transactions, schedules, prices,
- * budgets). Receipts have no GnuCash equivalent and stay in this book. */
-export async function exportGnuCashViaDialog(): Promise<boolean> {
-  if (busy || !dbSession.value) return false;
-  const stem = bookStem().replace(/\.spendo$/i, '') || 'spendo';
-  return saveExport(
-    `${stem}.gnucash`,
-    GNUCASH_FILTER,
-    ensureGnuCashExtension,
-    async (path) => {
-      const result = await exportGnuCash(path);
-      if (result.attachmentsSkipped > 0) {
-        toast.warning(
-          `${plural(result.attachmentsSkipped, 'receipt')} not exported. GnuCash cannot store attached files`
-        );
-      }
-      if (result.roundedAmounts > 0) {
-        toast.warning(
-          `${plural(result.roundedAmounts, 'amount')} have more than 2 decimals. GnuCash rounds them on open`
-        );
-      }
-      const parts = [
-        plural(result.transactions, 'transaction'),
-        plural(result.accounts, 'account')
-      ];
-      if (result.schedules > 0) parts.push(plural(result.schedules, 'schedule'));
-      if (result.prices > 0) parts.push(plural(result.prices, 'price'));
-      if (result.futureDated > 0) parts.push(`${result.futureDated} future-dated`);
-      return `Saved ${await basename(path)} (${parts.join(' · ')})`;
-    },
-    'GnuCash file'
   );
 }
