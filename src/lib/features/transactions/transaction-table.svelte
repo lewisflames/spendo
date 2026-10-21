@@ -13,16 +13,12 @@
 </script>
 
 <script lang="ts">
+  import Amount from '$lib/components/shared/amount.svelte';
   import { tooltip } from '$lib/attachments/tooltip';
   import { resolve } from '$app/paths';
   import * as Table from '$lib/components/ui/table';
   import { Badge } from '$lib/components/ui/badge';
-  import {
-    formatDate as fmtDate,
-    formatSignedCurrency,
-    formatSessionCurrency,
-    signColor
-  } from '$lib/utils/format.svelte';
+  import { formatDate as fmtDate, formatSignedCurrency } from '$lib/utils/format.svelte';
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import SortHead from '$lib/components/shared/sort-head.svelte';
   import NavRow from '$lib/components/shared/nav-row.svelte';
@@ -203,12 +199,8 @@
             </Table.Cell>
           {/if}
           {#if isVisible('amount')}
-            <Table.Cell
-              class="py-2.5 text-right font-medium whitespace-nowrap tabular-nums {signColor(
-                totalOf(txn)
-              )}"
-            >
-              {formatSignedCurrency(totalOf(txn), currency)}
+            <Table.Cell class="py-2.5 text-right">
+              <Amount value={totalOf(txn)} format={(n) => formatSignedCurrency(n, currency)} tone />
             </Table.Cell>
           {/if}
         {:else if isDetail(txn)}
@@ -227,17 +219,13 @@
             </Table.Cell>
           {/if}
           {#if isVisible('amount')}
-            <Table.Cell
-              class="py-2.5 text-right font-medium whitespace-nowrap tabular-nums {signColor(
-                txn.amount
-              )}"
-            >
-              {formatSignedCurrency(txn.amount, currency)}
+            <Table.Cell class="py-2.5 text-right">
+              <Amount value={txn.amount} format={(n) => formatSignedCurrency(n, currency)} tone />
             </Table.Cell>
           {/if}
           {#if isVisible('runningBalance')}
-            <Table.Cell class="py-2.5 text-right font-medium whitespace-nowrap tabular-nums">
-              {formatSessionCurrency(txn.runningBalance)}
+            <Table.Cell class="py-2.5 text-right">
+              <Amount value={txn.runningBalance} />
             </Table.Cell>
           {/if}
         {/if}

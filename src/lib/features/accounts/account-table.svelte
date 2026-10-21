@@ -1,7 +1,8 @@
 <script lang="ts">
+  import Amount from '$lib/components/shared/amount.svelte';
   import { resolve } from '$app/paths';
   import * as Table from '$lib/components/ui/table';
-  import { formatNumber, formatSessionCurrency, clampZero } from '$lib/utils/format.svelte';
+  import { formatNumber } from '$lib/utils/format.svelte';
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import NavRow from '$lib/components/shared/nav-row.svelte';
   import { openAccount } from '$lib/utils/navigation';
@@ -65,8 +66,8 @@
         <Table.Cell class="py-2.5 text-right text-sm text-muted-foreground tabular-nums">
           {formatNumber(node.txCount)}
         </Table.Cell>
-        <Table.Cell class="py-2.5 text-right font-medium whitespace-nowrap tabular-nums">
-          {formatSessionCurrency(clampZero(node.balance))}
+        <Table.Cell class="py-2.5 text-right">
+          <Amount value={node.balance} />
         </Table.Cell>
       </NavRow>
     {/each}

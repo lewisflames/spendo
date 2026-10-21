@@ -71,6 +71,8 @@ Frontend work is done when `bun run check`, `bun run lint` and `bun run test` pa
 - URL state composes factories from `use-url-params.svelte.ts` (`pageParam`, `debouncedSearchParam`, `dateParam`, `yearParam`); free-form specs only when none fits.
 - Search inputs debounce through `useDebouncedSearch`.
 - Command failures reject with `BackendError` (`{ kind, message }`): show text via `errMsg(e, fallback)` and branch on `errKind(e)` / `useAsyncData().errorKind` (e.g. `'notFound'` → `EmptyState`), never on message text.
+- Money values render through `<Amount>` (`$lib/components/shared/amount.svelte`: tabular digits, no wrap, -0 clamped, optional `tone`); amount table cells are just `text-right` around it.
+- Hints use the `tooltip` attachment (`$lib/attachments/tooltip.ts`, `{@attach tooltip('…')}`; `{ truncated: true }` for cut-off text), never native `title`.
 - Dates parse through `parseLocalDate` (date-only strings are local, not UTC); counts use `plural(n, 'word')`; ranges use `formatDateRange`.
 - Dialog form reset uses `useDialogReset(() => open, sync)` (bits-ui never fires `onOpenChange` for programmatic `bind:open`); create/edit footers use `<SaveFooter>`.
 - `index.ts` barrels use named exports only.

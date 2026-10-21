@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Amount from '$lib/components/shared/amount.svelte';
   import { resolve } from '$app/paths';
   import { ChevronRight } from '@lucide/svelte';
   import * as Table from '$lib/components/ui/table';
@@ -105,13 +106,8 @@
           <Table.Cell class="py-1.5 text-right text-sm text-muted-foreground tabular-nums">
             {formatNumber(row.node.txCount)}
           </Table.Cell>
-          <Table.Cell
-            class={cn(
-              'py-1.5 text-right whitespace-nowrap tabular-nums',
-              row.hasChildren ? 'font-semibold' : 'font-medium'
-            )}
-          >
-            {formatSessionCurrency(clampZero(row.total))}
+          <Table.Cell class="py-1.5 text-right">
+            <Amount value={row.total} weight={row.hasChildren ? 'semibold' : 'medium'} />
           </Table.Cell>
         </NavRow>
       {/each}

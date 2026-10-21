@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Amount from '$lib/components/shared/amount.svelte';
   import { tooltip } from '$lib/attachments/tooltip';
   import { resolve } from '$app/paths';
   import * as Table from '$lib/components/ui/table';
@@ -8,7 +9,7 @@
   import SortHead from '$lib/components/shared/sort-head.svelte';
   import EmptyValue from '$lib/components/shared/empty-value.svelte';
   import NavRow from '$lib/components/shared/nav-row.svelte';
-  import { formatDate as fmtDate, formatSignedCurrency, signColor } from '$lib/utils/format.svelte';
+  import { formatDate as fmtDate, formatSignedCurrency } from '$lib/utils/format.svelte';
   import { selectionState } from '$lib/features/reconcile/math';
   import type { ReconcileCandidate, TxSortKey } from '$lib/tauri';
 
@@ -155,12 +156,8 @@
             {/if}
           </div>
         </Table.Cell>
-        <Table.Cell
-          class="py-2.5 text-right font-medium whitespace-nowrap tabular-nums {signColor(
-            row.amount
-          )}"
-        >
-          {formatSignedCurrency(row.amount, currency)}
+        <Table.Cell class="py-2.5 text-right">
+          <Amount value={row.amount} format={(n) => formatSignedCurrency(n, currency)} tone />
         </Table.Cell>
       </NavRow>
     {/each}

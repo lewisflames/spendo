@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Amount from '$lib/components/shared/amount.svelte';
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
@@ -20,13 +21,10 @@
   import { fetchTransaction } from '$lib/tauri';
   import type { SplitDetail } from '$lib/tauri';
   import {
-    clampZero,
     formatDate as fmtDate,
     formatNumber,
-    formatSessionCurrency as fmt,
     formatSplitAmount,
-    sessionCurrency,
-    signColor
+    sessionCurrency
   } from '$lib/utils/format.svelte';
   import { errMsg } from '$lib/utils/error';
   import { statusFor } from '$lib/utils/reconcile';
@@ -162,9 +160,7 @@
         </div>
         <div class="flex flex-col gap-0.5">
           <dt class="text-xs text-muted-foreground">Total</dt>
-          <dd class="font-medium tabular-nums {signColor(d.totalAmount)}">
-            {fmt(clampZero(d.totalAmount))}
-          </dd>
+          <dd><Amount value={d.totalAmount} tone /></dd>
         </div>
         <div class="flex flex-col gap-0.5">
           <dt class="text-xs text-muted-foreground">Reconciled</dt>
@@ -218,9 +214,11 @@
                   <Badge variant={status.variant}>{status.label}</Badge>
                 </Table.Cell>
                 <Table.Cell class="py-2.5 text-right">
-                  <span class="font-medium tabular-nums {signColor(split.amount)}">
-                    {formatSplitAmount(split.amount, currency)}
-                  </span>
+                  <Amount
+                    value={split.amount}
+                    format={(n) => formatSplitAmount(n, currency)}
+                    tone
+                  />
                   {#if qline}
                     <p class="text-xs text-muted-foreground tabular-nums">{qline}</p>
                   {/if}

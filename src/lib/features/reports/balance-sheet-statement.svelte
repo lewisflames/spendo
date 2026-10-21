@@ -1,15 +1,13 @@
 <script lang="ts">
+  import Amount from '$lib/components/shared/amount.svelte';
   import * as Table from '$lib/components/ui/table';
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import NavRow from '$lib/components/shared/nav-row.svelte';
   import ReportAccountCell from '$lib/features/reports/report-account-cell.svelte';
-  import { clampZero, formatSessionCurrency } from '$lib/utils/format.svelte';
   import { openAccount } from '$lib/utils/navigation';
   import type { BalanceSheet, BalanceSheetRow } from './balance-sheet';
 
   let { sheet }: { sheet: BalanceSheet } = $props();
-
-  const fmt = formatSessionCurrency;
 </script>
 
 {#snippet tableHead()}
@@ -41,8 +39,8 @@
       description={row.description}
       code={row.code}
     />
-    <Table.Cell class="py-2.5 text-right font-medium whitespace-nowrap tabular-nums">
-      {fmt(clampZero(row.amount))}
+    <Table.Cell class="py-2.5 text-right">
+      <Amount value={row.amount} />
     </Table.Cell>
   </NavRow>
 {/snippet}
@@ -56,8 +54,8 @@
       description={row.description}
       code={row.code}
     />
-    <Table.Cell class="py-2.5 text-right font-medium whitespace-nowrap tabular-nums">
-      {fmt(clampZero(row.amount))}
+    <Table.Cell class="py-2.5 text-right">
+      <Amount value={row.amount} />
     </Table.Cell>
   </Table.Row>
 {/snippet}
@@ -85,18 +83,14 @@
 {#snippet subtotalRow(label: string, amount: number)}
   <Table.Row class="border-t hover:bg-transparent">
     <Table.Cell class="font-medium">{label}</Table.Cell>
-    <Table.Cell class="text-right font-medium whitespace-nowrap tabular-nums">
-      {fmt(clampZero(amount))}
-    </Table.Cell>
+    <Table.Cell class="text-right"><Amount value={amount} /></Table.Cell>
   </Table.Row>
 {/snippet}
 
 {#snippet totalRow(label: string, amount: number)}
   <Table.Row class="border-t hover:bg-transparent">
     <Table.Cell class="font-semibold">{label}</Table.Cell>
-    <Table.Cell class="text-right font-semibold whitespace-nowrap tabular-nums">
-      {fmt(clampZero(amount))}
-    </Table.Cell>
+    <Table.Cell class="text-right"><Amount value={amount} weight="semibold" /></Table.Cell>
   </Table.Row>
 {/snippet}
 
