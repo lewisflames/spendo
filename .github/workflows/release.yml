@@ -21,9 +21,10 @@ jobs:
           # .app.tar.gz updater artifact tauri-action lists in latest.json.
           - platform: macos-latest
             args: '--target universal-apple-darwin'
-          # The deb is both the AUR source artifact and the Linux updater entry.
+          # The AppImage self-updates (it is the Linux updater entry); the deb is
+          # the AUR source artifact, updated through the package manager.
           - platform: ubuntu-22.04
-            args: '--bundles deb'
+            args: '--bundles deb,appimage'
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v7

@@ -28,7 +28,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["dmg", "deb"],
+    "targets": ["dmg", "deb", "appimage"],
     "createUpdaterArtifacts": true,
     "publisher": "Lewis Flames",
     "copyright": "Copyright © 2026 Lewis Flames",
