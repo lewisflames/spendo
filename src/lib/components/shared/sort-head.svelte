@@ -13,7 +13,8 @@
     label: string;
     active?: boolean;
     dir?: 'asc' | 'desc';
-    onclick: () => void;
+    /** Omit for a static header (e.g. a preview table that can’t re-sort). */
+    onclick?: () => void;
     class?: string;
     /** Horizontal alignment; `right` right-aligns the sort button for numeric columns. */
     align?: 'left' | 'right';
@@ -24,24 +25,28 @@
 
 <Table.Head
   class="text-muted-foreground {className}"
-  aria-sort={active ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'}
+  aria-sort={onclick ? (active ? (dir === 'asc' ? 'ascending' : 'descending') : 'none') : undefined}
 >
-  <button
-    type="button"
-    class="inline-flex items-center gap-1 transition-colors hover:text-foreground {alignClass} {active
-      ? 'text-foreground'
-      : ''}"
-    {onclick}
-  >
-    {label}
-    {#if active}
-      {#if dir === 'asc'}
-        <ArrowUp aria-hidden="true" class="size-3" />
+  {#if !onclick}
+    <span class="inline-flex {alignClass}">{label}</span>
+  {:else}
+    <button
+      type="button"
+      class="inline-flex items-center gap-1 transition-colors hover:text-foreground {alignClass} {active
+        ? 'text-foreground'
+        : ''}"
+      {onclick}
+    >
+      {label}
+      {#if active}
+        {#if dir === 'asc'}
+          <ArrowUp aria-hidden="true" class="size-3" />
+        {:else}
+          <ArrowDown aria-hidden="true" class="size-3" />
+        {/if}
       {:else}
-        <ArrowDown aria-hidden="true" class="size-3" />
+        <ArrowUpDown aria-hidden="true" class="size-3 opacity-50" />
       {/if}
-    {:else}
-      <ArrowUpDown aria-hidden="true" class="size-3 opacity-50" />
-    {/if}
-  </button>
+    </button>
+  {/if}
 </Table.Head>
