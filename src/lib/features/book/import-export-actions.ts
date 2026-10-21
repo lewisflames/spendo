@@ -91,7 +91,7 @@ export async function confirmGnucashImport(deleteOrphans: boolean): Promise<bool
       const parts = [`${result.transactionsAdded} added`];
       if (result.transactionsUpdated) parts.push(`${result.transactionsUpdated} updated`);
       if (result.transactionsOrphaned) parts.push(`${result.transactionsOrphaned} removed`);
-      toast.success(`Brought in ${preview.filename} (${parts.join(' · ')})`);
+      toast.success(`Imported ${preview.filename} (${parts.join(' · ')})`);
     } else {
       toast.warning('No new data imported');
     }
@@ -156,7 +156,7 @@ async function saveExport(
     }
     return true;
   } catch (e: unknown) {
-    toast.error(errMsg(e, `We couldn’t export ${label}. Please try again`));
+    toast.error(errMsg(e, `We couldn’t export ${label}`));
     return false;
   } finally {
     busy = false;

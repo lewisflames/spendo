@@ -38,7 +38,7 @@
     try {
       await saveBookSetting(field, value);
     } catch (e: unknown) {
-      toast.error(errMsg(e, 'We couldn’t save that setting. Please try again'));
+      toast.error(errMsg(e, 'We couldn’t save that setting'));
     } finally {
       savingBookKey = false;
     }
@@ -87,7 +87,7 @@
     </SettingSelectRow>
     <SettingSelectRow
       label="Default P&amp;L period"
-      description="Where Profit &amp; Loss starts when the link has no dates"
+      description="Where Profit &amp; loss starts when the link has no dates"
       labelFor="setting-pnl-period"
     >
       {#if dbSession.value}

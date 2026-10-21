@@ -52,9 +52,9 @@
     try {
       const result = await setBaseCurrency(v);
       setDbSession(result.summary);
-      toast.success(`Now reporting in ${v}`);
+      toast.success(`Base currency set to ${v}`);
     } catch (e: unknown) {
-      toast.error(errMsg(e, 'We couldn’t change the currency. Please try again'));
+      toast.error(errMsg(e, 'We couldn’t change the currency'));
     } finally {
       savingCurrency = false;
     }

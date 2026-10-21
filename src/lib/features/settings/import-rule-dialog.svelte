@@ -75,13 +75,11 @@
       } else {
         await createImportRule(input);
       }
-      toast.success(
-        rule ? 'Rule updated. Future rows will follow it' : 'Rule added. Future rows will follow it'
-      );
+      toast.success(rule ? 'Rule updated' : 'Rule added');
       open = false;
       onSaved();
     } catch (e: unknown) {
-      toast.error(errMsg(e, 'We couldn’t save this rule. Please try again'));
+      toast.error(errMsg(e, 'We couldn’t save this rule'));
     } finally {
       saving = false;
     }
@@ -100,7 +98,7 @@
       open = false;
       onSaved();
     } catch (e: unknown) {
-      toast.error(errMsg(e, 'We couldn’t delete this rule. Please try again'));
+      toast.error(errMsg(e, 'We couldn’t delete this rule'));
     } finally {
       deleting = false;
     }

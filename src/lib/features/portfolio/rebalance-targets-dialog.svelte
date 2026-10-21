@@ -96,9 +96,9 @@
       );
       onSaved(new Map(rows.map((r) => [r.commodityGuid, r.targetPct])));
       open = false;
-      toast.success('Targets saved. Looking balanced');
+      toast.success('Targets saved');
     } catch (e: unknown) {
-      formError = errMsg(e, 'We couldn’t save your targets. Please try again');
+      formError = errMsg(e, 'We couldn’t save your targets');
     } finally {
       saving = false;
     }

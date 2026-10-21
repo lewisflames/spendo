@@ -350,7 +350,7 @@
       // Saving progress doesn’t move the summary counters; refresh the session
       // so nav roots and badges pick up any changes.
       refreshSession();
-      toast.success('Saved. Pick up where you left off');
+      toast.success('Progress saved');
       res.reload();
       return true;
     } catch (e) {
@@ -370,7 +370,7 @@
       // and the promotion commit (or roll back) as one transaction.
       const updates = pendingUpdates();
       const out = await finishReconciliation(g, statementDate, endingBalance, updates);
-      toast.success(`All matched. Reconciled ${plural(out.reconciledCount, 'split')}`);
+      toast.success(`Reconciled ${plural(out.reconciledCount, 'split')}`);
       clearDraft(g);
       bypassGuard = true;
       void goto(resolve('/reconcile'));
@@ -390,9 +390,7 @@
     undoing = true;
     try {
       const out = await reopenLastReconciliation(g);
-      toast.success(
-        `Reopened ${plural(out.reopenedCount, 'split')}. Tick them off and finish again`
-      );
+      toast.success(`Reopened ${plural(out.reopenedCount, 'split')}`);
       undoOpen = false;
       res.reload();
     } catch (e) {

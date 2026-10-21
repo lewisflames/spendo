@@ -106,7 +106,7 @@
       .catch((e: unknown) => {
         if (cancelled) return;
         existingYears = null;
-        const msg = errMsg(e, 'We couldn’t load your budgets. Please try again');
+        const msg = errMsg(e, 'We couldn’t load your budgets');
         fetchError = msg;
         onError?.(msg);
       })
@@ -157,7 +157,7 @@
       })
       .catch((e: unknown) => {
         existingYears = null;
-        const msg = errMsg(e, 'We couldn’t load your budgets. Please try again');
+        const msg = errMsg(e, 'We couldn’t load your budgets');
         fetchError = msg;
         onError?.(msg);
       })
@@ -180,7 +180,7 @@
       open = false;
       onSave?.(target, y);
     } catch (e: unknown) {
-      formError = errMsg(e, 'We couldn’t save this budget. Please try again');
+      formError = errMsg(e, 'We couldn’t save this budget');
     } finally {
       loading = false;
     }

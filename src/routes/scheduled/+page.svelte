@@ -46,7 +46,7 @@
     busyGuid = schedule.guid;
     try {
       const txGuid = await postScheduleOccurrence(schedule.guid);
-      toast.success(`Added “${schedule.name}” to your ledger`);
+      toast.success(`Posted “${schedule.name}”`);
       await refreshAfterMutation();
       await openTransaction(txGuid);
     } catch (e: unknown) {

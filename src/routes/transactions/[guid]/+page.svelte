@@ -72,7 +72,7 @@
     if (!detail) return;
     try {
       await navigator.clipboard.writeText(detail.guid);
-      toast.success('Copied. Paste it anywhere');
+      toast.success('GUID copied');
     } catch (e: unknown) {
       toast.error(errMsg(e, 'We couldn’t copy that'));
     }
@@ -174,7 +174,7 @@
           {/snippet}
         </KpiCard>
         <KpiCard
-          title="Total Amount"
+          title="Total amount"
           value={fmt(clampZero(d.totalAmount))}
           valueClass={signColor(d.totalAmount)}
         >

@@ -264,7 +264,7 @@
       });
       commitResult = result;
       step = 'done';
-      toast.success(`Brought in ${plural(result.created, 'transaction')}`);
+      toast.success(`Imported ${plural(result.created, 'transaction')}`);
       try {
         const home = await fetchHomeData();
         setDbSession(home.summary);
@@ -283,9 +283,9 @@
     try {
       await deleteCsvPreset(signature);
       presetApplied = false;
-      toast.success('Mapping forgotten. We’ll ask next time');
+      toast.success('Mapping forgotten');
     } catch (e: unknown) {
-      toast.error(errMsg(e, 'We couldn’t forget that mapping. Please try again'));
+      toast.error(errMsg(e, 'We couldn’t forget that mapping'));
     }
   }
 

@@ -100,12 +100,12 @@
       );
     }
     if (result.overflow > 0) {
-      toast.error(`Keep it to at most ${MAX_ATTACHMENTS} attachments per transaction`);
+      toast.error(`Up to ${MAX_ATTACHMENTS} attachments per transaction`);
     }
     if (result.added.length > 0) {
       toast.success(
         result.added.length === 1
-          ? 'Ready. It’ll attach when you save'
+          ? 'Attaches when you save'
           : `${result.added.length} files ready. They’ll attach when you save`
       );
     }
@@ -122,9 +122,7 @@
       const added = await addAttachments({ txGuid, paths });
       res.reload();
       toast.success(
-        added.length === 1
-          ? 'Attached. Tucked into your book'
-          : `${added.length} files tucked into your book`
+        added.length === 1 ? 'Attached' : `${added.length} files tucked into your book`
       );
     } catch (e: unknown) {
       toast.error(errMsg(e, 'We couldn’t attach that file'));
@@ -177,7 +175,7 @@
       await deleteAttachment(item.guid);
       confirmDeleteGuid = null;
       res.reload();
-      toast.success('Attachment gone');
+      toast.success('Attachment deleted');
     } catch (e: unknown) {
       toast.error(errMsg(e, 'We couldn’t delete that file'));
     } finally {

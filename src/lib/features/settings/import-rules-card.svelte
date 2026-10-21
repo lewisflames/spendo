@@ -66,7 +66,7 @@
       await moveImportRule(current.id, direction);
       rulesRes.reload();
     } catch (e: unknown) {
-      toast.error(errMsg(e, 'We couldn’t reorder your rules. Please try again'));
+      toast.error(errMsg(e, 'We couldn’t reorder your rules'));
     } finally {
       movingId = null;
     }
@@ -85,7 +85,7 @@
       rulesRes.reload();
       toast.success('Import rule deleted');
     } catch (e: unknown) {
-      toast.error(errMsg(e, 'We couldn’t delete this rule. Please try again'));
+      toast.error(errMsg(e, 'We couldn’t delete this rule'));
     } finally {
       deletingId = null;
     }

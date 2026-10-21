@@ -34,7 +34,7 @@
   <ErrorCard message={res.error} onRetry={() => res.reload()} />
 {:else}
   <TimeSeriesChart
-    title="Balance Over Time"
+    title="Balance over time"
     description="How the balance moved, transaction by transaction"
     {loading}
     emptyMessage="Not enough history to draw a line yet."

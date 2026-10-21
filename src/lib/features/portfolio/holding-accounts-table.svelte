@@ -32,10 +32,10 @@
       <Table.Row class="bg-muted/75">
         <Table.Head class="text-muted-foreground">Account</Table.Head>
         <Table.Head class="text-right text-muted-foreground">Shares</Table.Head>
-        <Table.Head class="text-right text-muted-foreground">Avg Cost</Table.Head>
-        <Table.Head class="text-right text-muted-foreground">Cost Basis</Table.Head>
-        <Table.Head class="text-right text-muted-foreground">Market Value</Table.Head>
-        <Table.Head class="text-right text-muted-foreground">Gain / Loss</Table.Head>
+        <Table.Head class="text-right text-muted-foreground">Avg cost</Table.Head>
+        <Table.Head class="text-right text-muted-foreground">Cost basis</Table.Head>
+        <Table.Head class="text-right text-muted-foreground">Market value</Table.Head>
+        <Table.Head class="text-right text-muted-foreground">Gain / loss</Table.Head>
       </Table.Row>
     </Table.Header>
     <Table.Body>

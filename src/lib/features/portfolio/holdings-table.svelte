@@ -52,11 +52,11 @@
 
   const COLUMNS: { id: ColumnId; label: string }[] = [
     { id: 'shares', label: 'Shares' },
-    { id: 'avgCost', label: 'Avg Cost' },
+    { id: 'avgCost', label: 'Avg cost' },
     { id: 'price', label: 'Price' },
-    { id: 'marketValue', label: 'Market Value' },
-    { id: 'costBasis', label: 'Cost Basis' },
-    { id: 'gainLoss', label: 'Gain / Loss' },
+    { id: 'marketValue', label: 'Market value' },
+    { id: 'costBasis', label: 'Cost basis' },
+    { id: 'gainLoss', label: 'Gain / loss' },
     { id: 'xirr', label: 'XIRR' },
     { id: 'alloc', label: 'Alloc' },
     { id: 'target', label: 'Target' },

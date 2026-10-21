@@ -29,7 +29,7 @@ export function createPriceRefresh(reload: () => void) {
       // Reload so market values, day change and timestamps pick up the new prices.
       reload();
     } catch (e: unknown) {
-      toast.error(errMsg(e, 'We couldn’t refresh prices. Please try again'));
+      toast.error(errMsg(e, 'We couldn’t refresh prices'));
     } finally {
       refreshing = false;
     }

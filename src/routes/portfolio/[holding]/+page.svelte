@@ -100,7 +100,7 @@
 
   async function handleSymbolSave() {
     overridesRes.reload();
-    toast.success('Symbol saved. Grabbing fresh prices');
+    toast.success('Symbol saved. Refreshing prices');
     await priceRefresh.refresh();
   }
   let currency = $derived(sessionCurrency());
@@ -108,7 +108,7 @@
   // its range stats are labeled in that currency rather than the report one.
   // Totals and per-share amounts stay in the report currency (see Option A).
   let priceCurrency = $derived(res.data?.priceHistory[0]?.currency ?? currency);
-  // Quote-currency 52W range, shown on the Price History chart instead of a KPI.
+  // Quote-currency 52W range, shown on the Price history chart instead of a KPI.
   let priceRange = $derived(range52w(res.data?.priceHistory));
   let priceHistoryDescription = $derived(
     priceRange
@@ -166,7 +166,7 @@
       <!-- Charts (previous data stays visible, dimmed, while refetching) -->
       <DimWrapper active={res.loading} class="grid grid-cols-1 gap-6 xl:grid-cols-2">
         <TimeSeriesChart
-          title="Price History"
+          title="Price history"
           description={priceHistoryDescription}
           loading={false}
           emptyMessage="No price history found. Set the Yahoo symbol, then refresh prices."
@@ -177,20 +177,20 @@
           currency={priceCurrency}
         />
         <TimeSeriesChart
-          title="Value Trend"
+          title="Value trend"
           description="Market value vs cost basis over time"
           loading={false}
           emptyMessage="No performance data available."
           data={res.data.valueTrend}
           getX={(d: { date: string }) => parseLocalDate(d.date)}
           series={[
-            { key: 'marketValue', label: 'Market Value', color: 'var(--color-success)' },
-            { key: 'costBasis', label: 'Cost Basis', color: 'var(--color-warning)' }
+            { key: 'marketValue', label: 'Market value', color: 'var(--color-success)' },
+            { key: 'costBasis', label: 'Cost basis', color: 'var(--color-warning)' }
           ]}
           {currency}
           tooltipTotals={[
             {
-              label: 'Gain / Loss',
+              label: 'Gain / loss',
               compute: (d) => d.marketValue - d.costBasis
             }
           ]}

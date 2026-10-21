@@ -56,7 +56,7 @@
       open = false;
       onSave?.();
     } catch (e: unknown) {
-      formError = errMsg(e, 'We couldn’t save this symbol. Please try again');
+      formError = errMsg(e, 'We couldn’t save this symbol');
     } finally {
       loading = false;
     }
@@ -74,7 +74,7 @@
       open = false;
       onSave?.();
     } catch (e: unknown) {
-      formError = errMsg(e, 'We couldn’t reset this symbol. Please try again');
+      formError = errMsg(e, 'We couldn’t reset this symbol');
     } finally {
       resetting = false;
     }

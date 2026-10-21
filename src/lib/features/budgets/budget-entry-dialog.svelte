@@ -66,7 +66,7 @@
       open = false;
       onSave?.();
     } catch (e: unknown) {
-      formError = errMsg(e, 'We couldn’t save this budget. Please try again');
+      formError = errMsg(e, 'We couldn’t save this budget');
     } finally {
       loading = false;
     }
@@ -85,7 +85,7 @@
       open = false;
       onDelete?.();
     } catch (e: unknown) {
-      formError = errMsg(e, 'We couldn’t delete this budget. Please try again');
+      formError = errMsg(e, 'We couldn’t delete this budget');
     } finally {
       deleting = false;
     }

@@ -61,7 +61,7 @@
 
 <AllocationPie
   data={pieData}
-  title="Balance Composition"
+  title="Balance composition"
   description="How the pieces add up, by type."
   {currency}
   {centerLabel}

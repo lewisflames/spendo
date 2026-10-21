@@ -24,7 +24,7 @@ export const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
 const DEFAULT_SETTINGS: AppSettings = {
   locale: 'en-IE',
   theme: 'system',
-  accent: 'zinc',
+  accent: 'blue',
   customPrimary: null,
   pageSize: 25,
   sidebarCollapsed: false,

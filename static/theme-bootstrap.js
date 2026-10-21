@@ -15,7 +15,7 @@
     root.style.colorScheme = dark ? 'dark' : 'light';
     if (typeof stored.locale === 'string' && stored.locale) root.lang = stored.locale;
     var accents = ['zinc', 'blue', 'emerald', 'amber', 'rose', 'violet', 'custom'];
-    var accent = accents.indexOf(stored.accent) >= 0 ? stored.accent : 'zinc';
+    var accent = accents.indexOf(stored.accent) >= 0 ? stored.accent : 'blue';
     root.dataset.accent = accent;
     var custom = typeof stored.customPrimary === 'string' ? stored.customPrimary : null;
     if (accent === 'custom' && custom && /^#[0-9a-fA-F]{6}$/.test(custom)) {

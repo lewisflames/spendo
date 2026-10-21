@@ -256,7 +256,7 @@
         onSaved?.(await createSchedule(input));
       }
     } catch (e: unknown) {
-      formError = errMsg(e, 'We couldn’t save this schedule. Please try again');
+      formError = errMsg(e, 'We couldn’t save this schedule');
       focusFormError();
     } finally {
       saving = false;
@@ -290,7 +290,7 @@
       deleteDialogOpen = false;
       onDeleted?.();
     } catch (e: unknown) {
-      formError = errMsg(e, 'We couldn’t delete this schedule. Please try again');
+      formError = errMsg(e, 'We couldn’t delete this schedule');
       deleteDialogOpen = false;
       focusFormError();
     } finally {
