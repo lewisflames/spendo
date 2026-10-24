@@ -13,6 +13,7 @@ mod home;
 mod import;
 mod import_rules;
 mod init;
+mod lots;
 mod nav;
 mod portfolio;
 mod prices;

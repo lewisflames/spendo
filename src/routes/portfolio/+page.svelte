@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tooltip } from '$lib/attachments/tooltip';
   import { PAGE_META } from '$lib/features/nav/page-meta';
-  import { Briefcase, TrendingDown, TrendingUp, RefreshCw, Pencil } from '@lucide/svelte';
+  import { HandCoins, TrendingDown, TrendingUp, RefreshCw, Pencil } from '@lucide/svelte';
   import { SvelteMap } from 'svelte/reactivity';
   import { dbBootstrapping, dbSession, activeBookPath } from '$lib/stores/db.svelte';
   import { fetchPortfolioData, fetchAllocationTargets } from '$lib/tauri';
@@ -215,21 +215,24 @@
                 <TrendingUp aria-hidden="true" class="size-4 text-muted-foreground" />
               {/snippet}
             </KpiCard>
-            <KpiCard title="Cost basis" value={fmt(d.totalCostBasis)}>
+            <KpiCard title="Unrealized gain" valueClass={signColor(d.totalUnrealizedGain)}>
               {#snippet icon()}
-                <Briefcase aria-hidden="true" class="size-4 text-muted-foreground" />
-              {/snippet}
-            </KpiCard>
-            <KpiCard title="Gain / loss" valueClass={signColor(d.totalGainLoss)}>
-              {#snippet icon()}
-                {#if d.totalGainLoss >= 0}
+                {#if d.totalUnrealizedGain >= 0}
                   <TrendingUp aria-hidden="true" class="size-4 text-success" />
                 {:else}
                   <TrendingDown aria-hidden="true" class="size-4 text-destructive" />
                 {/if}
               {/snippet}
               {#snippet value()}
-                {formatSignedCurrency(d.totalGainLoss, currency)}
+                {formatSignedCurrency(d.totalUnrealizedGain, currency)}
+              {/snippet}
+            </KpiCard>
+            <KpiCard title="Realized gain" valueClass={signColor(d.totalRealizedGain)}>
+              {#snippet icon()}
+                <HandCoins aria-hidden="true" class="size-4 text-muted-foreground" />
+              {/snippet}
+              {#snippet value()}
+                {formatSignedCurrency(d.totalRealizedGain, currency)}
               {/snippet}
             </KpiCard>
             <KpiCard

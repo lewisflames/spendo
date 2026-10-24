@@ -6,6 +6,7 @@ use tauri::State;
 
 use crate::backups::BackupReason;
 use crate::db::{clear_db, run_blocking, AppState};
+use crate::lots::CostMethod;
 
 #[tauri::command]
 pub async fn clear_app_db(state: State<'_, AppState>) -> Result<(), AppError> {
@@ -39,6 +40,8 @@ pub struct BookSettings {
     /// Clearing account whose transfer legs the transit check pairs up
     /// (account GUID; empty = off).
     pub transit_account: String,
+    /// How sales are matched to lots for realized gains: `fifo` or `average`.
+    pub cost_basis_method: String,
 }
 
 fn default_book_settings() -> BookSettings {
@@ -50,6 +53,7 @@ fn default_book_settings() -> BookSettings {
         export_date_format: "iso".to_string(),
         auto_backup: "daily".to_string(),
         transit_account: String::new(),
+        cost_basis_method: "fifo".to_string(),
     }
 }
 
@@ -107,6 +111,12 @@ fn validate_book_setting(key: &str, value: &str) -> Result<(), AppError> {
                 "Invalid value for {key}: {value}"
             ))),
         },
+        "cost_basis_method" => match value {
+            "fifo" | "average" => Ok(()),
+            _ => Err(AppError::Validation(format!(
+                "Invalid value for {key}: {value}"
+            ))),
+        },
         "transit_account" => {
             if value.is_empty()
                 || (value.len() <= 64 && value.chars().all(|c| c.is_ascii_hexdigit() || c == '-'))
@@ -149,6 +159,7 @@ fn get_book_settings_inner(conn: &Connection) -> Result<BookSettings, AppError> 
         export_date_format: pick("export_date_format", defaults.export_date_format.clone())?,
         auto_backup: pick("auto_backup", defaults.auto_backup.clone())?,
         transit_account: pick("transit_account", defaults.transit_account.clone())?,
+        cost_basis_method: pick("cost_basis_method", defaults.cost_basis_method.clone())?,
     })
 }
 
@@ -156,6 +167,13 @@ fn get_book_settings_inner(conn: &Connection) -> Result<BookSettings, AppError> 
 /// snapshots before bulk changes ignore it.
 pub(crate) fn auto_backup_enabled(conn: &Connection) -> Result<bool, AppError> {
     Ok(get_book_settings_inner(conn)?.auto_backup == "daily")
+}
+
+/// Lot-matching method for realized gains (`cost_basis_method`).
+pub(crate) fn cost_basis_method(conn: &Connection) -> Result<CostMethod, AppError> {
+    Ok(CostMethod::from_setting(
+        &get_book_settings_inner(conn)?.cost_basis_method,
+    ))
 }
 
 fn set_book_setting_inner(
@@ -247,6 +265,10 @@ mod tests {
         let updated = set_book_setting_inner(&conn, "auto_backup", "off").unwrap();
         assert_eq!(updated.auto_backup, "off");
         assert!(!auto_backup_enabled(&conn).unwrap());
+        assert_eq!(cost_basis_method(&conn).unwrap(), CostMethod::Fifo);
+        let updated = set_book_setting_inner(&conn, "cost_basis_method", "average").unwrap();
+        assert_eq!(updated.cost_basis_method, "average");
+        assert_eq!(cost_basis_method(&conn).unwrap(), CostMethod::Average);
         // Full snapshot persists.
         assert_eq!(get_book_settings_inner(&conn).unwrap(), updated);
     }
@@ -267,6 +289,7 @@ mod tests {
             ("export_csv_delimiter", "|"),
             ("export_date_format", "us"),
             ("auto_backup", "hourly"),
+            ("cost_basis_method", "lifo"),
         ] {
             assert!(
                 set_book_setting_inner(&conn, key, value).is_err(),

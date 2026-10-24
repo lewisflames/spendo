@@ -4,7 +4,7 @@
   import { resolve } from '$app/paths';
   import { Button } from '$lib/components/ui/button';
   import * as Tabs from '$lib/components/ui/tabs';
-  import { ArrowLeft, TrendingUp } from '@lucide/svelte';
+  import { ArrowLeft, TrendingUp, TriangleAlert } from '@lucide/svelte';
   import { dbBootstrapping, dbSession } from '$lib/stores/db.svelte';
   import { appSettings, applyPageSize } from '$lib/stores/settings.svelte';
   import { fetchHoldingDetail, fetchSymbolOverrides } from '$lib/tauri';
@@ -147,8 +147,21 @@
         breadcrumbs={[{ label: PAGE_META.portfolio.title, href: resolve('/portfolio') }]}
       />
 
+      {#if holding.basisWarning}
+        <div
+          role="alert"
+          class="flex items-start gap-2.5 rounded-lg border border-warning/40 bg-warning/10 px-3.5 py-2.5 text-sm"
+        >
+          <TriangleAlert aria-hidden="true" class="mt-0.5 size-4 shrink-0 text-warning" />
+          <p class="text-muted-foreground">
+            <span class="font-medium text-foreground">Cost basis is incomplete.</span>
+            {holding.basisWarning}, so realized gains may read high.
+          </p>
+        </div>
+      {/if}
+
       <!-- KPI summary cards -->
-      <HoldingKpiCards {holding} {priceCurrency} />
+      <HoldingKpiCards {holding} />
 
       {#key holdingGuid}
         <SymbolOverrideDialog

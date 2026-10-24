@@ -345,6 +345,7 @@ type PriceAutoRefresh = 'off' | 'on_startup';
 export type CsvDelimiter = ',' | ';';
 export type ExportDateFormat = 'iso' | 'locale';
 type AutoBackup = 'daily' | 'off';
+type CostBasisMethod = 'fifo' | 'average';
 
 export interface BookSettings {
   fiscalYearStartMonth: number;
@@ -355,6 +356,8 @@ export interface BookSettings {
   autoBackup: AutoBackup;
   /** Clearing account the transit check pairs transfer legs in; '' = off. */
   transitAccount: string;
+  /** How sales are matched to lots for realized gains. */
+  costBasisMethod: CostBasisMethod;
 }
 
 export const getBookSettings = (): Promise<BookSettings> => invoke('get_book_settings');
@@ -1020,10 +1023,18 @@ export interface PortfolioHolding {
   fullName: string | null;
   namespace: string;
   shares: number;
+  /** Net cash invested: buys minus sale proceeds. */
   costBasis: number;
+  /** Basis of the shares still held, fees included. */
+  openCostBasis: number;
   marketValue: number;
+  /** Open cost basis per share. */
   avgCostPerShare: number;
   gainLoss: number;
+  /** `null` for an unpriced open position. */
+  unrealizedGain: number | null;
+  realizedGain: number;
+  basisWarning: string | null;
   xirr: number | null;
   allocationPct: number;
   price: number | null;
@@ -1042,6 +1053,10 @@ interface PortfolioData {
   totalMarketValue: number;
   totalCostBasis: number;
   totalGainLoss: number;
+  totalOpenCostBasis: number;
+  /** Priced holdings only. */
+  totalUnrealizedGain: number;
+  totalRealizedGain: number;
   totalXirr: number | null;
   lastRefreshed: string | null;
   holdings: PortfolioHolding[];

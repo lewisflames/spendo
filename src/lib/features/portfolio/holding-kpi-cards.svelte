@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { TrendingUp, TrendingDown, ChartLine, Layers } from '@lucide/svelte';
+  import { TrendingUp, TrendingDown, HandCoins, Layers } from '@lucide/svelte';
   import KpiCard from '$lib/components/shared/kpi-card.svelte';
   import {
     signColor,
@@ -7,18 +7,11 @@
     formatSignedCurrency,
     sessionCurrency,
     formatShares,
-    formatCurrency,
     EMPTY_DASH
   } from '$lib/utils/format.svelte';
   import type { PortfolioHolding } from '$lib/tauri';
 
-  let {
-    holding: h,
-    priceCurrency = null
-  }: {
-    holding: PortfolioHolding;
-    priceCurrency?: string | null;
-  } = $props();
+  let { holding: h }: { holding: PortfolioHolding } = $props();
 
   let currency = $derived(sessionCurrency());
 </script>
@@ -33,24 +26,30 @@
       {fmt(h.marketValue)}
     {/snippet}
   </KpiCard>
-  <KpiCard title="Gain / loss" valueClass={signColor(h.gainLoss)}>
+  <KpiCard
+    title="Unrealized gain"
+    valueClass={h.unrealizedGain === null ? 'text-muted-foreground' : signColor(h.unrealizedGain)}
+  >
     {#snippet icon()}
-      {#if h.gainLoss >= 0}
-        <TrendingUp aria-hidden="true" class="size-4 text-success" />
-      {:else}
+      {#if h.unrealizedGain !== null && h.unrealizedGain < 0}
         <TrendingDown aria-hidden="true" class="size-4 text-destructive" />
+      {:else}
+        <TrendingUp
+          aria-hidden="true"
+          class="size-4 {h.unrealizedGain === null ? 'text-muted-foreground' : 'text-success'}"
+        />
       {/if}
     {/snippet}
     {#snippet value()}
-      {formatSignedCurrency(h.gainLoss, currency)}
+      {h.unrealizedGain === null ? EMPTY_DASH : formatSignedCurrency(h.unrealizedGain, currency)}
     {/snippet}
   </KpiCard>
-  <KpiCard title="Current price">
+  <KpiCard title="Realized gain" valueClass={signColor(h.realizedGain)}>
     {#snippet icon()}
-      <ChartLine aria-hidden="true" class="size-4 text-muted-foreground" />
+      <HandCoins aria-hidden="true" class="size-4 text-muted-foreground" />
     {/snippet}
     {#snippet value()}
-      {h.price === null ? EMPTY_DASH : formatCurrency(h.price, priceCurrency ?? currency)}
+      {formatSignedCurrency(h.realizedGain, currency)}
     {/snippet}
   </KpiCard>
   <KpiCard title="Shares">

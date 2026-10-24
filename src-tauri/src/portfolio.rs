@@ -6,10 +6,12 @@ use tauri::State;
 
 use crate::db::{run_blocking, with_tx_err, AppError, AppState};
 use crate::fx;
+use crate::lots;
 use crate::prices::{
     get_cached_price_maps, get_last_refresh_timestamp, get_price_history, latest_quote_currencies,
     list_commodities, PriceHistoryEntry,
 };
+use crate::settings;
 use crate::sql;
 use crate::utils;
 
@@ -35,10 +37,19 @@ pub struct PortfolioHolding {
     pub full_name: Option<String>,
     pub namespace: String,
     pub shares: f64,
+    /// Net cash invested: buys minus sale proceeds, fees excluded.
     pub cost_basis: f64,
+    /// Basis of the shares still held (lot engine, fees included).
+    pub open_cost_basis: f64,
     pub market_value: f64,
+    /// `open_cost_basis` per open share.
     pub avg_cost_per_share: f64,
     pub gain_loss: f64,
+    /// Market value minus open basis; `None` for unpriced open positions.
+    pub unrealized_gain: Option<f64>,
+    /// Proceeds minus matched basis over every sale, fees included.
+    pub realized_gain: f64,
+    pub basis_warning: Option<String>,
     pub xirr: Option<f64>,
     pub allocation_pct: f64,
     pub price: Option<f64>,
@@ -61,6 +72,10 @@ pub struct PortfolioData {
     pub total_market_value: f64,
     pub total_cost_basis: f64,
     pub total_gain_loss: f64,
+    pub total_open_cost_basis: f64,
+    /// Sum over priced holdings only.
+    pub total_unrealized_gain: f64,
+    pub total_realized_gain: f64,
     pub total_xirr: Option<f64>,
     pub last_refreshed: Option<String>,
     pub holdings: Vec<PortfolioHolding>,
@@ -378,11 +393,6 @@ fn value_commodity_groups(
                 .map(|p| p.0)
                 .filter(|_| price.is_some());
             let market_value = group.total_shares * price.unwrap_or(0.0);
-            let avg_cost = if group.total_shares != 0.0 {
-                group.total_cost / group.total_shares
-            } else {
-                0.0
-            };
             let gain_loss = market_value - group.total_cost;
 
             PortfolioHolding {
@@ -392,10 +402,15 @@ fn value_commodity_groups(
                 namespace: group.namespace,
                 shares: group.total_shares,
                 cost_basis: group.total_cost,
+                // Return fields are filled by `attach_returns` once dated
+                // events are loaded.
+                open_cost_basis: 0.0,
                 market_value,
-                avg_cost_per_share: avg_cost,
+                avg_cost_per_share: 0.0,
                 gain_loss,
-                // Filled by `attach_xirr` once dated cash flows are loaded.
+                unrealized_gain: None,
+                realized_gain: 0.0,
+                basis_warning: None,
                 xirr: None,
                 allocation_pct: 0.0,
                 price,
@@ -680,51 +695,80 @@ fn accumulate_trend(
 /// (matches the display-level zero snap in `format.svelte.ts`).
 const XIRR_DUST: f64 = 0.005;
 
-/// Dated cash-flow inputs for XIRR: investment splits plus the maps to value
-/// them in the report currency at each flow's own date.
-struct XirrInputs {
+/// Net share moves below this don't count as a trade when sharing out fees
+/// or computing average cost.
+const SHARE_DUST: f64 = 1e-9;
+
+/// Dated inputs for XIRR and the lot engine: one event per transaction and
+/// commodity, plus the maps to value them in the report currency at each
+/// event's own date.
+struct ReturnInputs {
     events: Vec<SplitEvent>,
     fx_history: fx::FxHistory,
     report_currency: String,
     guid_to_quote: HashMap<String, String>,
 }
 
-/// Investment split events plus contemporary FX (optionally one commodity).
-/// Lighter than `load_trend_inputs` (no price history) for the XIRR pass.
-fn load_xirr_inputs(conn: &Connection, filter: Option<&str>) -> Result<XirrInputs, AppError> {
-    let mut events_sql = format!(
-        "SELECT a.commodity_guid, t.post_date,
-				{} AS shares_delta,
-				{} AS cost_delta
+/// Investment events netted per (transaction, commodity), so moving shares
+/// between accounts nets out, with the transaction's expense splits (fees)
+/// added to the cost of its trades. Fees are shared across a transaction's
+/// trades by traded value. The fee split needs every commodity in the
+/// transaction, so events load unfiltered and `filter` applies afterwards.
+fn load_return_inputs(conn: &Connection, filter: Option<&str>) -> Result<ReturnInputs, AppError> {
+    let events_sql = format!(
+        "SELECT a.commodity_guid, t.guid, t.post_date,
+				SUM({}) AS shares_delta,
+				SUM({}) AS cost_delta
 		 FROM splits s
 		 JOIN accounts a ON a.guid = s.account_guid
 		 JOIN transactions t ON t.guid = s.tx_guid
 		 WHERE a.account_type IN ({})
 		   AND a.placeholder = 0
-		   AND {}",
+		   AND {}
+		 GROUP BY t.guid, a.commodity_guid
+		 ORDER BY t.post_date ASC, t.guid ASC",
         utils::QUANTITY_AMOUNT,
         utils::RAW_AMOUNT,
         utils::investment_types_sql(),
         utils::VISIBLE_TX_FILTER
     );
-    let mut event_params: Vec<Box<dyn rusqlite::ToSql>> = vec![];
-    if let Some(g) = filter {
-        events_sql.push_str(" AND a.commodity_guid = ?1");
-        event_params.push(Box::new(g.to_string()));
-    }
-    events_sql.push_str(" ORDER BY t.post_date ASC");
-
     let mut stmt = conn.prepare(&events_sql)?;
-    let events: Vec<SplitEvent> = stmt
-        .query_map(sql::param_refs(&event_params).as_slice(), |row| {
-            Ok(SplitEvent {
-                commodity_guid: row.get(0)?,
-                post_date: row.get(1)?,
-                shares_delta: row.get(2)?,
-                cost_delta: row.get(3)?,
-            })
+    let rows: Vec<(String, SplitEvent)> = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get(1)?,
+                SplitEvent {
+                    commodity_guid: row.get(0)?,
+                    post_date: row.get(2)?,
+                    shares_delta: row.get(3)?,
+                    cost_delta: row.get(4)?,
+                },
+            ))
         })?
         .collect::<Result<Vec<_>, _>>()?;
+
+    let fees_sql = format!(
+        "SELECT s.tx_guid, SUM({})
+		 FROM splits s
+		 JOIN accounts a ON a.guid = s.account_guid
+		 WHERE a.account_type = 'EXPENSE'
+		   AND s.tx_guid IN (
+		     SELECT s2.tx_guid FROM splits s2
+		     JOIN accounts a2 ON a2.guid = s2.account_guid
+		     WHERE a2.account_type IN ({}) AND a2.placeholder = 0
+		   )
+		 GROUP BY s.tx_guid",
+        utils::RAW_AMOUNT,
+        utils::investment_types_sql()
+    );
+    let mut fee_stmt = conn.prepare(&fees_sql)?;
+    let fees: HashMap<String, f64> = fee_stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<Result<HashMap<_, _>, _>>()?;
+    let events = allocate_fees(rows, &fees)
+        .into_iter()
+        .filter(|e| filter.is_none_or(|g| e.commodity_guid == g))
+        .collect();
 
     let report_currency = fx::report_currency_or_empty(conn)?;
     let fx_history = fx::FxHistory::load(conn)?;
@@ -756,12 +800,68 @@ fn load_xirr_inputs(conn: &Connection, filter: Option<&str>) -> Result<XirrInput
         guid_to_quote.insert(guid, quote);
     }
 
-    Ok(XirrInputs {
+    Ok(ReturnInputs {
         events,
         fx_history,
         report_currency,
         guid_to_quote,
     })
+}
+
+/// Fold each transaction's fee into the cost of its trades (events that move
+/// shares), weighted by traded value. `rows` arrive grouped by transaction.
+fn allocate_fees(rows: Vec<(String, SplitEvent)>, fees: &HashMap<String, f64>) -> Vec<SplitEvent> {
+    let mut events = Vec::with_capacity(rows.len());
+    let mut start = 0;
+    while start < rows.len() {
+        let tx = rows[start].0.clone();
+        let end = start + rows[start..].iter().take_while(|(t, _)| *t == tx).count();
+        let fee = fees.get(&tx).copied().unwrap_or(0.0);
+        let group = &rows[start..end];
+        let is_trade = |e: &SplitEvent| e.shares_delta.abs() >= SHARE_DUST;
+        let trades = group.iter().filter(|(_, e)| is_trade(e)).count();
+        let weight: f64 = group
+            .iter()
+            .filter(|(_, e)| is_trade(e))
+            .map(|(_, e)| e.cost_delta.abs())
+            .sum();
+        for (_, e) in group {
+            let share = if fee == 0.0 || !is_trade(e) {
+                0.0
+            } else if weight > 0.0 {
+                fee * e.cost_delta.abs() / weight
+            } else {
+                fee / trades as f64
+            };
+            events.push(SplitEvent {
+                commodity_guid: e.commodity_guid.clone(),
+                post_date: e.post_date.clone(),
+                shares_delta: e.shares_delta,
+                cost_delta: e.cost_delta + share,
+            });
+        }
+        start = end;
+    }
+    events
+}
+
+/// Rate converting a commodity's quote currency to the report currency on
+/// `date` (1.0 when they match or no rate is known).
+fn quote_rate(inputs: &ReturnInputs, commodity_guid: &str, date: &str) -> f64 {
+    let quote = inputs
+        .guid_to_quote
+        .get(commodity_guid)
+        .map(|s| s.as_str())
+        .unwrap_or(&inputs.report_currency);
+    if quote == inputs.report_currency {
+        return 1.0;
+    }
+    inputs
+        .fx_history
+        .map_for_date(date)
+        .get(quote)
+        .copied()
+        .unwrap_or(1.0)
 }
 
 /// Annualized money-weighted return, percent scale (like `fmtPct`), for
@@ -899,14 +999,11 @@ fn xirr_percent(flows: &[(NaiveDate, f64)]) -> Option<f64> {
 /// Investor-signed cash flows in the report currency: buys (positive cost)
 /// are outflows, sells are inflows. Converted at each flow's own date.
 fn cash_flows_from_events(
-    events: &[SplitEvent],
-    guid_to_quote: &HashMap<String, String>,
-    fx_history: &fx::FxHistory,
-    report_currency: &str,
+    inputs: &ReturnInputs,
     filter_guid: Option<&str>,
 ) -> Vec<(NaiveDate, f64)> {
     let mut flows = Vec::new();
-    for e in events {
+    for e in &inputs.events {
         if let Some(g) = filter_guid {
             if e.commodity_guid != g {
                 continue;
@@ -919,20 +1016,7 @@ fn cash_flows_from_events(
         let Ok(date) = NaiveDate::parse_from_str(date_str, "%Y-%m-%d") else {
             continue;
         };
-        let quote = guid_to_quote
-            .get(&e.commodity_guid)
-            .map(|s| s.as_str())
-            .unwrap_or(report_currency);
-        let rate = if quote == report_currency {
-            1.0
-        } else {
-            fx_history
-                .map_for_date(date_str)
-                .get(quote)
-                .copied()
-                .unwrap_or(1.0)
-        };
-        let flow = -e.cost_delta * rate;
+        let flow = -e.cost_delta * quote_rate(inputs, &e.commodity_guid, date_str);
         if flow.abs() < XIRR_DUST {
             continue;
         }
@@ -945,23 +1029,14 @@ fn cash_flows_from_events(
 /// positions would show a realized-only return, so they report `None`;
 /// closed positions solve from realized flows alone.
 fn holding_xirr(
-    events: &[SplitEvent],
-    guid_to_quote: &HashMap<String, String>,
-    fx_history: &fx::FxHistory,
-    report_currency: &str,
+    inputs: &ReturnInputs,
     holding: &PortfolioHolding,
     end_date: NaiveDate,
 ) -> Option<f64> {
     if holding.price.is_none() && holding.shares != 0.0 {
         return None;
     }
-    let mut flows = cash_flows_from_events(
-        events,
-        guid_to_quote,
-        fx_history,
-        report_currency,
-        Some(&holding.commodity_guid),
-    );
+    let mut flows = cash_flows_from_events(inputs, Some(&holding.commodity_guid));
     if flows.is_empty() {
         return None;
     }
@@ -978,16 +1053,8 @@ fn holding_xirr(
 /// Portfolio-level XIRR over all flows plus total market value. Keeps the
 /// conservative "unpriced = 0" convention inherited from gain/loss; unpriced
 /// open rows still show a dash individually.
-fn total_xirr(
-    events: &[SplitEvent],
-    guid_to_quote: &HashMap<String, String>,
-    fx_history: &fx::FxHistory,
-    report_currency: &str,
-    total_market_value: f64,
-    end_date: NaiveDate,
-) -> Option<f64> {
-    let mut flows =
-        cash_flows_from_events(events, guid_to_quote, fx_history, report_currency, None);
+fn total_xirr(inputs: &ReturnInputs, total_market_value: f64, end_date: NaiveDate) -> Option<f64> {
+    let mut flows = cash_flows_from_events(inputs, None);
     if flows.is_empty() {
         return None;
     }
@@ -995,6 +1062,53 @@ fn total_xirr(
         flows.push((end_date, total_market_value));
     }
     xirr_percent(&flows)
+}
+
+/// Replay one holding's events through the lot engine, in the report
+/// currency at each event's own date (so realized gains include FX moves).
+fn holding_lots(
+    inputs: &ReturnInputs,
+    commodity_guid: &str,
+    method: lots::CostMethod,
+) -> lots::LotSummary {
+    let events: Vec<lots::LotEvent> = inputs
+        .events
+        .iter()
+        .filter(|e| e.commodity_guid == commodity_guid)
+        .filter_map(|e| {
+            let date = e.post_date.get(..10)?;
+            Some(lots::LotEvent {
+                date: date.to_string(),
+                shares: e.shares_delta,
+                cost: e.cost_delta * quote_rate(inputs, commodity_guid, date),
+            })
+        })
+        .collect();
+    lots::replay(&events, method)
+}
+
+/// Fill the return fields (`xirr`, open basis, realized / unrealized gains,
+/// average cost) that need dated events rather than aggregated splits.
+fn attach_returns(
+    holding: &mut PortfolioHolding,
+    inputs: &ReturnInputs,
+    method: lots::CostMethod,
+    end_date: NaiveDate,
+) {
+    holding.xirr = holding_xirr(inputs, holding, end_date);
+    let lots = holding_lots(inputs, &holding.commodity_guid, method);
+    let open_shares = lots.open_shares();
+    holding.open_cost_basis = lots.open_basis();
+    holding.avg_cost_per_share = if open_shares >= SHARE_DUST {
+        holding.open_cost_basis / open_shares
+    } else {
+        0.0
+    };
+    holding.realized_gain = lots.realized_gain();
+    // An unpriced open position has no meaningful unrealized figure.
+    holding.unrealized_gain = (holding.price.is_some() || holding.shares == 0.0)
+        .then_some(holding.market_value - holding.open_cost_basis);
+    holding.basis_warning = lots.warning;
 }
 
 fn finalize_totals(mut holdings: Vec<PortfolioHolding>) -> (f64, f64, f64, Vec<PortfolioHolding>) {
@@ -1028,28 +1142,18 @@ fn finalize_totals(mut holdings: Vec<PortfolioHolding>) -> (f64, f64, f64, Vec<P
 
 fn fetch_portfolio_data_inner(conn: &Connection) -> Result<PortfolioData, AppError> {
     let mut holdings = build_holdings(conn, None)?;
-    let xirr_inputs = load_xirr_inputs(conn, None)?;
+    let inputs = load_return_inputs(conn, None)?;
+    let method = settings::cost_basis_method(conn)?;
     let end_date = Utc::now().date_naive();
     for h in holdings.iter_mut() {
-        h.xirr = holding_xirr(
-            &xirr_inputs.events,
-            &xirr_inputs.guid_to_quote,
-            &xirr_inputs.fx_history,
-            &xirr_inputs.report_currency,
-            h,
-            end_date,
-        );
+        attach_returns(h, &inputs, method, end_date);
     }
     let (total_market_value, total_cost_basis, total_gain_loss, holdings) =
         finalize_totals(holdings);
-    let total_xirr = total_xirr(
-        &xirr_inputs.events,
-        &xirr_inputs.guid_to_quote,
-        &xirr_inputs.fx_history,
-        &xirr_inputs.report_currency,
-        total_market_value,
-        end_date,
-    );
+    let total_xirr = total_xirr(&inputs, total_market_value, end_date);
+    let total_open_cost_basis = holdings.iter().map(|h| h.open_cost_basis).sum();
+    let total_unrealized_gain = holdings.iter().filter_map(|h| h.unrealized_gain).sum();
+    let total_realized_gain = holdings.iter().map(|h| h.realized_gain).sum();
     let value_trend = build_value_trend(conn, None)?;
     let last_refreshed = get_last_refresh_timestamp(conn)?;
 
@@ -1057,6 +1161,9 @@ fn fetch_portfolio_data_inner(conn: &Connection) -> Result<PortfolioData, AppErr
         total_market_value,
         total_cost_basis,
         total_gain_loss,
+        total_open_cost_basis,
+        total_unrealized_gain,
+        total_realized_gain,
         total_xirr,
         last_refreshed,
         holdings,
@@ -1339,18 +1446,11 @@ fn fetch_holding_detail_inner(
     } else {
         0.0
     };
-    // Same money-weighted return as the overview table (dated splits plus
-    // terminal market value, not the simple gain/loss ratio).
-    let xirr_inputs = load_xirr_inputs(conn, Some(commodity_guid))?;
-    let end_date = Utc::now().date_naive();
-    holding.xirr = holding_xirr(
-        &xirr_inputs.events,
-        &xirr_inputs.guid_to_quote,
-        &xirr_inputs.fx_history,
-        &xirr_inputs.report_currency,
-        &holding,
-        end_date,
-    );
+    // Same returns as the overview table (dated events plus terminal market
+    // value, not the simple gain/loss ratio).
+    let inputs = load_return_inputs(conn, Some(commodity_guid))?;
+    let method = settings::cost_basis_method(conn)?;
+    attach_returns(&mut holding, &inputs, method, Utc::now().date_naive());
 
     let price_history = get_price_history(conn, commodity_guid)?;
     let value_trend = build_value_trend(conn, Some(commodity_guid))?;
@@ -1669,6 +1769,168 @@ mod tests {
             "got {}",
             last.market_value
         );
+    }
+
+    /// AAPL book with a brokerage, a second broker, a cash account and a
+    /// commissions expense, for the lot-engine integration tests.
+    fn setup_trading_book() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        init_db(&conn).unwrap();
+        conn.execute_batch(
+            "INSERT INTO commodities (guid, mnemonic, namespace, fullname) VALUES
+             ('c-eur', 'EUR', 'CURRENCY', NULL),
+             ('c-aapl', 'AAPL', 'NASDAQ', 'Apple Inc');
+             INSERT INTO accounts (guid, name, account_type, parent_guid, placeholder, commodity_guid) VALUES
+             ('root', 'Root', 'ROOT', NULL, 0, 'c-eur'),
+             ('broker', 'Broker', 'STOCK', 'root', 0, 'c-aapl'),
+             ('broker2', 'Broker 2', 'STOCK', 'root', 0, 'c-aapl'),
+             ('cash', 'Cash', 'BANK', 'root', 0, 'c-eur'),
+             ('fees', 'Commissions', 'EXPENSE', 'root', 0, 'c-eur');
+             INSERT INTO prices (guid, commodity_guid, currency_guid, value_num, value_denom, date)
+             VALUES ('p-aapl', 'c-aapl', 'c-eur', 15000, 100, '2024-06-01');",
+        )
+        .unwrap();
+        conn
+    }
+
+    /// One transaction from `(account, shares, value)` legs, in whole units.
+    fn add_tx(conn: &Connection, tx: &str, date: &str, legs: &[(&str, i64, i64)]) {
+        conn.execute(
+            "INSERT INTO transactions (guid, post_date) VALUES (?1, ?2)",
+            params![tx, date],
+        )
+        .unwrap();
+        for (i, (account, shares, value)) in legs.iter().enumerate() {
+            conn.execute(
+                "INSERT INTO splits (guid, tx_guid, account_guid, value_num, value_denom, quantity_num, quantity_denom)
+                 VALUES (?1, ?2, ?3, ?4, 1, ?5, 1)",
+                params![format!("{tx}-{i}"), tx, account, value, shares],
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn returns_split_realized_and_unrealized_with_fees() {
+        let conn = setup_trading_book();
+        // Buy 10 for 1000 + 10 fee; buy 10 for 1200; sell 15 for 2100 - 6 fee.
+        add_tx(
+            &conn,
+            "b1",
+            "2024-01-10",
+            &[
+                ("broker", 10, 1000),
+                ("fees", 0, 10),
+                ("cash", -1010, -1010),
+            ],
+        );
+        add_tx(
+            &conn,
+            "b2",
+            "2024-02-10",
+            &[("broker", 10, 1200), ("cash", -1200, -1200)],
+        );
+        add_tx(
+            &conn,
+            "s1",
+            "2024-03-10",
+            &[("broker", -15, -2100), ("fees", 0, 6), ("cash", 2094, 2094)],
+        );
+
+        let data = fetch_portfolio_data_inner(&conn).unwrap();
+        let h = &data.holdings[0];
+        assert_eq!(h.shares, 5.0);
+        // Net invested keeps its old meaning: 1000 + 1200 - 2100.
+        assert_eq!(h.cost_basis, 100.0);
+        // FIFO: 10 @ 101 then 5 @ 120 sold; 5 @ 120 left.
+        assert!((h.open_cost_basis - 600.0).abs() < 1e-9);
+        assert!((h.avg_cost_per_share - 120.0).abs() < 1e-9);
+        assert!((h.realized_gain - (2094.0 - 1010.0 - 600.0)).abs() < 1e-9);
+        assert!((h.unrealized_gain.unwrap() - (750.0 - 600.0)).abs() < 1e-9);
+        assert_eq!(h.basis_warning, None);
+        assert!((data.total_open_cost_basis - 600.0).abs() < 1e-9);
+        assert!((data.total_realized_gain - 484.0).abs() < 1e-9);
+        assert!((data.total_unrealized_gain - 150.0).abs() < 1e-9);
+
+        conn.execute(
+            "INSERT INTO app_settings (key, value) VALUES ('cost_basis_method', 'average')",
+            [],
+        )
+        .unwrap();
+        let h = fetch_portfolio_data_inner(&conn)
+            .unwrap()
+            .holdings
+            .remove(0);
+        // Average cost 2210 / 20 = 110.5 per share.
+        assert!((h.open_cost_basis - 552.5).abs() < 1e-9);
+        assert!((h.realized_gain - (2094.0 - 1657.5)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn moving_shares_between_brokers_is_not_a_sale() {
+        let conn = setup_trading_book();
+        add_tx(
+            &conn,
+            "b1",
+            "2024-01-10",
+            &[("broker", 10, 1000), ("cash", -1000, -1000)],
+        );
+        add_tx(
+            &conn,
+            "mv",
+            "2024-02-10",
+            &[
+                ("broker", -4, -400),
+                ("broker2", 4, 400),
+                ("fees", 0, 5),
+                ("cash", -5, -5),
+            ],
+        );
+
+        let detail = fetch_holding_detail_inner(&conn, "c-aapl", 1, 25, None).unwrap();
+        let h = detail.holding;
+        assert_eq!(h.shares, 10.0);
+        assert_eq!(h.realized_gain, 0.0);
+        // The transfer fee isn't a trade cost, so the basis stays at 1000.
+        assert!((h.open_cost_basis - 1000.0).abs() < 1e-9);
+        assert!((h.unrealized_gain.unwrap() - 500.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn fees_are_shared_across_a_transactions_trades_by_value() {
+        let event = |guid: &str, shares: f64, cost: f64| SplitEvent {
+            commodity_guid: guid.to_string(),
+            post_date: "2024-01-10".to_string(),
+            shares_delta: shares,
+            cost_delta: cost,
+        };
+        let rows = vec![
+            ("t1".to_string(), event("a", 1.0, 300.0)),
+            ("t1".to_string(), event("b", -2.0, -100.0)),
+            ("t1".to_string(), event("c", 0.0, 0.0)),
+            ("t2".to_string(), event("a", 1.0, 50.0)),
+        ];
+        let fees = HashMap::from([("t1".to_string(), 8.0)]);
+        let out = allocate_fees(rows, &fees);
+        assert_eq!(out[0].cost_delta, 306.0);
+        assert_eq!(out[1].cost_delta, -98.0);
+        assert_eq!(out[2].cost_delta, 0.0);
+        assert_eq!(out[3].cost_delta, 50.0);
+    }
+
+    #[test]
+    fn unpriced_open_position_has_no_unrealized_gain() {
+        let conn = setup_valued_portfolio();
+        let data = fetch_portfolio_data_inner(&conn).unwrap();
+        let xyz = data
+            .holdings
+            .iter()
+            .find(|h| h.commodity_guid == "c-xyz")
+            .unwrap();
+        assert_eq!(xyz.unrealized_gain, None);
+        assert_eq!(xyz.open_cost_basis, 700.0);
+        // Only priced holdings count toward the total.
+        assert_eq!(data.total_unrealized_gain, 500.0);
     }
 
     fn date(ymd: &str) -> NaiveDate {

@@ -43,6 +43,9 @@
     | 'price'
     | 'marketValue'
     | 'costBasis'
+    | 'openBasis'
+    | 'unrealized'
+    | 'realized'
     | 'gainLoss'
     | 'xirr'
     | 'alloc'
@@ -56,7 +59,10 @@
     { id: 'avgCost', label: 'Avg cost' },
     { id: 'price', label: 'Price' },
     { id: 'marketValue', label: 'Market value' },
-    { id: 'costBasis', label: 'Cost basis' },
+    { id: 'costBasis', label: 'Net invested' },
+    { id: 'openBasis', label: 'Cost basis' },
+    { id: 'unrealized', label: 'Unrealized' },
+    { id: 'realized', label: 'Realized' },
     { id: 'gainLoss', label: 'Gain / loss' },
     { id: 'xirr', label: 'XIRR' },
     { id: 'alloc', label: 'Alloc' },
@@ -68,7 +74,8 @@
     'shares',
     'price',
     'marketValue',
-    'gainLoss',
+    'unrealized',
+    'realized',
     'alloc',
     'target',
     'buy'
@@ -92,6 +99,9 @@
     'price',
     'marketValue',
     'costBasis',
+    'openBasis',
+    'unrealized',
+    'realized',
     'gainLoss',
     'xirr',
     'alloc',
@@ -163,6 +173,17 @@
         case 'costBasis':
           cmp = a.costBasis - b.costBasis;
           break;
+        case 'openBasis':
+          cmp = a.openCostBasis - b.openCostBasis;
+          break;
+        case 'unrealized':
+          cmp =
+            nullCmp(a.unrealizedGain, b.unrealizedGain) ||
+            (a.unrealizedGain ?? 0) - (b.unrealizedGain ?? 0);
+          break;
+        case 'realized':
+          cmp = a.realizedGain - b.realizedGain;
+          break;
         case 'gainLoss':
           cmp = a.gainLoss - b.gainLoss;
           break;
@@ -192,6 +213,9 @@
   let totals = $derived.by(() => {
     let marketValue = 0;
     let costBasis = 0;
+    let openBasis = 0;
+    let unrealized = 0;
+    let realized = 0;
     let gainLoss = 0;
     let alloc = 0;
     let targetPct = 0;
@@ -199,6 +223,9 @@
     for (const h of filteredHoldings) {
       marketValue += h.marketValue;
       costBasis += h.costBasis;
+      openBasis += h.openCostBasis;
+      unrealized += h.unrealizedGain ?? 0;
+      realized += h.realizedGain;
       gainLoss += h.gainLoss;
       alloc += h.allocationPct;
       const row = rebalanceByGuid.get(h.commodityGuid);
@@ -210,6 +237,9 @@
     return {
       marketValue,
       costBasis,
+      openBasis,
+      unrealized,
+      realized,
       gainLoss,
       alloc,
       targetPct,
@@ -371,6 +401,29 @@
                   {fmt(h.costBasis)}
                 </Table.Cell>
               {/if}
+              {#if cols.isVisible('openBasis')}
+                <Table.Cell class="py-2.5 text-right tabular-nums">
+                  {fmt(h.openCostBasis)}
+                </Table.Cell>
+              {/if}
+              {#if cols.isVisible('unrealized')}
+                <Table.Cell
+                  class="py-2.5 text-right tabular-nums {h.unrealizedGain !== null
+                    ? signColor(h.unrealizedGain)
+                    : ''}"
+                >
+                  {#if h.unrealizedGain !== null}
+                    {formatSignedCurrency(h.unrealizedGain, currency)}
+                  {:else}
+                    <EmptyValue />
+                  {/if}
+                </Table.Cell>
+              {/if}
+              {#if cols.isVisible('realized')}
+                <Table.Cell class="py-2.5 text-right tabular-nums {signColor(h.realizedGain)}">
+                  {formatSignedCurrency(h.realizedGain, currency)}
+                </Table.Cell>
+              {/if}
               {#if cols.isVisible('gainLoss')}
                 <Table.Cell class="py-2.5 text-right tabular-nums {signColor(h.gainLoss)}">
                   {formatSignedCurrency(h.gainLoss, currency)}
@@ -428,6 +481,16 @@
                     {fmt(totals.marketValue)}
                   {:else if col.id === 'costBasis'}
                     {fmt(totals.costBasis)}
+                  {:else if col.id === 'openBasis'}
+                    {fmt(totals.openBasis)}
+                  {:else if col.id === 'unrealized'}
+                    <span class={signColor(totals.unrealized)}>
+                      {formatSignedCurrency(totals.unrealized, currency)}
+                    </span>
+                  {:else if col.id === 'realized'}
+                    <span class={signColor(totals.realized)}>
+                      {formatSignedCurrency(totals.realized, currency)}
+                    </span>
                   {:else if col.id === 'gainLoss'}
                     <span class={signColor(totals.gainLoss)}>
                       {formatSignedCurrency(totals.gainLoss, currency)}

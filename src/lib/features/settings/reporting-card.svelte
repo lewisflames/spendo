@@ -21,6 +21,11 @@
     { value: 'last_12_months', label: 'Last 12 months' }
   ];
 
+  const costMethods: { value: BookSettings['costBasisMethod']; label: string }[] = [
+    { value: 'fifo', label: 'FIFO' },
+    { value: 'average', label: 'Average cost' }
+  ];
+
   let savingBookKey = $state(false);
 
   const fyMonths = $derived(
@@ -31,7 +36,7 @@
   );
 
   async function handleBookSetting<
-    K extends 'fiscalYearStartMonth' | 'defaultPnlPeriod' | 'priceAutoRefresh'
+    K extends 'fiscalYearStartMonth' | 'defaultPnlPeriod' | 'priceAutoRefresh' | 'costBasisMethod'
   >(field: K, value: BookSettings[K]) {
     if (!dbSession.value || savingBookKey) return;
     savingBookKey = true;
@@ -112,6 +117,34 @@
           <Select.Content>
             {#each pnlPeriods as p (p.value)}
               <Select.Item value={p.value} label={p.label}>{p.label}</Select.Item>
+            {/each}
+          </Select.Content>
+        </Select.Root>
+      {:else}
+        <span class="text-xs text-muted-foreground">Open a book to change this.</span>
+      {/if}
+    </SettingSelectRow>
+    <SettingSelectRow
+      label="Cost basis method"
+      description="How sales are matched to purchases for realized gains"
+      labelFor="setting-cost-method"
+    >
+      {#if dbSession.value}
+        <Select.Root
+          type="single"
+          value={bookSettings.value.costBasisMethod}
+          onValueChange={(v) => {
+            if (v === 'fifo' || v === 'average') void handleBookSetting('costBasisMethod', v);
+          }}
+          items={costMethods}
+          disabled={savingBookKey}
+        >
+          <Select.Trigger id="setting-cost-method" class="w-36">
+            <SelectPrimitive.Value placeholder="Select method" />
+          </Select.Trigger>
+          <Select.Content>
+            {#each costMethods as m (m.value)}
+              <Select.Item value={m.value} label={m.label}>{m.label}</Select.Item>
             {/each}
           </Select.Content>
         </Select.Root>
