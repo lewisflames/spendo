@@ -9,7 +9,14 @@ import { resetNav } from '$lib/stores/nav.svelte';
 import { loadBookSettings, resetBookSettings } from '$lib/stores/book-settings.svelte';
 import { appSettings } from '$lib/stores/settings.svelte';
 import { confirmDiscardIfDirty, clearDiscardWaiver } from '$lib/stores/unsaved-changes.svelte';
-import { closeBook, createBookAt, openBook, saveBookAs, type DataSummary } from '$lib/tauri';
+import {
+  closeBook,
+  createBookAt,
+  openBook,
+  restoreBackup,
+  saveBookAs,
+  type DataSummary
+} from '$lib/tauri';
 import { ensureSpendoExtension } from '$lib/utils/book';
 import { defaultCurrencyForLocale } from '$lib/utils/currency';
 import { errMsg } from '$lib/utils/error';
@@ -173,6 +180,28 @@ export async function closeActiveBook(): Promise<boolean> {
       return true;
     } catch (e: unknown) {
       toast.error(errMsg(e, 'We couldn’t close the book'));
+      return false;
+    } finally {
+      switching = false;
+    }
+  });
+}
+
+/** Restore a snapshot into the open book. The file stays the same but every
+ * row may change, so it is handled like a switch: discard check, fresh
+ * session, back home. */
+export async function restoreBackupFile(fileName: string): Promise<boolean> {
+  const path = activeBookPath.value;
+  if (switching || !path) return false;
+  return withDiscardCheck(async () => {
+    switching = true;
+    try {
+      const result = await restoreBackup(fileName);
+      await activateBook(path, result.summary, 'Backup restored');
+      await goto(resolve('/'), { replaceState: true });
+      return true;
+    } catch (e: unknown) {
+      toast.error(errMsg(e, 'We couldn’t restore that backup'));
       return false;
     } finally {
       switching = false;

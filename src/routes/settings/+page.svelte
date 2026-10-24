@@ -3,6 +3,7 @@
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
   import AppearanceCard from '$lib/features/settings/appearance-card.svelte';
+  import BackupsCard from '$lib/features/settings/backups-card.svelte';
   import BookCard from '$lib/features/settings/book-card.svelte';
   import DangerZoneCard from '$lib/features/settings/danger-zone-card.svelte';
   import ImportExportCard from '$lib/features/settings/import-export-card.svelte';
@@ -21,6 +22,7 @@
     { id: 'appearance', label: 'Appearance' },
     { id: 'display', label: 'Display & lists' },
     { id: 'book', label: 'Book' },
+    { id: 'backups', label: 'Backups' },
     { id: 'reporting', label: 'Reporting' },
     { id: 'import-export', label: 'Import & export' },
     { id: 'import-rules', label: 'Import rules' },
@@ -80,6 +82,7 @@
   <section id="appearance" class="scroll-mt-4"><AppearanceCard bind:customDraft /></section>
   <section id="display" class="scroll-mt-4"><DisplayCard /></section>
   <section id="book" class="scroll-mt-4"><BookCard /></section>
+  <section id="backups" class="scroll-mt-4"><BackupsCard /></section>
   <section id="reporting" class="scroll-mt-4"><ReportingCard /></section>
   <section id="import-export" class="scroll-mt-4"><ImportExportCard /></section>
   <section id="import-rules" class="scroll-mt-4"><ImportRulesCard /></section>

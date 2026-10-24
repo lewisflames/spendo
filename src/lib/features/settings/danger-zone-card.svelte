@@ -41,7 +41,10 @@
 </script>
 
 <Card.Root class="border-destructive/30">
-  <IconCardHeader title="Danger zone" description="Be careful here. There’s no undo.">
+  <IconCardHeader
+    title="Danger zone"
+    description="Be careful here. Clearing data takes a backup first; nothing else can be undone."
+  >
     {#snippet icon()}
       <Trash2 aria-hidden="true" class="size-4 text-destructive" />
     {/snippet}
@@ -65,7 +68,8 @@
             <Dialog.Title>Clear all data?</Dialog.Title>
             <Dialog.Description>
               This wipes accounts, transactions, schedules, budgets, prices, receipts, import rules
-              and portfolio targets for good. Your theme and display choices stay put.
+              and portfolio targets. We save a backup first, so you can restore it from Backups.
+              Your theme and display choices stay put.
             </Dialog.Description>
           </Dialog.Header>
           <Dialog.Footer>

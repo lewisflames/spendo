@@ -296,12 +296,42 @@ export const saveBookAs = (path: string): Promise<EmptyBookResult> =>
 /** Close the active book and return to the book-less placeholder. */
 export const closeBook = (): Promise<CloseBookResult> => invoke('close_book');
 
+// ── Backups (snapshots of the active book in the app-data folder) ──
+
+export type BackupReason = 'daily' | 'manual' | 'beforeImport' | 'beforeClear' | 'beforeRestore';
+
+export interface BackupEntry {
+  fileName: string;
+  /** RFC 3339 UTC timestamp. */
+  createdAt: string;
+  reason: BackupReason;
+  byteSize: number;
+}
+
+interface BackupList {
+  /** Snapshot folder of the active book; `null` while book-less. */
+  folder: string | null;
+  backups: BackupEntry[];
+}
+
+export const fetchBackups = (): Promise<BackupList> => invoke('fetch_backups');
+
+export const createBackup = (): Promise<BackupEntry> => invoke('create_backup');
+
+export const deleteBackup = (fileName: string): Promise<void> =>
+  invoke('delete_backup', { fileName });
+
+/** Replace the open book's content with a snapshot (a pre-restore one is taken first). */
+export const restoreBackup = (fileName: string): Promise<EmptyBookResult> =>
+  invoke('restore_backup', { fileName });
+
 // ── Book-scoped settings (travel with the `.spendo` file) ──
 
 export type PnlPeriodId = 'this_month' | 'this_quarter' | 'this_year' | 'last_12_months';
 type PriceAutoRefresh = 'off' | 'on_startup';
 export type CsvDelimiter = ',' | ';';
 export type ExportDateFormat = 'iso' | 'locale';
+type AutoBackup = 'daily' | 'off';
 
 export interface BookSettings {
   fiscalYearStartMonth: number;
@@ -309,6 +339,7 @@ export interface BookSettings {
   priceAutoRefresh: PriceAutoRefresh;
   exportCsvDelimiter: CsvDelimiter;
   exportDateFormat: ExportDateFormat;
+  autoBackup: AutoBackup;
 }
 
 export const getBookSettings = (): Promise<BookSettings> => invoke('get_book_settings');
@@ -1142,6 +1173,7 @@ type CommandPayloads = {
   add_attachments: AttachmentInfo[];
   clear_app_db: void;
   close_book: CloseBookResult;
+  create_backup: BackupEntry;
   create_account: string;
   create_book_at: EmptyBookResult;
   create_import_rule: ImportRule;
@@ -1151,6 +1183,7 @@ type CommandPayloads = {
   csv_detect: CsvDetectResult;
   csv_preview: CsvPreviewResult;
   delete_account: void;
+  delete_backup: void;
   delete_attachment: void;
   delete_budget_year: void;
   delete_csv_preset: void;
@@ -1167,6 +1200,7 @@ type CommandPayloads = {
   fetch_active_book: ActiveBook;
   fetch_allocation_targets: AllocationTarget[];
   fetch_attachments: AttachmentInfo[];
+  fetch_backups: BackupList;
   fetch_book_currencies: BookCurrency[];
   fetch_budget_date_range: BudgetDateRange;
   fetch_budget_detail: BudgetDetail;
@@ -1199,6 +1233,7 @@ type CommandPayloads = {
   preview_gnucash_import: GnuCashPreview;
   refresh_prices: PricesResult;
   reopen_last_reconciliation: ReopenReconcileResult;
+  restore_backup: EmptyBookResult;
   save_allocation_targets: AllocationTarget[];
   save_book_as: EmptyBookResult;
   search_global: GlobalSearchResult;
