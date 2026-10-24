@@ -29,6 +29,16 @@ export interface DataSummary {
   netWorth: number;
 }
 
+/** Month-end net worth in report currency; the last point is dated today. */
+export interface NetWorthPoint {
+  /** YYYY-MM-DD */
+  date: string;
+  assets: number;
+  /** Amount owed, positive when in debt. */
+  liabilities: number;
+  netWorth: number;
+}
+
 /** Sortable ledger columns shared by transactions + account detail. Backend falls back silently on unknown values, so keep this in sync. */
 export type TxSortKey = 'date' | 'description' | 'amount';
 type SortDir = 'asc' | 'desc';
@@ -248,6 +258,8 @@ export interface AccountDetailResult {
 }
 
 export const fetchHomeData = (): Promise<HomeDataResult> => invoke('fetch_home_data');
+
+export const fetchNetWorthTrend = (): Promise<NetWorthPoint[]> => invoke('fetch_net_worth_trend');
 
 /** The top-level account for a category (`fetch_nav_roots`; currently unused by the UI). */
 interface NavRoot {
@@ -1237,6 +1249,7 @@ type CommandPayloads = {
   fetch_nav_badges: NavBadges;
   move_import_rule: ImportRule[];
   fetch_nav_roots: NavRoot[];
+  fetch_net_worth_trend: NetWorthPoint[];
   fetch_pnl_report: ProfitLossReport;
   fetch_pnl_trend: PnlTrendPoint[];
   fetch_portfolio_data: PortfolioData;

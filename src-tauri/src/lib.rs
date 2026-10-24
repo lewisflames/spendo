@@ -90,6 +90,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             home::fetch_home_data,
+            home::fetch_net_worth_trend,
             books::fetch_active_book,
             books::open_book,
             books::create_book_at,

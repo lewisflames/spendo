@@ -15,12 +15,13 @@
   import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
   import EmptyBookPrompt from '$lib/components/shared/empty-book-prompt.svelte';
   import PnlTrend from '$lib/features/pnl/pnl-trend.svelte';
+  import NetWorthChart from '$lib/features/overview/net-worth-chart.svelte';
   import TransactionTable from '$lib/features/transactions/transaction-table.svelte';
   import { PAGE_META } from '$lib/features/nav/page-meta';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import { dbSession } from '$lib/stores/db.svelte';
   import { navBadges } from '$lib/stores/nav.svelte';
-  import { fetchPnlReport, fetchPnlTrend, fetchTransactions } from '$lib/tauri';
+  import { fetchNetWorthTrend, fetchPnlReport, fetchPnlTrend, fetchTransactions } from '$lib/tauri';
   import { computePrevRange, todayStr } from '$lib/utils/date-utils.svelte';
   import { modKeyLabel } from '$lib/utils/platform';
   import { tooltip } from '$lib/attachments/tooltip';
@@ -66,6 +67,17 @@
     fetch: () => {
       void dbSession.value?.summary.totalTransactions;
       return fetchPnlTrend(trendStart, today);
+    },
+    label: 'We couldn’t load that chart'
+  });
+
+  const netWorth = useAsyncData({
+    enabled: () => !!dbSession.value,
+    fetch: () => {
+      // Also track the KPI value so a price refresh redraws the line with it.
+      void dbSession.value?.summary.totalTransactions;
+      void dbSession.value?.summary.netWorth;
+      return fetchNetWorthTrend();
     },
     label: 'We couldn’t load that chart'
   });
@@ -156,6 +168,12 @@
         {/snippet}
       </KpiCard>
     </div>
+
+    {#if netWorth.error && !netWorth.data}
+      <ErrorCard message={netWorth.error} onRetry={() => netWorth.reload()} />
+    {:else}
+      <NetWorthChart data={netWorth.data ?? []} loading={netWorth.loading && !netWorth.data} />
+    {/if}
 
     {#if trend.error && !trend.data}
       <ErrorCard message={trend.error} onRetry={() => trend.reload()} />

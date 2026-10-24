@@ -1,3 +1,8 @@
+<script lang="ts" module>
+  const ALL_RANGES = ['1M', '3M', '6M', '1Y', '5Y', 'All'] as const;
+  export type ChartRange = (typeof ALL_RANGES)[number];
+</script>
+
 <script lang="ts" generics="T">
   import * as Card from '$lib/components/ui/card';
   import * as Chart from '$lib/components/ui/chart';
@@ -37,7 +42,8 @@
     currency,
     tooltipTotals,
     variant = 'area',
-    showRangeFilter = true
+    showRangeFilter = true,
+    ranges = ALL_RANGES
   }: {
     title: string;
     description?: string;
@@ -51,6 +57,8 @@
     tooltipTotals?: TimeSeriesTooltipTotal[];
     variant?: 'area' | 'bar';
     showRangeFilter?: boolean;
+    /** Range buttons to offer; coarse (e.g. monthly) series drop the short ones. */
+    ranges?: readonly ChartRange[];
   } = $props();
 
   let dateRange = $state('All');
@@ -117,14 +125,7 @@
     return Math.abs(v) >= 100 ? formatInteger(v) : formatNumber(v);
   }
 
-  const rangeOptions = [
-    { value: '1M', label: '1M' },
-    { value: '3M', label: '3M' },
-    { value: '6M', label: '6M' },
-    { value: '1Y', label: '1Y' },
-    { value: '5Y', label: '5Y' },
-    { value: 'All', label: 'All' }
-  ] as const;
+  let rangeOptions = $derived(ranges.map((value) => ({ value, label: value })));
 </script>
 
 {#snippet tooltipFooter({ data }: { data: unknown })}

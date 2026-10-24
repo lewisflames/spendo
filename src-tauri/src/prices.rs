@@ -857,6 +857,74 @@ pub fn get_cached_price_maps(conn: &Connection) -> Result<(PriceDateMap, PriceDa
     Ok((latest_map, prev_map))
 }
 
+/// Date-ordered price history per commodity GUID, loaded once per request for
+/// as-of valuations (e.g. the net worth trend). Lookups normalize to the
+/// report currency at the price's own date, like `latest_prices_normalized`.
+pub struct PriceHistory {
+    /// Commodity GUID → ascending [(date, price, quote mnemonic)], one entry per date.
+    by_commodity: HashMap<String, Vec<(String, f64, String)>>,
+}
+
+impl PriceHistory {
+    pub fn load(conn: &Connection) -> Result<PriceHistory, AppError> {
+        let mut stmt = conn.prepare(&format!(
+            "SELECT c.guid, p.date, {} as price, cur.mnemonic
+             FROM prices p
+             JOIN commodities c ON c.guid = p.commodity_guid
+             JOIN commodities cur ON cur.guid = p.currency_guid
+             WHERE c.namespace != 'CURRENCY'
+             ORDER BY c.guid ASC, p.date ASC, p.guid ASC",
+            utils::PRICE_AMOUNT
+        ))?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, f64>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })?;
+        let mut by_commodity: HashMap<String, Vec<(String, f64, String)>> = HashMap::new();
+        for row in rows {
+            let (guid, date, price, quote) = row?;
+            let evs = by_commodity.entry(guid).or_default();
+            // Same-day duplicates (mixed sources): the later guid wins.
+            match evs.last_mut() {
+                Some((d, p, q)) if *d == date => {
+                    *p = price;
+                    *q = quote;
+                }
+                _ => evs.push((date, price, quote)),
+            }
+        }
+        Ok(PriceHistory { by_commodity })
+    }
+
+    /// Report-currency price as of `date`: the latest price on or before it,
+    /// else the earliest known one (holdings bought before their price history
+    /// starts are better approximated than zeroed). `None` without any price.
+    pub fn price_as_of(
+        &self,
+        commodity_guid: &str,
+        date: &str,
+        report_currency: &str,
+        fx_history: &fx::FxHistory,
+    ) -> Option<f64> {
+        let evs = self.by_commodity.get(commodity_guid)?;
+        let idx = evs.partition_point(|(d, _, _)| d.as_str() <= date);
+        let (price_date, price, quote) = &evs[idx.saturating_sub(1)];
+        if quote == report_currency {
+            return Some(*price);
+        }
+        let rate = fx_history
+            .map_for_date(price_date)
+            .get(quote)
+            .copied()
+            .unwrap_or(1.0);
+        Some(price * rate)
+    }
+}
+
 /// Latest-price rows with `price` normalized to the report currency. Single
 /// window-function scan plus one FX-history scan shared by every cached-price
 /// map above.
