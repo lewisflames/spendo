@@ -903,6 +903,55 @@ export interface PnlTrendPoint {
 export const fetchPnlTrend = (dateFrom: string, dateTo: string): Promise<PnlTrendPoint[]> =>
   invoke('fetch_pnl_trend', { dateFrom, dateTo });
 
+export interface SpendingCategory {
+  accountGuid: string;
+  accountName: string;
+  /** Has expense sub-accounts to drill into. */
+  hasChildren: boolean;
+  /** The parent's own splits, listed beside its children. */
+  ownSplits: boolean;
+  /** One amount per `SpendingReport.months` entry. */
+  monthly: number[];
+  total: number;
+  previousTotal: number;
+  changePct: number | null;
+}
+
+interface SpendingCrumb {
+  accountGuid: string;
+  accountName: string;
+}
+
+export interface SpendingReport {
+  dateFrom: string;
+  dateTo: string;
+  prevDateFrom: string;
+  prevDateTo: string;
+  reportCurrency: string;
+  /** Expense accounts from the top level down to the current parent. */
+  path: SpendingCrumb[];
+  /** YYYY-MM, every month of the window. */
+  months: string[];
+  /** Largest total first. */
+  categories: SpendingCategory[];
+  total: number;
+  totalPrev: number;
+  changePct: number | null;
+  missingFx: string[];
+}
+
+interface SpendingInput {
+  dateFrom: string;
+  dateTo: string;
+  prevDateFrom?: string;
+  prevDateTo?: string;
+  /** Expense account whose children are the categories; omit for the top level. */
+  parentGuid?: string;
+}
+
+export const fetchSpendingReport = (input: SpendingInput): Promise<SpendingReport> =>
+  invoke('fetch_spending_report', { input });
+
 export interface MissingPrice {
   mnemonic: string;
   commodityGuid: string | null;
@@ -1400,6 +1449,7 @@ type CommandPayloads = {
   fetch_net_worth_trend: NetWorthPoint[];
   fetch_pnl_report: ProfitLossReport;
   fetch_pnl_trend: PnlTrendPoint[];
+  fetch_spending_report: SpendingReport;
   fetch_portfolio_data: PortfolioData;
   fetch_realized_gains: RealizedGainsReport;
   fetch_reconcile_info: ReconcileInfo;

@@ -23,6 +23,7 @@ mod reports;
 mod schedules;
 mod search;
 mod settings;
+mod spending;
 mod sql;
 mod transactions;
 mod transit;
@@ -149,6 +150,7 @@ pub fn run() {
             account_detail::fetch_account_balance_trend,
             reports::fetch_pnl_report,
             reports::fetch_pnl_trend,
+            spending::fetch_spending_report,
             prices::fetch_symbol_overrides,
             prices::set_symbol_override,
             prices::delete_symbol_override,

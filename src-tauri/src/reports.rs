@@ -55,12 +55,12 @@ struct RawAccountBalance {
     balance: f64,
 }
 
-struct AccountMeta {
-    name: String,
+pub(crate) struct AccountMeta {
+    pub(crate) name: String,
     description: Option<String>,
     code: Option<String>,
-    account_type: String,
-    parent_guid: Option<String>,
+    pub(crate) account_type: String,
+    pub(crate) parent_guid: Option<String>,
     placeholder: bool,
 }
 
@@ -68,7 +68,9 @@ struct AccountMeta {
 /// its parent link. P&L buckets only carry accounts with in-window splits, so
 /// without this the tree walker promotes children of inactive placeholders to
 /// roots (flattened tables).
-fn fetch_account_meta(conn: &Connection) -> Result<HashMap<String, AccountMeta>, AppError> {
+pub(crate) fn fetch_account_meta(
+    conn: &Connection,
+) -> Result<HashMap<String, AccountMeta>, AppError> {
     let mut stmt = conn.prepare(
         "SELECT guid, name, description, code, account_type, parent_guid, placeholder
              FROM accounts WHERE account_type != 'ROOT'",
@@ -96,7 +98,7 @@ fn is_pnl_type(account_type: &str) -> bool {
 }
 
 /// Ancestor chain of `guid` through `meta`, stopping at ROOT/missing parents.
-fn ancestor_chain(guid: &str, meta: &HashMap<String, AccountMeta>) -> Vec<String> {
+pub(crate) fn ancestor_chain(guid: &str, meta: &HashMap<String, AccountMeta>) -> Vec<String> {
     let mut chain = Vec::new();
     let mut seen = HashSet::new();
     let mut next = meta.get(guid).and_then(|m| m.parent_guid.clone());
@@ -195,7 +197,7 @@ fn build_tree_adjacency(rows: &[RawAccountBalance], account_types: &[&str]) -> t
 /// One account's signed activity in one calendar month. Sign follows
 /// `signed_amount_expr` (credit-normal types negated, so INCOME reads
 /// positive like everywhere else).
-struct MonthlyBucket {
+pub(crate) struct MonthlyBucket {
     guid: String,
     name: String,
     description: Option<String>,
@@ -212,7 +214,7 @@ struct MonthlyBucket {
 /// (half-open, visibility-capped like every money query). Only accounts with
 /// in-window splits appear — zero-activity accounts contribute nothing to P&L
 /// trees, so omitting them just drops €0 rows.
-fn fetch_monthly_buckets(
+pub(crate) fn fetch_monthly_buckets(
     conn: &Connection,
     date_from: &str,
     date_to: &str,
@@ -254,24 +256,24 @@ fn fetch_monthly_buckets(
 }
 
 /// A monthly bucket converted to report currency at its month-end rate.
-struct ConvertedBucket {
-    guid: String,
+pub(crate) struct ConvertedBucket {
+    pub(crate) guid: String,
     name: String,
     description: Option<String>,
     code: Option<String>,
-    account_type: String,
+    pub(crate) account_type: String,
     parent_guid: Option<String>,
     placeholder: bool,
     commodity: Option<String>,
-    month: String,
-    amount: f64,
+    pub(crate) month: String,
+    pub(crate) amount: f64,
 }
 
 /// Convert buckets at month-end rates via a single `FxHistory` load (one rate
 /// map per distinct month). Returns converted buckets, the sorted missing-FX
 /// list and report currency. Zero buckets convert to zero at any rate and
 /// never warn.
-fn convert_buckets(
+pub(crate) fn convert_buckets(
     conn: &Connection,
     buckets: &[MonthlyBucket],
 ) -> Result<(Vec<ConvertedBucket>, Vec<String>, String), AppError> {
@@ -419,7 +421,7 @@ fn build_tree<R>(
 /// Percent change for P&L rows. `None` when both periods are zero; a new
 /// account with no prior balance reports 100% (matches the frontend
 /// `changePct` in `pnl-utils.ts` — keep the two in sync).
-fn pnl_change_pct(current: f64, previous: f64) -> Option<f64> {
+pub(crate) fn pnl_change_pct(current: f64, previous: f64) -> Option<f64> {
     if previous != 0.0 {
         Some((current - previous) / previous * 100.0)
     } else if current != 0.0 {
@@ -457,7 +459,7 @@ fn fetch_pnl_window(
     })
 }
 
-fn resolve_pnl_prev_window(
+pub(crate) fn resolve_pnl_prev_window(
     date_from: &str,
     date_to: &str,
     prev_date_from: Option<&str>,

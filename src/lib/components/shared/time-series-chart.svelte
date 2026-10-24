@@ -16,6 +16,7 @@
     formatNumber
   } from '$lib/utils/format.svelte';
   import { curveStepAfter } from 'd3-shape';
+  import type { Snippet } from 'svelte';
 
   interface TimeSeriesSeries {
     key: string;
@@ -42,8 +43,10 @@
     currency,
     tooltipTotals,
     variant = 'area',
+    stacked = false,
     showRangeFilter = true,
-    ranges = ALL_RANGES
+    ranges = ALL_RANGES,
+    footer
   }: {
     title: string;
     description?: string;
@@ -56,9 +59,13 @@
     currency: string;
     tooltipTotals?: TimeSeriesTooltipTotal[];
     variant?: 'area' | 'bar';
+    /** Bar variant only: stack the series instead of grouping them. */
+    stacked?: boolean;
     showRangeFilter?: boolean;
     /** Range buttons to offer; coarse (e.g. monthly) series drop the short ones. */
     ranges?: readonly ChartRange[];
+    /** Rendered under the chart, e.g. a legend. */
+    footer?: Snippet;
   } = $props();
 
   let dateRange = $state('All');
@@ -188,7 +195,7 @@
             data={filteredData}
             x={getX}
             y={yField}
-            seriesLayout="group"
+            seriesLayout={stacked ? 'stack' : 'group'}
             yNice={false}
             axis
             series={visibleSeries.map((s) => ({ key: s.key, label: s.label, color: s.color }))}
@@ -237,6 +244,7 @@
           </AreaChart>
         {/if}
       </Chart.Container>
+      {@render footer?.()}
     {/if}
   </Card.Content>
 </Card.Root>

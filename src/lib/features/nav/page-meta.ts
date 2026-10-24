@@ -11,6 +11,7 @@ export const PAGE_META = {
   scheduled: { title: 'Scheduled', description: 'Recurring transactions' },
   budgets: { title: 'Budgets', description: 'Planned spending by year, leftovers roll over' },
   pnl: { title: 'Profit & loss', description: 'Income and expenses for a period' },
+  spending: { title: 'Spending', description: 'Where your money goes, by category' },
   balanceSheet: { title: 'Balance sheet', description: 'What you own and owe, as of today' },
   portfolio: { title: 'Portfolio', description: 'Investment holdings and performance' },
   realizedGains: { title: 'Realized gains', description: 'Sales and dividends by year' },

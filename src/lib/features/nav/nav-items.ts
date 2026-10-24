@@ -3,6 +3,7 @@ import type { Component } from 'svelte';
 import {
   ArrowLeftRight,
   Briefcase,
+  ChartColumnStacked,
   CalendarClock,
   HandCoins,
   Landmark,
@@ -26,6 +27,7 @@ export const NAV_CHORD_TARGETS = {
   s: '/scheduled',
   b: '/budgets',
   p: '/reports/pnl',
+  e: '/reports/spending',
   i: '/portfolio'
 } as const;
 
@@ -130,6 +132,15 @@ export const NAV_GROUPS: NavGroup[] = [
         href: '/reports/pnl',
         chord: 'p',
         match: (pathname) => pathname === '/reports/pnl'
+      },
+      {
+        id: 'spending',
+        label: PAGE_META.spending.title,
+        icon: ChartColumnStacked,
+        keywords: ['spending', 'expenses', 'categories', 'where money goes', 'report'],
+        href: '/reports/spending',
+        chord: 'e',
+        match: (pathname) => pathname === '/reports/spending'
       },
       {
         id: 'balance-sheet',
