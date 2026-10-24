@@ -7,6 +7,7 @@ A local-first personal finance app for macOS and Linux. Your money lives in a si
 - Investment portfolio with prices from Yahoo Finance
 - Statement reconciliation and scheduled transactions
 - Import from GnuCash (`.gnucash` SQLite files) or bank CSV statements
+- Automatic daily backups, plus a safety snapshot before every import or reset
 
 ## Install
 
