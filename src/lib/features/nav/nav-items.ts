@@ -128,7 +128,16 @@ export const NAV_GROUPS: NavGroup[] = [
         id: 'pnl',
         label: PAGE_META.pnl.title,
         icon: Receipt,
-        keywords: ['profit', 'loss', 'pnl', 'income', 'expenses', 'report'],
+        keywords: [
+          'cash flow',
+          'profit',
+          'loss',
+          'pnl',
+          'income',
+          'expenses',
+          'savings rate',
+          'report'
+        ],
         href: '/reports/pnl',
         chord: 'p',
         match: (pathname) => pathname === '/reports/pnl'

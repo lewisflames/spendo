@@ -10,7 +10,7 @@ export const PAGE_META = {
   reconcile: { title: 'Reconcile', description: 'Match your accounts to bank statements' },
   scheduled: { title: 'Scheduled', description: 'Recurring transactions' },
   budgets: { title: 'Budgets', description: 'Planned spending by year, leftovers roll over' },
-  pnl: { title: 'Profit & loss', description: 'Income and expenses for a period' },
+  pnl: { title: 'Cash flow', description: 'Money in and out for a period, and how much you kept' },
   spending: { title: 'Spending', description: 'Where your money goes, by category' },
   balanceSheet: { title: 'Balance sheet', description: 'What you own and owe on any date' },
   portfolio: { title: 'Portfolio', description: 'Investment holdings and performance' },

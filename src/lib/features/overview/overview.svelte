@@ -151,7 +151,7 @@
         value={month.data ? fmt(clampZero(month.data.totalIncome)) : undefined}
         loading={monthLoading}
         href={pnlMonthHref}
-        linkLabel="Income this month, open profit & loss"
+        linkLabel="Income this month, open cash flow"
       >
         {#snippet icon()}
           <TrendingUp aria-hidden="true" class="size-4 text-muted-foreground" />
@@ -174,7 +174,7 @@
         valueClass={month.data ? signColor(month.data.netIncome) : ''}
         loading={monthLoading}
         href={pnlMonthHref}
-        linkLabel="Net this month, open profit & loss"
+        linkLabel="Net this month, open cash flow"
       >
         {#snippet icon()}
           <Scale aria-hidden="true" class="size-4 text-muted-foreground" />

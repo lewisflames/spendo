@@ -209,7 +209,7 @@
 {:else}
   {#if pnlData}
     <Tabs.Root bind:value={section}>
-      <Tabs.List aria-label="Profit and loss section">
+      <Tabs.List aria-label="Cash flow section">
         <Tabs.Trigger value="income">Income</Tabs.Trigger>
         <Tabs.Trigger value="expenses">Expenses</Tabs.Trigger>
       </Tabs.List>

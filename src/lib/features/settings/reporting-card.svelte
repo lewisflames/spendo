@@ -92,7 +92,7 @@
     </SettingSelectRow>
     <SettingSelectRow
       label="Default P&amp;L period"
-      description="Where Profit &amp; loss starts when the link has no dates"
+      description="Where Cash flow starts when the link has no dates"
       labelFor="setting-pnl-period"
     >
       {#if dbSession.value}
