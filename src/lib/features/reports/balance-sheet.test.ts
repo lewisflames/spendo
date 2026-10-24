@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AccountNode, AccountsResult } from '$lib/tauri';
-import { buildBalanceSheet, subtreeTotal } from './balance-sheet';
+import { buildBalanceSheet, comparisonDate, subtreeTotal } from './balance-sheet';
 
 function node(partial: Partial<AccountNode> & { guid: string; name: string }): AccountNode {
   return {
@@ -190,5 +190,46 @@ describe('buildBalanceSheet', () => {
     expect(sheet.liabilities.rows).toEqual([]);
     expect(sheet.equity.rows.map((r) => r.name)).toEqual(['Retained earnings']);
     expect(sheet.totalLiabilitiesAndEquity).toBe(0);
+  });
+});
+
+describe('buildBalanceSheet with a comparison', () => {
+  const tree = (balance: number) => [
+    node({ guid: 'checking', name: 'Checking', accountType: 'BANK', balance })
+  ];
+
+  it('pairs each account with its amount on the comparison date', () => {
+    const sheet = buildBalanceSheet(
+      result({ trees: tree(300), byType: { ASSET: { count: 1, totalBalance: 300 } } }),
+      result({ trees: tree(100), byType: { ASSET: { count: 1, totalBalance: 100 } } })
+    );
+    expect(sheet.assets.rows).toEqual([
+      expect.objectContaining({ accountGuid: 'checking', amount: 300, compareAmount: 100 })
+    ]);
+    expect(sheet.assets.compareTotal).toBe(100);
+  });
+
+  it('keeps a synthetic line that only exists on the comparison date', () => {
+    const sheet = buildBalanceSheet(result({}), result({ unrealizedGains: 40 }));
+    expect(sheet.equity.rows.find((r) => r.name === 'Unrealized gains')).toEqual(
+      expect.objectContaining({ amount: 0, compareAmount: 40 })
+    );
+    expect(sheet.compareTotalLiabilitiesAndEquity).toBe(40);
+  });
+
+  it('leaves comparison fields empty without a second date', () => {
+    const sheet = buildBalanceSheet(result({ trees: tree(300) }));
+    expect(sheet.assets.rows[0].compareAmount).toBeNull();
+    expect(sheet.assets.compareTotal).toBeNull();
+  });
+});
+
+describe('comparisonDate', () => {
+  it('finds the end of the previous month, year and the same day a year back', () => {
+    expect(comparisonDate('2026-03-15', 'month')).toBe('2026-02-28');
+    expect(comparisonDate('2026-01-10', 'month')).toBe('2025-12-31');
+    expect(comparisonDate('2026-10-25', 'year')).toBe('2025-12-31');
+    expect(comparisonDate('2026-10-25', 'yoy')).toBe('2025-10-25');
+    expect(comparisonDate('2024-02-29', 'yoy')).toBe('2023-02-28');
   });
 });

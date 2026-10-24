@@ -538,6 +538,23 @@ export const setBaseCurrency = (currency: string): Promise<EmptyBookResult> =>
 
 export const fetchAccounts = (): Promise<AccountsResult> => invoke('fetch_accounts');
 
+interface BalanceSheetInput {
+  /** `YYYY-MM-DD`; omitted means today, valued like the accounts page. */
+  asOf?: string;
+  compareTo?: string;
+}
+
+export interface BalanceSheetResult {
+  /** The resolved valuation date (today when the input had none). */
+  asOf: string;
+  current: AccountsResult;
+  compareTo: string | null;
+  compare: AccountsResult | null;
+}
+
+export const fetchBalanceSheet = (input: BalanceSheetInput): Promise<BalanceSheetResult> =>
+  invoke('fetch_balance_sheet', { input });
+
 export interface BookCurrency {
   guid: string;
   mnemonic: string;
@@ -1431,6 +1448,7 @@ type CommandPayloads = {
   fetch_account_balance_trend: AccountBalancePoint[];
   fetch_account_detail: AccountDetailResult;
   fetch_accounts: AccountsResult;
+  fetch_balance_sheet: BalanceSheetResult;
   fetch_active_book: ActiveBook;
   fetch_allocation_targets: AllocationTarget[];
   fetch_attachments: AttachmentInfo[];

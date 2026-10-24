@@ -18,6 +18,8 @@ export interface BalanceSheetRow {
   depth: number;
   /** Placeholder-aware subtree total in the report currency. */
   amount: number;
+  /** The same line on the comparison date; `null` without a comparison. */
+  compareAmount: number | null;
 }
 
 export interface BalanceSheetSection {
@@ -25,6 +27,7 @@ export interface BalanceSheetSection {
   label: string;
   rows: BalanceSheetRow[];
   total: number;
+  compareTotal: number | null;
 }
 
 export interface BalanceSheet {
@@ -33,6 +36,7 @@ export interface BalanceSheet {
   equity: BalanceSheetSection;
   /** Total liabilities plus total equity (includes retained + unrealized). */
   totalLiabilitiesAndEquity: number;
+  compareTotalLiabilitiesAndEquity: number | null;
 }
 
 /**
@@ -66,7 +70,8 @@ function flattenRows(nodes: AccountNode[], depth = 0): BalanceSheetRow[] {
               description: node.description,
               code: node.code,
               depth,
-              amount: subtreeTotal(node)
+              amount: subtreeTotal(node),
+              compareAmount: null
             }
           ];
     return [...ownRow, ...flattenRows(node.children, depth + 1)];
@@ -83,24 +88,25 @@ function accountSection(
     category,
     label: CATEGORY_LABEL_PLURAL[category],
     rows: [...flattenRows(categoryTrees(data.trees, category)), ...extraRows],
-    total: (data.byType[category]?.totalBalance ?? 0) + extraTotal
+    total: (data.byType[category]?.totalBalance ?? 0) + extraTotal,
+    compareTotal: null
   };
 }
 
 /**
- * Build the two-column statement from the accounts payload. Retained earnings
- * and unrealized gains are equity components because the backend marks
- * investments to market while equity accounts keep cost; the balance identity
- * (`balanceCheck`) only holds when both are part of equity.
+ * Retained earnings and unrealized gains are equity components because the
+ * backend marks investments to market while equity accounts keep cost; the
+ * balance identity (`balanceCheck`) only holds when both are part of equity.
  */
-export function buildBalanceSheet(data: AccountsResult): BalanceSheet {
+function buildStatement(data: AccountsResult): BalanceSheet {
   const synthetic = (name: string, amount: number): BalanceSheetRow => ({
     accountGuid: '',
     name,
     description: null,
     code: null,
     depth: 0,
-    amount
+    amount,
+    compareAmount: null
   });
 
   const equityExtras: BalanceSheetRow[] = [synthetic('Retained earnings', data.retainedEarnings)];
@@ -118,6 +124,84 @@ export function buildBalanceSheet(data: AccountsResult): BalanceSheet {
     assets,
     liabilities,
     equity,
-    totalLiabilitiesAndEquity: liabilities.total + equity.total
+    totalLiabilitiesAndEquity: liabilities.total + equity.total,
+    compareTotalLiabilitiesAndEquity: null
   };
+}
+
+/** Accounts match by GUID, synthetic lines (no GUID) by name. */
+const rowKey = (row: BalanceSheetRow) => row.accountGuid || row.name;
+
+/**
+ * Pair each line with its comparison amount. Both dates load the same account
+ * tree, so only synthetic lines can differ (unrealized gains appear only when
+ * non-zero); one present on a single date shows zero on the other.
+ */
+function withCompare(
+  current: BalanceSheetSection,
+  compare: BalanceSheetSection
+): BalanceSheetSection {
+  const compareByKey = new Map(compare.rows.map((row) => [rowKey(row), row.amount]));
+  const currentKeys = new Set(current.rows.map(rowKey));
+  const onlyCompared = compare.rows
+    .filter((row) => !currentKeys.has(rowKey(row)))
+    .map((row) => ({ ...row, amount: 0, compareAmount: row.amount }));
+  return {
+    ...current,
+    rows: [
+      ...current.rows.map((row) => ({ ...row, compareAmount: compareByKey.get(rowKey(row)) ?? 0 })),
+      ...onlyCompared
+    ],
+    compareTotal: compare.total
+  };
+}
+
+/**
+ * Build the statement from the accounts payload, optionally with a second
+ * payload for another date that fills every `compare*` field.
+ */
+export function buildBalanceSheet(
+  data: AccountsResult,
+  compareData: AccountsResult | null = null
+): BalanceSheet {
+  const current = buildStatement(data);
+  if (!compareData) return current;
+  const compare = buildStatement(compareData);
+  return {
+    assets: withCompare(current.assets, compare.assets),
+    liabilities: withCompare(current.liabilities, compare.liabilities),
+    equity: withCompare(current.equity, compare.equity),
+    totalLiabilitiesAndEquity: current.totalLiabilitiesAndEquity,
+    compareTotalLiabilitiesAndEquity: compare.totalLiabilitiesAndEquity
+  };
+}
+
+/** Comparison dates the balance sheet offers, relative to its as-of date. */
+export type BalanceSheetComparison = 'month' | 'year' | 'yoy';
+
+export const COMPARISON_OPTIONS: { value: BalanceSheetComparison; label: string }[] = [
+  { value: 'month', label: 'End of previous month' },
+  { value: 'year', label: 'End of previous year' },
+  { value: 'yoy', label: 'Same day last year' }
+];
+
+export function isComparison(value: string | null): value is BalanceSheetComparison {
+  return COMPARISON_OPTIONS.some((option) => option.value === value);
+}
+
+/** `YYYY-MM-DD` of a UTC date; Date.UTC day 0 is the previous month's last day. */
+const isoUtc = (y: number, m: number, d: number) =>
+  new Date(Date.UTC(y, m, d)).toISOString().slice(0, 10);
+
+/** The comparison date for `asOf`; 29 February a year back becomes the 28th. */
+export function comparisonDate(asOf: string, kind: BalanceSheetComparison): string {
+  const [y, m, d] = asOf.split('-').map(Number);
+  switch (kind) {
+    case 'month':
+      return isoUtc(y, m - 1, 0);
+    case 'year':
+      return `${y - 1}-12-31`;
+    case 'yoy':
+      return isoUtc(y - 1, m - 1, Math.min(d, new Date(Date.UTC(y - 1, m, 0)).getUTCDate()));
+  }
 }

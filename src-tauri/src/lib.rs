@@ -120,6 +120,7 @@ pub fn run() {
             import_rules::delete_import_rule,
             import_rules::move_import_rule,
             accounts::fetch_accounts,
+            accounts::fetch_balance_sheet,
             accounts::fetch_nav_roots,
             accounts::fetch_book_currencies,
             nav::fetch_nav_badges,

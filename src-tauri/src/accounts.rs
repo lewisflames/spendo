@@ -1,13 +1,13 @@
 use crate::db::AppError;
 use rusqlite::Connection;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 use tauri::State;
 
 use crate::db::{run_blocking, AppState};
 use crate::fx;
-use crate::prices::get_cached_prices_map;
+use crate::prices::{get_cached_prices_map, PriceHistory};
 use crate::tree;
 use crate::utils;
 
@@ -68,9 +68,11 @@ struct AccountRow {
     tx_count: i64,
 }
 
-/// Load every account (excluding ROOT) with its current balance, quantity and
-/// transaction count, bounded by the shared visibility window.
-fn load_account_rows(conn: &Connection) -> Result<Vec<AccountRow>, AppError> {
+/// Load every account (excluding ROOT) with its balance, quantity and
+/// transaction count through `as_of` (inclusive; `None` means today), always
+/// capped by the shared visibility window so a future date never reveals
+/// future-dated transactions.
+fn load_account_rows(conn: &Connection, as_of: Option<&str>) -> Result<Vec<AccountRow>, AppError> {
     let sql = format!("SELECT a.guid, a.name, a.account_type, a.parent_guid, a.code, a.description, a.placeholder,
                       c.mnemonic as commodity_mnemonic, c.guid as commodity_guid,
                       COALESCE(b.balance, 0) as balance,
@@ -85,18 +87,18 @@ fn load_account_rows(conn: &Connection) -> Result<Vec<AccountRow>, AppError> {
                         COUNT(DISTINCT s.tx_guid) as tx_count
                  FROM splits s
                  JOIN transactions t ON t.guid = s.tx_guid
-                 WHERE t.post_date < {}
+                 WHERE t.post_date < MIN(COALESCE(date(?1, '+1 day'), {now}), {now})
                  GROUP BY s.account_guid
                ) b ON b.account_guid = a.guid
                WHERE a.account_type != 'ROOT'
                ORDER BY a.account_type, a.name",
-        utils::RAW_AMOUNT, utils::QUANTITY_AMOUNT, utils::VISIBLE_NOW_EXPR
+        utils::RAW_AMOUNT, utils::QUANTITY_AMOUNT, now = utils::VISIBLE_NOW_EXPR
     );
 
     let mut stmt = conn.prepare(&sql)?;
 
     let rows: Vec<AccountRow> = stmt
-        .query_map([], |row| {
+        .query_map([as_of], |row| {
             Ok(AccountRow {
                 guid: row.get(0)?,
                 name: row.get(1)?,
@@ -170,9 +172,13 @@ fn value_account_rows(
                     unrealized_gains += market - cost;
                     balance = market;
                 } else {
-                    missing_prices_map
-                        .entry(mnemonic.clone())
-                        .or_insert(row.commodity_guid.clone());
+                    // An empty holding is worth zero at any price; only flag
+                    // the ones whose shares are being left out.
+                    if row.quantity != 0.0 {
+                        missing_prices_map
+                            .entry(mnemonic.clone())
+                            .or_insert(row.commodity_guid.clone());
+                    }
                     // Unpriced securities contribute zero (matching home net
                     // worth and portfolio market value): cost basis is excluded
                     // until a cached price exists, and the holding is flagged
@@ -331,12 +337,51 @@ fn assemble_accounts_result(
     }
 }
 
-fn fetch_accounts_inner(conn: &Connection) -> Result<AccountsResult, AppError> {
-    let rows = load_account_rows(conn)?;
+/// Report-currency price per held commodity as of `date`, with the same
+/// as-of rule as the net worth trend (latest on or before the date, else the
+/// earliest known price), so a month-end balance sheet matches its point.
+fn prices_as_of(
+    conn: &Connection,
+    rows: &[AccountRow],
+    date: &str,
+    report_currency: &str,
+) -> Result<HashMap<String, f64>, AppError> {
+    let history = PriceHistory::load(conn)?;
+    let fx_history = fx::FxHistory::load(conn)?;
+    let mut prices = HashMap::new();
+    for row in rows {
+        if !utils::INVESTMENT_TYPES.contains(&row.account_type.as_str()) {
+            continue;
+        }
+        let Some(guid) = row.commodity_guid.as_deref() else {
+            continue;
+        };
+        if prices.contains_key(guid) {
+            continue;
+        }
+        if let Some(price) = history.price_as_of(guid, date, report_currency, &fx_history) {
+            prices.insert(guid.to_string(), price);
+        }
+    }
+    Ok(prices)
+}
 
-    let unified_prices = get_cached_prices_map(conn)?;
+fn fetch_accounts_inner(conn: &Connection) -> Result<AccountsResult, AppError> {
+    accounts_as_of(conn, None)
+}
+
+/// The valued account tree through `as_of` (inclusive). `None` is "now":
+/// latest cached prices and FX rates, exactly what the accounts page shows;
+/// a date values holdings and currencies as of that day.
+fn accounts_as_of(conn: &Connection, as_of: Option<&str>) -> Result<AccountsResult, AppError> {
+    let rows = load_account_rows(conn, as_of)?;
+
     let report_currency = fx::report_currency_or_empty(conn)?;
-    let fx_map = fx::get_fx_map(conn, None)?;
+    let unified_prices = match as_of {
+        None => get_cached_prices_map(conn)?,
+        Some(date) => prices_as_of(conn, &rows, date, &report_currency)?,
+    };
+    let fx_map = fx::get_fx_map(conn, as_of)?;
 
     let valuation = value_account_rows(&rows, &unified_prices, &report_currency, &fx_map);
     let trees = build_account_tree(&rows, &valuation.node_map);
@@ -462,6 +507,63 @@ pub fn fetch_children_and_subtree(
 #[tauri::command]
 pub async fn fetch_accounts(state: State<'_, AppState>) -> Result<AccountsResult, AppError> {
     run_blocking(state.db.clone(), fetch_accounts_inner).await
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BalanceSheetInput {
+    /// `YYYY-MM-DD`; `None` is today, valued like the accounts page.
+    pub as_of: Option<String>,
+    /// Optional second date for a comparison column.
+    pub compare_to: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BalanceSheetResult {
+    /// The resolved valuation date (today when the input had none).
+    pub as_of: String,
+    pub current: AccountsResult,
+    pub compare_to: Option<String>,
+    pub compare: Option<AccountsResult>,
+}
+
+fn fetch_balance_sheet_inner(
+    conn: &Connection,
+    input: BalanceSheetInput,
+) -> Result<BalanceSheetResult, AppError> {
+    let as_of = input
+        .as_of
+        .as_deref()
+        .map(utils::validate_iso_date)
+        .transpose()?;
+    let compare_to = input
+        .compare_to
+        .as_deref()
+        .map(utils::validate_iso_date)
+        .transpose()?;
+    let current = accounts_as_of(conn, as_of.as_deref())?;
+    let compare = compare_to
+        .as_deref()
+        .map(|date| accounts_as_of(conn, Some(date)))
+        .transpose()?;
+    Ok(BalanceSheetResult {
+        as_of: as_of.unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%d").to_string()),
+        current,
+        compare_to,
+        compare,
+    })
+}
+
+#[tauri::command]
+pub async fn fetch_balance_sheet(
+    state: State<'_, AppState>,
+    input: BalanceSheetInput,
+) -> Result<BalanceSheetResult, AppError> {
+    run_blocking(state.db.clone(), move |conn| {
+        fetch_balance_sheet_inner(conn, input)
+    })
+    .await
 }
 
 /// One ACCOUNTS-group destination: the top-level account representing a
@@ -622,6 +724,91 @@ mod tests {
 
         let (_, subtree, _) = fetch_children_and_subtree(&conn, "assets").unwrap();
         assert_eq!(subtree.unwrap().balance, 2000.0);
+    }
+
+    #[test]
+    fn balance_sheet_values_each_date_with_its_own_splits_and_prices() {
+        let conn = setup_investments();
+        conn.execute(
+            "INSERT INTO prices (guid, commodity_guid, currency_guid, value_num, value_denom, date)
+             VALUES ('c-aapl-2024-02-10', 'c-aapl', 'c-eur', 12000, 100, '2024-02-10')",
+            [],
+        )
+        .unwrap();
+        let sheet = fetch_balance_sheet_inner(
+            &conn,
+            BalanceSheetInput {
+                as_of: Some("2024-02-20".into()),
+                compare_to: Some("2024-01-31".into()),
+            },
+        )
+        .unwrap();
+
+        // 20 Feb: cash 500 + 10 AAPL at the 10 Feb price (120); XYZ unpriced.
+        assert_eq!(sheet.as_of, "2024-02-20");
+        let asset = |r: &AccountsResult| r.by_type.get("ASSET").unwrap().total_balance;
+        assert_eq!(asset(&sheet.current), 1700.0);
+        assert_eq!(sheet.current.unrealized_gains, 200.0);
+        // 31 Jan: only the cash deposit had happened.
+        let compare = sheet.compare.unwrap();
+        assert_eq!(sheet.compare_to.as_deref(), Some("2024-01-31"));
+        assert_eq!(asset(&compare), 500.0);
+        assert!(compare.missing_prices.is_empty());
+        // No date: today, latest price (150).
+        let today = fetch_balance_sheet_inner(
+            &conn,
+            BalanceSheetInput {
+                as_of: None,
+                compare_to: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(asset(&today.current), 2000.0);
+        assert!(today.compare.is_none());
+    }
+
+    #[test]
+    fn balance_sheet_never_shows_future_transactions() {
+        let conn = setup_investments();
+        conn.execute(
+            "INSERT INTO transactions (guid, post_date) VALUES ('t-future', '2999-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO splits (guid, tx_guid, account_guid, value_num, value_denom, quantity_num, quantity_denom)
+             VALUES ('s-future', 't-future', 'checking', 10000, 100, 10000, 100)",
+            [],
+        )
+        .unwrap();
+        let sheet = fetch_balance_sheet_inner(
+            &conn,
+            BalanceSheetInput {
+                as_of: Some("2999-12-31".into()),
+                compare_to: None,
+            },
+        )
+        .unwrap();
+        let checking = sheet.current.trees[0]
+            .children
+            .iter()
+            .find(|c| c.guid == "checking")
+            .unwrap();
+        assert_eq!(checking.balance, 500.0);
+    }
+
+    #[test]
+    fn balance_sheet_rejects_malformed_dates() {
+        let conn = setup_investments();
+        let err = fetch_balance_sheet_inner(
+            &conn,
+            BalanceSheetInput {
+                as_of: Some("2024-13-01".into()),
+                compare_to: None,
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(err, AppError::Validation(_)));
     }
 
     #[test]
