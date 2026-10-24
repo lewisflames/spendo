@@ -43,7 +43,7 @@ test('lists each lot a sale consumed with yearly totals', async ({ page }) => {
       years: [2023, 2024]
     }
   });
-  await page.goto('/reports/gains?year=2024');
+  await page.goto('/portfolio/gains?year=2024');
 
   await expect(page.getByRole('heading', { name: 'Realized gains' })).toBeVisible();
   await expect(page.getByRole('link', { name: /Apple Inc/ })).toHaveCount(2);
@@ -66,7 +66,7 @@ test('shows an empty state for a year without sales', async ({ page }) => {
       years: []
     }
   });
-  await page.goto('/reports/gains?year=2022');
+  await page.goto('/portfolio/gains?year=2022');
 
   await expect(page.getByText('No sales in 2022')).toBeVisible();
 });

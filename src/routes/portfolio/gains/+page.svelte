@@ -14,7 +14,7 @@
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import BudgetYearStepper from '$lib/features/budgets/budget-year-stepper.svelte';
   import { buildYearOptions } from '$lib/features/budgets/budget-utils';
-  import RealizedGainsTable from '$lib/features/reports/realized-gains-table.svelte';
+  import RealizedGainsTable from '$lib/features/portfolio/realized-gains-table.svelte';
   import { exportRealizedGainsCsvViaDialog } from '$lib/features/book/import-export-actions';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import { useUrlParams, yearParam } from '$lib/hooks/use-url-params.svelte';

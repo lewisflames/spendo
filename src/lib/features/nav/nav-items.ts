@@ -150,7 +150,12 @@ export const NAV_GROUPS: NavGroup[] = [
         href: '/reports/balance-sheet',
         chord: 'a',
         match: (pathname) => pathname === '/reports/balance-sheet'
-      },
+      }
+    ]
+  },
+  {
+    label: 'Investments',
+    items: [
       {
         id: 'portfolio',
         label: PAGE_META.portfolio.title,
@@ -158,15 +163,17 @@ export const NAV_GROUPS: NavGroup[] = [
         keywords: ['portfolio', 'investments', 'holdings', 'stocks'],
         href: '/portfolio',
         chord: 'i',
-        match: (pathname) => pathname === '/portfolio' || pathname.startsWith('/portfolio/')
+        match: (pathname) =>
+          pathname === '/portfolio' ||
+          (pathname.startsWith('/portfolio/') && pathname !== '/portfolio/gains')
       },
       {
         id: 'realized-gains',
         label: PAGE_META.realizedGains.title,
         icon: HandCoins,
         keywords: ['realized', 'gains', 'capital gains', 'sales', 'dividends', 'tax'],
-        href: '/reports/gains',
-        match: (pathname) => pathname === '/reports/gains'
+        href: '/portfolio/gains',
+        match: (pathname) => pathname === '/portfolio/gains'
       }
     ]
   }
