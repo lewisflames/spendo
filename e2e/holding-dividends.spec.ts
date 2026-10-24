@@ -45,6 +45,9 @@ const MOCKS: BackendMocks = {
       { txGuid: 't-d1', postDate: '2024-03-01', description: 'AAPL dividend', amount: 34 }
     ],
     dividendAccounts: [{ accountGuid: 'a-div', accountName: 'Dividends' }],
+    openLots: [
+      { acquired: '2024-01-10', shares: 10, basis: 1000, marketValue: 1500, unrealizedGain: 500 }
+    ],
     priceHistory: [],
     valueTrend: [],
     transactions: [],
@@ -69,4 +72,14 @@ test('lists dividends and the linked income accounts', async ({ page }) => {
   const dialog = page.getByRole('dialog');
   await expect(dialog.getByText('Dividend accounts for AAPL')).toBeVisible();
   await expect(dialog.getByRole('button', { name: 'Unlink Dividends' })).toBeVisible();
+});
+
+test('shows open lots with their unrealized gain', async ({ page }) => {
+  await mockBackend(page, MOCKS);
+  await page.goto('/portfolio/c-aapl');
+
+  await page.getByRole('tab', { name: 'Lots' }).click();
+  const lotsPanel = page.getByRole('tabpanel');
+  await expect(lotsPanel.getByRole('columnheader', { name: 'Cost per share' })).toBeVisible();
+  await expect(lotsPanel.getByRole('row')).toHaveCount(2);
 });

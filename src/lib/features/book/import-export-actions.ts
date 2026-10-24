@@ -9,6 +9,7 @@ import { activeBookPath, dbSession, setDbSession } from '$lib/stores/db.svelte';
 import { appSettings } from '$lib/stores/settings.svelte';
 import {
   exportAccountsCsv,
+  exportRealizedGainsCsv,
   exportTransactionsCsv,
   importGnucash,
   previewGnucashImport
@@ -200,5 +201,27 @@ export async function exportAccountsCsvViaDialog(): Promise<boolean> {
     ensureCsvExtension,
     (path) => exportAccountsCsv({ path, delimiter: opts.delimiter }),
     'accounts'
+  );
+}
+
+/** One year's realized gains, one row per lot a sale consumed. */
+export async function exportRealizedGainsCsvViaDialog(year: number): Promise<boolean> {
+  if (busy || !dbSession.value) return false;
+  const opts = await exportOptions();
+  const pattern = opts.dateFormat === 'locale' ? exportDatePattern(opts.locale ?? 'en-IE') : null;
+  return saveExport(
+    exportFilename(`realized-gains-${year}`, bookStem(), todayStr()),
+    CSV_FILTER,
+    ensureCsvExtension,
+    (path) =>
+      exportRealizedGainsCsv({
+        path,
+        year,
+        delimiter: opts.delimiter,
+        dateFormat: opts.dateFormat,
+        dateParts: pattern?.parts ?? null,
+        dateSeparator: pattern?.separator ?? null
+      }),
+    'realized gains'
   );
 }

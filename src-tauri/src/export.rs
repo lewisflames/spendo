@@ -5,6 +5,8 @@ use std::path::PathBuf;
 use tauri::State;
 
 use crate::db::{run_blocking, run_io, AppError, AppState};
+use crate::fx;
+use crate::portfolio::{realized_gains_inner, RealizedGainRow};
 use crate::tree;
 use crate::utils;
 
@@ -335,6 +337,30 @@ pub struct AccountsExportInput {
     pub delimiter: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RealizedGainsExportInput {
+    pub path: String,
+    pub year: i32,
+    pub delimiter: String,
+    /// Same date options as [`TransactionsExportInput`].
+    pub date_format: String,
+    pub date_parts: Option<String>,
+    pub date_separator: Option<String>,
+}
+
+const REALIZED_GAINS_EXPORT_HEADERS: [&str; 9] = [
+    "Date Sold",
+    "Symbol",
+    "Name",
+    "Date Acquired",
+    "Shares",
+    "Proceeds",
+    "Cost Basis",
+    "Gain",
+    "Currency",
+];
+
 fn validate_delimiter(raw: &str) -> Result<u8, AppError> {
     match raw {
         "," => Ok(b','),
@@ -446,6 +472,28 @@ fn split_row_cells(row: &ExportSplitRow, locale: Option<&(String, String)>) -> V
     ]
 }
 
+/// Money rounded to cents; shares keep full precision.
+fn realized_gain_cells(
+    row: &RealizedGainRow,
+    currency: &str,
+    locale: Option<&(String, String)>,
+) -> Vec<String> {
+    vec![
+        format_export_date(&row.date, locale),
+        row.mnemonic.clone(),
+        row.full_name.clone().unwrap_or_default(),
+        row.acquired
+            .as_deref()
+            .map(|d| format_export_date(d, locale))
+            .unwrap_or_default(),
+        format!("{}", row.shares),
+        format!("{:.2}", row.proceeds),
+        format!("{:.2}", row.basis),
+        format!("{:.2}", row.gain),
+        currency.to_string(),
+    ]
+}
+
 fn account_row_cells(row: &ExportAccountRow) -> Vec<String> {
     vec![
         row.account_type.clone(),
@@ -508,6 +556,43 @@ pub async fn export_accounts_csv(
     let rows = run_blocking(state.db.clone(), fetch_export_accounts_inner).await?;
     let cells: Vec<Vec<String>> = rows.iter().map(account_row_cells).collect();
     let bytes = build_csv_bytes(delimiter, &ACCOUNTS_EXPORT_HEADERS, &cells)?;
+    let path = input.path;
+    run_io(move || {
+        std::fs::write(&path, bytes).map_err(|e| AppError::Io(format!("Failed to write file: {e}")))
+    })
+    .await
+}
+
+/// One year's realized gains (one row per lot a sale consumed), written
+/// straight to the user's chosen path.
+#[tauri::command]
+pub async fn export_realized_gains_csv(
+    state: State<'_, AppState>,
+    input: RealizedGainsExportInput,
+) -> Result<(), AppError> {
+    let delimiter = validate_delimiter(&input.delimiter)?;
+    validate_export_path(&input.path)?;
+    state.ensure_not_active_book(&PathBuf::from(input.path.trim()))?;
+    let locale = validate_date_options(
+        &input.date_format,
+        input.date_parts.as_deref(),
+        input.date_separator.as_deref(),
+    )?;
+
+    let year = input.year;
+    let (report, currency) = run_blocking(state.db.clone(), move |conn| {
+        Ok((
+            realized_gains_inner(conn, year)?,
+            fx::report_currency_or_empty(conn)?,
+        ))
+    })
+    .await?;
+    let cells: Vec<Vec<String>> = report
+        .rows
+        .iter()
+        .map(|r| realized_gain_cells(r, &currency, locale.as_ref()))
+        .collect();
+    let bytes = build_csv_bytes(delimiter, &REALIZED_GAINS_EXPORT_HEADERS, &cells)?;
     let path = input.path;
     run_io(move || {
         std::fs::write(&path, bytes).map_err(|e| AppError::Io(format!("Failed to write file: {e}")))
@@ -599,6 +684,36 @@ mod tests {
             .unwrap()
             .replace("\r\n", "\n");
         assert_eq!(text, "H1,H2,H3\n\"a,b\",\"line\nbreak\",plain\n");
+    }
+
+    #[test]
+    fn realized_gain_cells_round_money_and_format_dates() {
+        let row = RealizedGainRow {
+            date: "2024-03-10".to_string(),
+            commodity_guid: "c".to_string(),
+            mnemonic: "AAPL".to_string(),
+            full_name: Some("Apple Inc".to_string()),
+            acquired: None,
+            shares: 2.5,
+            proceeds: 100.004,
+            basis: 80.0,
+            gain: 20.004,
+        };
+        let locale = ("dmy".to_string(), "/".to_string());
+        assert_eq!(
+            realized_gain_cells(&row, "EUR", Some(&locale)),
+            [
+                "10/03/2024",
+                "AAPL",
+                "Apple Inc",
+                "",
+                "2.5",
+                "100.00",
+                "80.00",
+                "20.00",
+                "EUR"
+            ]
+        );
     }
 
     #[test]

@@ -173,6 +173,8 @@ pub fn run() {
             portfolio::fetch_allocation_targets,
             portfolio::save_allocation_targets,
             dividends::set_dividend_links,
+            portfolio::fetch_realized_gains,
+            export::export_realized_gains_csv,
             search::search_global,
         ])
         .run(tauri::generate_context!())

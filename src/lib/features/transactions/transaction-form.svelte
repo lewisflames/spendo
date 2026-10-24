@@ -58,6 +58,7 @@
     mode = 'create',
     guid = null,
     initial = null,
+    prefill = null,
     title,
     headerDescription,
     breadcrumbs = [],
@@ -75,6 +76,12 @@
     mode?: 'create' | 'edit';
     guid?: string | null;
     initial?: TransactionDetail | null;
+    /** Create mode without `initial`: starting description and splits; a
+     * missing amount leaves that split blank. */
+    prefill?: {
+      description: string;
+      splits: { accountGuid: string; amount?: number; memo?: string }[];
+    } | null;
     title: string;
     headerDescription: string;
     breadcrumbs?: Breadcrumb[];
@@ -104,6 +111,22 @@
   // The edit page mounts this form only after the payload resolves, so the
   // initial prop is captured once; {#key} remounts when the transaction changes.
   const snapshot = untrack(() => {
+    if (!initial && prefill) {
+      const drafts = prefill.splits.map((s) => ({
+        ...makeSplitDraft(nextKey()),
+        accountGuid: s.accountGuid,
+        amount: s.amount === undefined ? '' : String(s.amount),
+        memo: s.memo ?? ''
+      }));
+      while (drafts.length < 2) drafts.push(makeSplitDraft(nextKey()));
+      return {
+        postDate: todayStr(),
+        description: prefill.description,
+        num: '',
+        notes: '',
+        splits: drafts
+      };
+    }
     if (!initial) {
       return {
         postDate: todayStr(),

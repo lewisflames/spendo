@@ -1,6 +1,7 @@
 <script lang="ts">
   import { PAGE_META } from '$lib/features/nav/page-meta';
   import { page } from '$app/state';
+  import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { Button } from '$lib/components/ui/button';
   import * as Tabs from '$lib/components/ui/tabs';
@@ -13,6 +14,7 @@
   import SymbolOverrideDialog from '$lib/features/portfolio/symbol-override-dialog.svelte';
   import DividendLinksDialog from '$lib/features/portfolio/dividend-links-dialog.svelte';
   import HoldingDividendsTable from '$lib/features/portfolio/holding-dividends-table.svelte';
+  import HoldingLotsTable from '$lib/features/portfolio/holding-lots-table.svelte';
   import { sessionCurrency, parseLocalDate, formatCurrency } from '$lib/utils/format.svelte';
   import TimeSeriesChart from '$lib/components/shared/time-series-chart.svelte';
   import { ColumnsMenu } from '$lib/components/shared/columns-menu';
@@ -102,6 +104,12 @@
   const activityCols = useColumnVisibility(ACTIVITY_DEFAULT_COLUMNS, 'cols:holding-activity');
   const priceCols = useColumnVisibility(PRICE_DEFAULT_COLUMNS, 'cols:holding-prices');
 
+  function recordDividend(commodityGuid: string) {
+    // Query strings can’t go through `resolve()` — same pattern as Duplicate.
+    // eslint-disable-next-line svelte/no-navigation-without-resolve
+    void goto(resolve('/transactions/new') + `?dividend=${encodeURIComponent(commodityGuid)}`);
+  }
+
   async function handleSymbolSave() {
     overridesRes.reload();
     toast.success('Symbol saved. Refreshing prices');
@@ -148,6 +156,7 @@
         onRefresh={() => void priceRefresh.refresh()}
         onEditSymbol={() => (symbolDialogOpen = true)}
         onEditDividends={() => (dividendsDialogOpen = true)}
+        onRecordDividend={() => recordDividend(holding.commodityGuid)}
         breadcrumbs={[{ label: PAGE_META.portfolio.title, href: resolve('/portfolio') }]}
       />
 
@@ -229,6 +238,7 @@
         <div class="flex items-center justify-between gap-2">
           <Tabs.List aria-label="Holding data">
             <Tabs.Trigger value="activity">Activity</Tabs.Trigger>
+            <Tabs.Trigger value="lots">Lots</Tabs.Trigger>
             <Tabs.Trigger value="prices">Prices</Tabs.Trigger>
             <Tabs.Trigger value="dividends">Dividends</Tabs.Trigger>
           </Tabs.List>
@@ -251,6 +261,9 @@
             totalPages={res.data.totalPages}
             onPageSizeChange={(size) => applyPageSize(size, (v) => (pg = v))}
           />
+        </Tabs.Content>
+        <Tabs.Content value="lots">
+          <HoldingLotsTable lots={res.data.openLots} />
         </Tabs.Content>
         <Tabs.Content value="prices">
           <HoldingPricesTable

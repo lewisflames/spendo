@@ -125,6 +125,49 @@ pub struct HoldingTransaction {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct OpenLot {
+    pub acquired: String,
+    pub shares: f64,
+    pub basis: f64,
+    /// `None` while the holding has no price.
+    pub market_value: Option<f64>,
+    pub unrealized_gain: Option<f64>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RealizedGainRow {
+    pub date: String,
+    pub commodity_guid: String,
+    pub mnemonic: String,
+    pub full_name: Option<String>,
+    /// `None` for average-cost sales and shares sold beyond what was held.
+    pub acquired: Option<String>,
+    pub shares: f64,
+    pub proceeds: f64,
+    pub basis: f64,
+    pub gain: f64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RealizedGainsReport {
+    pub year: i32,
+    /// Sale date order; one row per lot a sale consumed.
+    pub rows: Vec<RealizedGainRow>,
+    pub total_proceeds: f64,
+    pub total_basis: f64,
+    pub total_gains: f64,
+    pub total_losses: f64,
+    pub net_gain: f64,
+    /// Dividends received in the year, net of withholding.
+    pub dividends: f64,
+    /// Years with a sale or a dividend, ascending.
+    pub years: Vec<i32>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HoldingDividend {
     pub tx_guid: String,
     pub post_date: String,
@@ -140,6 +183,8 @@ pub struct HoldingDetail {
     pub dividend_history: Vec<HoldingDividend>,
     /// Income accounts linked to this holding in `dividend_links`.
     pub dividend_accounts: Vec<dividends::DividendAccount>,
+    /// Lots still held, oldest first.
+    pub open_lots: Vec<OpenLot>,
     pub price_history: Vec<PriceHistoryEntry>,
     pub value_trend: Vec<PortfolioValuePoint>,
     pub transactions: Vec<HoldingTransaction>,
@@ -1159,13 +1204,14 @@ fn holding_dividends<'a>(
 }
 
 /// Fill the return fields (`xirr`, open basis, realized / unrealized gains,
-/// average cost) that need dated events rather than aggregated splits.
+/// average cost) that need dated events rather than aggregated splits, and
+/// hand back the lots they came from.
 fn attach_returns(
     holding: &mut PortfolioHolding,
     inputs: &ReturnInputs,
     method: lots::CostMethod,
     end_date: NaiveDate,
-) {
+) -> lots::LotSummary {
     holding.xirr = holding_xirr(inputs, holding, end_date);
     let lots = holding_lots(inputs, &holding.commodity_guid, method);
     let open_shares = lots.open_shares();
@@ -1185,7 +1231,8 @@ fn attach_returns(
     holding.total_return = holding
         .unrealized_gain
         .map(|u| u + holding.realized_gain + holding.dividends);
-    holding.basis_warning = lots.warning;
+    holding.basis_warning = lots.warning.clone();
+    lots
 }
 
 fn finalize_totals(mut holdings: Vec<PortfolioHolding>) -> (f64, f64, f64, Vec<PortfolioHolding>) {
@@ -1249,6 +1296,122 @@ fn fetch_portfolio_data_inner(conn: &Connection) -> Result<PortfolioData, AppErr
         holdings,
         value_trend,
     })
+}
+
+/// The holding's open lots valued at its current price.
+fn open_lot_rows(holding: &PortfolioHolding, lots: lots::LotSummary) -> Vec<OpenLot> {
+    lots.open_lots
+        .into_iter()
+        .map(|lot| {
+            let market_value = holding.price.map(|p| p * lot.shares);
+            OpenLot {
+                unrealized_gain: market_value.map(|v| v - lot.basis),
+                market_value,
+                acquired: lot.acquired,
+                shares: lot.shares,
+                basis: lot.basis,
+            }
+        })
+        .collect()
+}
+
+/// Every sale matched against its lots, plus dividends, for one calendar
+/// year, in the report currency.
+pub(crate) fn realized_gains_inner(
+    conn: &Connection,
+    year: i32,
+) -> Result<RealizedGainsReport, AppError> {
+    if !(1900..=2200).contains(&year) {
+        return Err(AppError::Validation(format!(
+            "That year doesn't look right: {year}"
+        )));
+    }
+    let inputs = load_return_inputs(conn, None)?;
+    let method = settings::cost_basis_method(conn)?;
+    let year_of = |date: &str| date.get(..4).and_then(|y| y.parse::<i32>().ok());
+
+    let mut meta: HashMap<String, (String, Option<String>)> = HashMap::new();
+    let mut stmt = conn.prepare("SELECT guid, mnemonic, fullname FROM commodities")?;
+    for row in stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))? {
+        let (guid, mnemonic, full_name): (String, String, Option<String>) = row?;
+        meta.insert(guid, (mnemonic, full_name));
+    }
+
+    let commodities: HashSet<&str> = inputs
+        .events
+        .iter()
+        .map(|e| e.commodity_guid.as_str())
+        .collect();
+    let mut years: HashSet<i32> = HashSet::new();
+    let mut rows = Vec::new();
+    for guid in commodities {
+        let (mnemonic, full_name) = meta
+            .get(guid)
+            .cloned()
+            .unwrap_or_else(|| (guid.to_string(), None));
+        for d in holding_lots(&inputs, guid, method).disposals {
+            let Some(y) = year_of(&d.date) else { continue };
+            years.insert(y);
+            if y != year {
+                continue;
+            }
+            rows.push(RealizedGainRow {
+                gain: d.gain(),
+                date: d.date,
+                commodity_guid: guid.to_string(),
+                mnemonic: mnemonic.clone(),
+                full_name: full_name.clone(),
+                acquired: d.acquired,
+                shares: d.shares,
+                proceeds: d.proceeds,
+                basis: d.basis,
+            });
+        }
+    }
+    rows.sort_by(|a, b| {
+        a.date
+            .cmp(&b.date)
+            .then_with(|| a.mnemonic.cmp(&b.mnemonic))
+            .then_with(|| a.acquired.cmp(&b.acquired))
+    });
+
+    let mut dividends = 0.0;
+    for d in &inputs.dividends {
+        let Some(y) = year_of(&d.post_date) else {
+            continue;
+        };
+        years.insert(y);
+        if y == year {
+            dividends += d.amount * quote_rate(&inputs, &d.commodity_guid, &d.post_date);
+        }
+    }
+    let mut years: Vec<i32> = years.into_iter().collect();
+    years.sort_unstable();
+
+    let total_gains: f64 = rows.iter().map(|r| r.gain).filter(|g| *g > 0.0).sum();
+    let total_losses: f64 = rows.iter().map(|r| r.gain).filter(|g| *g < 0.0).sum();
+    Ok(RealizedGainsReport {
+        year,
+        total_proceeds: rows.iter().map(|r| r.proceeds).sum(),
+        total_basis: rows.iter().map(|r| r.basis).sum(),
+        total_gains,
+        total_losses,
+        net_gain: total_gains + total_losses,
+        dividends,
+        years,
+        rows,
+    })
+}
+
+#[tauri::command]
+pub async fn fetch_realized_gains(
+    state: State<'_, AppState>,
+    year: i32,
+) -> Result<RealizedGainsReport, AppError> {
+    run_blocking(state.db.clone(), move |conn| {
+        realized_gains_inner(conn, year)
+    })
+    .await
 }
 
 // ── Rebalance allocation targets (book-scoped config) ────────────────────────
@@ -1530,7 +1693,8 @@ fn fetch_holding_detail_inner(
     // value, not the simple gain/loss ratio).
     let inputs = load_return_inputs(conn, Some(commodity_guid))?;
     let method = settings::cost_basis_method(conn)?;
-    attach_returns(&mut holding, &inputs, method, Utc::now().date_naive());
+    let lots = attach_returns(&mut holding, &inputs, method, Utc::now().date_naive());
+    let open_lots = open_lot_rows(&holding, lots);
     let mut dividend_history: Vec<HoldingDividend> =
         holding_dividends(&inputs, commodity_guid).collect();
     dividend_history.reverse();
@@ -1544,6 +1708,7 @@ fn fetch_holding_detail_inner(
         holding,
         dividend_history,
         dividend_accounts,
+        open_lots,
         price_history,
         value_trend,
         transactions: tx_page.transactions,
@@ -2010,6 +2175,71 @@ mod tests {
             .collect();
         assert_eq!(dates, ["2024-04-01", "2024-03-01"]);
         assert!(detail.dividend_accounts.is_empty());
+    }
+
+    #[test]
+    fn realized_gains_report_filters_by_year_and_splits_gains_from_losses() {
+        let conn = setup_trading_book();
+        conn.execute_batch(
+            "INSERT INTO accounts (guid, name, account_type, parent_guid, placeholder, commodity_guid) VALUES
+             ('div', 'Dividends', 'INCOME', 'root', 0, 'c-eur');",
+        )
+        .unwrap();
+        add_tx(
+            &conn,
+            "b1",
+            "2023-01-10",
+            &[("broker", 10, 1000), ("cash", -1000, -1000)],
+        );
+        add_tx(
+            &conn,
+            "b2",
+            "2023-06-10",
+            &[("broker", 10, 2000), ("cash", -2000, -2000)],
+        );
+        // 2024: sell 15 for 2250 → lot 1 (10 @ 100) gains, lot 2 (5 @ 200) loses.
+        add_tx(
+            &conn,
+            "s1",
+            "2024-03-10",
+            &[("broker", -15, -2250), ("cash", 2250, 2250)],
+        );
+        add_tx(
+            &conn,
+            "d1",
+            "2025-02-01",
+            &[("broker", 0, 0), ("div", -20, -20), ("cash", 20, 20)],
+        );
+
+        let r = realized_gains_inner(&conn, 2024).unwrap();
+        assert_eq!(r.years, [2024, 2025]);
+        assert_eq!(r.rows.len(), 2);
+        assert_eq!(r.rows[0].acquired.as_deref(), Some("2023-01-10"));
+        assert_eq!(r.rows[0].mnemonic, "AAPL");
+        assert!((r.rows[0].gain - 500.0).abs() < 1e-9);
+        assert!((r.rows[1].gain - (750.0 - 1000.0)).abs() < 1e-9);
+        assert!((r.total_gains - 500.0).abs() < 1e-9);
+        assert!((r.total_losses + 250.0).abs() < 1e-9);
+        assert!((r.net_gain - 250.0).abs() < 1e-9);
+        assert!((r.total_proceeds - 2250.0).abs() < 1e-9);
+        assert_eq!(r.dividends, 0.0);
+
+        let r = realized_gains_inner(&conn, 2025).unwrap();
+        assert!(r.rows.is_empty());
+        assert!((r.dividends - 20.0).abs() < 1e-9);
+        assert!(matches!(
+            realized_gains_inner(&conn, 1),
+            Err(AppError::Validation(_))
+        ));
+
+        // The 5 shares left come from the second lot, priced at 150.
+        let lots = fetch_holding_detail_inner(&conn, "c-aapl", 1, 25, None)
+            .unwrap()
+            .open_lots;
+        assert_eq!(lots.len(), 1);
+        assert_eq!(lots[0].acquired, "2023-06-10");
+        assert!((lots[0].basis - 1000.0).abs() < 1e-9);
+        assert!((lots[0].unrealized_gain.unwrap() + 250.0).abs() < 1e-9);
     }
 
     #[test]

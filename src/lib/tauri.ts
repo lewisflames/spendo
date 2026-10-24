@@ -812,6 +812,15 @@ export const exportTransactionsCsv = (input: TransactionsExportInput): Promise<v
 export const exportAccountsCsv = (input: AccountsExportInput): Promise<void> =>
   invoke('export_accounts_csv', { input });
 
+/** One year's realized gains, one row per lot a sale consumed. */
+interface RealizedGainsExportInput extends Omit<TransactionsExportInput, 'path'> {
+  path: string;
+  year: number;
+}
+
+export const exportRealizedGainsCsv = (input: RealizedGainsExportInput): Promise<void> =>
+  invoke('export_realized_gains_csv', { input });
+
 export const refreshPrices = (): Promise<PricesResult> => invoke('refresh_prices');
 
 export const fetchAccountDetail = (
@@ -1090,6 +1099,45 @@ export interface HoldingDividend {
   amount: number;
 }
 
+export interface OpenLot {
+  acquired: string;
+  shares: number;
+  basis: number;
+  /** `null` while the holding has no price. */
+  marketValue: number | null;
+  unrealizedGain: number | null;
+}
+
+export interface RealizedGainRow {
+  date: string;
+  commodityGuid: string;
+  mnemonic: string;
+  fullName: string | null;
+  /** `null` for average-cost sales and shares sold beyond what was held. */
+  acquired: string | null;
+  shares: number;
+  proceeds: number;
+  basis: number;
+  gain: number;
+}
+
+interface RealizedGainsReport {
+  year: number;
+  rows: RealizedGainRow[];
+  totalProceeds: number;
+  totalBasis: number;
+  totalGains: number;
+  totalLosses: number;
+  netGain: number;
+  /** Dividends received in the year, net of withholding. */
+  dividends: number;
+  /** Years with a sale or a dividend, ascending. */
+  years: number[];
+}
+
+export const fetchRealizedGains = (year: number): Promise<RealizedGainsReport> =>
+  invoke('fetch_realized_gains', { year });
+
 export interface DividendAccount {
   accountGuid: string;
   accountName: string;
@@ -1100,6 +1148,8 @@ interface HoldingDetail {
   /** Newest first, in the report currency. */
   dividendHistory: HoldingDividend[];
   dividendAccounts: DividendAccount[];
+  /** Lots still held, oldest first. */
+  openLots: OpenLot[];
   priceHistory: PriceHistoryEntry[];
   valueTrend: PortfolioValuePoint[];
   transactions: HoldingTransaction[];
@@ -1326,6 +1376,7 @@ type CommandPayloads = {
   delete_symbol_override: void;
   delete_transaction: void;
   export_accounts_csv: void;
+  export_realized_gains_csv: void;
   export_attachment: void;
   export_transactions_csv: void;
   fetch_account_balance_trend: AccountBalancePoint[];
@@ -1350,6 +1401,7 @@ type CommandPayloads = {
   fetch_pnl_report: ProfitLossReport;
   fetch_pnl_trend: PnlTrendPoint[];
   fetch_portfolio_data: PortfolioData;
+  fetch_realized_gains: RealizedGainsReport;
   fetch_reconcile_info: ReconcileInfo;
   fetch_reconcile_summaries: ReconcileAccountSummary[];
   fetch_schedule: Schedule;

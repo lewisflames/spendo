@@ -13,6 +13,7 @@ export const PAGE_META = {
   pnl: { title: 'Profit & loss', description: 'Income and expenses for a period' },
   balanceSheet: { title: 'Balance sheet', description: 'What you own and owe, as of today' },
   portfolio: { title: 'Portfolio', description: 'Investment holdings and performance' },
+  realizedGains: { title: 'Realized gains', description: 'Sales and dividends by year' },
   settings: { title: 'Settings', description: 'App and book preferences' },
   about: { title: 'About Spendo', description: 'Version and updates' },
   importCsv: { title: 'Import CSV', description: 'Map columns, preview, then import' }

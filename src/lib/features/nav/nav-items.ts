@@ -4,6 +4,7 @@ import {
   ArrowLeftRight,
   Briefcase,
   CalendarClock,
+  HandCoins,
   Landmark,
   LayoutDashboard,
   PiggyBank,
@@ -147,6 +148,14 @@ export const NAV_GROUPS: NavGroup[] = [
         href: '/portfolio',
         chord: 'i',
         match: (pathname) => pathname === '/portfolio' || pathname.startsWith('/portfolio/')
+      },
+      {
+        id: 'realized-gains',
+        label: PAGE_META.realizedGains.title,
+        icon: HandCoins,
+        keywords: ['realized', 'gains', 'capital gains', 'sales', 'dividends', 'tax'],
+        href: '/reports/gains',
+        match: (pathname) => pathname === '/reports/gains'
       }
     ]
   }
