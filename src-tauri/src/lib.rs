@@ -7,6 +7,7 @@ mod books;
 mod budgets;
 mod csv_import;
 mod db;
+mod dividends;
 mod export;
 mod fx;
 mod home;
@@ -171,6 +172,7 @@ pub fn run() {
             portfolio::fetch_holding_detail,
             portfolio::fetch_allocation_targets,
             portfolio::save_allocation_targets,
+            dividends::set_dividend_links,
             search::search_global,
         ])
         .run(tauri::generate_context!())

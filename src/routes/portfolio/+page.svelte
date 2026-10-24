@@ -215,24 +215,21 @@
                 <TrendingUp aria-hidden="true" class="size-4 text-muted-foreground" />
               {/snippet}
             </KpiCard>
-            <KpiCard title="Unrealized gain" valueClass={signColor(d.totalUnrealizedGain)}>
+            <KpiCard title="Total return" valueClass={signColor(d.totalReturn)}>
               {#snippet icon()}
-                {#if d.totalUnrealizedGain >= 0}
+                {#if d.totalReturn >= 0}
                   <TrendingUp aria-hidden="true" class="size-4 text-success" />
                 {:else}
                   <TrendingDown aria-hidden="true" class="size-4 text-destructive" />
                 {/if}
               {/snippet}
               {#snippet value()}
-                {formatSignedCurrency(d.totalUnrealizedGain, currency)}
+                {formatSignedCurrency(d.totalReturn, currency)}
               {/snippet}
             </KpiCard>
-            <KpiCard title="Realized gain" valueClass={signColor(d.totalRealizedGain)}>
+            <KpiCard title="Dividends" value={fmt(d.totalDividends)}>
               {#snippet icon()}
                 <HandCoins aria-hidden="true" class="size-4 text-muted-foreground" />
-              {/snippet}
-              {#snippet value()}
-                {formatSignedCurrency(d.totalRealizedGain, currency)}
               {/snippet}
             </KpiCard>
             <KpiCard

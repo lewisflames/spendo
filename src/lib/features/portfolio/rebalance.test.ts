@@ -20,6 +20,8 @@ function holding(
     gainLoss: 0,
     unrealizedGain: 0,
     realizedGain: 0,
+    dividends: 0,
+    totalReturn: 0,
     basisWarning: null,
     xirr: null,
     allocationPct: 0,

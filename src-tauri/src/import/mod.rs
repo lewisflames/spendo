@@ -289,12 +289,13 @@ pub struct GnuCashImportInput {
 
 /// Accounts the orphan sweep must keep: canonical roots for categories the
 /// source doesn't cover, accounts carrying budgets (the FK cascade would
-/// destroy budgets), accounts referenced by import rules (same cascade
-/// problem), and accounts referenced by schedules.
+/// destroy budgets), accounts referenced by import rules or dividend links
+/// (same cascade problem), and accounts referenced by schedules.
 fn protected_accounts(conn: &Connection, src: &SourceData) -> Result<HashSet<String>, AppError> {
     let mut protected: HashSet<String> = protected_default_roots(conn, src)?.into_iter().collect();
     protected.extend(accounts_with_budgets(conn)?);
     protected.extend(crate::import_rules::rule_account_guids(conn)?);
+    protected.extend(crate::dividends::linked_account_guids(conn)?);
     protected.extend(schedules::schedule_account_guids(conn)?);
     Ok(protected)
 }

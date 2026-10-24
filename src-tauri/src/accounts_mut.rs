@@ -354,6 +354,18 @@ fn delete_account_inner(conn: &Connection, guid: &str) -> Result<(), AppError> {
             "This one still has import rules pointing at it. Remove those rules first.".to_string(),
         ));
     }
+    // Dividend links are book config too; same guard as import rules.
+    let links: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM dividend_links WHERE account_guid = ?1",
+        params![guid],
+        |row| row.get(0),
+    )?;
+    if links > 0 {
+        return Err(AppError::Validation(
+            "This one is linked to a holding for dividends. Unlink it on that holding first."
+                .to_string(),
+        ));
+    }
     // Schedule templates embed account GUIDs in JSON (no FK), so deleting would
     // leave them failing at posting time.
     let schedules: i64 = conn.query_row(
@@ -453,6 +465,22 @@ mod tests {
         placeholder.commodity_guid = None;
         placeholder.placeholder = true;
         assert!(create_account_inner(&conn, placeholder).is_ok());
+    }
+
+    #[test]
+    fn delete_blocks_accounts_linked_for_dividends() {
+        let conn = setup();
+        conn.execute_batch(
+            "INSERT INTO commodities (guid, mnemonic, namespace) VALUES ('c-aapl', 'AAPL', 'NASDAQ');
+             INSERT INTO accounts (guid, name, account_type, parent_guid, placeholder, commodity_guid)
+             VALUES ('div', 'Dividends', 'INCOME', 'root', 0, 'c-eur');
+             INSERT INTO dividend_links (account_guid, commodity_guid) VALUES ('div', 'c-aapl');",
+        )
+        .unwrap();
+        let err = delete_account_inner(&conn, "div").unwrap_err();
+        assert!(err.to_string().contains("dividends"));
+        conn.execute("DELETE FROM dividend_links", []).unwrap();
+        delete_account_inner(&conn, "div").unwrap();
     }
 
     #[test]

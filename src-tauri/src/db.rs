@@ -414,6 +414,17 @@ CREATE TABLE IF NOT EXISTS allocation_targets (
 	target_pct REAL NOT NULL
 );
 
+-- Income accounts whose postings are dividends of one holding, for books
+-- that don't record the GnuCash zero-amount split on the stock account.
+-- User config like `import_rules`: account deletion and the GnuCash orphan
+-- sweep are guarded instead of cascading silently.
+CREATE TABLE IF NOT EXISTS dividend_links (
+	account_guid TEXT PRIMARY KEY REFERENCES accounts(guid) ON DELETE CASCADE,
+	commodity_guid TEXT NOT NULL REFERENCES commodities(guid) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_dividend_links_commodity ON dividend_links(commodity_guid);
+
 CREATE TABLE IF NOT EXISTS app_settings (
 	key TEXT PRIMARY KEY,
 	value TEXT NOT NULL
@@ -516,6 +527,7 @@ pub fn clear_db(conn: &Connection) -> Result<()> {
         "PRAGMA foreign_keys = OFF;
           DROP TABLE IF EXISTS attachments;
           DROP TABLE IF EXISTS allocation_targets;
+          DROP TABLE IF EXISTS dividend_links;
           DROP TABLE IF EXISTS budgets;
           DROP TABLE IF EXISTS csv_import_presets;
           DROP TABLE IF EXISTS import_rules;

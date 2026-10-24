@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import { Button } from '$lib/components/ui/button';
-  import { Pencil, RefreshCw } from '@lucide/svelte';
+  import { HandCoins, Pencil, RefreshCw } from '@lucide/svelte';
   import PageHeader, { type Breadcrumb } from '$lib/components/layout/page-header.svelte';
   import OverflowMenu from '$lib/components/shared/overflow-menu.svelte';
   import type { PortfolioHolding } from '$lib/tauri';
@@ -12,6 +12,7 @@
     refreshing,
     onRefresh,
     onEditSymbol,
+    onEditDividends,
     breadcrumbs = [],
     children = undefined
   }: {
@@ -20,6 +21,7 @@
     refreshing: boolean;
     onRefresh: () => void;
     onEditSymbol: () => void;
+    onEditDividends: () => void;
     breadcrumbs?: Breadcrumb[];
     children?: Snippet;
   } = $props();
@@ -41,5 +43,10 @@
     <RefreshCw aria-hidden="true" class="size-4 {refreshing ? 'animate-spin' : ''}" />
     {refreshing ? 'Refreshing…' : 'Refresh prices'}
   </Button>
-  <OverflowMenu actions={[{ label: 'Edit Yahoo symbol', icon: Pencil, onSelect: onEditSymbol }]} />
+  <OverflowMenu
+    actions={[
+      { label: 'Edit Yahoo symbol', icon: Pencil, onSelect: onEditSymbol },
+      { label: 'Dividend accounts', icon: HandCoins, onSelect: onEditDividends }
+    ]}
+  />
 </PageHeader>

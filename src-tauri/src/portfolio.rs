@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 use tauri::State;
 
 use crate::db::{run_blocking, with_tx_err, AppError, AppState};
+use crate::dividends;
 use crate::fx;
 use crate::lots;
 use crate::prices::{
@@ -49,6 +50,10 @@ pub struct PortfolioHolding {
     pub unrealized_gain: Option<f64>,
     /// Proceeds minus matched basis over every sale, fees included.
     pub realized_gain: f64,
+    /// Dividends received, net of withholding.
+    pub dividends: f64,
+    /// Unrealized + realized + dividends; `None` when unrealized is.
+    pub total_return: Option<f64>,
     pub basis_warning: Option<String>,
     pub xirr: Option<f64>,
     pub allocation_pct: f64,
@@ -76,6 +81,8 @@ pub struct PortfolioData {
     /// Sum over priced holdings only.
     pub total_unrealized_gain: f64,
     pub total_realized_gain: f64,
+    pub total_dividends: f64,
+    pub total_return: f64,
     pub total_xirr: Option<f64>,
     pub last_refreshed: Option<String>,
     pub holdings: Vec<PortfolioHolding>,
@@ -118,8 +125,21 @@ pub struct HoldingTransaction {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct HoldingDividend {
+    pub tx_guid: String,
+    pub post_date: String,
+    pub description: Option<String>,
+    pub amount: f64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HoldingDetail {
     pub holding: PortfolioHolding,
+    /// Newest first, in the report currency.
+    pub dividend_history: Vec<HoldingDividend>,
+    /// Income accounts linked to this holding in `dividend_links`.
+    pub dividend_accounts: Vec<dividends::DividendAccount>,
     pub price_history: Vec<PriceHistoryEntry>,
     pub value_trend: Vec<PortfolioValuePoint>,
     pub transactions: Vec<HoldingTransaction>,
@@ -410,6 +430,8 @@ fn value_commodity_groups(
                 gain_loss,
                 unrealized_gain: None,
                 realized_gain: 0.0,
+                dividends: 0.0,
+                total_return: None,
                 basis_warning: None,
                 xirr: None,
                 allocation_pct: 0.0,
@@ -704,6 +726,7 @@ const SHARE_DUST: f64 = 1e-9;
 /// event's own date.
 struct ReturnInputs {
     events: Vec<SplitEvent>,
+    dividends: Vec<dividends::DividendEvent>,
     fx_history: fx::FxHistory,
     report_currency: String,
     guid_to_quote: HashMap<String, String>,
@@ -762,9 +785,26 @@ fn load_return_inputs(conn: &Connection, filter: Option<&str>) -> Result<ReturnI
         utils::investment_types_sql()
     );
     let mut fee_stmt = conn.prepare(&fees_sql)?;
-    let fees: HashMap<String, f64> = fee_stmt
+    let mut fees: HashMap<String, f64> = fee_stmt
         .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
         .collect::<Result<HashMap<_, _>, _>>()?;
+
+    let legs: Vec<dividends::TradeLeg> = rows
+        .iter()
+        .map(|(tx, e)| dividends::TradeLeg {
+            tx_guid: tx.clone(),
+            commodity_guid: e.commodity_guid.clone(),
+            shares: e.shares_delta,
+            value: e.cost_delta,
+        })
+        .collect();
+    let mut dividends = dividends::detect(conn, &legs)?;
+    // A dividend's expenses are withholding, already netted from the
+    // dividend, not a cost of the shares it reinvests.
+    let dividend_txs: HashSet<&str> = dividends.iter().map(|d| d.tx_guid.as_str()).collect();
+    fees.retain(|tx, _| !dividend_txs.contains(tx.as_str()));
+    dividends.retain(|d| filter.is_none_or(|g| d.commodity_guid == g));
+
     let events = allocate_fees(rows, &fees)
         .into_iter()
         .filter(|e| filter.is_none_or(|g| e.commodity_guid == g))
@@ -802,6 +842,7 @@ fn load_return_inputs(conn: &Connection, filter: Option<&str>) -> Result<ReturnI
 
     Ok(ReturnInputs {
         events,
+        dividends,
         fx_history,
         report_currency,
         guid_to_quote,
@@ -997,7 +1038,8 @@ fn xirr_percent(flows: &[(NaiveDate, f64)]) -> Option<f64> {
 }
 
 /// Investor-signed cash flows in the report currency: buys (positive cost)
-/// are outflows, sells are inflows. Converted at each flow's own date.
+/// are outflows, sells and dividends are inflows. Converted at each flow's
+/// own date.
 fn cash_flows_from_events(
     inputs: &ReturnInputs,
     filter_guid: Option<&str>,
@@ -1021,6 +1063,18 @@ fn cash_flows_from_events(
             continue;
         }
         flows.push((date, flow));
+    }
+    for d in &inputs.dividends {
+        if filter_guid.is_some_and(|g| d.commodity_guid != g) {
+            continue;
+        }
+        let Ok(date) = NaiveDate::parse_from_str(&d.post_date, "%Y-%m-%d") else {
+            continue;
+        };
+        flows.push((
+            date,
+            d.amount * quote_rate(inputs, &d.commodity_guid, &d.post_date),
+        ));
     }
     flows
 }
@@ -1087,6 +1141,23 @@ fn holding_lots(
     lots::replay(&events, method)
 }
 
+/// One holding's dividends in the report currency at each payment's date.
+fn holding_dividends<'a>(
+    inputs: &'a ReturnInputs,
+    commodity_guid: &'a str,
+) -> impl Iterator<Item = HoldingDividend> + 'a {
+    inputs
+        .dividends
+        .iter()
+        .filter(move |d| d.commodity_guid == commodity_guid)
+        .map(move |d| HoldingDividend {
+            tx_guid: d.tx_guid.clone(),
+            post_date: d.post_date.clone(),
+            description: d.description.clone(),
+            amount: d.amount * quote_rate(inputs, commodity_guid, &d.post_date),
+        })
+}
+
 /// Fill the return fields (`xirr`, open basis, realized / unrealized gains,
 /// average cost) that need dated events rather than aggregated splits.
 fn attach_returns(
@@ -1108,6 +1179,12 @@ fn attach_returns(
     // An unpriced open position has no meaningful unrealized figure.
     holding.unrealized_gain = (holding.price.is_some() || holding.shares == 0.0)
         .then_some(holding.market_value - holding.open_cost_basis);
+    holding.dividends = holding_dividends(inputs, &holding.commodity_guid)
+        .map(|d| d.amount)
+        .sum();
+    holding.total_return = holding
+        .unrealized_gain
+        .map(|u| u + holding.realized_gain + holding.dividends);
     holding.basis_warning = lots.warning;
 }
 
@@ -1152,8 +1229,9 @@ fn fetch_portfolio_data_inner(conn: &Connection) -> Result<PortfolioData, AppErr
         finalize_totals(holdings);
     let total_xirr = total_xirr(&inputs, total_market_value, end_date);
     let total_open_cost_basis = holdings.iter().map(|h| h.open_cost_basis).sum();
-    let total_unrealized_gain = holdings.iter().filter_map(|h| h.unrealized_gain).sum();
-    let total_realized_gain = holdings.iter().map(|h| h.realized_gain).sum();
+    let total_unrealized_gain: f64 = holdings.iter().filter_map(|h| h.unrealized_gain).sum();
+    let total_realized_gain: f64 = holdings.iter().map(|h| h.realized_gain).sum();
+    let total_dividends: f64 = holdings.iter().map(|h| h.dividends).sum();
     let value_trend = build_value_trend(conn, None)?;
     let last_refreshed = get_last_refresh_timestamp(conn)?;
 
@@ -1164,6 +1242,8 @@ fn fetch_portfolio_data_inner(conn: &Connection) -> Result<PortfolioData, AppErr
         total_open_cost_basis,
         total_unrealized_gain,
         total_realized_gain,
+        total_dividends,
+        total_return: total_unrealized_gain + total_realized_gain + total_dividends,
         total_xirr,
         last_refreshed,
         holdings,
@@ -1451,6 +1531,10 @@ fn fetch_holding_detail_inner(
     let inputs = load_return_inputs(conn, Some(commodity_guid))?;
     let method = settings::cost_basis_method(conn)?;
     attach_returns(&mut holding, &inputs, method, Utc::now().date_naive());
+    let mut dividend_history: Vec<HoldingDividend> =
+        holding_dividends(&inputs, commodity_guid).collect();
+    dividend_history.reverse();
+    let dividend_accounts = dividends::linked_accounts(conn, commodity_guid)?;
 
     let price_history = get_price_history(conn, commodity_guid)?;
     let value_trend = build_value_trend(conn, Some(commodity_guid))?;
@@ -1458,6 +1542,8 @@ fn fetch_holding_detail_inner(
 
     Ok(HoldingDetail {
         holding,
+        dividend_history,
+        dividend_accounts,
         price_history,
         value_trend,
         transactions: tx_page.transactions,
@@ -1864,6 +1950,66 @@ mod tests {
         // Average cost 2210 / 20 = 110.5 per share.
         assert!((h.open_cost_basis - 552.5).abs() < 1e-9);
         assert!((h.realized_gain - (2094.0 - 1657.5)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn dividends_count_toward_total_return_and_xirr_but_not_basis() {
+        let conn = setup_trading_book();
+        conn.execute_batch(
+            "INSERT INTO accounts (guid, name, account_type, parent_guid, placeholder, commodity_guid) VALUES
+             ('div', 'Dividends', 'INCOME', 'root', 0, 'c-eur');",
+        )
+        .unwrap();
+        add_tx(
+            &conn,
+            "b1",
+            "2024-01-10",
+            &[("broker", 10, 1000), ("cash", -1000, -1000)],
+        );
+        let before = fetch_portfolio_data_inner(&conn)
+            .unwrap()
+            .holdings
+            .remove(0);
+
+        // Cash dividend of 40 with 6 withheld, flagged by a zero split.
+        add_tx(
+            &conn,
+            "d1",
+            "2024-03-01",
+            &[
+                ("broker", 0, 0),
+                ("div", -40, -40),
+                ("fees", 0, 6),
+                ("cash", 34, 34),
+            ],
+        );
+        // Reinvested dividend of 150 buying one share.
+        add_tx(
+            &conn,
+            "d2",
+            "2024-04-01",
+            &[("broker", 1, 150), ("div", -150, -150)],
+        );
+
+        let data = fetch_portfolio_data_inner(&conn).unwrap();
+        let h = &data.holdings[0];
+        assert!((h.dividends - 184.0).abs() < 1e-9);
+        // The withholding isn't a share cost: basis is 1000 + 150.
+        assert!((h.open_cost_basis - 1150.0).abs() < 1e-9);
+        assert!((h.unrealized_gain.unwrap() - (11.0 * 150.0 - 1150.0)).abs() < 1e-9);
+        assert!((h.total_return.unwrap() - (500.0 + 184.0)).abs() < 1e-9);
+        assert!((data.total_dividends - 184.0).abs() < 1e-9);
+        assert!((data.total_return - 684.0).abs() < 1e-9);
+        assert!(h.xirr.unwrap() > before.xirr.unwrap());
+
+        let detail = fetch_holding_detail_inner(&conn, "c-aapl", 1, 25, None).unwrap();
+        let dates: Vec<&str> = detail
+            .dividend_history
+            .iter()
+            .map(|d| d.post_date.as_str())
+            .collect();
+        assert_eq!(dates, ["2024-04-01", "2024-03-01"]);
+        assert!(detail.dividend_accounts.is_empty());
     }
 
     #[test]

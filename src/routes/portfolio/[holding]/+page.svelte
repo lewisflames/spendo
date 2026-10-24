@@ -11,6 +11,8 @@
   import type { PriceHistoryEntry } from '$lib/tauri';
   import { toast } from '$lib/components/ui/sonner';
   import SymbolOverrideDialog from '$lib/features/portfolio/symbol-override-dialog.svelte';
+  import DividendLinksDialog from '$lib/features/portfolio/dividend-links-dialog.svelte';
+  import HoldingDividendsTable from '$lib/features/portfolio/holding-dividends-table.svelte';
   import { sessionCurrency, parseLocalDate, formatCurrency } from '$lib/utils/format.svelte';
   import TimeSeriesChart from '$lib/components/shared/time-series-chart.svelte';
   import { ColumnsMenu } from '$lib/components/shared/columns-menu';
@@ -90,6 +92,7 @@
     overridesRes.data?.find((o) => o.commodityGuid === holdingGuid)?.symbol ?? null
   );
   let symbolDialogOpen = $state(false);
+  let dividendsDialogOpen = $state(false);
 
   const priceRefresh = createPriceRefresh(() => res.reload());
 
@@ -144,6 +147,7 @@
         refreshing={priceRefresh.refreshing}
         onRefresh={() => void priceRefresh.refresh()}
         onEditSymbol={() => (symbolDialogOpen = true)}
+        onEditDividends={() => (dividendsDialogOpen = true)}
         breadcrumbs={[{ label: PAGE_META.portfolio.title, href: resolve('/portfolio') }]}
       />
 
@@ -170,6 +174,16 @@
           mnemonic={holding.mnemonic}
           currentSymbol={overrideSymbol}
           onSave={() => void handleSymbolSave()}
+        />
+        <DividendLinksDialog
+          bind:open={dividendsDialogOpen}
+          commodityGuid={holdingGuid ?? ''}
+          mnemonic={holding.mnemonic}
+          linked={res.data.dividendAccounts}
+          onSave={() => {
+            toast.success('Dividend accounts saved');
+            res.reload();
+          }}
         />
       {/key}
 
@@ -216,11 +230,12 @@
           <Tabs.List aria-label="Holding data">
             <Tabs.Trigger value="activity">Activity</Tabs.Trigger>
             <Tabs.Trigger value="prices">Prices</Tabs.Trigger>
+            <Tabs.Trigger value="dividends">Dividends</Tabs.Trigger>
           </Tabs.List>
           <div class="flex items-center gap-2">
             {#if tab === 'activity'}
               <ColumnsMenu columns={ACTIVITY_COLUMNS} cols={activityCols} />
-            {:else}
+            {:else if tab === 'prices'}
               <ColumnsMenu columns={PRICE_COLUMNS} cols={priceCols} />
             {/if}
           </div>
@@ -243,6 +258,9 @@
             {priceCurrency}
             cols={priceCols}
           />
+        </Tabs.Content>
+        <Tabs.Content value="dividends">
+          <HoldingDividendsTable dividends={res.data.dividendHistory} />
         </Tabs.Content>
       </Tabs.Root>
     </div>

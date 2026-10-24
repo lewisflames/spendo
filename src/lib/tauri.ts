@@ -1034,6 +1034,10 @@ export interface PortfolioHolding {
   /** `null` for an unpriced open position. */
   unrealizedGain: number | null;
   realizedGain: number;
+  /** Net of withholding. */
+  dividends: number;
+  /** Unrealized + realized + dividends; `null` when unrealized is. */
+  totalReturn: number | null;
   basisWarning: string | null;
   xirr: number | null;
   allocationPct: number;
@@ -1057,6 +1061,8 @@ interface PortfolioData {
   /** Priced holdings only. */
   totalUnrealizedGain: number;
   totalRealizedGain: number;
+  totalDividends: number;
+  totalReturn: number;
   totalXirr: number | null;
   lastRefreshed: string | null;
   holdings: PortfolioHolding[];
@@ -1077,8 +1083,23 @@ export interface HoldingTransaction {
   runningShares: number;
 }
 
+export interface HoldingDividend {
+  txGuid: string;
+  postDate: string;
+  description: string | null;
+  amount: number;
+}
+
+export interface DividendAccount {
+  accountGuid: string;
+  accountName: string;
+}
+
 interface HoldingDetail {
   holding: PortfolioHolding;
+  /** Newest first, in the report currency. */
+  dividendHistory: HoldingDividend[];
+  dividendAccounts: DividendAccount[];
   priceHistory: PriceHistoryEntry[];
   valueTrend: PortfolioValuePoint[];
   transactions: HoldingTransaction[];
@@ -1102,6 +1123,15 @@ export const fetchHoldingDetail = (
     pageSize,
     search: search ?? null
   });
+
+interface DividendLinksInput {
+  commodityGuid: string;
+  accountGuids: string[];
+}
+
+/** Replace the income accounts whose postings count as this holding’s dividends. */
+export const setDividendLinks = (input: DividendLinksInput): Promise<DividendAccount[]> =>
+  invoke('set_dividend_links', { input });
 
 /** Saved rebalance target for one commodity (portfolio rebalance calculator). */
 interface AllocationTarget {
@@ -1348,6 +1378,7 @@ type CommandPayloads = {
   set_book_setting: BookSettings;
   set_budget_year_amount: Budget;
   set_schedule_active: Schedule;
+  set_dividend_links: DividendAccount[];
   set_symbol_override: SymbolOverride;
   skip_schedule_occurrence: string | null;
   update_account: void;

@@ -1,12 +1,11 @@
 <script lang="ts">
-  import { TrendingUp, TrendingDown, HandCoins, Layers } from '@lucide/svelte';
+  import { TrendingUp, TrendingDown, HandCoins, Coins } from '@lucide/svelte';
   import KpiCard from '$lib/components/shared/kpi-card.svelte';
   import {
     signColor,
     formatSessionCurrency as fmt,
     formatSignedCurrency,
     sessionCurrency,
-    formatShares,
     EMPTY_DASH
   } from '$lib/utils/format.svelte';
   import type { PortfolioHolding } from '$lib/tauri';
@@ -52,12 +51,12 @@
       {formatSignedCurrency(h.realizedGain, currency)}
     {/snippet}
   </KpiCard>
-  <KpiCard title="Shares">
+  <KpiCard title="Dividends">
     {#snippet icon()}
-      <Layers aria-hidden="true" class="size-4 text-muted-foreground" />
+      <Coins aria-hidden="true" class="size-4 text-muted-foreground" />
     {/snippet}
     {#snippet value()}
-      {formatShares(h.shares)}
+      {fmt(h.dividends)}
     {/snippet}
   </KpiCard>
 </div>

@@ -46,6 +46,8 @@
     | 'openBasis'
     | 'unrealized'
     | 'realized'
+    | 'dividends'
+    | 'totalReturn'
     | 'gainLoss'
     | 'xirr'
     | 'alloc'
@@ -63,6 +65,8 @@
     { id: 'openBasis', label: 'Cost basis' },
     { id: 'unrealized', label: 'Unrealized' },
     { id: 'realized', label: 'Realized' },
+    { id: 'dividends', label: 'Dividends' },
+    { id: 'totalReturn', label: 'Total return' },
     { id: 'gainLoss', label: 'Gain / loss' },
     { id: 'xirr', label: 'XIRR' },
     { id: 'alloc', label: 'Alloc' },
@@ -102,6 +106,8 @@
     'openBasis',
     'unrealized',
     'realized',
+    'dividends',
+    'totalReturn',
     'gainLoss',
     'xirr',
     'alloc',
@@ -184,6 +190,13 @@
         case 'realized':
           cmp = a.realizedGain - b.realizedGain;
           break;
+        case 'dividends':
+          cmp = a.dividends - b.dividends;
+          break;
+        case 'totalReturn':
+          cmp =
+            nullCmp(a.totalReturn, b.totalReturn) || (a.totalReturn ?? 0) - (b.totalReturn ?? 0);
+          break;
         case 'gainLoss':
           cmp = a.gainLoss - b.gainLoss;
           break;
@@ -216,6 +229,8 @@
     let openBasis = 0;
     let unrealized = 0;
     let realized = 0;
+    let dividends = 0;
+    let totalReturn = 0;
     let gainLoss = 0;
     let alloc = 0;
     let targetPct = 0;
@@ -226,6 +241,8 @@
       openBasis += h.openCostBasis;
       unrealized += h.unrealizedGain ?? 0;
       realized += h.realizedGain;
+      dividends += h.dividends;
+      totalReturn += h.totalReturn ?? 0;
       gainLoss += h.gainLoss;
       alloc += h.allocationPct;
       const row = rebalanceByGuid.get(h.commodityGuid);
@@ -240,6 +257,8 @@
       openBasis,
       unrealized,
       realized,
+      dividends,
+      totalReturn,
       gainLoss,
       alloc,
       targetPct,
@@ -424,6 +443,24 @@
                   {formatSignedCurrency(h.realizedGain, currency)}
                 </Table.Cell>
               {/if}
+              {#if cols.isVisible('dividends')}
+                <Table.Cell class="py-2.5 text-right tabular-nums">
+                  {fmt(h.dividends)}
+                </Table.Cell>
+              {/if}
+              {#if cols.isVisible('totalReturn')}
+                <Table.Cell
+                  class="py-2.5 text-right tabular-nums {h.totalReturn !== null
+                    ? signColor(h.totalReturn)
+                    : ''}"
+                >
+                  {#if h.totalReturn !== null}
+                    {formatSignedCurrency(h.totalReturn, currency)}
+                  {:else}
+                    <EmptyValue />
+                  {/if}
+                </Table.Cell>
+              {/if}
               {#if cols.isVisible('gainLoss')}
                 <Table.Cell class="py-2.5 text-right tabular-nums {signColor(h.gainLoss)}">
                   {formatSignedCurrency(h.gainLoss, currency)}
@@ -490,6 +527,12 @@
                   {:else if col.id === 'realized'}
                     <span class={signColor(totals.realized)}>
                       {formatSignedCurrency(totals.realized, currency)}
+                    </span>
+                  {:else if col.id === 'dividends'}
+                    {fmt(totals.dividends)}
+                  {:else if col.id === 'totalReturn'}
+                    <span class={signColor(totals.totalReturn)}>
+                      {formatSignedCurrency(totals.totalReturn, currency)}
                     </span>
                   {:else if col.id === 'gainLoss'}
                     <span class={signColor(totals.gainLoss)}>
