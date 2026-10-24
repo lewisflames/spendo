@@ -1122,6 +1122,326 @@ pub async fn delete_transaction(
     .await
 }
 
+// ── Bulk edit ───────────────────────────────────────────────────────────────
+
+/// Which transactions a bulk edit touches: an explicit selection, or every row
+/// matching the list filters ("Select all matching"). `expected_count` is the
+/// total the user saw; a mismatch means the list changed underneath them
+/// (another edit, an import, a book switch) and the edit is refused.
+#[derive(Debug, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum BulkTarget {
+    Guids {
+        guids: Vec<String>,
+    },
+    Matching {
+        filters: Option<Filters>,
+        expected_count: i64,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum BulkAction {
+    /// Delete whole transactions; attachments go with them (FK cascade).
+    Delete,
+    /// Repoint the splits posted to `from_account_guid` at `to_account_guid`
+    /// (e.g. recategorize imported rows). Amounts stay as they are, so both
+    /// accounts must share a commodity.
+    MoveSplits {
+        from_account_guid: String,
+        to_account_guid: String,
+    },
+    /// Overwrite the description. Splits are untouched, so cleared and
+    /// reconciled transactions are renamed too.
+    SetDescription { description: String },
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BulkEditInput {
+    pub target: BulkTarget,
+    pub action: BulkAction,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BulkEditResult {
+    /// Transactions the action changed.
+    pub changed: i64,
+    /// Transactions left alone because the splits the action would rewrite
+    /// are cleared or reconciled (that state belongs to the reconcile flow).
+    pub skipped_locked: i64,
+}
+
+fn resolve_bulk_guids(conn: &Connection, target: &BulkTarget) -> Result<Vec<String>, AppError> {
+    let guids = match target {
+        BulkTarget::Guids { guids } => {
+            let mut guids = guids.clone();
+            guids.sort();
+            guids.dedup();
+            guids
+        }
+        BulkTarget::Matching {
+            filters,
+            expected_count,
+        } => {
+            let w = build_filter_conditions(filters, 0)?;
+            let sql = format!("SELECT t.guid FROM transactions t{}", w.where_clause());
+            let mut stmt = conn.prepare(&sql)?;
+            let guids = stmt
+                .query_map(sql::param_refs(&w.params).as_slice(), |row| row.get(0))?
+                .collect::<Result<Vec<String>, _>>()?;
+            if guids.len() as i64 != *expected_count {
+                return Err(AppError::Validation(
+                    "The list changed since you selected it. Check the selection and try again"
+                        .to_string(),
+                ));
+            }
+            guids
+        }
+    };
+    if guids.is_empty() {
+        return Err(AppError::Validation(
+            "Select at least one transaction".to_string(),
+        ));
+    }
+    Ok(guids)
+}
+
+/// Transactions among `guids` with a cleared or reconciled split, limited to
+/// splits in `account_guid` when given.
+fn locked_tx_guids(
+    conn: &Connection,
+    guids: &[String],
+    account_guid: Option<&str>,
+) -> Result<std::collections::HashSet<String>, AppError> {
+    let mut locked = std::collections::HashSet::new();
+    for chunk in guids.chunks(MAX_IN_PARAMS) {
+        let mut sql = format!(
+            "SELECT DISTINCT tx_guid FROM splits
+             WHERE tx_guid IN ({}) AND reconcile_state IN ('c', 'y')",
+            sql::in_clause(chunk.len())
+        );
+        let mut params = sql::string_param_refs(chunk);
+        if let Some(ref account) = account_guid {
+            sql.push_str(&format!(" AND account_guid = ?{}", chunk.len() + 1));
+            params.push(account);
+        }
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(params.as_slice(), |row| row.get::<_, String>(0))?;
+        for row in rows {
+            locked.insert(row?);
+        }
+    }
+    Ok(locked)
+}
+
+/// Commodity of a postable account, with the same rules the editor applies
+/// (no ROOT, no placeholders).
+fn postable_account_commodity(
+    conn: &Connection,
+    guid: &str,
+    role: &str,
+) -> Result<Option<String>, AppError> {
+    let row = conn
+        .query_row(
+            "SELECT COALESCE(placeholder, 0), account_type, commodity_guid
+             FROM accounts WHERE guid = ?1",
+            params![guid],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((placeholder, account_type, commodity)) = row else {
+        return Err(AppError::NotFound(format!(
+            "The {role} account wasn't found. It may have been removed"
+        )));
+    };
+    if account_type == "ROOT" || placeholder != 0 {
+        return Err(AppError::Validation(format!(
+            "The {role} account just groups others. Pick a real one"
+        )));
+    }
+    Ok(commodity)
+}
+
+fn bulk_delete(conn: &Connection, guids: &[String]) -> Result<BulkEditResult, AppError> {
+    let locked = locked_tx_guids(conn, guids, None)?;
+    let open: Vec<String> = guids
+        .iter()
+        .filter(|g| !locked.contains(*g))
+        .cloned()
+        .collect();
+    let mut changed = 0;
+    for chunk in open.chunks(MAX_IN_PARAMS) {
+        let in_list = sql::in_clause(chunk.len());
+        let params = sql::string_param_refs(chunk);
+        conn.execute(
+            &format!("DELETE FROM splits WHERE tx_guid IN ({in_list})"),
+            params.as_slice(),
+        )?;
+        changed += conn.execute(
+            &format!("DELETE FROM transactions WHERE guid IN ({in_list})"),
+            params.as_slice(),
+        )? as i64;
+    }
+    Ok(BulkEditResult {
+        changed,
+        skipped_locked: locked.len() as i64,
+    })
+}
+
+fn bulk_move_splits(
+    conn: &Connection,
+    guids: &[String],
+    from: &str,
+    to: &str,
+) -> Result<BulkEditResult, AppError> {
+    if from == to {
+        return Err(AppError::Validation(
+            "Pick a different account to move to".to_string(),
+        ));
+    }
+    // The source may be a placeholder (imported books post to them); only the
+    // target has to accept new postings.
+    let from_commodity: Option<String> = conn
+        .query_row(
+            "SELECT commodity_guid FROM accounts WHERE guid = ?1",
+            params![from],
+            |row| row.get(0),
+        )
+        .optional()?
+        .ok_or_else(|| {
+            AppError::NotFound(
+                "The account to move from wasn't found. It may have been removed".to_string(),
+            )
+        })?;
+    let to_commodity = postable_account_commodity(conn, to, "target")?;
+    if from_commodity != to_commodity {
+        return Err(AppError::Validation(
+            "Both accounts need the same currency or commodity".to_string(),
+        ));
+    }
+
+    let locked = locked_tx_guids(conn, guids, Some(from))?;
+    let open: Vec<String> = guids
+        .iter()
+        .filter(|g| !locked.contains(*g))
+        .cloned()
+        .collect();
+    let mut changed = 0;
+    for chunk in open.chunks(MAX_IN_PARAMS) {
+        let in_list = sql::in_clause(chunk.len());
+        let n = chunk.len();
+        let mut params = sql::string_param_refs(chunk);
+        params.push(&from);
+        changed += conn.query_row(
+            &format!(
+                "SELECT COUNT(DISTINCT tx_guid) FROM splits
+                 WHERE tx_guid IN ({in_list}) AND account_guid = ?{}",
+                n + 1
+            ),
+            params.as_slice(),
+            |row| row.get::<_, i64>(0),
+        )?;
+        params.push(&to);
+        conn.execute(
+            &format!(
+                "UPDATE splits SET account_guid = ?{}
+                 WHERE tx_guid IN ({in_list}) AND account_guid = ?{}",
+                n + 2,
+                n + 1
+            ),
+            params.as_slice(),
+        )?;
+    }
+    Ok(BulkEditResult {
+        changed,
+        skipped_locked: locked.len() as i64,
+    })
+}
+
+fn bulk_set_description(
+    conn: &Connection,
+    guids: &[String],
+    description: &str,
+) -> Result<BulkEditResult, AppError> {
+    let description = description.trim();
+    if description.is_empty() {
+        return Err(AppError::Validation("Enter a description".to_string()));
+    }
+    if description.len() > 500 {
+        return Err(AppError::Validation(
+            "Keep the description under 500 characters".to_string(),
+        ));
+    }
+    let mut changed = 0;
+    for chunk in guids.chunks(MAX_IN_PARAMS) {
+        let mut params = sql::string_param_refs(chunk);
+        params.push(&description);
+        changed += conn.execute(
+            &format!(
+                "UPDATE transactions SET description = ?{} WHERE guid IN ({})",
+                chunk.len() + 1,
+                sql::in_clause(chunk.len())
+            ),
+            params.as_slice(),
+        )? as i64;
+    }
+    Ok(BulkEditResult {
+        changed,
+        skipped_locked: 0,
+    })
+}
+
+fn bulk_edit_transactions_inner(
+    conn: &Connection,
+    input: BulkEditInput,
+) -> Result<BulkEditResult, AppError> {
+    let guids = resolve_bulk_guids(conn, &input.target)?;
+    with_tx_err(conn, || match &input.action {
+        BulkAction::Delete => bulk_delete(conn, &guids),
+        BulkAction::MoveSplits {
+            from_account_guid,
+            to_account_guid,
+        } => bulk_move_splits(conn, &guids, from_account_guid, to_account_guid),
+        BulkAction::SetDescription { description } => {
+            bulk_set_description(conn, &guids, description)
+        }
+    })
+}
+
+#[tauri::command]
+pub async fn bulk_edit_transactions(
+    state: State<'_, AppState>,
+    input: BulkEditInput,
+) -> Result<BulkEditResult, AppError> {
+    let app_data_dir = state.app_data_dir.clone();
+    run_blocking(state.db.clone(), move |conn| {
+        crate::backups::before_change(
+            conn,
+            &app_data_dir,
+            crate::backups::BackupReason::BeforeBulkEdit,
+        )?;
+        bulk_edit_transactions_inner(conn, input)
+    })
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1590,5 +1910,269 @@ mod tests {
             )
             .unwrap();
         assert_eq!(locks, 2);
+    }
+
+    fn setup_bulk() -> Connection {
+        let conn = setup_two_accounts();
+        conn.execute_batch(
+            "INSERT INTO commodities (guid, mnemonic, namespace) VALUES ('c-usd', 'USD', 'CURRENCY');
+             INSERT INTO accounts (guid, name, account_type, parent_guid, placeholder, commodity_guid)
+             VALUES ('dining', 'Dining', 'EXPENSE', 'root', 0, 'c-eur'),
+                    ('travel-usd', 'Travel', 'EXPENSE', 'root', 0, 'c-usd');",
+        )
+        .unwrap();
+        conn
+    }
+
+    fn guids_target(guids: &[&str]) -> BulkTarget {
+        BulkTarget::Guids {
+            guids: guids.iter().map(|g| g.to_string()).collect(),
+        }
+    }
+
+    fn lock_tx(conn: &Connection, tx_guid: &str, account: &str) {
+        conn.execute(
+            "UPDATE splits SET reconcile_state = 'y', reconciled = 1
+             WHERE tx_guid = ?1 AND account_guid = ?2",
+            params![tx_guid, account],
+        )
+        .unwrap();
+    }
+
+    fn split_accounts(conn: &Connection, tx_guid: &str) -> Vec<String> {
+        let mut stmt = conn
+            .prepare("SELECT account_guid FROM splits WHERE tx_guid = ?1 ORDER BY account_guid")
+            .unwrap();
+        stmt.query_map(params![tx_guid], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<Vec<String>, _>>()
+            .unwrap()
+    }
+
+    #[test]
+    fn bulk_input_deserializes_from_ipc_shape() {
+        let input: BulkEditInput = serde_json::from_value(serde_json::json!({
+            "target": { "kind": "matching", "filters": { "search": "x" }, "expectedCount": 3 },
+            "action": { "kind": "moveSplits", "fromAccountGuid": "a", "toAccountGuid": "b" }
+        }))
+        .unwrap();
+        assert!(matches!(
+            input.target,
+            BulkTarget::Matching {
+                expected_count: 3,
+                ..
+            }
+        ));
+        assert!(matches!(
+            input.action,
+            BulkAction::MoveSplits { ref from_account_guid, .. } if from_account_guid == "a"
+        ));
+    }
+
+    #[test]
+    fn bulk_delete_skips_locked_transactions() {
+        let conn = setup_bulk();
+        let a = create_transaction_inner(&conn, balanced_input()).unwrap();
+        let b = create_transaction_inner(&conn, balanced_input()).unwrap();
+        lock_tx(&conn, &b, "checking");
+
+        let result = bulk_edit_transactions_inner(
+            &conn,
+            BulkEditInput {
+                target: guids_target(&[&a, &b, &a]),
+                action: BulkAction::Delete,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            result,
+            BulkEditResult {
+                changed: 1,
+                skipped_locked: 1
+            }
+        );
+        assert!(fetch_transaction_inner(&conn, &a).unwrap().is_none());
+        assert!(fetch_transaction_inner(&conn, &b).unwrap().is_some());
+        let orphans: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM splits WHERE tx_guid = ?1",
+                params![a],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(orphans, 0);
+    }
+
+    #[test]
+    fn bulk_move_repoints_only_open_splits_in_the_source_account() {
+        let conn = setup_bulk();
+        let a = create_transaction_inner(&conn, balanced_input()).unwrap();
+        let b = create_transaction_inner(&conn, balanced_input()).unwrap();
+        // Locked on the *other* side: the groceries split still moves.
+        lock_tx(&conn, &b, "checking");
+        let c = create_transaction_inner(&conn, balanced_input()).unwrap();
+        lock_tx(&conn, &c, "groceries");
+
+        let result = bulk_edit_transactions_inner(
+            &conn,
+            BulkEditInput {
+                target: guids_target(&[&a, &b, &c, "t1"]),
+                action: BulkAction::MoveSplits {
+                    from_account_guid: "groceries".into(),
+                    to_account_guid: "dining".into(),
+                },
+            },
+        )
+        .unwrap();
+        // t1 has no groceries split, so it is neither changed nor skipped.
+        assert_eq!(
+            result,
+            BulkEditResult {
+                changed: 2,
+                skipped_locked: 1
+            }
+        );
+        assert_eq!(split_accounts(&conn, &a), ["checking", "dining"]);
+        assert_eq!(split_accounts(&conn, &b), ["checking", "dining"]);
+        assert_eq!(split_accounts(&conn, &c), ["checking", "groceries"]);
+    }
+
+    #[test]
+    fn bulk_move_rejects_bad_targets() {
+        let conn = setup_bulk();
+        let a = create_transaction_inner(&conn, balanced_input()).unwrap();
+        for to in ["groceries", "placeholder", "root", "travel-usd", "missing"] {
+            let err = bulk_edit_transactions_inner(
+                &conn,
+                BulkEditInput {
+                    target: guids_target(&[&a]),
+                    action: BulkAction::MoveSplits {
+                        from_account_guid: "groceries".into(),
+                        to_account_guid: to.into(),
+                    },
+                },
+            )
+            .unwrap_err();
+            let expected_kind = if to == "missing" {
+                "notFound"
+            } else {
+                "validation"
+            };
+            assert_eq!(err.kind(), expected_kind, "{to}: {err}");
+        }
+        assert_eq!(split_accounts(&conn, &a), ["checking", "groceries"]);
+    }
+
+    #[test]
+    fn bulk_set_description_renames_locked_transactions_too() {
+        let conn = setup_bulk();
+        let a = create_transaction_inner(&conn, balanced_input()).unwrap();
+        lock_tx(&conn, &a, "checking");
+        let result = bulk_edit_transactions_inner(
+            &conn,
+            BulkEditInput {
+                target: guids_target(&[&a, "t1"]),
+                action: BulkAction::SetDescription {
+                    description: "  Supermarket ".into(),
+                },
+            },
+        )
+        .unwrap();
+        assert_eq!(result.changed, 2);
+        let detail = fetch_transaction_inner(&conn, &a).unwrap().unwrap();
+        assert_eq!(
+            detail.transaction.description.as_deref(),
+            Some("Supermarket")
+        );
+
+        let err = bulk_edit_transactions_inner(
+            &conn,
+            BulkEditInput {
+                target: guids_target(&[&a]),
+                action: BulkAction::SetDescription {
+                    description: "   ".into(),
+                },
+            },
+        )
+        .unwrap_err();
+        assert_eq!(err.kind(), "validation");
+    }
+
+    #[test]
+    fn bulk_matching_target_uses_list_filters_and_expected_count() {
+        let conn = setup_bulk();
+        conn.execute(
+            "INSERT INTO transactions (guid, post_date) VALUES ('future', '2099-01-01')",
+            [],
+        )
+        .unwrap();
+        let filters = || {
+            Some(Filters {
+                search: None,
+                date_from: Some("2024-01-01".into()),
+                date_to: Some("2024-01-31".into()),
+            })
+        };
+        // Stale count: refuse instead of touching a different set of rows.
+        let err = bulk_edit_transactions_inner(
+            &conn,
+            BulkEditInput {
+                target: BulkTarget::Matching {
+                    filters: filters(),
+                    expected_count: 2,
+                },
+                action: BulkAction::Delete,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(err.kind(), "validation");
+
+        let result = bulk_edit_transactions_inner(
+            &conn,
+            BulkEditInput {
+                target: BulkTarget::Matching {
+                    filters: filters(),
+                    expected_count: 1,
+                },
+                action: BulkAction::Delete,
+            },
+        )
+        .unwrap();
+        assert_eq!(result.changed, 1);
+        assert!(fetch_transaction_inner(&conn, "t1").unwrap().is_none());
+        assert!(fetch_transaction_inner(&conn, "t2").unwrap().is_some());
+
+        // No filters still respects the visibility window: `future` is not
+        // part of "all matching".
+        let result = bulk_edit_transactions_inner(
+            &conn,
+            BulkEditInput {
+                target: BulkTarget::Matching {
+                    filters: None,
+                    expected_count: 1,
+                },
+                action: BulkAction::Delete,
+            },
+        )
+        .unwrap();
+        assert_eq!(result.changed, 1);
+        let left: i64 = conn
+            .query_row("SELECT COUNT(*) FROM transactions", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(left, 1);
+    }
+
+    #[test]
+    fn bulk_edit_requires_a_selection() {
+        let conn = setup_bulk();
+        let err = bulk_edit_transactions_inner(
+            &conn,
+            BulkEditInput {
+                target: guids_target(&[]),
+                action: BulkAction::Delete,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(err.kind(), "validation");
     }
 }

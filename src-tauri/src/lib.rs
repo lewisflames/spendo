@@ -127,6 +127,7 @@ pub fn run() {
             transactions::create_transaction,
             transactions::update_transaction,
             transactions::delete_transaction,
+            transactions::bulk_edit_transactions,
             attachments::fetch_attachments,
             attachments::add_attachments,
             attachments::delete_attachment,

@@ -42,15 +42,17 @@ pub enum BackupReason {
     BeforeImport,
     BeforeClear,
     BeforeRestore,
+    BeforeBulkEdit,
 }
 
 impl BackupReason {
-    const ALL: [BackupReason; 5] = [
+    const ALL: [BackupReason; 6] = [
         BackupReason::Daily,
         BackupReason::Manual,
         BackupReason::BeforeImport,
         BackupReason::BeforeClear,
         BackupReason::BeforeRestore,
+        BackupReason::BeforeBulkEdit,
     ];
 
     /// File-name token (kebab-case so names stay readable in a file manager).
@@ -61,6 +63,7 @@ impl BackupReason {
             BackupReason::BeforeImport => "before-import",
             BackupReason::BeforeClear => "before-clear",
             BackupReason::BeforeRestore => "before-restore",
+            BackupReason::BeforeBulkEdit => "before-bulk-edit",
         }
     }
 
@@ -71,7 +74,10 @@ impl BackupReason {
     fn is_safety(self) -> bool {
         matches!(
             self,
-            BackupReason::BeforeImport | BackupReason::BeforeClear | BackupReason::BeforeRestore
+            BackupReason::BeforeImport
+                | BackupReason::BeforeClear
+                | BackupReason::BeforeRestore
+                | BackupReason::BeforeBulkEdit
         )
     }
 }
