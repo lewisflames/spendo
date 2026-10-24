@@ -3,33 +3,30 @@
   import {
     ArrowRight,
     CalendarClock,
-    CircleCheck,
     Scale,
     TrendingDown,
     TrendingUp,
     Wallet
   } from '@lucide/svelte';
-  import * as Card from '$lib/components/ui/card';
   import { Button } from '$lib/components/ui/button';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import ErrorCard from '$lib/components/shared/error-card.svelte';
-  import IconCardHeader from '$lib/components/shared/icon-card-header.svelte';
   import KpiCard from '$lib/components/shared/kpi-card.svelte';
   import TableSkeleton from '$lib/components/shared/table-skeleton.svelte';
   import EmptyBookPrompt from '$lib/components/shared/empty-book-prompt.svelte';
   import PnlTrend from '$lib/features/pnl/pnl-trend.svelte';
   import TransactionTable from '$lib/features/transactions/transaction-table.svelte';
   import { PAGE_META } from '$lib/features/nav/page-meta';
-  import { scheduleStatus } from '$lib/features/schedules/schedule-utils';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import { dbSession } from '$lib/stores/db.svelte';
   import { navBadges } from '$lib/stores/nav.svelte';
-  import { fetchPnlReport, fetchPnlTrend, fetchSchedules, fetchTransactions } from '$lib/tauri';
+  import { fetchPnlReport, fetchPnlTrend, fetchTransactions } from '$lib/tauri';
   import { computePrevRange, todayStr } from '$lib/utils/date-utils.svelte';
   import { modKeyLabel } from '$lib/utils/platform';
+  import { tooltip } from '$lib/attachments/tooltip';
   import {
     clampZero,
-    formatDate,
+    formatNumber,
     formatSessionCurrency as fmt,
     plural,
     sessionCurrency,
@@ -39,6 +36,8 @@
   const meta = PAGE_META.overview;
   const modKey = modKeyLabel();
   const RECENT_COUNT = 8;
+  const PILL_CLASS =
+    'flex h-8 items-center gap-1.5 rounded-full border bg-card px-3 text-sm transition-colors hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none';
 
   let today = todayStr();
   let monthStart = `${today.slice(0, 7)}-01`;
@@ -80,27 +79,35 @@
     label: 'We couldn’t load recent transactions'
   });
 
-  const schedules = useAsyncData({
-    enabled: () => !!dbSession.value,
-    fetch: () => {
-      void navBadges.value.dueSchedules;
-      return fetchSchedules();
-    },
-    label: 'We couldn’t load your schedules'
-  });
-
-  let dueSchedules = $derived(
-    (schedules.data ?? [])
-      .filter((s) => scheduleStatus(s, today) === 'overdue')
-      .sort((a, b) => (a.nextDueDate ?? '').localeCompare(b.nextDueDate ?? ''))
-      .slice(0, 5)
-  );
+  let uncleared = $derived(navBadges.value.unclearedTransactions);
+  let dueCount = $derived(navBadges.value.dueSchedules);
 
   let monthLoading = $derived(month.loading && !month.data);
 </script>
 
+{#snippet pillContent(Icon: typeof Scale, label: string)}
+  <Icon aria-hidden="true" class="size-3.5 text-muted-foreground" />
+  <span class="font-medium tabular-nums">{label}</span>
+  <ArrowRight aria-hidden="true" class="size-3.5 text-muted-foreground" />
+{/snippet}
+
 <div class="page-stack">
-  <PageHeader title={meta.title} description={meta.description} />
+  <!-- Needs-attention pills sit in the header's action slot and only appear
+       when there is something to do. -->
+  <PageHeader title={meta.title} description={meta.description}>
+    {#if uncleared > 0}
+      {@const hint = `Reconcile ${plural(uncleared, 'uncleared transaction')}`}
+      <a href={resolve('/reconcile')} class={PILL_CLASS} aria-label={hint} {@attach tooltip(hint)}>
+        {@render pillContent(Scale, `${formatNumber(uncleared)} uncleared`)}
+      </a>
+    {/if}
+    {#if dueCount > 0}
+      {@const hint = `Review ${plural(dueCount, 'due schedule')}`}
+      <a href={resolve('/scheduled')} class={PILL_CLASS} aria-label={hint} {@attach tooltip(hint)}>
+        {@render pillContent(CalendarClock, `${formatNumber(dueCount)} due`)}
+      </a>
+    {/if}
+  </PageHeader>
 
   {#if summary && summary.totalAccounts === 0}
     <EmptyBookPrompt />
@@ -150,68 +157,15 @@
       </KpiCard>
     </div>
 
-    <div class="grid grid-cols-1 items-start gap-6 @3xl:grid-cols-3">
-      <div class="@3xl:col-span-2">
-        {#if trend.error && !trend.data}
-          <ErrorCard message={trend.error} onRetry={() => trend.reload()} />
-        {:else}
-          <PnlTrend
-            data={trend.data ?? []}
-            loading={trend.loading && !trend.data}
-            description="The last 12 months"
-          />
-        {/if}
-      </div>
-
-      <Card.Root>
-        <IconCardHeader title="Needs attention">
-          {#snippet icon()}
-            <CircleCheck aria-hidden="true" class="size-4 text-muted-foreground" />
-          {/snippet}
-        </IconCardHeader>
-        <Card.Content class="flex flex-col gap-4">
-          <a
-            href={resolve('/reconcile')}
-            class="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-sm transition-colors hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-          >
-            <span class="flex items-center gap-2">
-              <Scale aria-hidden="true" class="size-4 text-muted-foreground" />
-              Uncleared transactions
-            </span>
-            <span class="font-medium tabular-nums">{navBadges.value.unclearedTransactions}</span>
-          </a>
-
-          <div class="flex flex-col gap-2">
-            <div class="flex items-center justify-between gap-2 text-sm">
-              <span class="flex items-center gap-2">
-                <CalendarClock aria-hidden="true" class="size-4 text-muted-foreground" />
-                Due schedules
-              </span>
-              <span class="font-medium tabular-nums">{navBadges.value.dueSchedules}</span>
-            </div>
-            {#if dueSchedules.length > 0}
-              <ul class="flex flex-col divide-y rounded-lg border">
-                {#each dueSchedules as schedule (schedule.guid)}
-                  <li class="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-                    <span class="min-w-0 truncate">{schedule.name}</span>
-                    <span class="shrink-0 text-xs text-muted-foreground">
-                      {schedule.nextDueDate ? formatDate(schedule.nextDueDate) : ''}
-                    </span>
-                  </li>
-                {/each}
-              </ul>
-            {:else if schedules.data}
-              <p class="text-sm text-muted-foreground">Nothing due. You’re all caught up.</p>
-            {/if}
-          </div>
-
-          <Button variant="outline" href={resolve('/scheduled')} class="self-start">
-            Scheduled
-            <ArrowRight aria-hidden="true" class="size-4" />
-          </Button>
-        </Card.Content>
-      </Card.Root>
-    </div>
+    {#if trend.error && !trend.data}
+      <ErrorCard message={trend.error} onRetry={() => trend.reload()} />
+    {:else}
+      <PnlTrend
+        data={trend.data ?? []}
+        loading={trend.loading && !trend.data}
+        description="The last 12 months"
+      />
+    {/if}
 
     <section class="flex flex-col gap-3" aria-labelledby="recent-heading">
       <div class="flex items-center justify-between gap-2">
