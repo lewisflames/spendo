@@ -4,6 +4,7 @@ use serde::Serialize;
 use std::sync::atomic::Ordering;
 use tauri::State;
 
+use crate::backups::BackupReason;
 use crate::db::{clear_db, run_blocking, AppState};
 
 #[tauri::command]
@@ -11,7 +12,9 @@ pub async fn clear_app_db(state: State<'_, AppState>) -> Result<(), AppError> {
     // Clearing the book invalidates any in-flight price refresh (which checks
     // only the generation before writing), so bump it under the DB lock.
     let generation = state.book_generation.clone();
+    let app_data_dir = state.app_data_dir.clone();
     run_blocking(state.db.clone(), move |conn| {
+        crate::backups::before_change(conn, &app_data_dir, BackupReason::BeforeClear)?;
         clear_db(conn)?;
         generation.fetch_add(1, Ordering::SeqCst);
         Ok(())
@@ -32,6 +35,7 @@ pub struct BookSettings {
     pub price_auto_refresh: String,
     pub export_csv_delimiter: String,
     pub export_date_format: String,
+    pub auto_backup: String,
 }
 
 fn default_book_settings() -> BookSettings {
@@ -41,6 +45,7 @@ fn default_book_settings() -> BookSettings {
         price_auto_refresh: "off".to_string(),
         export_csv_delimiter: ",".to_string(),
         export_date_format: "iso".to_string(),
+        auto_backup: "daily".to_string(),
     }
 }
 
@@ -92,6 +97,12 @@ fn validate_book_setting(key: &str, value: &str) -> Result<(), AppError> {
                 "Invalid value for {key}: {value}"
             ))),
         },
+        "auto_backup" => match value {
+            "daily" | "off" => Ok(()),
+            _ => Err(AppError::Validation(format!(
+                "Invalid value for {key}: {value}"
+            ))),
+        },
         _ => Err(AppError::Validation(format!(
             "Unknown setting: {key}. We don't know that one"
         ))),
@@ -121,7 +132,14 @@ fn get_book_settings_inner(conn: &Connection) -> Result<BookSettings, AppError> 
             defaults.export_csv_delimiter.clone(),
         )?,
         export_date_format: pick("export_date_format", defaults.export_date_format.clone())?,
+        auto_backup: pick("auto_backup", defaults.auto_backup.clone())?,
     })
+}
+
+/// Whether the daily snapshot runs for this book (`auto_backup`). Safety
+/// snapshots before bulk changes ignore it.
+pub(crate) fn auto_backup_enabled(conn: &Connection) -> Result<bool, AppError> {
+    Ok(get_book_settings_inner(conn)?.auto_backup == "daily")
 }
 
 fn set_book_setting_inner(
@@ -188,6 +206,9 @@ mod tests {
         assert_eq!(updated.export_csv_delimiter, ";");
         let updated = set_book_setting_inner(&conn, "export_date_format", "locale").unwrap();
         assert_eq!(updated.export_date_format, "locale");
+        let updated = set_book_setting_inner(&conn, "auto_backup", "off").unwrap();
+        assert_eq!(updated.auto_backup, "off");
+        assert!(!auto_backup_enabled(&conn).unwrap());
         // Full snapshot persists.
         assert_eq!(get_book_settings_inner(&conn).unwrap(), updated);
     }
@@ -207,6 +228,7 @@ mod tests {
             ("price_auto_refresh", "hourly"),
             ("export_csv_delimiter", "|"),
             ("export_date_format", "us"),
+            ("auto_backup", "hourly"),
         ] {
             assert!(
                 set_book_setting_inner(&conn, key, value).is_err(),

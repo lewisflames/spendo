@@ -666,8 +666,14 @@ pub async fn import_gnucash(
         delete_orphans,
         ..
     } = input;
+    let app_data_dir = state.app_data_dir.clone();
     let mut result = db::run_blocking(state.db.clone(), move |conn| {
         db::ensure_same_book(&generation_handle, generation)?;
+        crate::backups::before_change(
+            conn,
+            &app_data_dir,
+            crate::backups::BackupReason::BeforeImport,
+        )?;
         import_source_inner(conn, src, &filename, delete_orphans)
     })
     .await?;

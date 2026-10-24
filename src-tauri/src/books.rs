@@ -24,6 +24,10 @@ fn gnucash_guidance() -> String {
 /// Check that `path` is an openable Spendo book: a Spendo `application_id`
 /// stamp. GnuCash sources and random SQLite/text files are rejected with
 /// actionable errors.
+pub(crate) fn validate_spendo_db(path: &Path) -> Result<(), AppError> {
+    validate_spendo_db_inner(path)
+}
+
 fn validate_spendo_db_inner(path: &Path) -> Result<(), AppError> {
     if !path.is_file() {
         return Err(AppError::Validation(format!(
@@ -220,7 +224,9 @@ pub async fn open_book(
     // Validate + connect on a blocking thread before touching shared state.
     let open_path = new_path.clone();
     let new_conn = db::run_io(move || open_book_inner(&open_path)).await?;
-    activate_book(&state, new_path, new_conn).await
+    let result = activate_book(&state, new_path, new_conn).await?;
+    crate::backups::spawn_daily_check(state.db.clone(), state.app_data_dir.clone());
+    Ok(result)
 }
 
 #[tauri::command]

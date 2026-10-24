@@ -915,8 +915,14 @@ pub async fn csv_commit(
     let path = input.path.clone();
     let bytes = run_io(move || read_file_bytes(&path)).await?;
     let generation_handle = state.book_generation.clone();
+    let app_data_dir = state.app_data_dir.clone();
     run_blocking(state.db.clone(), move |conn| {
         ensure_same_book(&generation_handle, generation)?;
+        crate::backups::before_change(
+            conn,
+            &app_data_dir,
+            crate::backups::BackupReason::BeforeImport,
+        )?;
         commit_inner(conn, input, &bytes)
     })
     .await

@@ -2,6 +2,7 @@ mod account_detail;
 mod accounts;
 mod accounts_mut;
 mod attachments;
+mod backups;
 mod books;
 mod budgets;
 mod csv_import;
@@ -77,8 +78,10 @@ pub fn run() {
                 }
             };
 
+            let db = Arc::new(Mutex::new(conn));
+            backups::start_daily_thread(db.clone(), app_data_dir.clone());
             app.manage(AppState {
-                db: Arc::new(Mutex::new(conn)),
+                db,
                 book_generation: Arc::new(AtomicU64::new(0)),
                 db_path: Mutex::new(active_path),
                 app_data_dir,
@@ -92,6 +95,10 @@ pub fn run() {
             books::create_book_at,
             books::save_book_as,
             books::close_book,
+            backups::fetch_backups,
+            backups::create_backup,
+            backups::delete_backup,
+            backups::restore_backup,
             init::set_base_currency,
             settings::clear_app_db,
             settings::get_book_settings,
