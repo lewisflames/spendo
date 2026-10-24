@@ -14,7 +14,14 @@
   import { cn } from '$lib/utils';
   import { isBoolean, usePersistedState } from '$lib/hooks/use-persisted-state.svelte';
 
-  let { filters }: { filters: Filters } = $props();
+  let {
+    filters,
+    refreshKey = 0
+  }: {
+    filters: Filters;
+    /** Bump to refetch after the ledger changed underneath the same filters. */
+    refreshKey?: number;
+  } = $props();
 
   // Mount the grid only once the browser is idle (or after two frames):
   // this keeps route navigation snappy by letting the ledger table win the
@@ -86,8 +93,9 @@
 
   const res = useAsyncData({
     enabled: () => !!dbSession.value && mounted && !collapsed.value,
-    // Reads `debouncedFilters`, so changing a filter refetches (debounced).
-    fetch: () => fetchTransactionHeatmap(debouncedFilters),
+    // Reads `debouncedFilters` and `refreshKey`, so changing a filter refetches
+    // (debounced) and a bump refetches right away.
+    fetch: () => (void refreshKey, fetchTransactionHeatmap(debouncedFilters)),
     label: 'We couldn’t load recent activity'
   });
 

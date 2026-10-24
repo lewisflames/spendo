@@ -298,7 +298,8 @@ export const closeBook = (): Promise<CloseBookResult> => invoke('close_book');
 
 // ── Backups (snapshots of the active book in the app-data folder) ──
 
-export type BackupReason = 'daily' | 'manual' | 'beforeImport' | 'beforeClear' | 'beforeRestore';
+export type BackupReason =
+  'daily' | 'manual' | 'beforeImport' | 'beforeClear' | 'beforeRestore' | 'beforeBulkEdit';
 
 export interface BackupEntry {
   fileName: string;
@@ -570,6 +571,29 @@ export const updateTransaction = (guid: string, input: TxInput): Promise<void> =
 
 export const deleteTransaction = (guid: string, unreconcile = false): Promise<void> =>
   invoke('delete_transaction', { guid, unreconcile });
+
+/** What a bulk edit touches: explicit rows, or every row matching the list filters. */
+export type BulkTarget =
+  | { kind: 'guids'; guids: string[] }
+  /** `expectedCount` is the total the user saw; the backend refuses a changed list. */
+  | { kind: 'matching'; filters: Filters | null; expectedCount: number };
+
+export type BulkAction =
+  | { kind: 'delete' }
+  | { kind: 'moveSplits'; fromAccountGuid: string; toAccountGuid: string }
+  | { kind: 'setDescription'; description: string };
+
+export interface BulkEditResult {
+  changed: number;
+  /** Left alone: the splits the action would rewrite are cleared or reconciled. */
+  skippedLocked: number;
+}
+
+/** Takes a safety backup first, then applies the action in one transaction. */
+export const bulkEditTransactions = (
+  target: BulkTarget,
+  action: BulkAction
+): Promise<BulkEditResult> => invoke('bulk_edit_transactions', { input: { target, action } });
 
 export const fetchTransactions = (
   page: number,
@@ -1171,6 +1195,7 @@ export const searchGlobal = (query: string, limitPerGroup?: number): Promise<Glo
  */
 type CommandPayloads = {
   add_attachments: AttachmentInfo[];
+  bulk_edit_transactions: BulkEditResult;
   clear_app_db: void;
   close_book: CloseBookResult;
   create_backup: BackupEntry;

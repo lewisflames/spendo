@@ -29,7 +29,8 @@
     manual: 'Manual',
     beforeImport: 'Before import',
     beforeClear: 'Before clearing data',
-    beforeRestore: 'Before restore'
+    beforeRestore: 'Before restore',
+    beforeBulkEdit: 'Before bulk edit'
   };
 
   const list = useAsyncData({

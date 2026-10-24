@@ -1,8 +1,21 @@
 <script lang="ts">
   import ErrorCard from '$lib/components/shared/error-card.svelte';
   import DimWrapper from '$lib/components/shared/dim-wrapper.svelte';
-  import { fetchTransactions } from '$lib/tauri';
-  import { dbBootstrapping, dbSession } from '$lib/stores/db.svelte';
+  import { SvelteMap } from 'svelte/reactivity';
+  import {
+    fetchAccounts,
+    fetchTransactions,
+    type BulkAction,
+    type BulkEditResult,
+    type BulkTarget,
+    type TransactionRow
+  } from '$lib/tauri';
+  import {
+    activeBookPath,
+    dbBootstrapping,
+    dbSession,
+    refreshSession
+  } from '$lib/stores/db.svelte';
   import { appSettings, applyPageSize } from '$lib/stores/settings.svelte';
   import TransactionFilters from '$lib/features/transactions/transaction-filters.svelte';
   import TransactionTable, {
@@ -10,6 +23,16 @@
     TRANSACTION_DEFAULT_COLUMNS
   } from '$lib/features/transactions/transaction-table.svelte';
   import TransactionHeatmap from '$lib/features/transactions/transaction-heatmap.svelte';
+  import BulkEditBar from '$lib/features/transactions/bulk-edit-bar.svelte';
+  import BulkEditDialog from '$lib/features/transactions/bulk-edit-dialog.svelte';
+  import {
+    bulkResultMessage,
+    pageSelectionState,
+    rangeRows,
+    selectionAccounts
+  } from '$lib/features/transactions/bulk-edit';
+  import { flattenAccountsForPicker } from '$lib/features/accounts/account-picker-utils';
+  import { toast } from '$lib/components/ui/sonner';
   import { Button } from '$lib/components/ui/button';
   import { Plus } from '@lucide/svelte';
   import { resolve } from '$app/paths';
@@ -138,6 +161,91 @@
     },
     label: 'We couldn’t load your transactions'
   });
+
+  // ── Bulk edit ──
+  // Selected rows keep their loaded data so the dialog can offer the accounts
+  // they post to, across pages. "All matching" reaches rows never loaded, so
+  // it targets the filters instead.
+  const selected = new SvelteMap<string, TransactionRow>();
+  let allMatching = $state(false);
+  /** Last toggled row: the shift-click range anchor. Not reactive on purpose. */
+  let anchor: string | null = null;
+  let bulkKind = $state<BulkAction['kind']>('moveSplits');
+  let bulkOpen = $state(false);
+  let heatmapKey = $state(0);
+
+  let rows = $derived(res.data?.transactions ?? []);
+  let total = $derived(res.data?.total ?? 0);
+  let hasSelection = $derived(allMatching || selected.size > 0);
+
+  function clearSelection() {
+    selected.clear();
+    allMatching = false;
+    anchor = null;
+  }
+
+  // A different query or book makes the selection meaningless.
+  useResetPageOnChange(() => JSON.stringify(filters), clearSelection);
+  useResetPageOnChange(() => activeBookPath.value, clearSelection);
+
+  function toggleRow(txn: TransactionRow, next: boolean) {
+    allMatching = false;
+    if (next) selected.set(txn.guid, txn);
+    else selected.delete(txn.guid);
+    anchor = txn.guid;
+  }
+
+  function togglePage(next: boolean) {
+    allMatching = false;
+    for (const txn of rows) {
+      if (next) selected.set(txn.guid, txn);
+      else selected.delete(txn.guid);
+    }
+  }
+
+  function selectRange(guid: string) {
+    allMatching = false;
+    for (const txn of rangeRows(rows, anchor, guid)) selected.set(txn.guid, txn);
+    anchor = guid;
+  }
+
+  let bulkTarget = $derived<BulkTarget>(
+    allMatching
+      ? {
+          kind: 'matching',
+          filters: Object.keys(filters).length > 0 ? filters : null,
+          expectedCount: total
+        }
+      : { kind: 'guids', guids: [...selected.keys()] }
+  );
+
+  let sharedDescription = $derived.by(() => {
+    if (allMatching) return '';
+    const descriptions = new Set([...selected.values()].map((t) => t.description ?? ''));
+    return descriptions.size === 1 ? [...descriptions][0] : '';
+  });
+
+  const accountsRes = useAsyncData({
+    enabled: () => !!dbSession.value && hasSelection,
+    fetch: fetchAccounts,
+    label: 'We couldn’t load your accounts'
+  });
+  let pickerAccounts = $derived(flattenAccountsForPicker(accountsRes.data?.trees));
+
+  function openBulk(kind: BulkAction['kind']) {
+    bulkKind = kind;
+    bulkOpen = true;
+  }
+
+  function handleBulkDone(kind: BulkAction['kind'], result: BulkEditResult) {
+    const message = bulkResultMessage(kind, result);
+    if (result.changed > 0) toast.success(message);
+    else toast.info(message);
+    clearSelection();
+    heatmapKey += 1;
+    res.reload();
+    refreshSession();
+  }
 </script>
 
 <svelte:head>
@@ -154,7 +262,7 @@
         : meta.description}
     />
 
-    <TransactionHeatmap {filters} />
+    <TransactionHeatmap {filters} refreshKey={heatmapKey} />
 
     <TransactionFilters bind:search={searchInput} bind:dateFrom bind:dateTo>
       {#snippet extra()}
@@ -203,6 +311,10 @@
             {sortDir}
             onSort={sort.toggle}
             {visibleColumns}
+            {selected}
+            onToggle={toggleRow}
+            onToggleAll={togglePage}
+            onRangeSelect={selectRange}
           />
           <PaginationNav
             bind:page
@@ -212,9 +324,34 @@
             onPageSizeChange={(size) => applyPageSize(size, (v) => (page = v))}
           />
         </DimWrapper>
+        <!-- Below the table and sticky to the viewport bottom: showing it never
+             pushes the rows the user is clicking. -->
+        {#if hasSelection}
+          <BulkEditBar
+            count={selected.size}
+            {total}
+            pageFullySelected={pageSelectionState(selected, rows) === 'all'}
+            {allMatching}
+            onSelectAllMatching={() => (allMatching = true)}
+            onClear={clearSelection}
+            onAction={openBulk}
+          />
+        {/if}
       {/if}
     {:else if res.error}
       <ErrorCard message={res.error} onRetry={() => res.reload()} />
     {/if}
   </div>
 </BookGate>
+
+<BulkEditDialog
+  bind:open={bulkOpen}
+  kind={bulkKind}
+  target={bulkTarget}
+  count={allMatching ? total : selected.size}
+  accounts={pickerAccounts}
+  selectionAccountGuids={selectionAccounts(selected.values()).map((a) => a.guid)}
+  anySource={allMatching}
+  defaultDescription={sharedDescription}
+  onDone={handleBulkDone}
+/>
