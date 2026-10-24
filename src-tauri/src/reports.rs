@@ -202,7 +202,7 @@ pub(crate) struct MonthlyBucket {
     name: String,
     description: Option<String>,
     code: Option<String>,
-    account_type: String,
+    pub(crate) account_type: String,
     parent_guid: Option<String>,
     placeholder: bool,
     commodity: Option<String>,

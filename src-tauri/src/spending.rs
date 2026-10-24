@@ -166,6 +166,20 @@ fn group_buckets(
     out
 }
 
+/// One window's expense buckets in report currency, with the missing-FX list
+/// and report currency. Other account types are dropped before conversion:
+/// an investment account's security mnemonic has no FX rate and would raise
+/// a bogus missing-rate warning for a report that never shows it.
+fn expense_buckets(
+    conn: &Connection,
+    date_from: &str,
+    date_to: &str,
+) -> Result<(Vec<ConvertedBucket>, Vec<String>, String), AppError> {
+    let mut buckets = reports::fetch_monthly_buckets(conn, date_from, date_to)?;
+    buckets.retain(|b| b.account_type == "EXPENSE");
+    reports::convert_buckets(conn, &buckets)
+}
+
 fn window_months(date_from: &str, date_to: &str) -> Result<Vec<String>, AppError> {
     let start = utils::month_number(date_from)?;
     let end = utils::month_number(date_to)?;
@@ -229,10 +243,8 @@ fn fetch_spending_report_inner(
             .collect();
     }
 
-    let current_buckets = reports::fetch_monthly_buckets(conn, &date_from, &date_to)?;
-    let (current, missing_cur, report_currency) = reports::convert_buckets(conn, &current_buckets)?;
-    let prev_buckets = reports::fetch_monthly_buckets(conn, &prev_from, &prev_to)?;
-    let (prev, missing_prev, _) = reports::convert_buckets(conn, &prev_buckets)?;
+    let (current, missing_cur, report_currency) = expense_buckets(conn, &date_from, &date_to)?;
+    let (prev, missing_prev, _) = expense_buckets(conn, &prev_from, &prev_to)?;
 
     let months = window_months(&date_from, &date_to)?;
     let current = group_buckets(&current, &level, &meta);
@@ -453,6 +465,27 @@ mod tests {
         assert!(
             fetch_spending_report_inner(&conn, &input("2024-1-01", "2024-02-01", None)).is_err()
         );
+    }
+
+    #[test]
+    fn ignores_missing_rates_outside_expense_accounts() {
+        let conn = setup();
+        // A security bought from checking, with no price: its mnemonic has no
+        // rate to EUR, but it isn't an expense, so it must not warn.
+        conn.execute_batch(
+            "INSERT INTO commodities (guid, mnemonic, namespace) VALUES ('c-etf', 'IWDA.AS', 'ETF');
+             INSERT INTO accounts (guid, name, account_type, parent_guid, placeholder, commodity_guid)
+             VALUES ('etf', 'IWDA', 'STOCK', 'root', 0, 'c-etf');
+             INSERT INTO transactions (guid, post_date) VALUES ('t-etf', '2024-01-15');
+             INSERT INTO splits (guid, tx_guid, account_guid, value_num, value_denom, quantity_num, quantity_denom)
+             VALUES ('s-etf-d', 't-etf', 'etf', 50000, 100, 500, 100),
+                    ('s-etf-c', 't-etf', 'checking', -50000, 100, -50000, 100);",
+        )
+        .unwrap();
+        let r =
+            fetch_spending_report_inner(&conn, &input("2024-01-01", "2024-02-29", None)).unwrap();
+        assert!(r.missing_fx.is_empty(), "got {:?}", r.missing_fx);
+        assert_eq!(r.total, 950.0);
     }
 
     #[test]
