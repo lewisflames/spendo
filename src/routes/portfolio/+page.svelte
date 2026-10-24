@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import { tooltip } from '$lib/attachments/tooltip';
   import { PAGE_META } from '$lib/features/nav/page-meta';
   import { HandCoins, TrendingDown, TrendingUp, RefreshCw, Pencil } from '@lucide/svelte';
@@ -227,7 +228,12 @@
                 {formatSignedCurrency(d.totalReturn, currency)}
               {/snippet}
             </KpiCard>
-            <KpiCard title="Dividends" value={fmt(d.totalDividends)}>
+            <KpiCard
+              title="Dividends"
+              value={fmt(d.totalDividends)}
+              href={resolve('/portfolio/gains')}
+              linkLabel="Dividends, open realized gains by year"
+            >
               {#snippet icon()}
                 <HandCoins aria-hidden="true" class="size-4 text-muted-foreground" />
               {/snippet}

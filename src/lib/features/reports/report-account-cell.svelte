@@ -3,13 +3,15 @@
   import { resolve } from '$app/paths';
   import { treeIndentStyle } from '$lib/utils';
   import AccountLabel from '$lib/features/accounts/account-label.svelte';
+  import type { Snippet } from 'svelte';
 
   let {
     depth,
     guid,
     name,
     description,
-    code
+    code,
+    trailing
   }: {
     depth: number;
     /** Empty for synthetic rows (renders plain text, no account link). */
@@ -18,6 +20,8 @@
     description?: string | null;
     /** Optional account code, shown as a small chip after the name. */
     code?: string | null;
+    /** Optional extra action after the label (e.g. a drill-down link). */
+    trailing?: Snippet;
   } = $props();
 </script>
 
@@ -35,5 +39,6 @@
         <AccountLabel {name} {description} {code} />
       </span>
     {/if}
+    {@render trailing?.()}
   </div>
 </Table.Cell>

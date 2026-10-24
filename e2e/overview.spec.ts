@@ -68,3 +68,16 @@ test('offers a retry when the trend fails to load', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
   await expect(page.getByText('Net worth over time')).toHaveCount(0);
 });
+
+test('links the month cards to their reports for the same period', async ({ page }) => {
+  await mockBackend(page, { ...OVERVIEW, fetch_net_worth_trend: [] });
+  await page.goto('/');
+
+  const spending = page.getByRole('link', {
+    name: 'Spending this month, open the spending report'
+  });
+  await expect(spending).toHaveAttribute('href', /\/reports\/spending\?from=\d{4}-\d{2}-01&to=/);
+  await expect(
+    page.getByRole('link', { name: 'Net worth, open the balance sheet' })
+  ).toHaveAttribute('href', '/reports/balance-sheet');
+});

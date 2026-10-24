@@ -8,6 +8,8 @@
     formatDateRange,
     signColor
   } from '$lib/utils/format.svelte';
+  import { ChartColumnStacked } from '@lucide/svelte';
+  import { tooltip } from '$lib/attachments/tooltip';
   import NavRow from '$lib/components/shared/nav-row.svelte';
   import EmptyValue from '$lib/components/shared/empty-value.svelte';
   import { cn } from '$lib/utils';
@@ -44,6 +46,13 @@
   let isExpensesEmpty = $derived(pnlData !== null && pnlData.expenseRows.length === 0);
   let isEmpty = $derived(section === 'income' ? isIncomeEmpty : isExpensesEmpty);
 
+  /** Spending report for one expense parent over the same period. */
+  function spendingHref(guid: string): string {
+    const base = resolve('/reports/spending');
+    if (!pnlData) return base;
+    return `${base}?category=${encodeURIComponent(guid)}&from=${pnlData.dateFrom}&to=${pnlData.dateTo}`;
+  }
+
   // Default to the first non-empty side when a new report arrives so users
   // don’t land on an empty tab when only the other side has activity.
   let lastPnlData = $state<ProfitLossReport | null>(null);
@@ -59,7 +68,11 @@
   });
 </script>
 
-{#snippet pnlRows(rows: { node: PnLTreeNode; depth: number }[], positiveGood: boolean)}
+{#snippet pnlRows(
+  rows: { node: PnLTreeNode; depth: number }[],
+  positiveGood: boolean,
+  drillToSpending = false
+)}
   {#each rows as item (item.node.row.accountGuid)}
     {@const row = item.node.row}
     {@const variance = row.currentAmount - row.previousAmount}
@@ -75,7 +88,23 @@
         name={row.accountName}
         description={row.accountDescription}
         code={row.accountCode}
-      />
+      >
+        {#snippet trailing()}
+          {#if drillToSpending && item.node.children.length > 0}
+            {@const hint = `${row.accountName} by month in Spending`}
+            <!-- eslint-disable svelte/no-navigation-without-resolve -- resolved route plus query -->
+            <a
+              href={spendingHref(row.accountGuid)}
+              aria-label={hint}
+              class="ml-1 shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+              {@attach tooltip(hint)}
+            >
+              <ChartColumnStacked aria-hidden="true" class="size-3.5" />
+            </a>
+            <!-- eslint-enable svelte/no-navigation-without-resolve -->
+          {/if}
+        {/snippet}
+      </ReportAccountCell>
       <Table.Cell class="py-2.5 text-right font-medium whitespace-nowrap tabular-nums">
         {fmt(row.currentAmount)}
       </Table.Cell>
@@ -232,7 +261,7 @@
       )}
     {/if}
     {#if pnlData && section === 'expenses'}
-      {@render pnlRows(visibleExpenseRows, false)}
+      {@render pnlRows(visibleExpenseRows, false, true)}
       {@render totalRow(
         'Total expenses',
         pnlData.expenseRootGuid,

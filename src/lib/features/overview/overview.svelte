@@ -49,6 +49,11 @@
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
   });
 
+  // The month cards open their report for the same stretch (query-only suffix).
+  const monthQuery = `?from=${monthStart}&to=${today}`;
+  const pnlMonthHref = resolve('/reports/pnl') + monthQuery;
+  const spendingMonthHref = resolve('/reports/spending') + monthQuery;
+
   let currency = $derived(sessionCurrency());
   let summary = $derived(dbSession.value?.summary ?? null);
 
@@ -134,6 +139,8 @@
         value={summary ? fmt(clampZero(summary.netWorth)) : undefined}
         valueClass={summary ? signColor(summary.netWorth) : ''}
         loading={!summary}
+        href={resolve('/reports/balance-sheet')}
+        linkLabel="Net worth, open the balance sheet"
       >
         {#snippet icon()}
           <Wallet aria-hidden="true" class="size-4 text-muted-foreground" />
@@ -143,6 +150,8 @@
         title="Income this month"
         value={month.data ? fmt(clampZero(month.data.totalIncome)) : undefined}
         loading={monthLoading}
+        href={pnlMonthHref}
+        linkLabel="Income this month, open profit & loss"
       >
         {#snippet icon()}
           <TrendingUp aria-hidden="true" class="size-4 text-muted-foreground" />
@@ -152,6 +161,8 @@
         title="Spending this month"
         value={month.data ? fmt(clampZero(month.data.totalExpenses)) : undefined}
         loading={monthLoading}
+        href={spendingMonthHref}
+        linkLabel="Spending this month, open the spending report"
       >
         {#snippet icon()}
           <TrendingDown aria-hidden="true" class="size-4 text-muted-foreground" />
@@ -162,6 +173,8 @@
         value={month.data ? fmt(clampZero(month.data.netIncome)) : undefined}
         valueClass={month.data ? signColor(month.data.netIncome) : ''}
         loading={monthLoading}
+        href={pnlMonthHref}
+        linkLabel="Net this month, open profit & loss"
       >
         {#snippet icon()}
           <Scale aria-hidden="true" class="size-4 text-muted-foreground" />
