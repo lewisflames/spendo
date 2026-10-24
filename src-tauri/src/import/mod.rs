@@ -140,8 +140,17 @@ fn read_source_data(source: &Connection) -> Result<SourceData, AppError> {
         .filter(|t| !template_tx_guids.contains(&t.guid) || surviving_tx.contains(t.guid.as_str()))
         .collect();
 
+    // Template accounts are denominated in GnuCash's `template` commodity;
+    // drop it with them unless a surviving account still uses it.
+    let used_commodities: HashSet<&str> = accounts
+        .iter()
+        .filter_map(|a| a.commodity_guid.as_deref())
+        .collect();
+    let mut commodities = read_commodity(source)?;
+    commodities.retain(|c| c.namespace != "template" || used_commodities.contains(c.guid.as_str()));
+
     Ok(SourceData {
-        commodities: read_commodity(source)?,
+        commodities,
         accounts,
         splits,
         transactions,
@@ -697,16 +706,41 @@ mod tests {
 
     #[test]
     fn normalize_post_date_handles_known_shapes() {
+        let utc = chrono::Utc;
         assert_eq!(
-            normalize_post_date("2024-01-15 10:30:00"),
-            "2024-01-15 10:30:00"
+            normalize_post_date_in("2024-01-15 10:59:00", &utc),
+            "2024-01-15"
         );
-        assert_eq!(normalize_post_date("2024-01-15"), "2024-01-15");
-        assert_eq!(normalize_post_date("20240115103000"), "2024-01-15 10:30:00");
-        assert_eq!(normalize_post_date(" 20240115 "), "2024-01-15");
-        // Compact hour / hour+minute tails are padded so SQLite can parse them.
-        assert_eq!(normalize_post_date("2024011510"), "2024-01-15 10:00:00");
-        assert_eq!(normalize_post_date("202401151030"), "2024-01-15 10:30:00");
+        assert_eq!(normalize_post_date_in("2024-01-15", &utc), "2024-01-15");
+        assert_eq!(normalize_post_date_in("20240115103000", &utc), "2024-01-15");
+        assert_eq!(normalize_post_date_in(" 20240115 ", &utc), "2024-01-15");
+        // Compact hour / hour+minute tails imply `:00`.
+        assert_eq!(normalize_post_date_in("2024011510", &utc), "2024-01-15");
+        assert_eq!(normalize_post_date_in("202401151030", &utc), "2024-01-15");
+    }
+
+    #[test]
+    fn normalize_post_date_converts_utc_to_local_day() {
+        let cet = chrono::FixedOffset::east_opt(3600).unwrap();
+        let pst = chrono::FixedOffset::west_opt(8 * 3600).unwrap();
+        // Older GnuCash: local midnight stored in UTC.
+        assert_eq!(
+            normalize_post_date_in("2024-01-14 23:00:00", &cet),
+            "2024-01-15"
+        );
+        assert_eq!(
+            normalize_post_date_in("2024-01-15 08:00:00", &pst),
+            "2024-01-15"
+        );
+        // Modern neutral time keeps its day on both sides of UTC.
+        assert_eq!(
+            normalize_post_date_in("2024-01-15 10:59:00", &cet),
+            "2024-01-15"
+        );
+        assert_eq!(
+            normalize_post_date_in("2024-01-15 10:59:00", &pst),
+            "2024-01-15"
+        );
     }
 
     #[test]
@@ -717,6 +751,10 @@ mod tests {
         // Odd-length and over-long time tails pass through for the caller.
         assert_eq!(normalize_post_date("202401151"), "202401151");
         assert_eq!(normalize_post_date("2024011510300012"), "2024011510300012");
+        assert_eq!(
+            normalize_post_date("2024-01-15 25:00:00"),
+            "2024-01-15 25:00:00"
+        );
     }
 
     /// End-to-end: import a minimal GnuCash source into a book with local-only
@@ -1141,14 +1179,15 @@ mod tests {
              CREATE TABLE schedxactions (guid TEXT PRIMARY KEY, name TEXT, enabled INTEGER NOT NULL, start_date TEXT, end_date TEXT, last_occur TEXT, num_occur INTEGER NOT NULL, rem_occur INTEGER NOT NULL, auto_create INTEGER NOT NULL, auto_notify INTEGER NOT NULL, adv_creation INTEGER NOT NULL, adv_notify INTEGER NOT NULL, instance_count INTEGER NOT NULL, template_act_guid TEXT NOT NULL);
              CREATE TABLE recurrences (id INTEGER PRIMARY KEY, obj_guid TEXT, recurrence_mult INTEGER, recurrence_period_type TEXT, recurrence_period_start TEXT, recurrence_weekend_adjust TEXT);
 
-             INSERT INTO commodities (guid, mnemonic, namespace) VALUES ('c-eur', 'EUR', 'CURRENCY');
+             INSERT INTO commodities (guid, mnemonic, namespace)
+               VALUES ('c-eur', 'EUR', 'CURRENCY'), ('c-tpl', 'template', 'template');
              INSERT INTO accounts (guid, name, account_type, parent_guid, placeholder, commodity_guid)
                VALUES ('src-root', 'Root Account', 'ROOT', NULL, 0, 'c-eur'),
                       ('checking', 'Checking', 'BANK', 'src-root', 0, 'c-eur'),
                       ('expenses', 'Expenses', 'EXPENSE', 'src-root', 0, 'c-eur'),
-                      ('tpl-root', 'Template Root', 'ROOT', NULL, 0, 'c-eur'),
-                      ('tpl-acct', 'sx-1', 'BANK', 'tpl-root', 0, 'c-eur'),
-                      ('tpl-acct-2', 'sx-2', 'BANK', 'tpl-root', 0, 'c-eur');
+                      ('tpl-root', 'Template Root', 'ROOT', NULL, 0, 'c-tpl'),
+                      ('tpl-acct', 'sx-1', 'BANK', 'tpl-root', 0, 'c-tpl'),
+                      ('tpl-acct-2', 'sx-2', 'BANK', 'tpl-root', 0, 'c-tpl');
              INSERT INTO books (guid, root_account_guid, root_template_guid)
                VALUES ('book-1', 'src-root', 'tpl-root');
              INSERT INTO schedxactions (guid, name, enabled, start_date, end_date, last_occur,
@@ -1223,6 +1262,14 @@ mod tests {
                 .unwrap();
             assert_eq!(n, 0, "template account {junk} leaked");
         }
+        let tpl_commodities: i64 = dest
+            .query_row(
+                "SELECT COUNT(*) FROM commodities WHERE namespace = 'template'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(tpl_commodities, 0, "template commodity leaked");
         assert_eq!(count(&dest, "recurring_schedules"), 0);
 
         std::fs::remove_dir_all(&dir).ok();

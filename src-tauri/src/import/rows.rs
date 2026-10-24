@@ -225,12 +225,19 @@ pub(super) fn read_transaction(conn: &Connection) -> Result<Vec<Transaction>, Ap
     Ok(rows)
 }
 
-/// Normalize a source-book `post_date` to a lexicographically comparable
-/// ISO form. GnuCash normally stores `YYYY-MM-DD HH:MM:SS`, but some
-/// producers write the compact `YYYYMMDDHHMMSS` form, which would silently
-/// break every date-range comparison (digits sort after `-`). Anything not
-/// composed of dates/times characters is passed through unchanged.
+/// Normalize a source-book `post_date` to the date-only `YYYY-MM-DD` form
+/// Spendo writes itself, so imported and hand-entered rows sort and compare
+/// alike. GnuCash stores a UTC timestamp (`YYYY-MM-DD HH:MM:SS`, or the
+/// compact `YYYYMMDDHHMMSS` some producers write): modern books use 10:59 UTC
+/// so the day survives any timezone, older ones store local midnight in UTC
+/// (`2024-01-14 23:00:00` for the 15th in CET), so the instant is converted to
+/// the local calendar day rather than truncated. Anything not composed of
+/// date/time characters is passed through unchanged.
 pub(super) fn normalize_post_date(raw: &str) -> String {
+    normalize_post_date_in(raw, &chrono::Local)
+}
+
+pub(super) fn normalize_post_date_in<Tz: chrono::TimeZone>(raw: &str, tz: &Tz) -> String {
     let clean = raw.trim();
     let digits: String = clean.chars().filter(|c| c.is_ascii_digit()).collect();
     let plausible = clean
@@ -244,23 +251,26 @@ pub(super) fn normalize_post_date(raw: &str) -> String {
     if digits.len() == 8 {
         return date;
     }
-    // Remaining pairs are HH, MM, SS. Short tails (hour or hour+minute) are
-    // padded with `:00` so SQLite's date math parses them and lexicographic
-    // comparisons stay chronological; odd-length or over-long tails pass
-    // through for the caller to surface.
+    // Remaining pairs are HH, MM, SS; short tails (hour or hour+minute) imply
+    // `:00`. Odd-length, over-long or out-of-range tails pass through for the
+    // caller to surface.
     let tail = &digits[8..];
     if !tail.len().is_multiple_of(2) || !(2..=6).contains(&tail.len()) {
         return clean.to_string();
     }
-    let mut parts: Vec<&str> = tail
-        .as_bytes()
-        .chunks(2)
-        .map(|pair| std::str::from_utf8(pair).unwrap_or(""))
-        .collect();
-    while parts.len() < 3 {
-        parts.push("00");
+    let mut time = tail.to_string();
+    while time.len() < 6 {
+        time.push_str("00");
     }
-    format!("{date} {}", parts.join(":"))
+    match chrono::NaiveDateTime::parse_from_str(&format!("{date}{time}"), "%Y-%m-%d%H%M%S") {
+        Ok(utc) => utc
+            .and_utc()
+            .with_timezone(tz)
+            .date_naive()
+            .format("%Y-%m-%d")
+            .to_string(),
+        Err(_) => clean.to_string(),
+    }
 }
 
 /// Source-book loader: joins GnuCash's `slots` table, where transaction notes
