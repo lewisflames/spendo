@@ -500,7 +500,7 @@ pub fn clear_last_book(app_data_dir: &Path) {
 /// `SCHEMA`. This is the supported upgrade path while there are no
 /// migrations — Settings → Clear all data, then re-import. The `change_log` /
 /// `change_snapshots` drops purge the audit log that pre-removal books still
-/// carry.
+/// carry; `manual_prices` is the same kind of leftover from early builds.
 pub fn clear_db(conn: &Connection) -> Result<()> {
     let drops = conn.execute_batch(
         "PRAGMA foreign_keys = OFF;
@@ -518,6 +518,7 @@ pub fn clear_db(conn: &Connection) -> Result<()> {
           DROP TABLE IF EXISTS commodities;
           DROP TABLE IF EXISTS change_snapshots;
           DROP TABLE IF EXISTS change_log;
+          DROP TABLE IF EXISTS manual_prices;
            DROP TABLE IF EXISTS refresh_log;
            DROP TABLE IF EXISTS symbol_overrides;
            DROP TABLE IF EXISTS schedule_skips;
@@ -731,6 +732,24 @@ mod tests {
             [],
         )
         .unwrap();
+    }
+
+    #[test]
+    fn clear_purges_leftover_tables() {
+        let conn = Connection::open_in_memory().unwrap();
+        init_db(&conn).unwrap();
+        let fresh = table_names(&conn);
+        // Tables older builds created and the current SCHEMA no longer has.
+        conn.execute_batch(
+            "CREATE TABLE change_log (id INTEGER PRIMARY KEY);
+             CREATE TABLE change_snapshots (entry_id INTEGER);
+             CREATE TABLE manual_prices (commodity_guid TEXT, date TEXT);",
+        )
+        .unwrap();
+
+        clear_db(&conn).unwrap();
+
+        assert_eq!(table_names(&conn), fresh);
     }
 
     #[test]
