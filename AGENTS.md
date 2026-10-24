@@ -10,6 +10,7 @@ Tauri v2 desktop app: static SvelteKit SPA (Svelte 5 runes, Tailwind v4, `@svelt
 | Build           | `bun run build`                                       |
 | Type-check      | `bun run check`                                       |
 | Test (frontend) | `bun run test` (vitest; colocated `src/**/*.test.ts`) |
+| Test (UI)       | `bun run test:e2e` (Playwright; `e2e/*.spec.ts`)      |
 | Lint            | `bun run lint`                                        |
 | Format          | `bun run format`                                      |
 | Tauri dev       | `bun run tauri:dev` (generates icons first)           |
@@ -34,6 +35,7 @@ Frontend work is done when `bun run check`, `bun run lint` and `bun run test` pa
 - Routes contain only route files; page components/types live in `$lib/features/<domain>/`, domain utilities in `$lib/utils/`.
 - Store convention: `.svelte.ts` modules using `$state()` wrapped in `{ value }` — every store, including scalar flags.
 - Every page needs the Rust backend: develop with `bun run tauri:dev`. A plain browser (`bun run dev`) has no backend, so `invoke()` calls reject.
+- Playwright specs run against `bun run dev` and stub IPC with `mockBackend(page, { command: result })` from `e2e/fixtures.ts`; unmocked commands reject with `unmocked command: <name>`.
 
 ## Data / imports
 
