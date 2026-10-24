@@ -63,7 +63,7 @@ test('lists dividends and the linked income accounts', async ({ page }) => {
   await mockBackend(page, MOCKS);
   await page.goto('/portfolio/c-aapl');
 
-  await expect(page.getByText('Realized gain', { exact: true })).toBeVisible();
+  await expect(page.getByText('All-time realized gain', { exact: true })).toBeVisible();
   await page.getByRole('tab', { name: 'Dividends' }).click();
   await expect(page.getByRole('link', { name: 'AAPL dividend' })).toBeVisible();
 

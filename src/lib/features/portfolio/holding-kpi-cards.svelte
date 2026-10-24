@@ -43,7 +43,7 @@
       {h.unrealizedGain === null ? EMPTY_DASH : formatSignedCurrency(h.unrealizedGain, currency)}
     {/snippet}
   </KpiCard>
-  <KpiCard title="Realized gain" valueClass={signColor(h.realizedGain)}>
+  <KpiCard title="All-time realized gain" valueClass={signColor(h.realizedGain)}>
     {#snippet icon()}
       <HandCoins aria-hidden="true" class="size-4 text-muted-foreground" />
     {/snippet}
@@ -51,7 +51,7 @@
       {formatSignedCurrency(h.realizedGain, currency)}
     {/snippet}
   </KpiCard>
-  <KpiCard title="Dividends">
+  <KpiCard title="All-time dividends">
     {#snippet icon()}
       <Coins aria-hidden="true" class="size-4 text-muted-foreground" />
     {/snippet}

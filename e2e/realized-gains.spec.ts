@@ -48,6 +48,7 @@ test('lists each lot a sale consumed with yearly totals', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Realized gains' })).toBeVisible();
   await expect(page.getByRole('link', { name: /Apple Inc/ })).toHaveCount(2);
   await expect(page.getByText('Net realized')).toBeVisible();
+  await expect(page.getByText('Dividends in 2024')).toBeVisible();
   await expect(page.getByRole('button', { name: 'More actions' })).toBeVisible();
 });
 

@@ -107,7 +107,7 @@
               <TrendingDown aria-hidden="true" class="size-4 text-destructive" />
             {/snippet}
           </KpiCard>
-          <KpiCard title="Dividends" value={fmt(r.dividends)}>
+          <KpiCard title="Dividends in {r.year}" value={fmt(r.dividends)}>
             {#snippet icon()}
               <Coins aria-hidden="true" class="size-4 text-muted-foreground" />
             {/snippet}

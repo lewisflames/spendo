@@ -229,10 +229,10 @@
               {/snippet}
             </KpiCard>
             <KpiCard
-              title="Dividends"
+              title="All-time dividends"
               value={fmt(d.totalDividends)}
               href={resolve('/portfolio/gains')}
-              linkLabel="Dividends, open realized gains by year"
+              linkLabel="All-time dividends, open dividends by year"
             >
               {#snippet icon()}
                 <HandCoins aria-hidden="true" class="size-4 text-muted-foreground" />
