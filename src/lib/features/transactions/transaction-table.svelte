@@ -18,8 +18,6 @@
   import { resolve } from '$app/paths';
   import * as Table from '$lib/components/ui/table';
   import { Badge } from '$lib/components/ui/badge';
-  import { Button } from '$lib/components/ui/button';
-  import { CopyPlus, Pencil } from '@lucide/svelte';
   import { formatDate as fmtDate, formatSignedCurrency } from '$lib/utils/format.svelte';
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import SortHead from '$lib/components/shared/sort-head.svelte';
@@ -149,72 +147,39 @@
   </Table.Header>
   <Table.Body>
     {#each transactions as txn (txn.guid)}
-      <NavRow
-        onNavigate={() => openTransaction(txn.guid)}
-        class="group/row cursor-pointer hover:bg-muted/50"
-      >
+      <NavRow onNavigate={() => openTransaction(txn.guid)} class="cursor-pointer hover:bg-muted/50">
         {#if showDate}
           <Table.Cell class="py-2.5 whitespace-nowrap text-muted-foreground tabular-nums">
             {fmtDate(txn.postDate)}
           </Table.Cell>
         {/if}
         <Table.Cell class="max-w-md py-2.5 font-medium">
-          <div class="flex items-center gap-2">
-            <div class="min-w-0 flex-1">
-              <!-- Accessible link target for keyboard/middle-click; the row click
+          <div class="min-w-0">
+            <!-- Accessible link target for keyboard/middle-click; the row click
                    is a convenience shortcut. Its event must keep bubbling so
                    SvelteKit’s router can intercept it. -->
-              <a
-                class="block truncate focus-visible:outline-2 focus-visible:outline-ring"
-                href={resolve('/transactions/[guid]', { guid: txn.guid })}
-                {@attach tooltip(txn.description ?? undefined, { truncated: true })}
-              >
-                {#if txn.num && showInlineNum}<span class="mr-1 text-muted-foreground"
-                    >#{txn.num}</span
-                  >{/if}
-                {#if txn.description}
-                  {txn.description}
-                {:else}
-                  <EmptyValue />
-                {/if}
-              </a>
-              {#if txn.notes}
-                <p
-                  class="truncate text-xs font-normal text-muted-foreground"
-                  {@attach tooltip(txn.notes, { truncated: true })}
-                >
-                  {txn.notes}
-                </p>
-              {/if}
-            </div>
-            <!-- Quick actions appear on row hover or keyboard focus, so common
-                 edits don’t need a detail page visit. -->
-            <div
-              class="flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover/row:opacity-100 focus-within:opacity-100"
+            <a
+              class="block truncate focus-visible:outline-2 focus-visible:outline-ring"
+              href={resolve('/transactions/[guid]', { guid: txn.guid })}
+              {@attach tooltip(txn.description ?? undefined, { truncated: true })}
             >
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                class="text-muted-foreground"
-                href={resolve('/transactions/[guid]/edit', { guid: txn.guid })}
-                aria-label="Edit transaction"
-                {@attach tooltip('Edit')}
+              {#if txn.num && showInlineNum}<span class="mr-1 text-muted-foreground"
+                  >#{txn.num}</span
+                >{/if}
+              {#if txn.description}
+                {txn.description}
+              {:else}
+                <EmptyValue />
+              {/if}
+            </a>
+            {#if txn.notes}
+              <p
+                class="truncate text-xs font-normal text-muted-foreground"
+                {@attach tooltip(txn.notes, { truncated: true })}
               >
-                <Pencil aria-hidden="true" />
-              </Button>
-              <!-- eslint-disable svelte/no-navigation-without-resolve -- query strings can’t go through resolve() -->
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                class="text-muted-foreground"
-                href={`${resolve('/transactions/new')}?duplicate=${encodeURIComponent(txn.guid)}`}
-                aria-label="Duplicate transaction"
-                {@attach tooltip('Duplicate')}
-              >
-                <CopyPlus aria-hidden="true" />
-              </Button>
-              <!-- eslint-enable svelte/no-navigation-without-resolve -->
-            </div>
+                {txn.notes}
+              </p>
+            {/if}
           </div>
         </Table.Cell>
         {#if variant === 'all'}
