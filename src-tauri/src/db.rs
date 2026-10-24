@@ -350,6 +350,16 @@ CREATE TABLE IF NOT EXISTS schedule_skips (
 	skipped_count INTEGER NOT NULL DEFAULT 0
 );
 
+-- Per-schedule posting options, kept beside `recurring_schedules` for the same
+-- reason as `schedule_skips`. `auto_post` posts due occurrences when the book
+-- opens; `spread_total` treats the template amounts as a total divided across
+-- `max_occurrences` (e.g. depreciating a device). A missing row means both off.
+CREATE TABLE IF NOT EXISTS schedule_options (
+	schedule_guid TEXT PRIMARY KEY REFERENCES recurring_schedules(guid) ON DELETE CASCADE,
+	auto_post INTEGER NOT NULL DEFAULT 0,
+	spread_total INTEGER NOT NULL DEFAULT 0
+);
+
 -- Finished reconciliation batches. Persisting the membership (not inferring it
 -- from transaction dates) is what lets Undo last statement reopen exactly the
 -- splits a Finish promoted, even when one was dated before the previous
@@ -522,6 +532,7 @@ pub fn clear_db(conn: &Connection) -> Result<()> {
            DROP TABLE IF EXISTS refresh_log;
            DROP TABLE IF EXISTS symbol_overrides;
            DROP TABLE IF EXISTS schedule_skips;
+           DROP TABLE IF EXISTS schedule_options;
            DROP TABLE IF EXISTS recurring_schedules;
            DROP TABLE IF EXISTS app_settings;",
     );
@@ -663,6 +674,7 @@ mod tests {
             "reconcile_batch_splits",
             "reconcile_batches",
             "refresh_log",
+            "schedule_options",
             "schedule_skips",
             "splits",
             "symbol_overrides",

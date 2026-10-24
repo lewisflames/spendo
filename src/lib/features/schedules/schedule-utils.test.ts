@@ -20,6 +20,8 @@ function schedule(partial: Partial<Schedule> = {}): Schedule {
     notes: null,
     splits: [],
     previewAmount: 1000,
+    autoPost: false,
+    spreadTotal: false,
     createdAt: '2024-01-01T00:00:00Z',
     ...partial
   };

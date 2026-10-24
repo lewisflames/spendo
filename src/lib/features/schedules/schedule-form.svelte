@@ -5,6 +5,7 @@
   import { Input } from '$lib/components/ui/input';
   import { Textarea } from '$lib/components/ui/textarea';
   import { Button } from '$lib/components/ui/button';
+  import { Switch } from '$lib/components/ui/switch';
   import * as Card from '$lib/components/ui/card';
   import * as Dialog from '$lib/components/ui/dialog';
   import IconCardHeader from '$lib/components/shared/icon-card-header.svelte';
@@ -84,6 +85,8 @@
       description: initial?.description ?? '',
       num: initial?.num ?? '',
       notes: initial?.notes ?? '',
+      autoPost: initial?.autoPost ?? false,
+      spreadTotal: initial?.spreadTotal ?? false,
       splits: drafts
     };
   });
@@ -97,6 +100,8 @@
   let description = $state(snapshot.description);
   let num = $state(snapshot.num);
   let notes = $state(snapshot.notes);
+  let autoPost = $state(snapshot.autoPost);
+  let spreadTotal = $state(snapshot.spreadTotal);
   let splits = $state<SplitDraft[]>(snapshot.splits);
 
   let saving = $state(false);
@@ -174,6 +179,14 @@
     return '';
   });
 
+  let spreadError = $derived.by(() => {
+    if (!spreadTotal) return '';
+    if (!maxOccurrences.trim()) return 'Set how many times it repeats to spread the total';
+    if (splits.some((s) => s.showQuantity && s.quantity.trim()))
+      return 'A spread total can’t carry share quantities';
+    return '';
+  });
+
   let errors = $derived(splitErrors(splits));
   let balance = $derived(splitBalance(splits));
   let balanced = $derived(isBalanced(balance));
@@ -186,6 +199,7 @@
       !startError &&
       !endError &&
       !countError &&
+      !spreadError &&
       splits.length >= 2 &&
       errors.every((e) => !e) &&
       balanced
@@ -202,6 +216,8 @@
       description !== baseline.description ||
       num !== baseline.num ||
       notes !== baseline.notes ||
+      autoPost !== baseline.autoPost ||
+      spreadTotal !== baseline.spreadTotal ||
       splits.length !== baseline.splits.length
     ) {
       return true;
@@ -233,7 +249,9 @@
       description: description.trim() ? description.trim() : null,
       num: num.trim() ? num.trim() : null,
       notes: notes.trim() ? notes.trim() : null,
-      splits: splits.map(splitToInput)
+      splits: splits.map(splitToInput),
+      autoPost,
+      spreadTotal
     };
   }
 
@@ -386,7 +404,9 @@
   <Card.Root>
     <IconCardHeader
       title="Recurrence"
-      description="Nothing posts on its own. When one is due you’ll get a reminder to post or skip it."
+      description={autoPost
+        ? 'Due occurrences post on their own when you open the book.'
+        : 'Nothing posts on its own. When one is due you’ll get a reminder to post or skip it.'}
     >
       {#snippet icon()}
         <Repeat aria-hidden="true" class="size-4 text-muted-foreground" />
@@ -476,6 +496,30 @@
             <p role="alert" class="text-xs text-destructive">{countError}</p>
           {/if}
         </div>
+      </div>
+      <div class="flex flex-col gap-3">
+        <div class="flex items-start justify-between gap-4">
+          <div class="flex flex-col gap-0.5">
+            <label for="sched-auto" class="text-sm font-medium">Post automatically</label>
+            <p class="text-xs text-muted-foreground">
+              Catch up on what’s due each time you open the book, instead of reminding you
+            </p>
+          </div>
+          <Switch id="sched-auto" bind:checked={autoPost} />
+        </div>
+        <div class="flex items-start justify-between gap-4">
+          <div class="flex flex-col gap-0.5">
+            <label for="sched-spread" class="text-sm font-medium">Spread a total</label>
+            <p class="text-xs text-muted-foreground">
+              Treat the split amounts as a total and post an equal share each time, e.g. to
+              depreciate a device. The shares add up exactly
+            </p>
+          </div>
+          <Switch id="sched-spread" bind:checked={spreadTotal} />
+        </div>
+        {#if spreadError}
+          <p role="alert" class="text-xs text-destructive">{spreadError}</p>
+        {/if}
       </div>
       {#if mode === 'edit' && initial && initial.occurrencesPosted + initial.skippedCount > 0}
         <p class="text-xs text-muted-foreground">

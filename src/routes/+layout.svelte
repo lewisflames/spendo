@@ -19,10 +19,12 @@
     dbBootstrapping,
     ensureDbSessionLoaded,
     loadActiveBook,
-    refreshSession
+    refreshSession,
+    activeBookPath
   } from '$lib/stores/db.svelte';
   import { NAV_CHORD_TARGETS } from '$lib/features/nav/nav-items';
   import { refreshNav } from '$lib/stores/nav.svelte';
+  import { autoPostForBook } from '$lib/features/schedules/auto-post';
   import { TitleBar } from '$lib/components/layout/title-bar';
   import { cn } from '$lib/utils';
   import { Sonner, toast } from '$lib/components/ui/sonner';
@@ -85,6 +87,12 @@
     untrack(() => {
       void refreshNav();
     });
+  });
+
+  // Auto-post schedules catch up once per opened book.
+  $effect(() => {
+    const path = dbSession.value ? activeBookPath.value : null;
+    untrack(() => void autoPostForBook(path));
   });
 
   // Chrome is always mounted now; only the sidebar depends on having a book.

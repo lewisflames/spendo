@@ -95,6 +95,9 @@
         </Table.Cell>
         <Table.Cell class="py-2.5 whitespace-nowrap">
           {frequencyLabel(schedule.frequency, schedule.intervalMult)}
+          {#if schedule.autoPost}
+            <span class="block text-xs text-muted-foreground">Posts automatically</span>
+          {/if}
         </Table.Cell>
         <Table.Cell class="py-2.5 whitespace-nowrap">
           {#if schedule.nextDueDate}

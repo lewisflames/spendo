@@ -39,6 +39,12 @@ pub struct ScheduleInput {
     pub num: Option<String>,
     pub notes: Option<String>,
     pub splits: Vec<SplitInput>,
+    /// Post due occurrences automatically when the book opens.
+    #[serde(default)]
+    pub auto_post: bool,
+    /// Treat the split amounts as a total spread across `max_occurrences`.
+    #[serde(default)]
+    pub spread_total: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -69,11 +75,33 @@ pub struct Schedule {
     pub description: Option<String>,
     pub num: Option<String>,
     pub notes: Option<String>,
+    /// Template splits as entered (the totals, for a spread schedule).
     pub splits: Vec<ScheduleSplit>,
-    /// Sum of the positive template split amounts: the transfer size behind a
-    /// balanced template. Rendered in list rows (a raw sum is always 0).
+    /// Sum of the positive split amounts the next occurrence posts: the
+    /// transfer size behind a balanced template, or one slice of a spread
+    /// total. Rendered in list rows (a raw sum is always 0).
     pub preview_amount: f64,
+    pub auto_post: bool,
+    pub spread_total: bool,
     pub created_at: String,
+}
+
+/// Outcome of `post_due_schedules`: occurrences posted, plus the schedules
+/// that stopped on a validation error (e.g. an account became a placeholder)
+/// so the user can fix them.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoPostResult {
+    pub posted: i64,
+    pub failed: Vec<AutoPostFailure>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoPostFailure {
+    pub guid: String,
+    pub name: String,
+    pub message: String,
 }
 
 // ── Stored template ──────────────────────────────────────────────────────────
@@ -112,12 +140,16 @@ struct ScheduleRow {
     active: bool,
     template_json: String,
     created_at: String,
+    auto_post: bool,
+    spread_total: bool,
 }
 
 const SELECT_COLS: &str = "guid, name, frequency, interval_mult, start_date, end_date, \
     max_occurrences, occurrences_posted, \
     COALESCE((SELECT skipped_count FROM schedule_skips k WHERE k.schedule_guid = recurring_schedules.guid), 0), \
-    next_due_date, active, template_json, created_at";
+    next_due_date, active, template_json, created_at, \
+    COALESCE((SELECT auto_post FROM schedule_options o WHERE o.schedule_guid = recurring_schedules.guid), 0), \
+    COALESCE((SELECT spread_total FROM schedule_options o WHERE o.schedule_guid = recurring_schedules.guid), 0)";
 
 fn read_row(row: &rusqlite::Row) -> rusqlite::Result<ScheduleRow> {
     Ok(ScheduleRow {
@@ -134,6 +166,8 @@ fn read_row(row: &rusqlite::Row) -> rusqlite::Result<ScheduleRow> {
         active: row.get::<_, i64>(10)? != 0,
         template_json: row.get(11)?,
         created_at: row.get(12)?,
+        auto_post: row.get::<_, i64>(13)? != 0,
+        spread_total: row.get::<_, i64>(14)? != 0,
     })
 }
 
@@ -191,6 +225,63 @@ pub(crate) fn next_occurrence(
     })
 }
 
+/// Whole cents of an amount (spread schedules work at cent precision).
+fn to_cents(amount: f64) -> i64 {
+    (amount * 100.0).round() as i64
+}
+
+/// `a / n` rounded half away from zero, so a split and its negated
+/// counterpart round to exact opposites.
+fn div_round(a: i64, n: i64) -> i64 {
+    a.signum() * ((2 * a.abs() + n) / (2 * n))
+}
+
+/// The amounts occurrence `index` (0-based, posted + skipped before it) of a
+/// spread schedule posts: each split's slice is `round(total·(k+1)/n) −
+/// round(total·k/n)`, so the `n` slices sum exactly to the total and differ by
+/// at most a cent. The largest split absorbs any cross-split rounding so every
+/// occurrence balances on its own.
+fn spread_occurrence_amounts(totals: &[f64], occurrences: i64, index: i64) -> Vec<f64> {
+    let n = occurrences.max(1);
+    let k = index.clamp(0, n - 1);
+    let mut cents: Vec<i64> = totals
+        .iter()
+        .map(|t| {
+            let t = to_cents(*t);
+            div_round(t * (k + 1), n) - div_round(t * k, n)
+        })
+        .collect();
+    if let Some(anchor) = (0..totals.len()).max_by_key(|&i| to_cents(totals[i]).abs()) {
+        let others: i64 = cents
+            .iter()
+            .enumerate()
+            .filter(|&(i, _)| i != anchor)
+            .map(|(_, c)| c)
+            .sum();
+        cents[anchor] = -others;
+    }
+    cents.into_iter().map(|c| c as f64 / 100.0).collect()
+}
+
+/// The split amounts the occurrence at `index` posts: the template as-is, or
+/// its slice of the total for a spread schedule.
+fn occurrence_amounts(template: &StoredTemplate, spread: Option<i64>, index: i64) -> Vec<f64> {
+    let totals: Vec<f64> = template.splits.iter().map(|s| s.amount).collect();
+    match spread {
+        Some(n) => spread_occurrence_amounts(&totals, n, index),
+        None => totals,
+    }
+}
+
+/// Occurrence count a spread schedule divides by (`None` when not spread).
+fn spread_count(spread_total: bool, max_occurrences: Option<i64>) -> Option<i64> {
+    if spread_total {
+        max_occurrences
+    } else {
+        None
+    }
+}
+
 // ── GnuCash recurrence (import support) ──────────────────────────────────────
 
 // ── Validation ───────────────────────────────────────────────────────────────
@@ -243,6 +334,8 @@ struct ValidatedSchedule {
     end_date: Option<String>,
     max_occurrences: Option<i64>,
     template: StoredTemplate,
+    auto_post: bool,
+    spread_total: bool,
 }
 
 fn validate_schedule_input(
@@ -299,6 +392,9 @@ fn validate_schedule_input(
         unreconcile: false,
     };
     crate::transactions::validate_tx_body_with(&probe, &lookup)?;
+    if input.spread_total {
+        validate_spread(input)?;
+    }
     Ok(ValidatedSchedule {
         name,
         frequency,
@@ -321,7 +417,58 @@ fn validate_schedule_input(
                 })
                 .collect(),
         },
+        auto_post: input.auto_post,
+        spread_total: input.spread_total,
     })
+}
+
+/// A spread total needs a fixed occurrence count to divide by, plain currency
+/// splits (share quantities can't be sliced meaningfully) and totals that
+/// balance in whole cents, so every slice balances too.
+fn validate_spread(input: &ScheduleInput) -> Result<(), AppError> {
+    if input.max_occurrences.is_none() {
+        return Err(AppError::Validation(
+            "Set how many times it repeats to spread the total".to_string(),
+        ));
+    }
+    if input.splits.iter().any(|s| s.quantity.is_some()) {
+        return Err(AppError::Validation(
+            "A spread total can't carry share quantities. Remove them or stop spreading"
+                .to_string(),
+        ));
+    }
+    let cents: i64 = input.splits.iter().map(|s| to_cents(s.amount)).sum();
+    if cents != 0 {
+        return Err(AppError::Validation(
+            "Spread totals must balance in whole cents".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Upsert the side-table options. Rows exist only while something is on, so
+/// the table stays empty for books that never use them.
+fn save_options(
+    conn: &Connection,
+    guid: &str,
+    auto_post: bool,
+    spread_total: bool,
+) -> Result<(), AppError> {
+    if auto_post || spread_total {
+        conn.execute(
+            "INSERT INTO schedule_options (schedule_guid, auto_post, spread_total)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(schedule_guid) DO UPDATE
+               SET auto_post = excluded.auto_post, spread_total = excluded.spread_total",
+            params![guid, auto_post as i64, spread_total as i64],
+        )?;
+    } else {
+        conn.execute(
+            "DELETE FROM schedule_options WHERE schedule_guid = ?1",
+            params![guid],
+        )?;
+    }
+    Ok(())
 }
 
 // ── Pointer helpers ──────────────────────────────────────────────────────────
@@ -404,12 +551,8 @@ pub(crate) fn parse_template(template_json: &str) -> Result<StoredTemplate, AppE
         .map_err(|e| AppError::Validation(format!("Corrupt schedule data: {e}")))
 }
 
-fn preview_amount(splits: &[StoredSplit]) -> f64 {
-    splits
-        .iter()
-        .filter(|s| s.amount > 0.0)
-        .map(|s| s.amount)
-        .sum()
+fn preview_amount(amounts: &[f64]) -> f64 {
+    amounts.iter().filter(|a| **a > 0.0).sum()
 }
 
 fn template_account_guids(template_json: &str) -> Result<Vec<String>, AppError> {
@@ -425,6 +568,11 @@ fn to_schedule_with_names(
     names: &HashMap<String, String>,
 ) -> Result<Schedule, AppError> {
     let template = parse_template(&row.template_json)?;
+    let next_amounts = occurrence_amounts(
+        &template,
+        spread_count(row.spread_total, row.max_occurrences),
+        row.occurrences_posted + row.skipped_count,
+    );
     Ok(Schedule {
         guid: row.guid,
         name: row.name,
@@ -451,7 +599,9 @@ fn to_schedule_with_names(
                 memo: s.memo.clone(),
             })
             .collect(),
-        preview_amount: preview_amount(&template.splits),
+        preview_amount: preview_amount(&next_amounts),
+        auto_post: row.auto_post,
+        spread_total: row.spread_total,
         created_at: row.created_at,
     })
 }
@@ -484,26 +634,30 @@ fn create_schedule_inner(conn: &Connection, input: ScheduleInput) -> Result<Sche
     let template_json = serde_json::to_string(&v.template)
         .map_err(|e| AppError::Validation(format!("We couldn't save that schedule: {e}")))?;
     // The pointer starts verbatim at the start date (no catch-up roll-forward):
-    // a backdated start simply surfaces as overdue for the user to post/skip.
-    conn.execute(
-        "INSERT INTO recurring_schedules
+    // a backdated start simply surfaces as overdue for the user to post/skip
+    // (or, with auto-post on, catches up the next time the book opens).
+    with_tx_err(conn, || -> Result<(), AppError> {
+        conn.execute(
+            "INSERT INTO recurring_schedules
           (guid, name, frequency, interval_mult, start_date, end_date,
            max_occurrences, occurrences_posted, next_due_date, active,
            template_json, created_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8, 1, ?9, ?10)",
-        params![
-            guid,
-            v.name,
-            v.frequency,
-            v.interval_mult,
-            v.start_date,
-            v.end_date,
-            v.max_occurrences,
-            v.start_date,
-            template_json,
-            created_at,
-        ],
-    )?;
+            params![
+                guid,
+                v.name,
+                v.frequency,
+                v.interval_mult,
+                v.start_date,
+                v.end_date,
+                v.max_occurrences,
+                v.start_date,
+                template_json,
+                created_at,
+            ],
+        )?;
+        save_options(conn, &guid, v.auto_post, v.spread_total)
+    })?;
     fetch_schedule_inner(conn, &guid)
 }
 
@@ -548,24 +702,27 @@ fn update_schedule_inner(
     next = apply_caps(next, v.max_occurrences, passed, v.end_date.as_deref());
     let template_json = serde_json::to_string(&v.template)
         .map_err(|e| AppError::Validation(format!("We couldn't save that schedule: {e}")))?;
-    conn.execute(
-        "UPDATE recurring_schedules
+    with_tx_err(conn, || -> Result<(), AppError> {
+        conn.execute(
+            "UPDATE recurring_schedules
          SET name = ?1, frequency = ?2, interval_mult = ?3, start_date = ?4,
              end_date = ?5, max_occurrences = ?6, next_due_date = ?7,
              template_json = ?8
          WHERE guid = ?9",
-        params![
-            v.name,
-            v.frequency,
-            v.interval_mult,
-            v.start_date,
-            v.end_date,
-            v.max_occurrences,
-            next,
-            template_json,
-            guid,
-        ],
-    )?;
+            params![
+                v.name,
+                v.frequency,
+                v.interval_mult,
+                v.start_date,
+                v.end_date,
+                v.max_occurrences,
+                next,
+                template_json,
+                guid,
+            ],
+        )?;
+        save_options(conn, guid, v.auto_post, v.spread_total)
+    })?;
     fetch_schedule_inner(conn, guid)
 }
 
@@ -627,9 +784,19 @@ pub(crate) fn schedule_account_guids(conn: &Connection) -> Result<Vec<String>, A
 // ── Post / skip ──────────────────────────────────────────────────────────────
 
 /// Materialize the due occurrence as a real transaction and advance the
-/// pointer atomically. Posting is manual-only: due dates are always ≤ today,
-/// so the manual future-date block is never bypassed.
+/// pointer atomically. Due dates are always ≤ today (manual Post and
+/// auto-post alike), so the manual future-date block is never bypassed.
 fn post_schedule_occurrence_inner(conn: &Connection, guid: &str) -> Result<String, AppError> {
+    // Local "today": the frontend enables Post from its local date, so the
+    // backend must use the same clock.
+    post_occurrence_at(
+        conn,
+        guid,
+        &chrono::Local::now().format("%Y-%m-%d").to_string(),
+    )
+}
+
+fn post_occurrence_at(conn: &Connection, guid: &str, today: &str) -> Result<String, AppError> {
     let row = fetch_row(conn, guid)?;
     if !row.active {
         return Err(AppError::Validation(
@@ -639,15 +806,17 @@ fn post_schedule_occurrence_inner(conn: &Connection, guid: &str) -> Result<Strin
     let due = row.next_due_date.clone().ok_or_else(|| {
         AppError::Validation("This schedule is done. Nothing left to post".to_string())
     })?;
-    // Local "today": the frontend enables Post from its local date, so the
-    // backend must use the same clock.
-    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-    if due > today {
+    if due.as_str() > today {
         return Err(AppError::Validation(format!(
             "Not due yet. The next occurrence is {due}"
         )));
     }
     let template = parse_template(&row.template_json)?;
+    let amounts = occurrence_amounts(
+        &template,
+        spread_count(row.spread_total, row.max_occurrences),
+        row.occurrences_posted + row.skipped_count,
+    );
     let input = TxInput {
         post_date: due.clone(),
         description: template.description.clone(),
@@ -657,9 +826,10 @@ fn post_schedule_occurrence_inner(conn: &Connection, guid: &str) -> Result<Strin
         splits: template
             .splits
             .iter()
-            .map(|s| SplitInput {
+            .zip(amounts)
+            .map(|(s, amount)| SplitInput {
                 account_guid: s.account_guid.clone(),
-                amount: s.amount,
+                amount,
                 quantity: s.quantity,
                 memo: s.memo.clone(),
             })
@@ -745,6 +915,55 @@ fn skip_schedule_occurrence_inner(
     Ok(next)
 }
 
+/// Upper bound on occurrences one auto-post run creates, so a long-backdated
+/// daily schedule can't stall the book open; the rest post on the next run.
+const AUTO_POST_LIMIT: i64 = 500;
+
+/// Post every due occurrence of active auto-post schedules, oldest first, up
+/// to `today`. A schedule that fails validation stops (its pointer stays put)
+/// and is reported; the others still post. DB failures abort the run.
+fn post_due_schedules_inner(conn: &Connection, today: &str) -> Result<AutoPostResult, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT r.guid, r.name FROM recurring_schedules r
+         JOIN schedule_options o ON o.schedule_guid = r.guid
+         WHERE o.auto_post = 1 AND r.active = 1
+           AND r.next_due_date IS NOT NULL AND r.next_due_date <= ?1
+         ORDER BY r.next_due_date, r.name",
+    )?;
+    let due: Vec<(String, String)> = stmt
+        .query_map(params![today], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<Result<_, _>>()?;
+    let mut result = AutoPostResult {
+        posted: 0,
+        failed: Vec::new(),
+    };
+    for (guid, name) in due {
+        loop {
+            if result.posted >= AUTO_POST_LIMIT {
+                return Ok(result);
+            }
+            let row = fetch_row(conn, &guid)?;
+            match row.next_due_date {
+                Some(next) if next.as_str() <= today => {}
+                _ => break,
+            }
+            match post_occurrence_at(conn, &guid, today) {
+                Ok(_) => result.posted += 1,
+                Err(AppError::Validation(message)) => {
+                    result.failed.push(AutoPostFailure {
+                        guid: guid.clone(),
+                        name: name.clone(),
+                        message,
+                    });
+                    break;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+    }
+    Ok(result)
+}
+
 // ── Commands ─────────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -819,6 +1038,16 @@ pub async fn post_schedule_occurrence(
     .await
 }
 
+/// Post what auto-post schedules have due; the layout runs this when a book
+/// opens.
+#[tauri::command]
+pub async fn post_due_schedules(state: State<'_, AppState>) -> Result<AutoPostResult, AppError> {
+    run_blocking(state.db.clone(), |conn| {
+        post_due_schedules_inner(conn, &chrono::Local::now().format("%Y-%m-%d").to_string())
+    })
+    .await
+}
+
 /// Skip the due occurrence without posting. Returns the new pointer (`None`
 /// when the skip completed the schedule).
 #[tauri::command]
@@ -881,7 +1110,186 @@ mod tests {
                     memo: None,
                 },
             ],
+            auto_post: false,
+            spread_total: false,
         }
+    }
+
+    /// A 1199.00 laptop depreciated over 96 months, like a device asset.
+    fn spread_input() -> ScheduleInput {
+        let mut input = balanced_input();
+        input.name = "Laptop depreciation".to_string();
+        input.max_occurrences = Some(96);
+        input.spread_total = true;
+        input.splits[0].amount = 1199.0;
+        input.splits[1].amount = -1199.0;
+        input
+    }
+
+    fn posted_amounts(conn: &Connection, account: &str) -> Vec<i64> {
+        let mut stmt = conn
+            .prepare(
+                "SELECT s.value_num * 100 / s.value_denom FROM splits s
+                 JOIN transactions t ON t.guid = s.tx_guid
+                 WHERE s.account_guid = ?1 ORDER BY t.post_date",
+            )
+            .unwrap();
+        stmt.query_map([account], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    #[test]
+    fn spread_slices_sum_to_total_and_balance() {
+        let totals = [1199.0, -1199.0];
+        let slices: Vec<Vec<f64>> = (0..96)
+            .map(|k| spread_occurrence_amounts(&totals, 96, k))
+            .collect();
+        let sum: i64 = slices.iter().map(|s| to_cents(s[0])).sum();
+        assert_eq!(sum, 119_900);
+        for s in &slices {
+            assert_eq!(to_cents(s[0]) + to_cents(s[1]), 0);
+            assert!((1248..=1249).contains(&to_cents(s[0])));
+        }
+        // Three legs that round independently still balance per occurrence.
+        let totals = [10.0, -5.0, -5.0];
+        let mut legs = [0i64; 3];
+        for k in 0..3 {
+            let s = spread_occurrence_amounts(&totals, 3, k);
+            assert_eq!(s.iter().map(|a| to_cents(*a)).sum::<i64>(), 0);
+            for (leg, a) in legs.iter_mut().zip(&s) {
+                *leg += to_cents(*a);
+            }
+        }
+        assert_eq!(legs, [1000, -500, -500]);
+    }
+
+    #[test]
+    fn spread_requires_count_and_plain_amounts() {
+        let conn = setup();
+        let mut no_count = spread_input();
+        no_count.max_occurrences = None;
+        assert!(matches!(
+            create_schedule_inner(&conn, no_count),
+            Err(AppError::Validation(_))
+        ));
+        let mut with_qty = spread_input();
+        with_qty.splits[0].quantity = Some(1.0);
+        assert!(matches!(
+            create_schedule_inner(&conn, with_qty),
+            Err(AppError::Validation(_))
+        ));
+    }
+
+    #[test]
+    fn spread_schedule_posts_slices_and_previews_next() {
+        let conn = setup();
+        let s = create_schedule_inner(&conn, spread_input()).unwrap();
+        assert!(s.spread_total);
+        assert_eq!(s.splits[0].amount, 1199.0); // the editor sees the total
+        assert_eq!(
+            to_cents(s.preview_amount),
+            to_cents(spread_occurrence_amounts(&[1199.0, -1199.0], 96, 0)[0])
+        );
+        post_occurrence_at(&conn, &s.guid, "2024-01-01").unwrap();
+        let after = fetch_schedule_inner(&conn, &s.guid).unwrap();
+        assert_eq!(
+            to_cents(after.preview_amount),
+            to_cents(spread_occurrence_amounts(&[1199.0, -1199.0], 96, 1)[0])
+        );
+        let posted = posted_amounts(&conn, "rent-exp");
+        assert_eq!(
+            posted,
+            vec![to_cents(
+                spread_occurrence_amounts(&[1199.0, -1199.0], 96, 0)[0]
+            )]
+        );
+    }
+
+    #[test]
+    fn auto_post_catches_up_to_today_and_completes() {
+        let conn = setup();
+        let mut input = spread_input();
+        input.auto_post = true;
+        input.max_occurrences = Some(3);
+        input.start_date = "2024-01-15".to_string();
+        let s = create_schedule_inner(&conn, input).unwrap();
+        // A manual schedule that's also due is left for the user.
+        create_schedule_inner(&conn, balanced_input()).unwrap();
+
+        let r = post_due_schedules_inner(&conn, "2024-02-20").unwrap();
+        assert_eq!(r.posted, 2);
+        assert!(r.failed.is_empty());
+        let mid = fetch_schedule_inner(&conn, &s.guid).unwrap();
+        assert_eq!(mid.next_due_date.as_deref(), Some("2024-03-15"));
+
+        let r = post_due_schedules_inner(&conn, "2025-01-01").unwrap();
+        assert_eq!(r.posted, 1);
+        let done = fetch_schedule_inner(&conn, &s.guid).unwrap();
+        assert_eq!(done.next_due_date, None);
+        assert_eq!(
+            posted_amounts(&conn, "rent-exp").iter().sum::<i64>(),
+            119_900
+        );
+        assert_eq!(
+            post_due_schedules_inner(&conn, "2025-01-01")
+                .unwrap()
+                .posted,
+            0
+        );
+    }
+
+    #[test]
+    fn auto_post_reports_invalid_schedules_and_continues() {
+        let conn = setup();
+        let mut broken = balanced_input();
+        broken.name = "Broken".to_string();
+        broken.auto_post = true;
+        let b = create_schedule_inner(&conn, broken).unwrap();
+        let mut ok = balanced_input();
+        ok.auto_post = true;
+        ok.start_date = "2024-01-02".to_string();
+        create_schedule_inner(&conn, ok).unwrap();
+        conn.execute(
+            "UPDATE accounts SET placeholder = 1 WHERE guid = 'rent-exp'",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO accounts (guid, name, account_type, parent_guid, placeholder, commodity_guid)
+             VALUES ('other-exp', 'Other', 'EXPENSE', 'root', 0, 'c-eur')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE recurring_schedules SET template_json = replace(template_json, 'rent-exp', 'other-exp')
+             WHERE guid <> ?1",
+            [&b.guid],
+        )
+        .unwrap();
+
+        let r = post_due_schedules_inner(&conn, "2024-01-02").unwrap();
+        assert_eq!(r.posted, 1);
+        assert_eq!(r.failed.len(), 1);
+        assert_eq!(r.failed[0].name, "Broken");
+        let still = fetch_schedule_inner(&conn, &b.guid).unwrap();
+        assert_eq!(still.next_due_date.as_deref(), Some("2024-01-01"));
+    }
+
+    #[test]
+    fn options_round_trip_and_clear() {
+        let conn = setup();
+        let mut input = balanced_input();
+        input.auto_post = true;
+        let s = create_schedule_inner(&conn, input).unwrap();
+        assert!(s.auto_post && !s.spread_total);
+        let off = update_schedule_inner(&conn, &s.guid, balanced_input()).unwrap();
+        assert!(!off.auto_post);
+        let rows: i64 = conn
+            .query_row("SELECT COUNT(*) FROM schedule_options", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 0);
     }
 
     fn d(s: &str) -> NaiveDate {

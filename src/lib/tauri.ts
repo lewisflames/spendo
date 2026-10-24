@@ -692,9 +692,17 @@ export interface Schedule {
   description: string | null;
   num?: string | null;
   notes?: string | null;
+  /** Template splits as entered: the totals, for a spread schedule. */
   splits: ScheduleSplit[];
-  /** Sum of the positive template split amounts (a raw sum is always 0). */
+  /**
+   * Sum of the positive split amounts the next occurrence posts (a raw sum is
+   * always 0); one slice of the total for a spread schedule.
+   */
   previewAmount: number;
+  /** Due occurrences post on their own when the book opens. */
+  autoPost: boolean;
+  /** Split amounts are a total divided across `maxOccurrences`. */
+  spreadTotal: boolean;
   createdAt: string;
 }
 
@@ -709,6 +717,20 @@ export interface ScheduleInput {
   num?: string | null;
   notes?: string | null;
   splits: SplitInput[];
+  autoPost?: boolean;
+  spreadTotal?: boolean;
+}
+
+interface AutoPostFailure {
+  guid: string;
+  name: string;
+  message: string;
+}
+
+export interface AutoPostResult {
+  posted: number;
+  /** Schedules that stopped on a validation error; their pointer stays put. */
+  failed: AutoPostFailure[];
 }
 
 export const fetchSchedules = (): Promise<Schedule[]> => invoke('fetch_schedules');
@@ -730,6 +752,9 @@ export const setScheduleActive = (guid: string, active: boolean): Promise<Schedu
 /** Posts the due occurrence; resolves with the new transaction GUID. */
 export const postScheduleOccurrence = (guid: string): Promise<string> =>
   invoke('post_schedule_occurrence', { guid });
+
+/** Posts every due occurrence of auto-post schedules up to today. */
+export const postDueSchedules = (): Promise<AutoPostResult> => invoke('post_due_schedules');
 
 /** Skips the due occurrence; resolves with the new pointer (`null` = completed). */
 export const skipScheduleOccurrence = (guid: string): Promise<string | null> =>
@@ -1267,6 +1292,7 @@ type CommandPayloads = {
   mark_reconcile_splits: MarkReconcileResult;
   open_attachment: void;
   open_book: EmptyBookResult;
+  post_due_schedules: AutoPostResult;
   post_schedule_occurrence: string;
   preview_gnucash_import: GnuCashPreview;
   refresh_prices: PricesResult;
