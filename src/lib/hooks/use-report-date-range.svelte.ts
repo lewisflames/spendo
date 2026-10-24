@@ -22,7 +22,7 @@ function applyCalendarParam(
 }
 
 /**
- * Shared period state for the P&L report: calendar range bound
+ * Shared period state for the P&L and spending reports: calendar range bound
  * to `DateRangePicker`, `YYYY-MM-DD` derivations, inverted-range guard, and
  * `?from&?to` URL sync. Must be called at component top level before
  * `useAsyncData` so the first fetch already uses URL-restored dates.

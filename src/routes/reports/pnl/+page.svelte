@@ -1,7 +1,6 @@
 <script lang="ts">
   import { PAGE_META } from '$lib/features/nav/page-meta';
   import { dbBootstrapping, dbSession } from '$lib/stores/db.svelte';
-  import { untrack } from 'svelte';
   import { fetchPnlReport, fetchPnlTrend } from '$lib/tauri';
   import {
     signColor,
@@ -22,9 +21,8 @@
   import ErrorCard from '$lib/components/shared/error-card.svelte';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import { useReportDateRange } from '$lib/hooks/use-report-date-range.svelte';
-  import { computePrevRange, PNL_PRESETS, getPnlPeriodRange } from '$lib/utils/date-utils.svelte';
-  import { loadBookSettings } from '$lib/stores/book-settings.svelte';
-  import { page } from '$app/state';
+  import { useBookDefaultPeriod } from '$lib/hooks/use-book-default-period.svelte';
+  import { computePrevRange, PNL_PRESETS } from '$lib/utils/date-utils.svelte';
   import { ReportPeriodPicker as DateRangePicker } from '$lib/components/shared/report-period-picker';
   import { buildTree, flattenAll } from '$lib/features/reports/report-tree';
 
@@ -34,39 +32,7 @@
   // first fetch already uses values from the URL.
   const range = useReportDateRange();
 
-  // Book default period (FY-aware) applies once on first load when the URL
-  // carries no explicit dates. Explicit ?from/?to always win; later user
-  // picks never get clobbered.
-  let defaultPeriodApplied = $state(false);
-  $effect(() => {
-    if (!dbSession.value || defaultPeriodApplied) return;
-    // Snapshot the URL-restored range: if the user picks a new period while
-    // settings load, the snapshot differs and the default is skipped (the URL
-    // guard alone loses the race because goto() updates the URL asynchronously).
-    const rangeAtStart = untrack(() => `${range.dateFrom}|${range.dateTo}`);
-    loadBookSettings()
-      .then((settings) => {
-        if (defaultPeriodApplied) return;
-        const sp = page.url.searchParams;
-        if (
-          sp.get('from') ||
-          sp.get('to') ||
-          `${range.dateFrom}|${range.dateTo}` !== rangeAtStart
-        ) {
-          defaultPeriodApplied = true;
-          return;
-        }
-        const { start, end } = getPnlPeriodRange(
-          settings.defaultPnlPeriod,
-          settings.fiscalYearStartMonth
-        );
-        range.value = { start, end };
-        defaultPeriodApplied = true;
-      })
-      .catch(() => {
-        defaultPeriodApplied = true;
-      });
-  });
+  useBookDefaultPeriod(range);
 
   const res = useAsyncData({
     enabled: () => !!dbSession.value && !!range.dateFrom && !!range.dateTo && range.rangeValid,
