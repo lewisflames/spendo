@@ -6,7 +6,8 @@
   import { Button } from '$lib/components/ui/button';
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import NavRow from '$lib/components/shared/nav-row.svelte';
-  import { clampZero, formatNumber, formatSessionCurrency } from '$lib/utils/format.svelte';
+  import SectionRow from '$lib/components/shared/section-row.svelte';
+  import { formatNumber } from '$lib/utils/format.svelte';
   import { openAccount } from '$lib/utils/navigation';
   import { cn, treeIndentStyle } from '$lib/utils';
   import AccountLabel from './account-label.svelte';
@@ -50,19 +51,7 @@
   </Table.Header>
   <Table.Body>
     {#each rendered as { section, rows } (section.category)}
-      <Table.Row class="hover:bg-transparent">
-        <Table.Cell
-          colspan={3}
-          class="pt-4 pb-1 text-xs font-semibold tracking-wider text-muted-foreground uppercase"
-        >
-          {section.label}
-        </Table.Cell>
-        <Table.Cell
-          class="pt-4 pb-1 text-right text-xs font-semibold whitespace-nowrap text-muted-foreground tabular-nums"
-        >
-          {formatSessionCurrency(clampZero(section.total))}
-        </Table.Cell>
-      </Table.Row>
+      <SectionRow label={section.label} total={section.total} columns={4} />
       {#each rows as row (row.node.guid)}
         <NavRow onNavigate={() => openAccount(row.node.guid)}>
           <Table.Cell class="p-0">

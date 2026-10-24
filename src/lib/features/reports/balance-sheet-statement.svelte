@@ -2,6 +2,7 @@
   import Amount from '$lib/components/shared/amount.svelte';
   import * as Table from '$lib/components/ui/table';
   import TableShell from '$lib/components/shared/table-shell.svelte';
+  import SectionRow from '$lib/components/shared/section-row.svelte';
   import NavRow from '$lib/components/shared/nav-row.svelte';
   import ReportAccountCell from '$lib/features/reports/report-account-cell.svelte';
   import { openAccount } from '$lib/utils/navigation';
@@ -17,17 +18,6 @@
       <Table.Head class="text-right text-muted-foreground">Amount</Table.Head>
     </Table.Row>
   </Table.Header>
-{/snippet}
-
-{#snippet sectionHeader(label: string)}
-  <Table.Row class="hover:bg-transparent">
-    <Table.Cell
-      colspan={2}
-      class="pt-4 pb-1 text-xs font-semibold tracking-wider text-muted-foreground uppercase"
-    >
-      {label}
-    </Table.Cell>
-  </Table.Row>
 {/snippet}
 
 {#snippet accountRow(row: BalanceSheetRow)}
@@ -101,7 +91,7 @@
   <TableShell>
     {@render tableHead()}
     <Table.Body>
-      {@render sectionHeader('Assets')}
+      <SectionRow label="Assets" columns={2} />
       {@render sectionRows(sheet.assets.rows)}
     </Table.Body>
     <Table.Footer>
@@ -112,10 +102,10 @@
   <TableShell>
     {@render tableHead()}
     <Table.Body>
-      {@render sectionHeader('Liabilities')}
+      <SectionRow label="Liabilities" columns={2} />
       {@render sectionRows(sheet.liabilities.rows)}
       {@render subtotalRow('Total liabilities', sheet.liabilities.total)}
-      {@render sectionHeader('Equity')}
+      <SectionRow label="Equity" columns={2} />
       {@render sectionRows(sheet.equity.rows)}
       {@render subtotalRow('Total equity', sheet.equity.total)}
     </Table.Body>
