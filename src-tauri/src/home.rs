@@ -89,7 +89,9 @@ pub fn get_summary(conn: &Connection) -> Result<DataSummary, AppError> {
     let net_worth: f64 = cash_rows
         .iter()
         .map(|(guid, mnemonic, cash_assets, shares, liabilities)| {
-            let cash_val = fx::convert(*cash_assets - *liabilities, mnemonic, &currency, &fx_map);
+            // Liabilities keep their raw (credit-negative) sign, so debt is
+            // added, not subtracted: 40 owed is a raw -40.
+            let cash_val = fx::convert(*cash_assets + *liabilities, mnemonic, &currency, &fx_map);
             let inv_val = if *shares != 0.0 {
                 unified_prices.get(guid).copied().unwrap_or(0.0) * shares
             } else {
@@ -185,6 +187,32 @@ mod tests {
         assert_eq!(summary.latest_date.as_deref(), Some("2024-02-05"));
         // 50 - 15 in EUR (the report currency).
         assert_eq!(summary.net_worth, 35.0);
+    }
+
+    /// Debt lowers net worth: a card purchase credits the liability account
+    /// (negative raw value), so 40 owed takes 35 down to -5.
+    #[test]
+    fn liabilities_reduce_net_worth() {
+        let conn = setup();
+        conn.execute(
+            "INSERT INTO accounts (guid, name, account_type, parent_guid, placeholder, commodity_guid)
+             VALUES ('card', 'Card', 'CREDIT', 'root', 0, 'c-eur')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO transactions (guid, post_date) VALUES ('t-card', '2024-02-10')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO splits (guid, tx_guid, account_guid, value_num, value_denom, quantity_num, quantity_denom)
+             VALUES ('s-card', 't-card', 'card', -4_000, 100, -4_000, 100)",
+            [],
+        )
+        .unwrap();
+
+        assert_eq!(get_summary(&conn).unwrap().net_worth, -5.0);
     }
 
     #[test]
