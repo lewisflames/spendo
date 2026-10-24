@@ -268,17 +268,8 @@
   // Receipts are deleted permanently with their transaction.
   let attachmentCount = $derived(initial?.attachmentCount ?? 0);
 
-  let dirty = $derived.by(() => {
-    if (
-      pendingAttachments.length > 0 ||
-      postDate !== baseline.postDate ||
-      description !== baseline.description ||
-      num !== baseline.num ||
-      notes !== baseline.notes ||
-      splits.length !== baseline.splits.length
-    ) {
-      return true;
-    }
+  let splitsDirty = $derived.by(() => {
+    if (splits.length !== baseline.splits.length) return true;
     return splits.some((s, i) => {
       const b = baseline.splits[i];
       return (
@@ -291,9 +282,19 @@
     });
   });
 
-  // Show inline split errors live once the user has touched the form; the save
-  // buttons stay honestly disabled until the form can actually save.
-  let effectiveShowErrors = $derived(showErrors || dirty);
+  let dirty = $derived(
+    pendingAttachments.length > 0 ||
+      postDate !== baseline.postDate ||
+      description !== baseline.description ||
+      num !== baseline.num ||
+      notes !== baseline.notes ||
+      splitsDirty
+  );
+
+  // Show inline split errors live once the user has edited a split (typing a
+  // description alone doesn't count) or tried to save; the save buttons stay
+  // honestly disabled until the form can actually save.
+  let effectiveShowErrors = $derived(showErrors || splitsDirty);
 
   let issues = $derived.by(() => {
     const list: string[] = [];
