@@ -9,7 +9,8 @@ const FIELD_TO_KEY: Record<BookSettingField, string> = {
   priceAutoRefresh: 'price_auto_refresh',
   exportCsvDelimiter: 'export_csv_delimiter',
   exportDateFormat: 'export_date_format',
-  autoBackup: 'auto_backup'
+  autoBackup: 'auto_backup',
+  transitAccount: 'transit_account'
 };
 
 const DEFAULT_BOOK_SETTINGS: BookSettings = {
@@ -18,7 +19,8 @@ const DEFAULT_BOOK_SETTINGS: BookSettings = {
   priceAutoRefresh: 'off',
   exportCsvDelimiter: ',',
   exportDateFormat: 'iso',
-  autoBackup: 'daily'
+  autoBackup: 'daily',
+  transitAccount: ''
 };
 
 export const bookSettings = $state<{ value: BookSettings }>({

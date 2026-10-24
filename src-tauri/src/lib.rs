@@ -23,6 +23,7 @@ mod search;
 mod settings;
 mod sql;
 mod transactions;
+mod transit;
 mod tree;
 mod utils;
 mod yahoo;
@@ -164,6 +165,7 @@ pub fn run() {
             schedules::post_schedule_occurrence,
             schedules::skip_schedule_occurrence,
             schedules::post_due_schedules,
+            transit::fetch_transit_check,
             portfolio::fetch_portfolio_data,
             portfolio::fetch_holding_detail,
             portfolio::fetch_allocation_targets,

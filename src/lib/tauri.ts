@@ -353,6 +353,8 @@ export interface BookSettings {
   exportCsvDelimiter: CsvDelimiter;
   exportDateFormat: ExportDateFormat;
   autoBackup: AutoBackup;
+  /** Clearing account the transit check pairs transfer legs in; '' = off. */
+  transitAccount: string;
 }
 
 export const getBookSettings = (): Promise<BookSettings> => invoke('get_book_settings');
@@ -759,6 +761,31 @@ export const postDueSchedules = (): Promise<AutoPostResult> => invoke('post_due_
 /** Skips the due occurrence; resolves with the new pointer (`null` = completed). */
 export const skipScheduleOccurrence = (guid: string): Promise<string | null> =>
   invoke('skip_schedule_occurrence', { guid });
+
+// ── Transit check (unpaired legs in the clearing account) ──
+
+interface OpenLeg {
+  txGuid: string;
+  /** YYYY-MM-DD. */
+  postDate: string;
+  description: string | null;
+  amount: number;
+  /** The transaction's other side (its largest other split). */
+  counterAccount: string | null;
+  daysOpen: number;
+}
+
+export interface TransitCheck {
+  /** `null` when the book has no transit account set. */
+  accountGuid: string | null;
+  accountName: string | null;
+  /** Oldest first. */
+  openLegs: OpenLeg[];
+  /** Sum of the open legs, i.e. the clearing balance. */
+  openTotal: number;
+}
+
+export const fetchTransitCheck = (): Promise<TransitCheck> => invoke('fetch_transit_check');
 
 /** Full-book transactions CSV written straight to the chosen path. */
 interface TransactionsExportInput {
@@ -1282,6 +1309,7 @@ type CommandPayloads = {
   fetch_reconcile_summaries: ReconcileAccountSummary[];
   fetch_schedule: Schedule;
   fetch_schedules: Schedule[];
+  fetch_transit_check: TransitCheck;
   fetch_symbol_overrides: SymbolOverride[];
   fetch_transaction: TransactionDetailResult | null;
   fetch_transaction_heatmap: HeatmapPoint[];

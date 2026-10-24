@@ -2,12 +2,18 @@
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
-  import { Pencil, Plus, CircleCheck } from '@lucide/svelte';
+  import { ArrowLeftRight, Pencil, Plus, CircleCheck } from '@lucide/svelte';
   import { toast } from '$lib/components/ui/sonner';
   import { Button } from '$lib/components/ui/button';
   import AccountDialog, { type AccountInitial } from '$lib/features/accounts/account-dialog.svelte';
   import { dbBootstrapping, dbSession, refreshSession } from '$lib/stores/db.svelte';
   import { appSettings, applyPageSize } from '$lib/stores/settings.svelte';
+  import {
+    bookSettings,
+    loadBookSettings,
+    saveBookSetting
+  } from '$lib/stores/book-settings.svelte';
+  import { errMsg } from '$lib/utils/error';
   import { fetchAccountDetail } from '$lib/tauri';
   import { clampZero, sessionCurrency } from '$lib/utils/format.svelte';
   import BookGate from '$lib/components/shared/book-gate.svelte';
@@ -31,6 +37,7 @@
   import AccountDetailHeader from '$lib/features/accounts/account-detail-header.svelte';
   import AccountKpiCards from '$lib/features/accounts/account-kpi-cards.svelte';
   import AccountLedger from '$lib/features/accounts/account-ledger.svelte';
+  import TransitCheckCard from '$lib/features/accounts/transit-check-card.svelte';
   import { isReconcilable } from '$lib/features/reconcile/math';
   import { openAccount } from '$lib/utils/navigation';
   import OverflowMenu, { type OverflowAction } from '$lib/components/shared/overflow-menu.svelte';
@@ -166,12 +173,39 @@
       : [])
   ]);
 
+  $effect(() => {
+    if (dbSession.value) loadBookSettings().catch(() => {});
+  });
+
+  // The book’s clearing account gets the unmatched-transfers check.
+  let isTransit = $derived(!!guid && bookSettings.value.transitAccount === guid);
+
+  async function toggleTransit() {
+    if (!guid) return;
+    const tracking = !isTransit;
+    try {
+      await saveBookSetting('transitAccount', tracking ? guid : '');
+      toast.success(tracking ? 'Tracking unmatched transfers' : 'Stopped tracking transfers');
+    } catch (e: unknown) {
+      toast.error(errMsg(e, 'We couldn’t change transfer tracking'));
+    }
+  }
+
   let moreActions = $derived.by((): OverflowAction[] => {
     const a = res.data?.account;
     if (!a || !guid) return [];
     return [
       ...(isReconcilable(a.accountType, a.placeholder)
         ? [{ label: 'Reconcile', icon: CircleCheck, href: resolve('/reconcile/[guid]', { guid }) }]
+        : []),
+      ...(!a.placeholder
+        ? [
+            {
+              label: isTransit ? 'Stop tracking transfers' : 'Track unmatched transfers',
+              icon: ArrowLeftRight,
+              onSelect: () => void toggleTransit()
+            }
+          ]
         : []),
       { label: 'New sub-account', icon: Plus, onSelect: () => (createOpen = true) }
     ];
@@ -235,6 +269,10 @@
       <KpiCardRow />
     {:else if res.data}
       <AccountKpiCards summary={res.data.summary} {currentBalance} />
+    {/if}
+
+    {#if isTransit}
+      <TransitCheckCard version={res.data} />
     {/if}
 
     <!-- Balance over time + composition. The grid keeps its shape across the

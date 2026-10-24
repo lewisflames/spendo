@@ -36,6 +36,9 @@ pub struct BookSettings {
     pub export_csv_delimiter: String,
     pub export_date_format: String,
     pub auto_backup: String,
+    /// Clearing account whose transfer legs the transit check pairs up
+    /// (account GUID; empty = off).
+    pub transit_account: String,
 }
 
 fn default_book_settings() -> BookSettings {
@@ -46,6 +49,7 @@ fn default_book_settings() -> BookSettings {
         export_csv_delimiter: ",".to_string(),
         export_date_format: "iso".to_string(),
         auto_backup: "daily".to_string(),
+        transit_account: String::new(),
     }
 }
 
@@ -103,6 +107,17 @@ fn validate_book_setting(key: &str, value: &str) -> Result<(), AppError> {
                 "Invalid value for {key}: {value}"
             ))),
         },
+        "transit_account" => {
+            if value.is_empty()
+                || (value.len() <= 64 && value.chars().all(|c| c.is_ascii_hexdigit() || c == '-'))
+            {
+                Ok(())
+            } else {
+                Err(AppError::Validation(format!(
+                    "Invalid value for {key}: {value}"
+                )))
+            }
+        }
         _ => Err(AppError::Validation(format!(
             "Unknown setting: {key}. We don't know that one"
         ))),
@@ -133,6 +148,7 @@ fn get_book_settings_inner(conn: &Connection) -> Result<BookSettings, AppError> 
         )?,
         export_date_format: pick("export_date_format", defaults.export_date_format.clone())?,
         auto_backup: pick("auto_backup", defaults.auto_backup.clone())?,
+        transit_account: pick("transit_account", defaults.transit_account.clone())?,
     })
 }
 
@@ -148,6 +164,28 @@ fn set_book_setting_inner(
     value: &str,
 ) -> Result<BookSettings, AppError> {
     validate_book_setting(key, value)?;
+    if key == "transit_account" && !value.is_empty() {
+        let placeholder: Option<i64> = conn
+            .query_row(
+                "SELECT COALESCE(placeholder, 0) FROM accounts WHERE guid = ?1",
+                [value],
+                |row| row.get(0),
+            )
+            .optional()?;
+        match placeholder {
+            None => {
+                return Err(AppError::NotFound(
+                    "That account no longer exists".to_string(),
+                ))
+            }
+            Some(p) if p != 0 => {
+                return Err(AppError::Validation(
+                    "Pick an account that holds transactions, not a placeholder".to_string(),
+                ))
+            }
+            Some(_) => {}
+        }
+    }
     conn.execute(
         "INSERT INTO app_settings (key, value) VALUES (?1, ?2)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -240,6 +278,29 @@ mod tests {
             get_book_settings_inner(&conn).unwrap(),
             default_book_settings()
         );
+    }
+
+    #[test]
+    fn transit_account_must_be_a_real_posting_account() {
+        let conn = mem_db();
+        conn.execute_batch(
+            "INSERT INTO accounts (guid, name, account_type, placeholder)
+               VALUES ('aa11', 'Transit', 'ASSET', 0), ('bb22', 'Banks', 'ASSET', 1);",
+        )
+        .unwrap();
+        assert!(matches!(
+            set_book_setting_inner(&conn, "transit_account", "cc33"),
+            Err(AppError::NotFound(_))
+        ));
+        assert!(matches!(
+            set_book_setting_inner(&conn, "transit_account", "bb22"),
+            Err(AppError::Validation(_))
+        ));
+        assert!(set_book_setting_inner(&conn, "transit_account", "not a guid").is_err());
+        let updated = set_book_setting_inner(&conn, "transit_account", "aa11").unwrap();
+        assert_eq!(updated.transit_account, "aa11");
+        let cleared = set_book_setting_inner(&conn, "transit_account", "").unwrap();
+        assert_eq!(cleared.transit_account, "");
     }
 
     #[test]
