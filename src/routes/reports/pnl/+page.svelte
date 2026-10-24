@@ -6,10 +6,10 @@
     signColor,
     formatSessionCurrency,
     formatSignedSessionCurrency,
-    fmtPct,
+    formatAllocPct,
     EMPTY_DASH
   } from '$lib/utils/format.svelte';
-  import { ArrowLeftRight, History, TrendingDown, TrendingUp, Percent } from '@lucide/svelte';
+  import { ArrowLeftRight, History, PiggyBank, TrendingDown, TrendingUp } from '@lucide/svelte';
   import PageHeader from '$lib/components/layout/page-header.svelte';
   import KpiCard from '$lib/components/shared/kpi-card.svelte';
   import PageSkeleton from '$lib/components/shared/page-skeleton.svelte';
@@ -25,6 +25,7 @@
   import { computePrevRange, PNL_PRESETS } from '$lib/utils/date-utils.svelte';
   import { ReportPeriodPicker as DateRangePicker } from '$lib/components/shared/report-period-picker';
   import { buildTree, flattenAll } from '$lib/features/reports/report-tree';
+  import { savingsRate } from '$lib/features/pnl/pnl-utils';
 
   const meta = PAGE_META.pnl;
 
@@ -69,9 +70,8 @@
   let netVariance = $derived(
     pnlData && prevNetIncome !== null ? pnlData.netIncome - prevNetIncome : null
   );
-  let netChangePct = $derived(pnlData ? pnlData.netIncomeChangePct : null);
   let isZeroVariance = $derived(netVariance === null || netVariance === 0);
-  let isZeroChange = $derived(netChangePct === null || netChangePct === 0);
+  let rate = $derived(pnlData ? savingsRate(pnlData.totalIncome, pnlData.netIncome) : null);
 </script>
 
 <svelte:head>
@@ -113,6 +113,16 @@
           {/snippet}
         </KpiCard>
         <KpiCard
+          title="Savings rate"
+          value={rate !== null ? formatAllocPct(rate) : EMPTY_DASH}
+          valueClass={rate !== null ? signColor(rate) : 'text-muted-foreground'}
+          loading={!pnlData && (res.loading || dbBootstrapping.value)}
+        >
+          {#snippet icon()}
+            <PiggyBank aria-hidden="true" class="size-4 text-muted-foreground" />
+          {/snippet}
+        </KpiCard>
+        <KpiCard
           title="Previous period"
           value={pnlData && prevNetIncome !== null ? fmt(prevNetIncome) : EMPTY_DASH}
           loading={!pnlData && (res.loading || dbBootstrapping.value)}
@@ -143,22 +153,6 @@
             {:else}
               <TrendingUp aria-hidden="true" class="size-4 text-muted-foreground" />
             {/if}
-          {/snippet}
-        </KpiCard>
-        <KpiCard
-          title="Change"
-          value={pnlData && netChangePct !== null
-            ? isZeroChange
-              ? EMPTY_DASH
-              : fmtPct(netChangePct)
-            : EMPTY_DASH}
-          valueClass={pnlData && netChangePct !== null && !isZeroChange
-            ? signColor(netChangePct)
-            : 'text-muted-foreground'}
-          loading={!pnlData && (res.loading || dbBootstrapping.value)}
-        >
-          {#snippet icon()}
-            <Percent aria-hidden="true" class="size-4 text-muted-foreground" />
           {/snippet}
         </KpiCard>
       </DimWrapper>

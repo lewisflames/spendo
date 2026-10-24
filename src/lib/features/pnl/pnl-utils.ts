@@ -6,3 +6,9 @@ export function changePct(current: number, previous: number): number | null {
   if (current !== 0) return 100;
   return null;
 }
+
+/** Share of income kept (net ÷ income, 0–100 scale); null without positive
+ * income, where a rate is meaningless. Negative when spending exceeds income. */
+export function savingsRate(income: number, net: number): number | null {
+  return income > 0 ? (net / income) * 100 : null;
+}
