@@ -70,10 +70,12 @@
   // (e.g. Settings' "Clear all data" gate) instead of a stale null session.
   // The rejection is deliberately swallowed here: the store resets its
   // bootstrap flag, so a later navigation retries; pages that need the
-  // session surface their own errors.
+  // session surface their own errors. The path loads afterwards: setting the
+  // session bumps its sequence, which would discard a path fetched in parallel.
   $effect(() => {
-    ensureDbSessionLoaded().catch(() => {});
-    loadActiveBook().catch(() => {});
+    ensureDbSessionLoaded()
+      .catch(() => {})
+      .then(() => loadActiveBook());
   });
 
   // Keep sidebar roots + badges current while a book is open: they refresh on
