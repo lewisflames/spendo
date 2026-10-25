@@ -6,7 +6,7 @@
   import { Button } from '$lib/components/ui/button';
   import * as Card from '$lib/components/ui/card';
   import IconCardHeader from '$lib/components/shared/icon-card-header.svelte';
-  import { ArrowLeftRight, ChevronLeft, CopyPlus, Info, Trash2 } from '@lucide/svelte';
+  import { ChevronLeft, CopyPlus, Info, Trash2 } from '@lucide/svelte';
   import { DatePicker } from '$lib/components/shared/date-picker';
   import PageHeader, { type Breadcrumb } from '$lib/components/layout/page-header.svelte';
   import OverflowMenu, { type OverflowAction } from '$lib/components/shared/overflow-menu.svelte';
@@ -814,25 +814,15 @@
     </Card.Content>
   </Card.Root>
 
-  <Card.Root>
-    <IconCardHeader title="Splits">
-      {#snippet icon()}
-        <ArrowLeftRight aria-hidden="true" class="size-4 text-muted-foreground" />
-      {/snippet}
-    </IconCardHeader>
-    <Card.Content>
-      <SplitEditor
-        bind:splits
-        options={pickerOptions}
-        loading={accountsRes.loading}
-        loadError={accountsRes.error ?? ''}
-        showErrors={effectiveShowErrors}
-        makeKey={nextKey}
-        idPrefix={SPLIT_ID_PREFIX}
-        title=""
-      />
-    </Card.Content>
-  </Card.Root>
+  <SplitEditor
+    bind:splits
+    options={pickerOptions}
+    loading={accountsRes.loading}
+    loadError={accountsRes.error ?? ''}
+    showErrors={effectiveShowErrors}
+    makeKey={nextKey}
+    idPrefix={SPLIT_ID_PREFIX}
+  />
 
   {#if !canSave && showErrors}
     <div

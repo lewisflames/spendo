@@ -4,8 +4,11 @@
   import { Input } from '$lib/components/ui/input';
   import { Button } from '$lib/components/ui/button';
   import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
+  import * as Card from '$lib/components/ui/card';
+  import IconCardHeader from '$lib/components/shared/icon-card-header.svelte';
   import { AccountPicker } from '$lib/components/shared/account-picker';
   import {
+    ArrowLeftRight,
     ArrowRightLeft,
     Check,
     ChevronDown,
@@ -47,7 +50,7 @@
     options?: PickerAccount[];
     loading?: boolean;
     loadError?: string;
-    /** Section heading; empty when the surrounding card already names it. */
+    /** Card title. */
     title?: string;
     addLabel?: string;
     showErrors?: boolean;
@@ -189,164 +192,167 @@
   }
 </script>
 
-<div class="flex flex-col gap-3">
-  {#if title}
-    <h3 class="text-sm font-medium">{title}</h3>
-  {/if}
+<Card.Root>
+  <IconCardHeader {title}>
+    {#snippet icon()}
+      <ArrowLeftRight aria-hidden="true" class="size-4 text-muted-foreground" />
+    {/snippet}
+  </IconCardHeader>
+  <Card.Content class="flex flex-col gap-3">
+    {#if loadError}
+      <p role="alert" class="text-xs text-destructive">{loadError}</p>
+    {/if}
 
-  {#if loadError}
-    <p role="alert" class="text-xs text-destructive">{loadError}</p>
-  {/if}
-
-  <div class="overflow-hidden rounded-lg border">
-    <div
-      class="hidden gap-2 border-b bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground @xl:grid {gridCols}"
-    >
-      <span>Account</span>
-      <span>Amount</span>
-      {#if showQtyColumn}
-        <span>Quantity</span>
-      {/if}
-      <span>Memo</span>
-      <span class="sr-only">Row actions</span>
-    </div>
-
-    <div class="divide-y">
-      {#each splits as s, i (s.key)}
-        {@const label = rowLabel(s, i)}
-        {@const remainder = remainderFor(i, splits)}
-        {@const price = unitPrice(s)}
-        <div
-          class="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_2rem] gap-2 p-3 @xl:items-start @xl:px-3 @xl:py-2 {gridCols}"
-        >
-          <div class="col-span-2 @xl:col-span-1">
-            <AccountPicker
-              id="{idPrefix}-{s.key}-account"
-              bind:value={s.accountGuid}
-              {options}
-              placeholder={loading ? 'Loading accounts…' : 'Select an account'}
-              disabled={loading}
-              invalid={showErrors && !!errors[i] && !s.accountGuid}
-              describedBy={showErrors && errors[i] ? `${idPrefix}-${s.key}-error` : undefined}
-              onSelect={() => focusAmount(s.key)}
-            />
-          </div>
-          <!-- Narrow: the menu sits beside the account; @xl renders it in the last column. -->
-          <div class="col-start-3 row-start-1 flex justify-end @xl:hidden">
-            {@render rowMenu(s, i, label, remainder)}
-          </div>
-          <div class="{showQtyColumn ? 'col-span-1' : 'col-span-full'} @xl:col-span-1">
-            <Input
-              id="{idPrefix}-{s.key}-amount"
-              type="text"
-              inputmode="decimal"
-              class="text-right tabular-nums"
-              bind:value={s.amount}
-              placeholder={autoFill === i && remainder !== null
-                ? formatDraftAmount(remainder)
-                : '0.00'}
-              {@attach tooltip('Accepts amounts like 1,000.00, $12.50 or 10+5')}
-              aria-label="{label} amount"
-              aria-invalid={showErrors && parseAmount(s.amount) === null}
-              onkeydown={(e) => handleAmountKeydown(e, i)}
-            />
-          </div>
-          {#if showQtyColumn}
-            <div class="col-span-2 flex flex-col gap-1 @xl:col-span-1">
-              {#if s.showQuantity}
-                <Input
-                  id="{idPrefix}-{s.key}-qty"
-                  type="text"
-                  inputmode="decimal"
-                  class="text-right tabular-nums"
-                  bind:value={s.quantity}
-                  placeholder="Quantity"
-                  aria-label="{label} quantity"
-                />
-                {#if price}
-                  <p class="text-right text-[11px] text-muted-foreground tabular-nums">{price}</p>
-                {/if}
-              {/if}
-            </div>
-          {/if}
-          <div class="col-span-full @xl:col-span-1">
-            <Input
-              id="{idPrefix}-{s.key}-memo"
-              bind:value={s.memo}
-              placeholder="Memo"
-              maxlength={500}
-              aria-label="{label} memo"
-            />
-          </div>
-          <div class="hidden justify-center @xl:flex">
-            {@render rowMenu(s, i, label, remainder)}
-          </div>
-          {#if showErrors && errors[i]}
-            <p
-              id="{idPrefix}-{s.key}-error"
-              role="alert"
-              class="col-span-full text-xs text-destructive"
-            >
-              {errors[i]}
-            </p>
-          {/if}
-        </div>
-      {/each}
-    </div>
-
-    <div
-      class="flex flex-wrap items-center justify-between gap-2 border-t bg-muted/30 px-3 py-2 @xl:grid {gridCols}"
-    >
-      <div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          class="-ml-2 text-muted-foreground"
-          onclick={addSplit}
-          disabled={splits.length >= 50}
-        >
-          <Plus aria-hidden="true" class="size-3.5" />
-          {addLabel}
-        </Button>
-      </div>
+    <div class="overflow-hidden rounded-lg border">
       <div
-        class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm @xl:col-[2/-1] {balanced
-          ? 'text-success'
-          : showErrors && autoFill < 0
-            ? 'text-destructive'
-            : 'text-muted-foreground'}"
-        role="status"
+        class="hidden gap-2 border-b bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground @xl:grid {gridCols}"
       >
-        {#if autoFill >= 0 && autoFillAmount !== null}
-          <span class="tabular-nums">
-            Row {autoFill + 1} balances at {formatSessionCurrency(autoFillAmount)}
-          </span>
+        <span>Account</span>
+        <span>Amount</span>
+        {#if showQtyColumn}
+          <span>Quantity</span>
+        {/if}
+        <span>Memo</span>
+        <span class="sr-only">Row actions</span>
+      </div>
+
+      <div class="divide-y">
+        {#each splits as s, i (s.key)}
+          {@const label = rowLabel(s, i)}
+          {@const remainder = remainderFor(i, splits)}
+          {@const price = unitPrice(s)}
+          <div
+            class="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_2rem] gap-2 p-3 @xl:items-start @xl:px-3 @xl:py-2 {gridCols}"
+          >
+            <div class="col-span-2 @xl:col-span-1">
+              <AccountPicker
+                id="{idPrefix}-{s.key}-account"
+                bind:value={s.accountGuid}
+                {options}
+                placeholder={loading ? 'Loading accounts…' : 'Select an account'}
+                disabled={loading}
+                invalid={showErrors && !!errors[i] && !s.accountGuid}
+                describedBy={showErrors && errors[i] ? `${idPrefix}-${s.key}-error` : undefined}
+                onSelect={() => focusAmount(s.key)}
+              />
+            </div>
+            <!-- Narrow: the menu sits beside the account; @xl renders it in the last column. -->
+            <div class="col-start-3 row-start-1 flex justify-end @xl:hidden">
+              {@render rowMenu(s, i, label, remainder)}
+            </div>
+            <div class="{showQtyColumn ? 'col-span-1' : 'col-span-full'} @xl:col-span-1">
+              <Input
+                id="{idPrefix}-{s.key}-amount"
+                type="text"
+                inputmode="decimal"
+                class="text-right tabular-nums"
+                bind:value={s.amount}
+                placeholder={autoFill === i && remainder !== null
+                  ? formatDraftAmount(remainder)
+                  : '0.00'}
+                {@attach tooltip('Accepts amounts like 1,000.00, $12.50 or 10+5')}
+                aria-label="{label} amount"
+                aria-invalid={showErrors && parseAmount(s.amount) === null}
+                onkeydown={(e) => handleAmountKeydown(e, i)}
+              />
+            </div>
+            {#if showQtyColumn}
+              <div class="col-span-2 flex flex-col gap-1 @xl:col-span-1">
+                {#if s.showQuantity}
+                  <Input
+                    id="{idPrefix}-{s.key}-qty"
+                    type="text"
+                    inputmode="decimal"
+                    class="text-right tabular-nums"
+                    bind:value={s.quantity}
+                    placeholder="Quantity"
+                    aria-label="{label} quantity"
+                  />
+                  {#if price}
+                    <p class="text-right text-[11px] text-muted-foreground tabular-nums">{price}</p>
+                  {/if}
+                {/if}
+              </div>
+            {/if}
+            <div class="col-span-full @xl:col-span-1">
+              <Input
+                id="{idPrefix}-{s.key}-memo"
+                bind:value={s.memo}
+                placeholder="Memo"
+                maxlength={500}
+                aria-label="{label} memo"
+              />
+            </div>
+            <div class="hidden justify-center @xl:flex">
+              {@render rowMenu(s, i, label, remainder)}
+            </div>
+            {#if showErrors && errors[i]}
+              <p
+                id="{idPrefix}-{s.key}-error"
+                role="alert"
+                class="col-span-full text-xs text-destructive"
+              >
+                {errors[i]}
+              </p>
+            {/if}
+          </div>
+        {/each}
+      </div>
+
+      <div
+        class="flex flex-wrap items-center justify-between gap-2 border-t bg-muted/30 px-3 py-2 @xl:grid {gridCols}"
+      >
+        <div>
           <Button
             type="button"
-            variant="outline"
+            variant="ghost"
             size="sm"
-            class="h-6 px-2"
-            onclick={() => fillRemainder(autoFill)}
+            class="-ml-2 text-muted-foreground"
+            onclick={addSplit}
+            disabled={splits.length >= 50}
           >
-            Fill row {autoFill + 1}
+            <Plus aria-hidden="true" class="size-3.5" />
+            {addLabel}
           </Button>
-        {:else if balanced}
-          <Check aria-hidden="true" class="size-4" />
-          <span>Balanced</span>
-        {:else if balance !== null}
-          <span class="text-destructive tabular-nums">
-            Off by {formatSessionCurrency(Math.abs(balance))}
-          </span>
-        {:else if showErrors}
-          Add an amount to every split.
-        {:else}
-          Splits net to zero.
-        {/if}
+        </div>
+        <div
+          class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm @xl:col-[2/-1] {balanced
+            ? 'text-success'
+            : showErrors && autoFill < 0
+              ? 'text-destructive'
+              : 'text-muted-foreground'}"
+          role="status"
+        >
+          {#if autoFill >= 0 && autoFillAmount !== null}
+            <span class="tabular-nums">
+              Row {autoFill + 1} balances at {formatSessionCurrency(autoFillAmount)}
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              class="h-6 px-2"
+              onclick={() => fillRemainder(autoFill)}
+            >
+              Fill row {autoFill + 1}
+            </Button>
+          {:else if balanced}
+            <Check aria-hidden="true" class="size-4" />
+            <span>Balanced</span>
+          {:else if balance !== null}
+            <span class="text-destructive tabular-nums">
+              Off by {formatSessionCurrency(Math.abs(balance))}
+            </span>
+          {:else if showErrors}
+            Add an amount to every split.
+          {:else}
+            Splits net to zero.
+          {/if}
+        </div>
       </div>
     </div>
-  </div>
-</div>
+  </Card.Content>
+</Card.Root>
 
 {#snippet rowMenu(s: SplitDraft, i: number, label: string, remainder: number | null)}
   <DropdownMenu.Root>
