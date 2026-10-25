@@ -3,7 +3,11 @@ name: pages
 on:
   push:
     branches: [main]
-    paths: ['site/**', 'src-tauri/icons/app-icon.svg', '.github/workflows/pages.yml']
+    paths:
+      - 'site/**'
+      - 'docs/screenshots/**'
+      - 'src-tauri/icons/app-icon.svg'
+      - '.github/workflows/pages.yml'
   # Releases are created with GITHUB_TOKEN, which never fires `release` events,
   # so rebuild after the release workflow to pick up the new download links.
   workflow_run:
