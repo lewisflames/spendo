@@ -369,6 +369,8 @@ export interface BookSettings {
   transitAccount: string;
   /** How sales are matched to lots for realized gains. */
   costBasisMethod: CostBasisMethod;
+  /** Tag the tax summary lists as deductible expenses; '' = none. */
+  taxDeductibleTag: string;
 }
 
 export const getBookSettings = (): Promise<BookSettings> => invoke('get_book_settings');
@@ -873,6 +875,14 @@ interface RealizedGainsExportInput extends Omit<TransactionsExportInput, 'path'>
 export const exportRealizedGainsCsv = (input: RealizedGainsExportInput): Promise<void> =>
   invoke('export_realized_gains_csv', { input });
 
+interface TaxSummaryExportInput {
+  path: string;
+  year: number;
+  delimiter: string;
+}
+
+export const exportTaxSummaryCsv = (input: TaxSummaryExportInput): Promise<void> =>
+  invoke('export_tax_summary_csv', { input });
 
 export const refreshPrices = (): Promise<PricesResult> => invoke('refresh_prices');
 
@@ -1240,6 +1250,88 @@ interface RealizedGainsReport {
 export const fetchRealizedGains = (year: number): Promise<RealizedGainsReport> =>
   invoke('fetch_realized_gains', { year });
 
+// ── Tax summary ──
+
+export type TaxRole =
+  | 'employment_income'
+  | 'employment_withholding'
+  | 'social_contributions'
+  | 'savings_income'
+  | 'savings_withholding'
+  | 'tax_settlement'
+  | 'exempt';
+
+export interface TaxRoleAssignment {
+  accountGuid: string;
+  role: TaxRole;
+}
+
+export interface TaxLine {
+  accountGuid: string;
+  accountName: string;
+  accountCode: string | null;
+  amount: number;
+}
+
+export interface TaxSection {
+  /** Ordered by account code, then name. */
+  lines: TaxLine[];
+  total: number;
+}
+
+interface RealizedTotals {
+  gains: number;
+  losses: number;
+  net: number;
+  /** Lots consumed by sales in the year. */
+  disposals: number;
+}
+
+interface DeductibleTotals {
+  tagGuid: string;
+  tagName: string;
+  total: number;
+  transactions: number;
+}
+
+export interface TaxSummary {
+  year: number;
+  /** Years with tax-relevant activity, ascending. */
+  years: number[];
+  reportCurrency: string;
+  /** The year hasn't ended, so totals are year to date. */
+  isPartial: boolean;
+  /** Year whose postings settle this year's return. */
+  settlementYear: number;
+  costBasisMethod: CostBasisMethod;
+  employmentIncome: TaxSection;
+  employmentWithholding: TaxSection;
+  socialContributions: TaxSection;
+  savingsIncome: TaxSection;
+  savingsWithholding: TaxSection;
+  settlement: TaxSection;
+  exempt: TaxSection;
+  realized: RealizedTotals;
+  /** `null` while no deductible tag is set. */
+  deductible: DeductibleTotals | null;
+  /** Income accounts with activity this year and no tax role. */
+  untagged: TaxLine[];
+  /** Employment + savings income + net realized gains when positive. */
+  grossIncome: number;
+  /** Withholding on both bases plus the settlement. */
+  incomeTax: number;
+  effectiveRate: number | null;
+  missingFx: string[];
+}
+
+export const fetchTaxSummary = (year: number): Promise<TaxSummary> =>
+  invoke('fetch_tax_summary', { year });
+
+export const fetchTaxRoles = (): Promise<TaxRoleAssignment[]> => invoke('fetch_tax_roles');
+
+/** Replaces every assignment. */
+export const saveTaxRoles = (roles: TaxRoleAssignment[]): Promise<TaxRoleAssignment[]> =>
+  invoke('save_tax_roles', { input: { roles } });
 
 export interface DividendAccount {
   accountGuid: string;
@@ -1481,6 +1573,7 @@ type CommandPayloads = {
   delete_transaction: void;
   export_accounts_csv: void;
   export_realized_gains_csv: void;
+  export_tax_summary_csv: void;
   export_attachment: void;
   export_transactions_csv: void;
   fetch_account_balance_trend: AccountBalancePoint[];
@@ -1515,6 +1608,8 @@ type CommandPayloads = {
   fetch_transit_check: TransitCheck;
   fetch_symbol_overrides: SymbolOverride[];
   fetch_tags: TagSummary[];
+  fetch_tax_roles: TaxRoleAssignment[];
+  fetch_tax_summary: TaxSummary;
   fetch_transaction: TransactionDetailResult | null;
   fetch_transaction_heatmap: HeatmapPoint[];
   fetch_transactions: TransactionsResult;
@@ -1533,6 +1628,7 @@ type CommandPayloads = {
   restore_backup: EmptyBookResult;
   save_allocation_targets: AllocationTarget[];
   save_book_as: EmptyBookResult;
+  save_tax_roles: TaxRoleAssignment[];
   search_global: GlobalSearchResult;
   set_base_currency: EmptyBookResult;
   set_book_setting: BookSettings;

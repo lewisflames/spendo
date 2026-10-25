@@ -13,6 +13,7 @@ export const PAGE_META = {
   pnl: { title: 'Cash flow', description: 'Money in and out for a period, and how much you kept' },
   spending: { title: 'Spending', description: 'Where your money goes, by category' },
   balanceSheet: { title: 'Balance sheet', description: 'What you own and owe on any date' },
+  tax: { title: 'Tax summary', description: 'Income, withholding and gains for one tax year' },
   portfolio: { title: 'Portfolio', description: 'Investment holdings and performance' },
   realizedGains: { title: 'Realized gains', description: 'Sales and dividends by year' },
   settings: { title: 'Settings', description: 'App and book preferences' },

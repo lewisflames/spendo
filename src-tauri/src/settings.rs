@@ -7,6 +7,7 @@ use tauri::State;
 use crate::backups::BackupReason;
 use crate::db::{clear_db, run_blocking, AppState};
 use crate::lots::CostMethod;
+use crate::tags;
 
 #[tauri::command]
 pub async fn clear_app_db(state: State<'_, AppState>) -> Result<(), AppError> {
@@ -42,6 +43,9 @@ pub struct BookSettings {
     pub transit_account: String,
     /// How sales are matched to lots for realized gains: `fifo` or `average`.
     pub cost_basis_method: String,
+    /// Tag whose transactions the tax summary lists as deductible expenses
+    /// (tag GUID; empty = none).
+    pub tax_deductible_tag: String,
 }
 
 fn default_book_settings() -> BookSettings {
@@ -54,6 +58,7 @@ fn default_book_settings() -> BookSettings {
         auto_backup: "daily".to_string(),
         transit_account: String::new(),
         cost_basis_method: "fifo".to_string(),
+        tax_deductible_tag: String::new(),
     }
 }
 
@@ -117,7 +122,7 @@ fn validate_book_setting(key: &str, value: &str) -> Result<(), AppError> {
                 "Invalid value for {key}: {value}"
             ))),
         },
-        "transit_account" => {
+        "transit_account" | "tax_deductible_tag" => {
             if value.is_empty()
                 || (value.len() <= 64 && value.chars().all(|c| c.is_ascii_hexdigit() || c == '-'))
             {
@@ -134,7 +139,7 @@ fn validate_book_setting(key: &str, value: &str) -> Result<(), AppError> {
     }
 }
 
-fn get_book_settings_inner(conn: &Connection) -> Result<BookSettings, AppError> {
+pub(crate) fn get_book_settings_inner(conn: &Connection) -> Result<BookSettings, AppError> {
     let defaults = default_book_settings();
     let pick = |key: &str, fallback: String| -> Result<String, AppError> {
         match read_setting(conn, key)? {
@@ -160,6 +165,7 @@ fn get_book_settings_inner(conn: &Connection) -> Result<BookSettings, AppError> 
         auto_backup: pick("auto_backup", defaults.auto_backup.clone())?,
         transit_account: pick("transit_account", defaults.transit_account.clone())?,
         cost_basis_method: pick("cost_basis_method", defaults.cost_basis_method.clone())?,
+        tax_deductible_tag: pick("tax_deductible_tag", defaults.tax_deductible_tag.clone())?,
     })
 }
 
@@ -203,6 +209,9 @@ fn set_book_setting_inner(
             }
             Some(_) => {}
         }
+    }
+    if key == "tax_deductible_tag" && !value.is_empty() && tags::tag_name(conn, value)?.is_none() {
+        return Err(AppError::NotFound("That tag no longer exists".to_string()));
     }
     conn.execute(
         "INSERT INTO app_settings (key, value) VALUES (?1, ?2)

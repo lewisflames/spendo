@@ -11,7 +11,8 @@ const FIELD_TO_KEY: Record<BookSettingField, string> = {
   exportDateFormat: 'export_date_format',
   autoBackup: 'auto_backup',
   transitAccount: 'transit_account',
-  costBasisMethod: 'cost_basis_method'
+  costBasisMethod: 'cost_basis_method',
+  taxDeductibleTag: 'tax_deductible_tag'
 };
 
 const DEFAULT_BOOK_SETTINGS: BookSettings = {
@@ -22,7 +23,8 @@ const DEFAULT_BOOK_SETTINGS: BookSettings = {
   exportDateFormat: 'iso',
   autoBackup: 'daily',
   transitAccount: '',
-  costBasisMethod: 'fifo'
+  costBasisMethod: 'fifo',
+  taxDeductibleTag: ''
 };
 
 export const bookSettings = $state<{ value: BookSettings }>({

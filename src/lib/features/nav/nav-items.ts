@@ -2,6 +2,7 @@ import type { Pathname } from '$app/types';
 import type { Component } from 'svelte';
 import {
   ArrowLeftRight,
+  BadgePercent,
   Briefcase,
   ChartColumnStacked,
   CalendarClock,
@@ -27,6 +28,7 @@ export const NAV_CHORD_TARGETS = {
   s: '/scheduled',
   b: '/budgets',
   p: '/reports/pnl',
+  x: '/reports/tax',
   e: '/reports/spending',
   i: '/portfolio'
 } as const;
@@ -159,6 +161,15 @@ export const NAV_GROUPS: NavGroup[] = [
         href: '/reports/balance-sheet',
         chord: 'a',
         match: (pathname) => pathname === '/reports/balance-sheet'
+      },
+      {
+        id: 'tax',
+        label: PAGE_META.tax.title,
+        icon: BadgePercent,
+        keywords: ['tax', 'taxes', 'income tax', 'withholding', 'return', 'irpf', 'report'],
+        href: '/reports/tax',
+        chord: 'x',
+        match: (pathname) => pathname === '/reports/tax'
       }
     ]
   },

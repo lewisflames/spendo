@@ -443,6 +443,14 @@ CREATE TABLE IF NOT EXISTS transaction_tags (
 
 CREATE INDEX IF NOT EXISTS idx_transaction_tags_tag ON transaction_tags(tag_guid);
 
+-- Tax role per account for the tax summary; descendants inherit the nearest
+-- ancestor's role. User config like `import_rules`: account deletion and the
+-- GnuCash orphan sweep are guarded instead of cascading silently.
+CREATE TABLE IF NOT EXISTS tax_roles (
+	account_guid TEXT PRIMARY KEY REFERENCES accounts(guid) ON DELETE CASCADE,
+	role TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS app_settings (
 	key TEXT PRIMARY KEY,
 	value TEXT NOT NULL
@@ -546,6 +554,7 @@ pub fn clear_db(conn: &Connection) -> Result<()> {
           DROP TABLE IF EXISTS attachments;
           DROP TABLE IF EXISTS allocation_targets;
           DROP TABLE IF EXISTS dividend_links;
+          DROP TABLE IF EXISTS tax_roles;
           DROP TABLE IF EXISTS transaction_tags;
           DROP TABLE IF EXISTS tags;
           DROP TABLE IF EXISTS budgets;
@@ -711,6 +720,7 @@ mod tests {
             "splits",
             "symbol_overrides",
             "tags",
+            "tax_roles",
             "transaction_tags",
             "transactions",
         ] {
@@ -753,7 +763,7 @@ mod tests {
         )
         .unwrap();
 
-        // Tags are book config too.
+        // Tags and tax roles are book config too.
         conn.execute_batch(
             "INSERT INTO tags (guid, name, created_at) VALUES ('g-reset', 'trip', '2024-01-01T00:00:00Z');
              INSERT INTO transaction_tags (tx_guid, tag_guid) VALUES ('t-reset', 'g-reset');",

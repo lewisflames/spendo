@@ -10,6 +10,7 @@ import { appSettings } from '$lib/stores/settings.svelte';
 import {
   exportAccountsCsv,
   exportRealizedGainsCsv,
+  exportTaxSummaryCsv,
   exportTransactionsCsv,
   importGnucash,
   previewGnucashImport
@@ -223,5 +224,18 @@ export async function exportRealizedGainsCsvViaDialog(year: number): Promise<boo
         dateSeparator: pattern?.separator ?? null
       }),
     'realized gains'
+  );
+}
+
+/** One year's tax summary: account lines per section, then the totals. */
+export async function exportTaxSummaryCsvViaDialog(year: number): Promise<boolean> {
+  if (busy || !dbSession.value) return false;
+  const opts = await exportOptions();
+  return saveExport(
+    exportFilename(`tax-summary-${year}`, bookStem(), todayStr()),
+    CSV_FILTER,
+    ensureCsvExtension,
+    (path) => exportTaxSummaryCsv({ path, year, delimiter: opts.delimiter }),
+    'tax summary'
   );
 }

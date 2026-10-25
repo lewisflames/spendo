@@ -26,6 +26,7 @@ mod settings;
 mod spending;
 mod sql;
 mod tags;
+mod tax;
 mod transactions;
 mod transit;
 mod tree;
@@ -138,6 +139,10 @@ pub fn run() {
             tags::fetch_tags,
             tags::rename_tag,
             tags::delete_tag,
+            tax::fetch_tax_summary,
+            tax::fetch_tax_roles,
+            tax::save_tax_roles,
+            export::export_tax_summary_csv,
             attachments::fetch_attachments,
             attachments::add_attachments,
             attachments::delete_attachment,

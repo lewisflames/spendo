@@ -366,6 +366,17 @@ fn delete_account_inner(conn: &Connection, guid: &str) -> Result<(), AppError> {
                 .to_string(),
         ));
     }
+    // Tax roles are book config too.
+    let roles: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM tax_roles WHERE account_guid = ?1",
+        params![guid],
+        |row| row.get(0),
+    )?;
+    if roles > 0 {
+        return Err(AppError::Validation(
+            "This one has a tax role. Clear it on the Tax summary page first.".to_string(),
+        ));
+    }
     // Schedule templates embed account GUIDs in JSON (no FK), so deleting would
     // leave them failing at posting time.
     let schedules: i64 = conn.query_row(

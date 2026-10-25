@@ -7,6 +7,7 @@ use tauri::State;
 use crate::db::{run_blocking, run_io, AppError, AppState};
 use crate::fx;
 use crate::portfolio::{realized_gains_inner, RealizedGainRow};
+use crate::tax::{fetch_tax_summary_inner, TaxSection, TaxSummary};
 use crate::tree;
 use crate::utils;
 
@@ -361,6 +362,16 @@ const REALIZED_GAINS_EXPORT_HEADERS: [&str; 9] = [
     "Currency",
 ];
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaxSummaryExportInput {
+    pub path: String,
+    pub year: i32,
+    pub delimiter: String,
+}
+
+const TAX_SUMMARY_EXPORT_HEADERS: [&str; 5] = ["Section", "Account", "Code", "Amount", "Currency"];
+
 fn validate_delimiter(raw: &str) -> Result<u8, AppError> {
     match raw {
         "," => Ok(b','),
@@ -593,6 +604,79 @@ pub async fn export_realized_gains_csv(
         .map(|r| realized_gain_cells(r, &currency, locale.as_ref()))
         .collect();
     let bytes = build_csv_bytes(delimiter, &REALIZED_GAINS_EXPORT_HEADERS, &cells)?;
+    let path = input.path;
+    run_io(move || {
+        std::fs::write(&path, bytes).map_err(|e| AppError::Io(format!("Failed to write file: {e}")))
+    })
+    .await
+}
+
+/// One row per account line plus a total per section, then the realized
+/// gains, the deductible tag and the year's totals: the same numbers the Tax
+/// summary page shows.
+fn tax_summary_cells(s: &TaxSummary) -> Vec<Vec<String>> {
+    let currency = &s.report_currency;
+    let row = |section: &str, account: &str, code: &str, amount: f64| {
+        vec![
+            section.to_string(),
+            account.to_string(),
+            code.to_string(),
+            format!("{amount:.2}"),
+            currency.clone(),
+        ]
+    };
+    let mut out = Vec::new();
+    let mut push_section = |label: &str, section: &TaxSection| {
+        for l in &section.lines {
+            out.push(row(
+                label,
+                &l.account_name,
+                l.account_code.as_deref().unwrap_or(""),
+                l.amount,
+            ));
+        }
+        out.push(row(label, "Total", "", section.total));
+    };
+    push_section("Employment income", &s.employment_income);
+    push_section("Employment withholding", &s.employment_withholding);
+    push_section("Social contributions", &s.social_contributions);
+    push_section("Savings income", &s.savings_income);
+    push_section("Savings withholding", &s.savings_withholding);
+    push_section(
+        &format!("Return settled in {}", s.settlement_year),
+        &s.settlement,
+    );
+    push_section("Exempt income", &s.exempt);
+    out.push(row("Realized gains", "Gains", "", s.realized.gains));
+    out.push(row("Realized gains", "Losses", "", s.realized.losses));
+    out.push(row("Realized gains", "Net", "", s.realized.net));
+    if let Some(d) = &s.deductible {
+        out.push(row("Deductible expenses", &d.tag_name, "", d.total));
+    }
+    out.push(row("Summary", "Gross income", "", s.gross_income));
+    out.push(row("Summary", "Income tax", "", s.income_tax));
+    out
+}
+
+/// Writes the tax summary for one year as CSV.
+#[tauri::command]
+pub async fn export_tax_summary_csv(
+    state: State<'_, AppState>,
+    input: TaxSummaryExportInput,
+) -> Result<(), AppError> {
+    let delimiter = validate_delimiter(&input.delimiter)?;
+    validate_export_path(&input.path)?;
+    state.ensure_not_active_book(&PathBuf::from(input.path.trim()))?;
+    let year = input.year;
+    let summary = run_blocking(state.db.clone(), move |conn| {
+        fetch_tax_summary_inner(conn, year)
+    })
+    .await?;
+    let bytes = build_csv_bytes(
+        delimiter,
+        &TAX_SUMMARY_EXPORT_HEADERS,
+        &tax_summary_cells(&summary),
+    )?;
     let path = input.path;
     run_io(move || {
         std::fs::write(&path, bytes).map_err(|e| AppError::Io(format!("Failed to write file: {e}")))

@@ -58,7 +58,7 @@ struct RawAccountBalance {
 pub(crate) struct AccountMeta {
     pub(crate) name: String,
     description: Option<String>,
-    code: Option<String>,
+    pub(crate) code: Option<String>,
     pub(crate) account_type: String,
     pub(crate) parent_guid: Option<String>,
     placeholder: bool,

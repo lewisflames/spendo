@@ -15,7 +15,7 @@ export interface ExportDatePattern {
  * `my-book-transactions-2026-09-20.csv`.
  */
 export function exportFilename(
-  kind: 'transactions' | 'accounts' | `realized-gains-${number}`,
+  kind: 'transactions' | 'accounts' | `realized-gains-${number}` | `tax-summary-${number}`,
   bookName: string,
   today: string
 ): string {
