@@ -37,6 +37,9 @@ pub struct ScheduleInput {
     pub max_occurrences: Option<i64>,
     pub description: Option<String>,
     pub num: Option<String>,
+    /// `None` keeps an edited schedule's template notes (the form no longer
+    /// shows them); a blank string clears them.
+    #[serde(default)]
     pub notes: Option<String>,
     /// Payee name for every posted occurrence; created when missing.
     #[serde(default)]
@@ -684,7 +687,10 @@ fn update_schedule_inner(
     input: ScheduleInput,
 ) -> Result<Schedule, AppError> {
     let existing = fetch_row(conn, guid)?;
-    let v = validate_schedule_input(conn, &input)?;
+    let mut v = validate_schedule_input(conn, &input)?;
+    if input.notes.is_none() {
+        v.template.notes = parse_template(&existing.template_json)?.notes;
+    }
     // Pointer rules: never-touched schedules (nothing posted, nothing skipped)
     // follow a start-date edit; otherwise the pointer is untouched (a start
     // edit must not rewrite history-in-progress). Completed schedules restart
@@ -1549,6 +1555,22 @@ mod tests {
             skip_schedule_occurrence_inner(&conn, &s.guid).unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn update_without_notes_keeps_them() {
+        let conn = setup();
+        let mut input = balanced_input();
+        input.notes = Some("landlord".to_string());
+        let s = create_schedule_inner(&conn, input).unwrap();
+
+        // `None` keeps the template notes; a blank string clears them.
+        let after = update_schedule_inner(&conn, &s.guid, balanced_input()).unwrap();
+        assert_eq!(after.notes.as_deref(), Some("landlord"));
+        let mut blank = balanced_input();
+        blank.notes = Some(String::new());
+        let after = update_schedule_inner(&conn, &s.guid, blank).unwrap();
+        assert_eq!(after.notes, None);
     }
 
     #[test]
