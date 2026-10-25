@@ -230,7 +230,18 @@
               area: {
                 curve: curveStepAfter
               },
-              xAxis: { format: xTickFormatter },
+              // d3 snaps the tick count to a time interval and has nothing
+              // between 3 months and a year, so ticks can land at half the
+              // spacing: 140px keeps "Mon Year" labels (~52px) evenly apart.
+              // Occlusion is the fallback for long month names; it measures
+              // at `fontSize`, which must match the container's text-xs
+              // (layerchart assumes 10px).
+              xAxis: {
+                format: xTickFormatter,
+                tickSpacing: 140,
+                tickOcclusion: { padding: 8 },
+                tickLabelProps: { fontSize: 12 }
+              },
               yAxis: { format: yTickFormatter }
             }}
           >
