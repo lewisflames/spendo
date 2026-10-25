@@ -9,6 +9,12 @@
       "options": {
         "parser": "svelte"
       }
+    },
+    {
+      "files": "site/**",
+      "options": {
+        "tailwindStylesheet": "./site/src/app.css"
+      }
     }
   ],
   "tailwindStylesheet": "./src/app.css"
