@@ -1,6 +1,8 @@
 <script lang="ts">
   import icon from '$icon';
   import { REPO_URL, RELEASES_URL } from '$lib/release';
+  import Screenshot from '$lib/screenshot.svelte';
+  import { SCREENSHOTS } from '$lib/screenshots';
   import {
     ArrowDownToLine,
     ChartPie,
@@ -23,6 +25,29 @@
   const title = 'Spendo · Local-first personal finance';
   const description =
     'A personal finance app for macOS and Linux. Your money lives in a single .spendo file on your own disk: no account, no cloud.';
+
+  const tour = [
+    {
+      shot: SCREENSHOTS.transactions,
+      title: 'Transactions',
+      body: 'Search everything, filter by payee or tag, and edit in bulk.'
+    },
+    {
+      shot: SCREENSHOTS.spending,
+      title: 'Spending',
+      body: 'Where the money went each month, drilling down into any category.'
+    },
+    {
+      shot: SCREENSHOTS.budgets,
+      title: 'Budgets',
+      body: 'Yearly budgets that show whether you are ahead or behind for the date.'
+    },
+    {
+      shot: SCREENSHOTS.portfolio,
+      title: 'Portfolio',
+      body: 'What your investments are worth against what you paid, with returns and dividends.'
+    }
+  ];
 
   const features = [
     {
@@ -79,9 +104,7 @@
 </header>
 
 <main id="top">
-  <section
-    class="mx-auto grid max-w-5xl items-center gap-12 px-4 pt-12 pb-20 sm:px-6 md:grid-cols-[1fr_auto] md:pt-20"
-  >
+  <section class="mx-auto max-w-5xl px-4 pt-12 sm:px-6 md:pt-20">
     <div>
       <p class="mb-4 text-sm font-medium text-brand">For macOS and Linux · Free and open source</p>
       <h1 class="text-4xl font-semibold tracking-tight text-balance sm:text-5xl">
@@ -117,11 +140,15 @@
         >
       </p>
     </div>
-    <div class="relative mx-auto hidden md:block" aria-hidden="true">
-      <div class="absolute inset-0 -z-10 scale-125 rounded-full bg-brand/20 blur-3xl"></div>
-      <img src={icon} alt="" class="size-56 drop-shadow-xl" />
-    </div>
   </section>
+
+  <div class="relative mx-auto max-w-6xl px-4 pt-14 pb-20 sm:px-6">
+    <div
+      class="absolute inset-x-10 top-24 bottom-10 -z-10 rounded-full bg-brand/15 blur-3xl"
+      aria-hidden="true"
+    ></div>
+    <Screenshot shot={SCREENSHOTS.overview} eager />
+  </div>
 
   <section id="features" class="border-t bg-card">
     <div class="mx-auto max-w-5xl px-4 py-20 sm:px-6">
@@ -146,7 +173,27 @@
     </div>
   </section>
 
-  <section class="border-t">
+  <section id="tour" class="border-t">
+    <div class="mx-auto max-w-6xl px-4 py-20 sm:px-6">
+      <h2 class="text-2xl font-semibold tracking-tight">A closer look</h2>
+      <p class="mt-2 max-w-2xl text-muted-foreground">
+        A made-up household book, as it appears in the app.
+      </p>
+      <div class="mt-10 grid gap-x-8 gap-y-12 md:grid-cols-2">
+        {#each tour as item (item.title)}
+          <figure>
+            <Screenshot shot={item.shot} />
+            <figcaption class="mt-4">
+              <span class="font-medium">{item.title}.</span>
+              <span class="text-muted-foreground">{item.body}</span>
+            </figcaption>
+          </figure>
+        {/each}
+      </div>
+    </div>
+  </section>
+
+  <section class="border-t bg-card">
     <div class="mx-auto grid max-w-5xl gap-8 px-4 py-20 sm:px-6 md:grid-cols-2">
       <div>
         <h2 class="text-2xl font-semibold tracking-tight">Private by design</h2>
@@ -173,11 +220,11 @@
     </div>
   </section>
 
-  <section id="install" class="border-t bg-card">
+  <section id="install" class="border-t">
     <div class="mx-auto max-w-5xl px-4 py-20 sm:px-6">
       <h2 class="text-2xl font-semibold tracking-tight">Install</h2>
       <div class="mt-8 grid gap-4 md:grid-cols-3">
-        <div class="rounded-xl border bg-background p-5">
+        <div class="rounded-xl border bg-card p-5">
           <h3 class="font-medium">macOS</h3>
           <p class="mt-2 text-sm/6 text-muted-foreground">
             Download the <a href={release.mac} class="text-brand hover:underline">universal dmg</a>.
@@ -186,7 +233,7 @@
             → Updates.
           </p>
         </div>
-        <div class="rounded-xl border bg-background p-5">
+        <div class="rounded-xl border bg-card p-5">
           <h3 class="font-medium">Linux</h3>
           <p class="mt-2 text-sm/6 text-muted-foreground">
             Download the <a href={release.appImage} class="text-brand hover:underline">AppImage</a>,
@@ -201,7 +248,7 @@
             >.
           </p>
         </div>
-        <div class="rounded-xl border bg-background p-5">
+        <div class="rounded-xl border bg-card p-5">
           <h3 class="font-medium">Arch Linux</h3>
           <p class="mt-2 text-sm/6 text-muted-foreground">
             Install <a
