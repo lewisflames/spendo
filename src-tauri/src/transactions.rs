@@ -39,6 +39,9 @@ pub struct TxInput {
     pub post_date: String,
     pub description: Option<String>,
     pub num: Option<String>,
+    /// `None` leaves an edited transaction's notes as they are (the edit form
+    /// no longer shows them); a blank string clears them.
+    #[serde(default)]
     pub notes: Option<String>,
     pub splits: Vec<SplitInput>,
     /// Set by the edit form once the user confirms the unreconcile warning.
@@ -1101,16 +1104,21 @@ fn update_transaction_inner(conn: &Connection, guid: &str, input: TxInput) -> Re
 
     with_tx_err(conn, || {
         conn.execute(
-            "UPDATE transactions SET post_date = ?1, description = ?2, num = ?3, notes = ?4
-             WHERE guid = ?5",
+            "UPDATE transactions SET post_date = ?1, description = ?2, num = ?3
+             WHERE guid = ?4",
             params![
                 post_date,
                 opt_text(&input.description),
                 opt_text(&input.num),
-                opt_text(&input.notes),
                 guid,
             ],
         )?;
+        if input.notes.is_some() {
+            conn.execute(
+                "UPDATE transactions SET notes = ?1 WHERE guid = ?2",
+                params![opt_text(&input.notes), guid],
+            )?;
+        }
         conn.execute("DELETE FROM splits WHERE tx_guid = ?1", params![guid])?;
         insert_split_rows(conn, guid, &input.splits)?;
         if let Some(ref names) = tag_names {
@@ -2427,6 +2435,34 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM transactions", [], |r| r.get(0))
             .unwrap();
         assert_eq!(count, 3, "two seeded rows plus the one created above");
+    }
+
+    #[test]
+    fn update_without_notes_keeps_them() {
+        let conn = setup_two_accounts();
+        let guid = create_transaction_inner(&conn, balanced_input()).unwrap();
+        let notes = |conn: &Connection| -> Option<String> {
+            conn.query_row(
+                "SELECT notes FROM transactions WHERE guid = ?1",
+                params![guid],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+
+        // `None` leaves notes alone; a blank string clears them.
+        let without = TxInput {
+            notes: None,
+            ..balanced_input()
+        };
+        update_transaction_inner(&conn, &guid, without).unwrap();
+        assert_eq!(notes(&conn).as_deref(), Some("test"));
+        let blank = TxInput {
+            notes: Some(String::new()),
+            ..balanced_input()
+        };
+        update_transaction_inner(&conn, &guid, blank).unwrap();
+        assert_eq!(notes(&conn), None);
     }
 
     #[test]
