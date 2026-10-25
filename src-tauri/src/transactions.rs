@@ -5,6 +5,7 @@ use tauri::State;
 use crate::db::{run_blocking, with_tx_err, AppError, AppState};
 use crate::fx;
 use crate::sql;
+use crate::tags::{self, TagRef};
 use crate::utils;
 use crate::utils::opt_text;
 
@@ -44,6 +45,10 @@ pub struct TxInput {
     /// as `'n'`, which is the unreconcile. Create ignores the flag.
     #[serde(default)]
     pub unreconcile: bool,
+    /// Tag names. `None` leaves an edited transaction's tags as they are
+    /// (callers that don't know about tags), `Some(vec![])` clears them.
+    #[serde(default)]
+    pub tags: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -119,6 +124,7 @@ pub struct TransactionRow {
     pub notes: Option<String>,
     pub splits: Vec<SplitInfo>,
     pub total_amount: f64,
+    pub tags: Vec<TagRef>,
 }
 
 #[derive(Debug, Serialize)]
@@ -134,6 +140,7 @@ pub struct TransactionDetail {
     /// Number of attached receipts/documents. Cheap COUNT so the editor can
     /// warn that deleting the transaction deletes them permanently.
     pub attachment_count: i64,
+    pub tags: Vec<TagRef>,
 }
 
 #[derive(Debug, Serialize)]
@@ -153,6 +160,8 @@ pub struct Filters {
     pub search: Option<String>,
     pub date_from: Option<String>,
     pub date_to: Option<String>,
+    /// Only transactions carrying this tag.
+    pub tag_guid: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -406,6 +415,12 @@ fn build_filter_conditions(
         let from = utils::validate_optional_iso_date(f.date_from.as_deref())?;
         let to = utils::validate_optional_iso_date(f.date_to.as_deref())?;
         sql::push_tx_date_search(&mut w, from.as_deref(), to.as_deref(), f.search.as_deref());
+        if let Some(tag) = f.tag_guid.as_deref().filter(|g| !g.is_empty()) {
+            w.add(
+                "EXISTS(SELECT 1 FROM transaction_tags tt WHERE tt.tx_guid = t.guid AND tt.tag_guid = {})",
+                vec![Box::new(tag.to_string())],
+            );
+        }
     }
 
     Ok(w)
@@ -554,10 +569,12 @@ fn map_tx_rows_with(
 ) -> Result<Vec<TransactionRow>, AppError> {
     let guids: Vec<String> = rows.iter().map(|r| r.guid.clone()).collect();
     let (split_map, total_map) = fetch_splits_for_txns_with(conn, &guids, ctx)?;
+    let mut tag_map = tags::tags_for_txns(conn, &guids)?;
 
     Ok(rows
         .into_iter()
         .map(|r| TransactionRow {
+            tags: tag_map.remove(&r.guid).unwrap_or_default(),
             splits: split_map
                 .get(&r.guid)
                 .map(|v| v.iter().map(|d| d.info.clone()).collect())
@@ -883,8 +900,12 @@ fn fetch_transaction_inner(
         [&base.guid],
         |row| row.get(0),
     )?;
+    let tags = tags::tags_for_txns(conn, &guids)?
+        .remove(&base.guid)
+        .unwrap_or_default();
 
     let transaction = TransactionDetail {
+        tags,
         guid: base.guid.clone(),
         post_date: base.post_date.clone(),
         description: base.description,
@@ -997,6 +1018,7 @@ fn reject_when_reconciled(conn: &Connection, tx_guid: &str, action: &str) -> Res
 
 fn create_transaction_inner(conn: &Connection, input: TxInput) -> Result<String, AppError> {
     let post_date = validate_tx_input(conn, &input)?;
+    let tag_names = tags::normalize_tag_names(input.tags.as_deref().unwrap_or_default())?;
     let tx_guid = uuid::Uuid::new_v4().to_string();
 
     with_tx_err(conn, || {
@@ -1012,12 +1034,18 @@ fn create_transaction_inner(conn: &Connection, input: TxInput) -> Result<String,
             ],
         )?;
         insert_split_rows(conn, &tx_guid, &input.splits)?;
+        tags::set_transaction_tags(conn, &tx_guid, &tag_names)?;
         Ok(tx_guid.clone())
     })
 }
 
 fn update_transaction_inner(conn: &Connection, guid: &str, input: TxInput) -> Result<(), AppError> {
     let post_date = validate_tx_input(conn, &input)?;
+    let tag_names = input
+        .tags
+        .as_deref()
+        .map(tags::normalize_tag_names)
+        .transpose()?;
     let exists: bool = conn
         .query_row(
             "SELECT 1 FROM transactions WHERE guid = ?1",
@@ -1053,6 +1081,9 @@ fn update_transaction_inner(conn: &Connection, guid: &str, input: TxInput) -> Re
         )?;
         conn.execute("DELETE FROM splits WHERE tx_guid = ?1", params![guid])?;
         insert_split_rows(conn, guid, &input.splits)?;
+        if let Some(ref names) = tag_names {
+            tags::set_transaction_tags(conn, guid, names)?;
+        }
         Ok(())
     })
 }
@@ -1163,6 +1194,11 @@ pub enum BulkAction {
     /// Overwrite the description. Splits are untouched, so cleared and
     /// reconciled transactions are renamed too.
     SetDescription { description: String },
+    /// Add a tag by name (created when missing). Tags live on the
+    /// transaction, so cleared and reconciled ones are tagged too.
+    AddTag { name: String },
+    /// Remove one tag; the tag itself stays for other transactions.
+    RemoveTag { tag_guid: String },
 }
 
 #[derive(Debug, Deserialize)]
@@ -1408,6 +1444,89 @@ fn bulk_set_description(
     })
 }
 
+fn bulk_add_tag(
+    conn: &Connection,
+    guids: &[String],
+    name: &str,
+) -> Result<BulkEditResult, AppError> {
+    let name = tags::normalize_tag_name(name)?;
+    let tag_guid = tags::ensure_tag(conn, &name)?;
+    // Same cap the editor enforces, counted against the tags each
+    // transaction would end up with.
+    let mut full = 0;
+    for chunk in guids.chunks(MAX_IN_PARAMS) {
+        let mut params = sql::string_param_refs(chunk);
+        params.push(&tag_guid);
+        full += conn.query_row(
+            &format!(
+                "SELECT COUNT(*) FROM (
+                     SELECT tx_guid FROM transaction_tags
+                     WHERE tx_guid IN ({}) GROUP BY tx_guid
+                     HAVING COUNT(*) >= {} AND SUM(tag_guid = ?{}) = 0
+                 )",
+                sql::in_clause(chunk.len()),
+                tags::MAX_TAGS_PER_TX,
+                chunk.len() + 1
+            ),
+            params.as_slice(),
+            |row| row.get::<_, i64>(0),
+        )?;
+    }
+    if full > 0 {
+        return Err(AppError::Validation(format!(
+            "{full} of these already carry {} tags, the most one can have",
+            tags::MAX_TAGS_PER_TX
+        )));
+    }
+    let mut changed = 0;
+    for chunk in guids.chunks(MAX_IN_PARAMS) {
+        let mut params = sql::string_param_refs(chunk);
+        params.push(&tag_guid);
+        changed += conn.execute(
+            &format!(
+                "INSERT OR IGNORE INTO transaction_tags (tx_guid, tag_guid)
+                 SELECT guid, ?{} FROM transactions WHERE guid IN ({})",
+                chunk.len() + 1,
+                sql::in_clause(chunk.len())
+            ),
+            params.as_slice(),
+        )? as i64;
+    }
+    Ok(BulkEditResult {
+        changed,
+        skipped_locked: 0,
+    })
+}
+
+fn bulk_remove_tag(
+    conn: &Connection,
+    guids: &[String],
+    tag_guid: &str,
+) -> Result<BulkEditResult, AppError> {
+    if tags::tag_name(conn, tag_guid)?.is_none() {
+        return Err(AppError::NotFound(
+            "That tag is gone. It may have been deleted".to_string(),
+        ));
+    }
+    let mut changed = 0;
+    for chunk in guids.chunks(MAX_IN_PARAMS) {
+        let mut params = sql::string_param_refs(chunk);
+        params.push(&tag_guid);
+        changed += conn.execute(
+            &format!(
+                "DELETE FROM transaction_tags WHERE tx_guid IN ({}) AND tag_guid = ?{}",
+                sql::in_clause(chunk.len()),
+                chunk.len() + 1
+            ),
+            params.as_slice(),
+        )? as i64;
+    }
+    Ok(BulkEditResult {
+        changed,
+        skipped_locked: 0,
+    })
+}
+
 fn bulk_edit_transactions_inner(
     conn: &Connection,
     input: BulkEditInput,
@@ -1422,6 +1541,8 @@ fn bulk_edit_transactions_inner(
         BulkAction::SetDescription { description } => {
             bulk_set_description(conn, &guids, description)
         }
+        BulkAction::AddTag { name } => bulk_add_tag(conn, &guids, name),
+        BulkAction::RemoveTag { tag_guid } => bulk_remove_tag(conn, &guids, tag_guid),
     })
 }
 
@@ -1544,6 +1665,7 @@ mod tests {
             description: Some("Manual groceries".to_string()),
             num: None,
             notes: Some("test".to_string()),
+            tags: None,
             splits: vec![
                 SplitInput {
                     account_guid: "checking".to_string(),
@@ -1629,6 +1751,7 @@ mod tests {
                 search: None,
                 date_from: Some("2024-1-5".to_string()),
                 date_to: None,
+                tag_guid: None,
             }),
             None,
             None,
@@ -1645,6 +1768,7 @@ mod tests {
                 search: None,
                 date_from: None,
                 date_to: Some("01/02/2024".to_string()),
+                tag_guid: None,
             }),
         )
         .unwrap_err();
@@ -1769,6 +1893,7 @@ mod tests {
                 search: Some("coffee".into()),
                 date_from: Some("2024-02-01".into()),
                 date_to: None,
+                tag_guid: None,
             }),
             None,
             None,
@@ -1784,6 +1909,7 @@ mod tests {
                 search: Some("coffee".into()),
                 date_from: None,
                 date_to: None,
+                tag_guid: None,
             }),
             None,
             None,
@@ -2111,6 +2237,7 @@ mod tests {
                 search: None,
                 date_from: Some("2024-01-01".into()),
                 date_to: Some("2024-01-31".into()),
+                tag_guid: None,
             })
         };
         // Stale count: refuse instead of touching a different set of rows.
@@ -2174,5 +2301,163 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(err.kind(), "validation");
+    }
+
+    fn tag_names(conn: &Connection, guid: &str) -> Vec<String> {
+        fetch_transaction_inner(conn, guid)
+            .unwrap()
+            .unwrap()
+            .transaction
+            .tags
+            .into_iter()
+            .map(|t| t.name)
+            .collect()
+    }
+
+    fn tagged_input(tags: &[&str]) -> TxInput {
+        TxInput {
+            tags: Some(tags.iter().map(|t| t.to_string()).collect()),
+            ..balanced_input()
+        }
+    }
+
+    #[test]
+    fn create_and_update_carry_tags() {
+        let conn = setup_bulk();
+        let guid = create_transaction_inner(&conn, tagged_input(&["Trip", "work"])).unwrap();
+        assert_eq!(tag_names(&conn, &guid), vec!["Trip", "work"]);
+
+        // `None` leaves tags alone; `Some` replaces them.
+        update_transaction_inner(&conn, &guid, balanced_input()).unwrap();
+        assert_eq!(tag_names(&conn, &guid), vec!["Trip", "work"]);
+        update_transaction_inner(&conn, &guid, tagged_input(&["trip"])).unwrap();
+        assert_eq!(tag_names(&conn, &guid), vec!["Trip"]);
+
+        // A bad tag fails the whole save.
+        let err = create_transaction_inner(&conn, tagged_input(&["a,b"])).unwrap_err();
+        assert_eq!(err.kind(), "validation");
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM transactions", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 3, "two seeded rows plus the one created above");
+    }
+
+    #[test]
+    fn list_filters_by_tag_and_searches_tag_names() {
+        let conn = setup_bulk();
+        let a = create_transaction_inner(&conn, tagged_input(&["Summer trip"])).unwrap();
+        create_transaction_inner(&conn, tagged_input(&["work"])).unwrap();
+        let trip = tags::ensure_tag(&conn, "Summer trip").unwrap();
+
+        let by_tag = fetch_transactions_inner(
+            &conn,
+            1,
+            50,
+            Some(Filters {
+                search: None,
+                date_from: None,
+                date_to: None,
+                tag_guid: Some(trip),
+            }),
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(by_tag.total, 1);
+        assert_eq!(by_tag.transactions[0].guid, a);
+        assert_eq!(by_tag.transactions[0].tags[0].name, "Summer trip");
+
+        let by_search = fetch_transactions_inner(
+            &conn,
+            1,
+            50,
+            Some(Filters {
+                search: Some("summer".into()),
+                date_from: None,
+                date_to: None,
+                tag_guid: None,
+            }),
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(by_search.total, 1);
+    }
+
+    #[test]
+    fn bulk_tags_apply_to_locked_transactions_too() {
+        let conn = setup_bulk();
+        let a = create_transaction_inner(&conn, tagged_input(&["work"])).unwrap();
+        let b = create_transaction_inner(&conn, balanced_input()).unwrap();
+        lock_tx(&conn, &b, "checking");
+
+        let added = bulk_edit_transactions_inner(
+            &conn,
+            BulkEditInput {
+                target: guids_target(&[&a, &b]),
+                action: BulkAction::AddTag {
+                    name: " Deductible ".into(),
+                },
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            added,
+            BulkEditResult {
+                changed: 2,
+                skipped_locked: 0
+            }
+        );
+        assert_eq!(tag_names(&conn, &a), vec!["Deductible", "work"]);
+        assert_eq!(tag_names(&conn, &b), vec!["Deductible"]);
+
+        let work = tags::ensure_tag(&conn, "work").unwrap();
+        let removed = bulk_edit_transactions_inner(
+            &conn,
+            BulkEditInput {
+                target: guids_target(&[&a, &b]),
+                action: BulkAction::RemoveTag { tag_guid: work },
+            },
+        )
+        .unwrap();
+        assert_eq!(removed.changed, 1, "only `a` carried it");
+        assert_eq!(tag_names(&conn, &a), vec!["Deductible"]);
+    }
+
+    #[test]
+    fn bulk_add_tag_respects_the_per_transaction_cap() {
+        let conn = setup_bulk();
+        let full: Vec<String> = (0..tags::MAX_TAGS_PER_TX)
+            .map(|i| format!("t{i}"))
+            .collect();
+        let a = create_transaction_inner(
+            &conn,
+            TxInput {
+                tags: Some(full),
+                ..balanced_input()
+            },
+        )
+        .unwrap();
+        let err = bulk_edit_transactions_inner(
+            &conn,
+            BulkEditInput {
+                target: guids_target(&[&a]),
+                action: BulkAction::AddTag {
+                    name: "one more".into(),
+                },
+            },
+        )
+        .unwrap_err();
+        assert_eq!(err.kind(), "validation");
+        // Re-adding a tag it already has is fine.
+        let again = bulk_edit_transactions_inner(
+            &conn,
+            BulkEditInput {
+                target: guids_target(&[&a]),
+                action: BulkAction::AddTag { name: "t0".into() },
+            },
+        )
+        .unwrap();
+        assert_eq!(again.changed, 0);
     }
 }

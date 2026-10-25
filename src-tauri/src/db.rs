@@ -425,6 +425,24 @@ CREATE TABLE IF NOT EXISTS dividend_links (
 
 CREATE INDEX IF NOT EXISTS idx_dividend_links_commodity ON dividend_links(commodity_guid);
 
+-- Free-form labels on whole transactions (a trip, a project, deductible).
+-- Names are unique ignoring case. A tag outlives its last transaction until
+-- it is deleted from Settings; links die with either side (FK cascade, so the
+-- GnuCash orphan sweep and transaction deletes clean them up).
+CREATE TABLE IF NOT EXISTS tags (
+	guid TEXT PRIMARY KEY,
+	name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+	created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS transaction_tags (
+	tx_guid TEXT NOT NULL REFERENCES transactions(guid) ON DELETE CASCADE,
+	tag_guid TEXT NOT NULL REFERENCES tags(guid) ON DELETE CASCADE,
+	PRIMARY KEY (tx_guid, tag_guid)
+);
+
+CREATE INDEX IF NOT EXISTS idx_transaction_tags_tag ON transaction_tags(tag_guid);
+
 CREATE TABLE IF NOT EXISTS app_settings (
 	key TEXT PRIMARY KEY,
 	value TEXT NOT NULL
@@ -528,6 +546,8 @@ pub fn clear_db(conn: &Connection) -> Result<()> {
           DROP TABLE IF EXISTS attachments;
           DROP TABLE IF EXISTS allocation_targets;
           DROP TABLE IF EXISTS dividend_links;
+          DROP TABLE IF EXISTS transaction_tags;
+          DROP TABLE IF EXISTS tags;
           DROP TABLE IF EXISTS budgets;
           DROP TABLE IF EXISTS csv_import_presets;
           DROP TABLE IF EXISTS import_rules;
@@ -690,6 +710,8 @@ mod tests {
             "schedule_skips",
             "splits",
             "symbol_overrides",
+            "tags",
+            "transaction_tags",
             "transactions",
         ] {
             assert!(tables.contains(&expected.to_string()), "missing {expected}");
@@ -731,12 +753,23 @@ mod tests {
         )
         .unwrap();
 
+        // Tags are book config too.
+        conn.execute_batch(
+            "INSERT INTO tags (guid, name, created_at) VALUES ('g-reset', 'trip', '2024-01-01T00:00:00Z');
+             INSERT INTO transaction_tags (tx_guid, tag_guid) VALUES ('t-reset', 'g-reset');",
+        )
+        .unwrap();
+
         clear_db(&conn).unwrap();
 
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM commodities", [], |r| r.get(0))
             .unwrap();
         assert_eq!(count, 0);
+        let tags: i64 = conn
+            .query_row("SELECT COUNT(*) FROM tags", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(tags, 0);
         let attachments: i64 = conn
             .query_row("SELECT COUNT(*) FROM attachments", [], |r| r.get(0))
             .unwrap();

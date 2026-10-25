@@ -103,6 +103,12 @@ interface SplitInfo {
   memo?: string | null;
 }
 
+/** A tag as shown on a transaction. */
+export interface TagRef {
+  guid: string;
+  name: string;
+}
+
 export interface TransactionRow {
   guid: string;
   postDate: string;
@@ -111,12 +117,16 @@ export interface TransactionRow {
   notes?: string | null;
   splits: SplitInfo[];
   totalAmount: number;
+  /** Sorted by name. */
+  tags: TagRef[];
 }
 
 export interface Filters {
   search?: string;
   dateFrom?: string;
   dateTo?: string;
+  /** Only transactions carrying this tag. */
+  tagGuid?: string;
 }
 
 interface TransactionsResult {
@@ -154,6 +164,7 @@ export interface TransactionDetail {
   totalAmount: number;
   /** Attached receipts/documents; deleting the transaction deletes them for good. */
   attachmentCount: number;
+  tags: TagRef[];
 }
 
 interface TransactionDetailResult {
@@ -595,6 +606,8 @@ export interface TxInput {
   splits: SplitInput[];
   /** Edit form only: the user confirmed putting cleared/reconciled splits back to New. */
   unreconcile?: boolean;
+  /** Tag names, created when missing. Omit to leave an edited transaction's tags alone. */
+  tags?: string[];
 }
 
 export const createTransaction = (input: TxInput): Promise<string> =>
@@ -615,7 +628,9 @@ export type BulkTarget =
 export type BulkAction =
   | { kind: 'delete' }
   | { kind: 'moveSplits'; fromAccountGuid: string; toAccountGuid: string }
-  | { kind: 'setDescription'; description: string };
+  | { kind: 'setDescription'; description: string }
+  | { kind: 'addTag'; name: string }
+  | { kind: 'removeTag'; tagGuid: string };
 
 export interface BulkEditResult {
   changed: number;
@@ -650,6 +665,26 @@ export const fetchTransactionHeatmap = (filters?: Filters): Promise<HeatmapPoint
 /** `null` when no transaction with that GUID exists. */
 export const fetchTransaction = (guid: string): Promise<TransactionDetailResult | null> =>
   invoke('fetch_transaction', { guid });
+
+// ── Tags ──
+
+export interface TagSummary {
+  guid: string;
+  name: string;
+  transactionCount: number;
+  /** Latest post date among its transactions; `null` while unused. */
+  lastUsed: string | null;
+}
+
+/** Most used first. */
+export const fetchTags = (): Promise<TagSummary[]> => invoke('fetch_tags');
+
+/** Renaming onto another tag's name merges them; resolves to the surviving tag's GUID. */
+export const renameTag = (guid: string, name: string): Promise<string> =>
+  invoke('rename_tag', { input: { guid, name } });
+
+/** Transactions keep their other tags. */
+export const deleteTag = (guid: string): Promise<void> => invoke('delete_tag', { guid });
 
 // ── Attachments (receipts/documents stored inside the book) ──
 
@@ -837,6 +872,7 @@ interface RealizedGainsExportInput extends Omit<TransactionsExportInput, 'path'>
 
 export const exportRealizedGainsCsv = (input: RealizedGainsExportInput): Promise<void> =>
   invoke('export_realized_gains_csv', { input });
+
 
 export const refreshPrices = (): Promise<PricesResult> => invoke('refresh_prices');
 
@@ -1204,6 +1240,7 @@ interface RealizedGainsReport {
 export const fetchRealizedGains = (year: number): Promise<RealizedGainsReport> =>
   invoke('fetch_realized_gains', { year });
 
+
 export interface DividendAccount {
   accountGuid: string;
   accountName: string;
@@ -1440,6 +1477,7 @@ type CommandPayloads = {
   delete_import_rule: void;
   delete_schedule: void;
   delete_symbol_override: void;
+  delete_tag: void;
   delete_transaction: void;
   export_accounts_csv: void;
   export_realized_gains_csv: void;
@@ -1476,6 +1514,7 @@ type CommandPayloads = {
   fetch_schedules: Schedule[];
   fetch_transit_check: TransitCheck;
   fetch_symbol_overrides: SymbolOverride[];
+  fetch_tags: TagSummary[];
   fetch_transaction: TransactionDetailResult | null;
   fetch_transaction_heatmap: HeatmapPoint[];
   fetch_transactions: TransactionsResult;
@@ -1489,6 +1528,7 @@ type CommandPayloads = {
   post_schedule_occurrence: string;
   preview_gnucash_import: GnuCashPreview;
   refresh_prices: PricesResult;
+  rename_tag: string;
   reopen_last_reconciliation: ReopenReconcileResult;
   restore_backup: EmptyBookResult;
   save_allocation_targets: AllocationTarget[];

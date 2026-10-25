@@ -15,13 +15,19 @@ const account = (guid: string, name: string, accountType: string) => ({
   children: []
 });
 
-const row = (guid: string, description: string, postDate: string) => ({
+const row = (
+  guid: string,
+  description: string,
+  postDate: string,
+  tags: { guid: string; name: string }[] = []
+) => ({
   guid,
   postDate,
   description,
   num: null,
   notes: null,
   totalAmount: -10,
+  tags,
   splits: [
     { guid: `${guid}-a`, accountGuid: 'food', accountName: 'Groceries', amount: 10 },
     { guid: `${guid}-b`, accountGuid: 'bank', accountName: 'Bank', amount: -10 }
@@ -46,7 +52,7 @@ const LEDGER: BackendMocks = {
   fetch_transaction_heatmap: [],
   fetch_transactions: {
     transactions: [
-      row('t1', 'Corner shop', '2024-01-03'),
+      row('t1', 'Corner shop', '2024-01-03', [{ guid: 'g-trip', name: 'Summer trip' }]),
       row('t2', 'Market', '2024-01-02'),
       row('t3', 'Bakery', '2024-01-01')
     ],
@@ -67,6 +73,10 @@ const LEDGER: BackendMocks = {
     retainedEarnings: 0,
     unrealizedGains: 0
   },
+  fetch_tags: [
+    { guid: 'g-trip', name: 'Summer trip', transactionCount: 4, lastUsed: '2024-01-03' },
+    { guid: 'g-tax', name: 'Deductible', transactionCount: 1, lastUsed: '2023-12-01' }
+  ],
   bulk_edit_transactions: { changed: 3, skippedLocked: 1 }
 };
 
@@ -102,7 +112,8 @@ test('shift-click selects a range and rename sends those rows', async ({ page })
   const toolbar = page.getByRole('toolbar', { name: 'Bulk actions' });
   await expect(toolbar).toHaveCount(0);
 
-  const firstRow = page.getByRole('cell', { name: 'Corner shop', exact: true });
+  // The cell also holds the row's tag.
+  const firstRow = page.getByRole('cell', { name: 'Corner shop Summer trip', exact: true });
   const before = await firstRow.boundingBox();
   await page.getByRole('checkbox', { name: 'Select Corner shop' }).click();
   await expect(toolbar).toContainText('1 selected');
@@ -173,4 +184,48 @@ test('delete asks before removing the selection', async ({ page }) => {
   expect(await bulkCall(page)).toEqual({
     input: { target: { kind: 'guids', guids: ['t2'] }, action: { kind: 'delete' } }
   });
+});
+
+test('tags show on rows, filter the list and bulk tagging sends the name', async ({ page }) => {
+  await openLedger(page);
+  // The row's tag links to the list filtered by it.
+  await expect(page.getByRole('link', { name: 'Summer trip' })).toHaveAttribute(
+    'href',
+    '/transactions?tag=g-trip'
+  );
+
+  await page.getByRole('checkbox', { name: 'Select Market' }).click();
+  await page.getByRole('checkbox', { name: 'Select Bakery' }).click();
+  await page
+    .getByRole('toolbar', { name: 'Bulk actions' })
+    .getByRole('button', { name: 'Tag' })
+    .click();
+  const dialog = page.getByRole('dialog');
+  // Neither selected row has a tag, so there is nothing to remove.
+  await expect(dialog.getByRole('tab', { name: 'Remove a tag' })).toBeDisabled();
+  await dialog.getByLabel('Tag').fill('deduct');
+  await page.getByRole('option', { name: /Deductible/ }).click();
+  await dialog.getByRole('button', { name: 'Add tag' }).click();
+
+  await expect(dialog).toHaveCount(0);
+  expect(await bulkCall(page)).toEqual({
+    input: {
+      target: { kind: 'guids', guids: ['t2', 't3'] },
+      action: { kind: 'addTag', name: 'Deductible' }
+    }
+  });
+});
+
+test('the tag filter narrows the list request', async ({ page }) => {
+  await openLedger(page);
+  await page.getByLabel('Tag').click();
+  await page.getByRole('option', { name: 'Summer trip' }).click();
+  await expect(page).toHaveURL(/tag=g-trip/);
+  const lastList = await page.evaluate(
+    () =>
+      (window as unknown as { __calls: { cmd: string; args: { filters?: unknown } }[] }).__calls
+        .filter((c) => c.cmd === 'fetch_transactions')
+        .at(-1)?.args.filters
+  );
+  expect(lastList).toEqual({ tagGuid: 'g-trip' });
 });

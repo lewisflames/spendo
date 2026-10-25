@@ -81,3 +81,52 @@ test('typing a description alone does not flag the untouched splits', async ({ p
   await expect(page.getByText('Add an amount to every split.')).toBeHidden();
   await expect(page.getByText(/choose an account/)).toHaveCount(0);
 });
+
+test('tags typed or picked are saved with the transaction', async ({ page }) => {
+  await mockBackend(page, {
+    ...OPEN_BOOK,
+    fetch_tags: [{ guid: 'g-trip', name: 'Summer trip', transactionCount: 3, lastUsed: null }],
+    create_transaction: 'new-guid'
+  });
+  await page.addInitScript((recipes) => {
+    localStorage.setItem('tx-recent-recipes', JSON.stringify(recipes));
+    type Invoke = (cmd: string, args: unknown) => Promise<unknown>;
+    const internals = (window as unknown as Record<string, { invoke: Invoke }>).__TAURI_INTERNALS__;
+    const invoke = internals.invoke;
+    const calls: { cmd: string; args: unknown }[] = [];
+    Object.assign(window, { __calls: calls });
+    internals.invoke = (cmd: string, args: unknown) => {
+      calls.push({ cmd, args });
+      return invoke(cmd, args);
+    };
+  }, RECIPES);
+  await page.goto('/transactions/new');
+
+  const description = page.getByRole('combobox', { name: 'Description' });
+  await description.fill('Groceries shop 0');
+  await page.getByRole('option', { name: /Groceries shop 0/ }).click();
+
+  const tags = page.getByRole('combobox', { name: 'Tags (optional)' });
+  await tags.fill('work,');
+  await tags.fill('summ');
+  await tags.press('ArrowDown');
+  await tags.press('Enter');
+  await expect(page.getByRole('button', { name: 'Remove tag work' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Remove tag Summer trip' })).toBeVisible();
+  await tags.press('Backspace');
+  await expect(page.getByRole('button', { name: 'Remove tag Summer trip' })).toHaveCount(0);
+  await tags.fill('Summer trip');
+  await tags.press('Enter');
+
+  await page.getByRole('button', { name: 'Create transaction' }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            window as unknown as { __calls: { cmd: string; args: { input: { tags: string[] } } }[] }
+          ).__calls.find((c) => c.cmd === 'create_transaction')?.args.input.tags
+      )
+    )
+    .toEqual(['work', 'Summer trip']);
+});

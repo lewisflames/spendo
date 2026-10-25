@@ -26,7 +26,7 @@ pub fn string_param_refs(guids: &[String]) -> Vec<&dyn ToSql> {
 /// Push the shared transaction date window and cross-field search predicate
 /// onto `w`. Callers must alias `transactions` as `t`. Dates are half-open
 /// (`>= from AND < date(to,'+1 day')`); search matches description, number,
-/// notes and split memos, with LIKE metacharacters escaped. Single source of
+/// notes, split memos and tag names, with LIKE metacharacters escaped. Single source of
 /// truth for the ledger and account-detail filters.
 pub fn push_tx_date_search(
     w: &mut WhereBuilder,
@@ -49,9 +49,12 @@ pub fn push_tx_date_search(
             "(t.description LIKE '%' || {} || '%' ESCAPE '\\' \
              OR t.num LIKE '%' || {} || '%' ESCAPE '\\' \
              OR t.notes LIKE '%' || {} || '%' ESCAPE '\\' \
-             OR EXISTS(SELECT 1 FROM splits m WHERE m.tx_guid = t.guid AND m.memo LIKE '%' || {} || '%' ESCAPE '\\'))",
+             OR EXISTS(SELECT 1 FROM splits m WHERE m.tx_guid = t.guid AND m.memo LIKE '%' || {} || '%' ESCAPE '\\') \
+             OR EXISTS(SELECT 1 FROM transaction_tags tt JOIN tags g ON g.guid = tt.tag_guid \
+                       WHERE tt.tx_guid = t.guid AND g.name LIKE '%' || {} || '%' ESCAPE '\\'))",
             vec![
                 Box::new(s.clone()) as Box<dyn ToSql>,
+                Box::new(s.clone()),
                 Box::new(s.clone()),
                 Box::new(s.clone()),
                 Box::new(s),

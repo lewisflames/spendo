@@ -1,4 +1,4 @@
-import type { BulkAction, BulkEditResult, TransactionRow } from '$lib/tauri';
+import type { BulkAction, BulkEditResult, TagRef, TransactionRow } from '$lib/tauri';
 import { plural } from '$lib/utils/format.svelte';
 
 /** Tri-state of the header checkbox for the rows on this page. */
@@ -48,10 +48,33 @@ export function selectionAccounts(
     .map(([guid, { count }]) => ({ guid, count }));
 }
 
+/** Tags the selected rows carry, most-used first (ties by name). */
+export function selectionTags(rows: Iterable<Pick<TransactionRow, 'tags'>>): TagRef[] {
+  const counts = new Map<string, { tag: TagRef; count: number }>();
+  for (const row of rows) {
+    for (const tag of row.tags) {
+      const entry = counts.get(tag.guid);
+      if (entry) entry.count += 1;
+      else counts.set(tag.guid, { tag, count: 1 });
+    }
+  }
+  return [...counts.values()]
+    .sort((a, b) => b.count - a.count || a.tag.name.localeCompare(b.tag.name))
+    .map((e) => e.tag);
+}
+
 const DONE_VERB: Record<BulkAction['kind'], string> = {
   delete: 'Deleted',
   moveSplits: 'Moved',
-  setDescription: 'Renamed'
+  setDescription: 'Renamed',
+  addTag: 'Tagged',
+  removeTag: 'Untagged'
+};
+
+const NOTHING_TO_DO: Partial<Record<BulkAction['kind'], string>> = {
+  moveSplits: 'Nothing to move. None of them use that account',
+  addTag: 'Nothing changed. They all have that tag already',
+  removeTag: 'Nothing to remove. None of them have that tag'
 };
 
 /** Toast text for a finished bulk edit. */
@@ -62,9 +85,7 @@ export function bulkResultMessage(kind: BulkAction['kind'], result: BulkEditResu
       : '';
   if (result.changed === 0) {
     if (locked) return `Nothing changed. ${locked}`;
-    return kind === 'moveSplits'
-      ? 'Nothing to move. None of them use that account'
-      : 'Nothing changed';
+    return NOTHING_TO_DO[kind] ?? 'Nothing changed';
   }
   const done = `${DONE_VERB[kind]} ${plural(result.changed, 'transaction')}`;
   return locked ? `${done} · ${locked}` : done;

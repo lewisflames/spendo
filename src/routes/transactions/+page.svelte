@@ -4,6 +4,7 @@
   import { SvelteMap } from 'svelte/reactivity';
   import {
     fetchAccounts,
+    fetchTags,
     fetchTransactions,
     type BulkAction,
     type BulkEditResult,
@@ -29,7 +30,8 @@
     bulkResultMessage,
     pageSelectionState,
     rangeRows,
-    selectionAccounts
+    selectionAccounts,
+    selectionTags
   } from '$lib/features/transactions/bulk-edit';
   import { flattenAccountsForPicker } from '$lib/features/accounts/account-picker-utils';
   import { toast } from '$lib/components/ui/sonner';
@@ -75,6 +77,7 @@
   let searchInput = $state('');
   let dateFrom = $state('');
   let dateTo = $state('');
+  let tagGuid = $state('');
 
   let search = useDebouncedSearch(() => searchInput);
 
@@ -84,6 +87,7 @@
     search.set('');
     dateFrom = '';
     dateTo = '';
+    tagGuid = '';
   }
 
   const cols = useColumnVisibility<TransactionColumnId>(
@@ -126,13 +130,21 @@
       'to',
       () => dateTo || null,
       (v) => (dateTo = v ?? '')
-    )
+    ),
+    // Tag pages and badges link here with `?tag=<guid>`.
+    {
+      key: 'tag',
+      get: () => tagGuid || null,
+      apply: (v) => (tagGuid = v ?? ''),
+      replace: true
+    }
   ]);
 
   let filters = $derived({
     ...(search.value ? { search: search.value } : {}),
     ...(dateFrom ? { dateFrom } : {}),
-    ...(dateTo ? { dateTo } : {})
+    ...(dateTo ? { dateTo } : {}),
+    ...(tagGuid ? { tagGuid } : {})
   });
 
   let currency = $derived(sessionCurrency());
@@ -161,6 +173,15 @@
     },
     label: 'We couldn’t load your transactions'
   });
+
+  // Tags for the filter and the bulk dialog; reloaded after a bulk edit since
+  // tagging can create one.
+  const tagsRes = useAsyncData({
+    enabled: () => !!dbSession.value,
+    fetch: fetchTags,
+    label: 'We couldn’t load your tags'
+  });
+  let allTags = $derived(tagsRes.data ?? []);
 
   // ── Bulk edit ──
   // Selected rows keep their loaded data so the dialog can offer the accounts
@@ -244,6 +265,7 @@
     clearSelection();
     heatmapKey += 1;
     res.reload();
+    tagsRes.reload();
     refreshSession();
   }
 </script>
@@ -264,7 +286,13 @@
 
     <TransactionHeatmap {filters} refreshKey={heatmapKey} />
 
-    <TransactionFilters bind:search={searchInput} bind:dateFrom bind:dateTo>
+    <TransactionFilters
+      bind:search={searchInput}
+      bind:dateFrom
+      bind:dateTo
+      bind:tagGuid
+      tags={allTags}
+    >
       {#snippet extra()}
         <ColumnsMenu columns={TRANSACTION_COLUMNS} {cols} onHide={handleHideColumn} />
       {/snippet}
@@ -278,7 +306,7 @@
         <ErrorCard message={res.error} onRetry={() => res.reload()} />
       {/if}
       {#if res.data.transactions.length === 0}
-        {@const isFiltered = !!(search.value || dateFrom || dateTo)}
+        {@const isFiltered = !!(search.value || dateFrom || dateTo || tagGuid)}
         {#if isFiltered}
           <FilteredEmptyState title="No matching transactions" onClear={clearFilters} />
         {:else if dbSession.value?.summary.totalAccounts === 0}
@@ -353,5 +381,7 @@
   selectionAccountGuids={selectionAccounts(selected.values()).map((a) => a.guid)}
   anySource={allMatching}
   defaultDescription={sharedDescription}
+  selectionTagList={selectionTags(selected.values())}
+  {allTags}
   onDone={handleBulkDone}
 />

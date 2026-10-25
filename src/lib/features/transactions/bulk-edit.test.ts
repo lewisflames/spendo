@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { bulkResultMessage, pageSelectionState, rangeRows, selectionAccounts } from './bulk-edit';
+import {
+  bulkResultMessage,
+  pageSelectionState,
+  rangeRows,
+  selectionAccounts,
+  selectionTags
+} from './bulk-edit';
 
 const rows = [{ guid: 'a' }, { guid: 'b' }, { guid: 'c' }, { guid: 'd' }];
 
@@ -43,7 +49,27 @@ describe('bulk edit selection', () => {
   });
 });
 
+describe('selectionTags', () => {
+  it('lists the tags on the selection, most used first', () => {
+    const trip = { guid: 't', name: 'trip' };
+    const work = { guid: 'w', name: 'work' };
+    const tax = { guid: 'x', name: 'deductible' };
+    expect(
+      selectionTags([{ tags: [work] }, { tags: [trip, work] }, { tags: [tax, trip] }, { tags: [] }])
+    ).toEqual([trip, work, tax]);
+  });
+});
+
 describe('bulkResultMessage', () => {
+  it('words tag changes', () => {
+    expect(bulkResultMessage('addTag', { changed: 2, skippedLocked: 0 })).toBe(
+      'Tagged 2 transactions'
+    );
+    expect(bulkResultMessage('removeTag', { changed: 0, skippedLocked: 0 })).toBe(
+      'Nothing to remove. None of them have that tag'
+    );
+  });
+
   it('summarizes what changed', () => {
     expect(bulkResultMessage('delete', { changed: 3, skippedLocked: 0 })).toBe(
       'Deleted 3 transactions'

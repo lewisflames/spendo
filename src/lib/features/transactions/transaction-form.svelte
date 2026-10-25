@@ -17,6 +17,8 @@
   import UnreconcileConfirmDialog from '$lib/features/transactions/unreconcile-confirm-dialog.svelte';
   import DeleteTransactionDialog from '$lib/features/transactions/delete-transaction-dialog.svelte';
   import DiscardChangesDialog from '$lib/features/transactions/discard-changes-dialog.svelte';
+  import TagInput from '$lib/features/tags/tag-input.svelte';
+  import { sameTags } from '$lib/features/tags/tag-utils';
   import {
     readLastAccounts,
     readRecipes,
@@ -40,6 +42,7 @@
     createTransaction,
     deleteTransaction,
     fetchAccounts,
+    fetchTags,
     updateTransaction,
     type TransactionDetail,
     type TxInput
@@ -124,6 +127,7 @@
         description: prefill.description,
         num: '',
         notes: '',
+        tags: [] as string[],
         splits: drafts
       };
     }
@@ -133,6 +137,7 @@
         description: '',
         num: '',
         notes: '',
+        tags: [] as string[],
         splits: [makeSplitDraft(nextKey()), makeSplitDraft(nextKey())]
       };
     }
@@ -143,6 +148,7 @@
       description: initial.description ?? '',
       num: initial.num ?? '',
       notes: initial.notes ?? '',
+      tags: initial.tags.map((t) => t.name),
       splits: drafts
     };
   });
@@ -151,6 +157,7 @@
   let description = $state(snapshot.description);
   let num = $state(snapshot.num);
   let notes = $state(snapshot.notes);
+  let tags = $state<string[]>(snapshot.tags);
   let splits = $state<SplitDraft[]>(snapshot.splits);
   // Files picked before the transaction exists; attached right after save.
   let pendingAttachments = $state<string[]>([]);
@@ -224,6 +231,13 @@
     label: 'We couldn’t load your accounts'
   });
 
+  const tagsRes = useAsyncData({
+    enabled: () => true,
+    fetch: fetchTags,
+    label: 'We couldn’t load your tags'
+  });
+  let knownTags = $derived((tagsRes.data ?? []).map((t) => t.name));
+
   let pickerOptions = $derived(
     flattenAccountsForPicker(accountsRes.data?.trees, { hidePlaceholders: true })
   );
@@ -258,6 +272,7 @@
         description,
         num,
         notes,
+        tags: [...tags],
         splits: splits.map((s) => ({ ...s }))
       };
     }
@@ -311,6 +326,7 @@
       description !== baseline.description ||
       num !== baseline.num ||
       notes !== baseline.notes ||
+      !sameTags(tags, baseline.tags) ||
       splitsDirty
   );
 
@@ -394,6 +410,7 @@
       description: description.trim() ? description.trim() : null,
       num: num.trim() ? num.trim() : null,
       notes: notes.trim() ? notes.trim() : null,
+      tags,
       splits: splits.map(splitToInput)
     };
   }
@@ -574,7 +591,8 @@
       rememberForNextTime(splits, description);
       await attachPending(newGuid);
       onSavedAndNew?.(newGuid);
-      // Keep the date and accounts for fast batch entry; clear the rest.
+      // Keep the date, accounts and tags for fast batch entry (a trip's
+      // expenses share a tag); clear the rest.
       description = '';
       num = '';
       notes = '';
@@ -589,6 +607,7 @@
         description,
         num,
         notes,
+        tags: [...tags],
         splits: splits.map((s) => ({ ...s }))
       };
       showErrors = false;
@@ -743,6 +762,14 @@
           rows={3}
           maxlength={2000}
         />
+      </div>
+      <div class="flex flex-col gap-1.5">
+        <label for="tx-tags" class="text-sm font-medium">Tags (optional)</label>
+        <TagInput id="tx-tags" bind:value={tags} known={knownTags} describedBy="tx-tags-hint" />
+        <p id="tx-tags-hint" class="text-xs text-muted-foreground">
+          Labels that cut across accounts, like a trip or a project. Press Enter or comma after each
+          one.
+        </p>
       </div>
     </Card.Content>
   </Card.Root>

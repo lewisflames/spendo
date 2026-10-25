@@ -25,6 +25,7 @@ mod search;
 mod settings;
 mod spending;
 mod sql;
+mod tags;
 mod transactions;
 mod transit;
 mod tree;
@@ -134,6 +135,9 @@ pub fn run() {
             transactions::update_transaction,
             transactions::delete_transaction,
             transactions::bulk_edit_transactions,
+            tags::fetch_tags,
+            tags::rename_tag,
+            tags::delete_tag,
             attachments::fetch_attachments,
             attachments::add_attachments,
             attachments::delete_attachment,

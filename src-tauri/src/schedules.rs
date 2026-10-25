@@ -390,6 +390,7 @@ fn validate_schedule_input(
         notes: input.notes.clone(),
         splits: input.splits.clone(),
         unreconcile: false,
+        tags: None,
     };
     crate::transactions::validate_tx_body_with(&probe, &lookup)?;
     if input.spread_total {
@@ -823,6 +824,7 @@ fn post_occurrence_at(conn: &Connection, guid: &str, today: &str) -> Result<Stri
         num: template.num.clone(),
         notes: template.notes.clone(),
         unreconcile: false,
+        tags: None,
         splits: template
             .splits
             .iter()

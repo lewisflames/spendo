@@ -41,6 +41,7 @@
   import NavRow from '$lib/components/shared/nav-row.svelte';
   import TransactionAttachments from '$lib/features/transactions/transaction-attachments.svelte';
   import AccountLabel from '$lib/features/accounts/account-label.svelte';
+  import TagBadges from '$lib/features/tags/tag-badges.svelte';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import { openAccount, openTransaction } from '$lib/utils/navigation';
 
@@ -170,6 +171,12 @@
           <div class="flex flex-col gap-0.5">
             <dt class="text-xs text-muted-foreground">Number</dt>
             <dd class="font-medium tabular-nums">#{d.num}</dd>
+          </div>
+        {/if}
+        {#if d.tags.length > 0}
+          <div class="flex flex-col gap-0.5">
+            <dt class="text-xs text-muted-foreground">Tags</dt>
+            <dd><TagBadges tags={d.tags} /></dd>
           </div>
         {/if}
       </dl>

@@ -4,12 +4,19 @@
   import { Input } from '$lib/components/ui/input';
   import SaveFooter from '$lib/components/shared/save-footer.svelte';
   import { AccountPicker } from '$lib/components/shared/account-picker';
+  import * as Select from '$lib/components/ui/select';
+  import * as Tabs from '$lib/components/ui/tabs';
+  import { Select as SelectPrimitive } from 'bits-ui';
+  import DescriptionCombobox from './description-combobox.svelte';
+  import { normalizeTagName, tagNameError } from '$lib/features/tags/tag-utils';
   import { useDialogReset } from '$lib/hooks/use-dialog-reset.svelte';
   import {
     bulkEditTransactions,
     type BulkAction,
     type BulkEditResult,
-    type BulkTarget
+    type BulkTarget,
+    type TagRef,
+    type TagSummary
   } from '$lib/tauri';
   import type { PickerAccount } from '$lib/features/accounts/account-picker-utils';
   import { errMsg } from '$lib/utils/error';
@@ -24,6 +31,8 @@
     selectionAccountGuids,
     anySource,
     defaultDescription,
+    selectionTagList,
+    allTags,
     onDone
   }: {
     open: boolean;
@@ -39,12 +48,20 @@
      * ("all matching" reaches rows that were never loaded). */
     anySource: boolean;
     defaultDescription: string;
+    /** Tags the loaded selected rows carry, most used first. */
+    selectionTagList: TagRef[];
+    /** Every tag in the book, most used first. */
+    allTags: TagSummary[];
     onDone: (kind: BulkAction['kind'], result: BulkEditResult) => void;
   } = $props();
 
   let fromGuid = $state('');
   let toGuid = $state('');
   let description = $state('');
+  /** The bar opens tagging as `addTag`; the dialog switches between add and remove. */
+  let tagMode = $state<'addTag' | 'removeTag'>('addTag');
+  let tagName = $state('');
+  let removeGuid = $state('');
   let saving = $state(false);
   let error = $state('');
 
@@ -58,6 +75,14 @@
     return [...ranked, ...accounts.filter((a) => a.accountType !== 'ROOT' && !seen.has(a.guid))];
   });
   let fromAccount = $derived(byGuid.get(fromGuid) ?? null);
+  let isTagging = $derived(kind === 'addTag' || kind === 'removeTag');
+  let effectiveKind = $derived<BulkAction['kind']>(isTagging ? tagMode : kind);
+  let tagOptions = $derived(
+    allTags.map((t) => ({ description: t.name, hint: plural(t.transactionCount, 'transaction') }))
+  );
+  // "All matching" reaches rows that were never loaded, so offer every tag.
+  let removable = $derived<TagRef[]>(anySource ? allTags : selectionTagList);
+  let tagError = $derived(tagName.trim() ? tagNameError(normalizeTagName(tagName)) : null);
   // Amounts move as they are, so only same-commodity accounts can take them.
   let toOptions = $derived(
     accounts.filter(
@@ -76,6 +101,9 @@
       fromGuid = fromOptions.find((a) => CATEGORY_TYPES.has(a.accountType))?.guid ?? '';
       toGuid = '';
       description = defaultDescription;
+      tagMode = kind === 'removeTag' ? 'removeTag' : 'addTag';
+      tagName = '';
+      removeGuid = removable[0]?.guid ?? '';
       saving = false;
       error = '';
     }
@@ -87,17 +115,36 @@
   });
 
   let action = $derived.by<BulkAction | null>(() => {
+    if (effectiveKind === 'addTag') {
+      const name = normalizeTagName(tagName);
+      return name && !tagError ? { kind: 'addTag', name } : null;
+    }
+    if (effectiveKind === 'removeTag') {
+      return removeGuid ? { kind: 'removeTag', tagGuid: removeGuid } : null;
+    }
     if (kind === 'delete') return { kind };
     if (kind === 'setDescription') {
       return description.trim() ? { kind, description: description.trim() } : null;
     }
-    return fromGuid && toGuid ? { kind, fromAccountGuid: fromGuid, toAccountGuid: toGuid } : null;
+    return fromGuid && toGuid
+      ? { kind: 'moveSplits', fromAccountGuid: fromGuid, toAccountGuid: toGuid }
+      : null;
   });
 
   const TITLES: Record<BulkAction['kind'], string> = {
     delete: 'Delete these transactions?',
     moveSplits: 'Move to another account',
-    setDescription: 'Rename transactions'
+    setDescription: 'Rename transactions',
+    addTag: 'Tag transactions',
+    removeTag: 'Tag transactions'
+  };
+
+  const SAVE_LABELS: Record<BulkAction['kind'], string> = {
+    delete: 'Delete',
+    moveSplits: 'Move',
+    setDescription: 'Rename',
+    addTag: 'Add tag',
+    removeTag: 'Remove tag'
   };
 
   async function apply() {
@@ -127,6 +174,9 @@
         {:else if kind === 'moveSplits'}
           Splits of {plural(count, 'transaction')} posted to one account move to another. Amounts stay
           the same; cleared or reconciled splits are left as is.
+        {:else if isTagging}
+          Add a tag to {plural(count, 'transaction')}, or take one off. Cleared and reconciled ones
+          are included: tags don’t touch amounts.
         {:else}
           Give {plural(count, 'transaction')} the same description.
         {/if}
@@ -162,6 +212,48 @@
             emptyText="No account in the same currency matches."
           />
         </div>
+      {:else if isTagging}
+        <Tabs.Root bind:value={tagMode}>
+          <Tabs.List class="w-full">
+            <Tabs.Trigger value="addTag">Add a tag</Tabs.Trigger>
+            <Tabs.Trigger value="removeTag" disabled={removable.length === 0}>
+              Remove a tag
+            </Tabs.Trigger>
+          </Tabs.List>
+        </Tabs.Root>
+        {#if tagMode === 'addTag'}
+          <div class="flex flex-col gap-1.5">
+            <label for="bulk-tag" class="text-sm font-medium">Tag</label>
+            <DescriptionCombobox
+              id="bulk-tag"
+              bind:value={tagName}
+              options={tagOptions}
+              placeholder="Pick one or type a new tag"
+              maxlength={60}
+            />
+            {#if tagError}
+              <p role="alert" class="text-xs text-destructive">{tagError}</p>
+            {/if}
+          </div>
+        {:else}
+          <div class="flex flex-col gap-1.5">
+            <label for="bulk-untag" class="text-sm font-medium">Tag</label>
+            <Select.Root
+              type="single"
+              bind:value={removeGuid}
+              items={removable.map((t) => ({ value: t.guid, label: t.name }))}
+            >
+              <Select.Trigger id="bulk-untag" class="w-full">
+                <SelectPrimitive.Value placeholder="Pick a tag" />
+              </Select.Trigger>
+              <Select.Content>
+                {#each removable as t (t.guid)}
+                  <Select.Item value={t.guid} label={t.name}>{t.name}</Select.Item>
+                {/each}
+              </Select.Content>
+            </Select.Root>
+          </div>
+        {/if}
       {:else if kind === 'setDescription'}
         <div class="flex flex-col gap-1.5">
           <label for="bulk-description" class="text-sm font-medium">Description</label>
@@ -196,7 +288,7 @@
         {saving}
         deleting={false}
         confirmDelete={false}
-        saveLabel={kind === 'moveSplits' ? 'Move' : 'Rename'}
+        saveLabel={SAVE_LABELS[effectiveKind]}
         saveDisabled={!action || saving}
         onSave={apply}
         onCancel={() => (open = false)}

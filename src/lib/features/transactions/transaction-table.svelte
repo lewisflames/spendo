@@ -26,6 +26,7 @@
   import EmptyValue from '$lib/components/shared/empty-value.svelte';
   import { openTransaction } from '$lib/utils/navigation';
   import { statusFor } from '$lib/utils/reconcile';
+  import TagBadges from '$lib/features/tags/tag-badges.svelte';
   import { pageSelectionState } from './bulk-edit';
   import type { DetailTransaction, TransactionRow, TxSortKey } from '$lib/tauri';
 
@@ -236,6 +237,9 @@
               >
                 {txn.notes}
               </p>
+            {/if}
+            {#if 'tags' in txn && txn.tags.length > 0}
+              <TagBadges tags={txn.tags} class="mt-1" />
             {/if}
           </div>
         </Table.Cell>
