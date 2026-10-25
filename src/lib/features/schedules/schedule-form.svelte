@@ -3,7 +3,6 @@
   import * as Select from '$lib/components/ui/select';
   import { Select as SelectPrimitive } from 'bits-ui';
   import { Input } from '$lib/components/ui/input';
-  import { Textarea } from '$lib/components/ui/textarea';
   import { Button } from '$lib/components/ui/button';
   import { Switch } from '$lib/components/ui/switch';
   import * as Card from '$lib/components/ui/card';
@@ -92,7 +91,6 @@
       maxOccurrences: initial?.maxOccurrences != null ? String(initial.maxOccurrences) : '',
       description: initial?.description ?? '',
       num: initial?.num ?? '',
-      notes: initial?.notes ?? '',
       payee: initial?.payee ?? '',
       autoPost: initial?.autoPost ?? false,
       spreadTotal: initial?.spreadTotal ?? false,
@@ -108,7 +106,6 @@
   let maxOccurrences = $state(snapshot.maxOccurrences);
   let description = $state(snapshot.description);
   let num = $state(snapshot.num);
-  let notes = $state(snapshot.notes);
   let payee = $state(snapshot.payee);
   let autoPost = $state(snapshot.autoPost);
   let spreadTotal = $state(snapshot.spreadTotal);
@@ -234,7 +231,6 @@
       maxOccurrences !== baseline.maxOccurrences ||
       description !== baseline.description ||
       num !== baseline.num ||
-      notes !== baseline.notes ||
       payee !== baseline.payee ||
       autoPost !== baseline.autoPost ||
       spreadTotal !== baseline.spreadTotal ||
@@ -268,7 +264,6 @@
       maxOccurrences: maxOccurrences.trim() ? Number(maxOccurrences) : null,
       description: description.trim() ? description.trim() : null,
       num: num.trim() ? num.trim() : null,
-      notes: notes.trim() ? notes.trim() : null,
       payee: normalizePayeeName(payee) || null,
       splits: splits.map(splitToInput),
       autoPost,
@@ -421,16 +416,6 @@
         {#if payeeError}
           <p role="alert" class="text-xs text-destructive">{payeeError}</p>
         {/if}
-      </div>
-      <div class="flex flex-col gap-1.5">
-        <label for="sched-notes" class="text-sm font-medium">Notes (optional)</label>
-        <Textarea
-          id="sched-notes"
-          bind:value={notes}
-          placeholder="Optional notes"
-          rows={3}
-          maxlength={2000}
-        />
       </div>
     </Card.Content>
   </Card.Root>
