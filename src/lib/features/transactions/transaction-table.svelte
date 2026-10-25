@@ -1,15 +1,16 @@
 <script lang="ts" module>
   export type TransactionColumnId =
-    'date' | 'num' | 'accounts' | 'amount' | 'transfer' | 'status' | 'runningBalance';
+    'date' | 'payee' | 'num' | 'accounts' | 'amount' | 'transfer' | 'status' | 'runningBalance';
 
   export const TRANSACTION_COLUMNS: { id: TransactionColumnId; label: string }[] = [
     { id: 'date', label: 'Date' },
+    { id: 'payee', label: 'Payee' },
     { id: 'num', label: 'Number' },
     { id: 'accounts', label: 'Accounts' },
     { id: 'amount', label: 'Total' }
   ];
 
-  export const TRANSACTION_DEFAULT_COLUMNS: TransactionColumnId[] = ['date', 'amount'];
+  export const TRANSACTION_DEFAULT_COLUMNS: TransactionColumnId[] = ['date', 'payee', 'amount'];
 </script>
 
 <script lang="ts">
@@ -27,6 +28,7 @@
   import { openTransaction } from '$lib/utils/navigation';
   import { statusFor } from '$lib/utils/reconcile';
   import TagBadges from '$lib/features/tags/tag-badges.svelte';
+  import { payeeListHref } from '$lib/features/payees/payee-utils';
   import { pageSelectionState } from './bulk-edit';
   import type { DetailTransaction, TransactionRow, TxSortKey } from '$lib/tauri';
 
@@ -129,6 +131,9 @@
           onclick={onSort ? () => onSort('date') : undefined}
         />
       {/if}
+      {#if isVisible('payee')}
+        <Table.Head class="text-muted-foreground">Payee</Table.Head>
+      {/if}
       <SortHead
         label="Description"
         active={sortBy === 'description'}
@@ -209,6 +214,24 @@
         {#if showDate}
           <Table.Cell class="py-2.5 whitespace-nowrap text-muted-foreground tabular-nums">
             {fmtDate(txn.postDate)}
+          </Table.Cell>
+        {/if}
+        {#if isVisible('payee')}
+          <Table.Cell class="max-w-48 py-2.5 text-muted-foreground">
+            {#if txn.payee}
+              <!-- Opens the list filtered to this payee; the row click ignores links. -->
+              <!-- eslint-disable svelte/no-navigation-without-resolve -- payeeListHref resolves the path -->
+              <a
+                class="block truncate hover:text-foreground hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+                href={payeeListHref(txn.payee.guid)}
+                {@attach tooltip(`Show only ${txn.payee.name}`)}
+              >
+                {txn.payee.name}
+              </a>
+              <!-- eslint-enable svelte/no-navigation-without-resolve -->
+            {:else}
+              <EmptyValue />
+            {/if}
           </Table.Cell>
         {/if}
         <Table.Cell class="max-w-md py-2.5 font-medium">

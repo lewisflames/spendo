@@ -43,6 +43,7 @@ pub struct ExportSplitRow {
     pub reconcile_state: Option<String>,
     /// `amount/quantity` for investments, else `1`.
     pub price: f64,
+    pub payee: Option<String>,
 }
 
 /// One CSV row per account in parent-before-child (pre-order DFS) order so a
@@ -86,11 +87,14 @@ fn fetch_export_transactions_inner(conn: &Connection) -> Result<Vec<ExportSplitR
                 {} as amount,
                 {} as quantity,
                 a.name as account_name,
-                c.mnemonic as commodity
+                c.mnemonic as commodity,
+                p.name as payee
          FROM splits s
          JOIN transactions t ON t.guid = s.tx_guid
          JOIN accounts a ON a.guid = s.account_guid
          LEFT JOIN commodities c ON c.guid = a.commodity_guid
+         LEFT JOIN transaction_payees tp ON tp.tx_guid = t.guid
+         LEFT JOIN payees p ON p.guid = tp.payee_guid
          ORDER BY t.post_date DESC, t.guid DESC,
                   ABS(CAST(s.value_num AS REAL) / CAST(s.value_denom AS REAL)) DESC,
                   s.guid ASC",
@@ -114,6 +118,7 @@ fn fetch_export_transactions_inner(conn: &Connection) -> Result<Vec<ExportSplitR
                 row.get::<_, f64>(10)?,
                 row.get::<_, String>(11)?,
                 row.get::<_, Option<String>>(12)?,
+                row.get::<_, Option<String>>(13)?,
             ))
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -135,6 +140,7 @@ fn fetch_export_transactions_inner(conn: &Connection) -> Result<Vec<ExportSplitR
                 quantity,
                 account_name,
                 commodity,
+                payee,
             )| {
                 let full_account_name = path_cache
                     .get(&account_guid)
@@ -154,6 +160,7 @@ fn fetch_export_transactions_inner(conn: &Connection) -> Result<Vec<ExportSplitR
                     amount,
                     reconcile_state,
                     price: price_for(amount, quantity),
+                    payee,
                 }
             },
         )
@@ -287,8 +294,9 @@ fn fetch_export_accounts_inner(conn: &Connection) -> Result<Vec<ExportAccountRow
 
 // ── CSV assembly + wire inputs ───────────────────────────────────────────────
 
-/// Column order of the transactions export (GnuCash multi-split shape).
-const TRANSACTIONS_EXPORT_HEADERS: [&str; 13] = [
+/// Column order of the transactions export (GnuCash multi-split shape, with
+/// Spendo's payee appended so GnuCash's own columns keep their positions).
+const TRANSACTIONS_EXPORT_HEADERS: [&str; 14] = [
     "Date",
     "Transaction ID",
     "Number",
@@ -302,6 +310,7 @@ const TRANSACTIONS_EXPORT_HEADERS: [&str; 13] = [
     "Reconciled",
     "Price",
     "Split ID",
+    "Payee",
 ];
 
 /// Column order of the account-tree export, parents before children.
@@ -480,6 +489,7 @@ fn split_row_cells(row: &ExportSplitRow, locale: Option<&(String, String)>) -> V
         row.reconcile_state.clone().unwrap_or_default(),
         format!("{}", row.price),
         row.split_guid.clone(),
+        row.payee.clone().unwrap_or_default(),
     ]
 }
 

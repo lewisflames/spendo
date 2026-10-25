@@ -42,6 +42,7 @@
   import TransactionAttachments from '$lib/features/transactions/transaction-attachments.svelte';
   import AccountLabel from '$lib/features/accounts/account-label.svelte';
   import TagBadges from '$lib/features/tags/tag-badges.svelte';
+  import { payeeListHref } from '$lib/features/payees/payee-utils';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import { openAccount, openTransaction } from '$lib/utils/navigation';
 
@@ -159,6 +160,15 @@
           <dt class="text-xs text-muted-foreground">Date</dt>
           <dd class="font-medium">{fmtDate(d.postDate)}</dd>
         </div>
+        {#if d.payee}
+          <div class="flex flex-col gap-0.5">
+            <dt class="text-xs text-muted-foreground">Payee</dt>
+            <dd class="font-medium">
+              <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+              <a class="hover:underline" href={payeeListHref(d.payee.guid)}>{d.payee.name}</a>
+            </dd>
+          </div>
+        {/if}
         <div class="flex flex-col gap-0.5">
           <dt class="text-xs text-muted-foreground">Total</dt>
           <dd><Amount value={d.totalAmount} tone /></dd>

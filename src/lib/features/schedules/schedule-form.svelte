@@ -27,6 +27,7 @@
     createSchedule,
     deleteSchedule,
     fetchAccounts,
+    fetchPayees,
     updateSchedule,
     type Schedule,
     type ScheduleFrequency,
@@ -38,6 +39,13 @@
   import { flattenAccountsForPicker } from '$lib/features/accounts/account-picker-utils';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import { FREQUENCY_OPTIONS } from './schedule-utils';
+  import DescriptionCombobox from '$lib/features/transactions/description-combobox.svelte';
+  import {
+    MAX_PAYEE_LEN,
+    normalizePayeeName,
+    payeeNameError,
+    payeeOptions
+  } from '$lib/features/payees/payee-utils';
 
   let {
     mode = 'create',
@@ -85,6 +93,7 @@
       description: initial?.description ?? '',
       num: initial?.num ?? '',
       notes: initial?.notes ?? '',
+      payee: initial?.payee ?? '',
       autoPost: initial?.autoPost ?? false,
       spreadTotal: initial?.spreadTotal ?? false,
       splits: drafts
@@ -100,6 +109,7 @@
   let description = $state(snapshot.description);
   let num = $state(snapshot.num);
   let notes = $state(snapshot.notes);
+  let payee = $state(snapshot.payee);
   let autoPost = $state(snapshot.autoPost);
   let spreadTotal = $state(snapshot.spreadTotal);
   let splits = $state<SplitDraft[]>(snapshot.splits);
@@ -146,6 +156,14 @@
   let pickerOptions = $derived(
     flattenAccountsForPicker(accountsRes.data?.trees, { hidePlaceholders: true })
   );
+
+  const payeesRes = useAsyncData({
+    enabled: () => true,
+    fetch: fetchPayees,
+    label: 'We couldn’t load your payees'
+  });
+  let payeeSuggestions = $derived(payeeOptions(payeesRes.data ?? []));
+  let payeeError = $derived(payeeNameError(normalizePayeeName(payee)));
 
   let nameError = $derived.by(() => {
     if (!name.trim()) return 'Give this schedule a name';
@@ -195,6 +213,7 @@
     !saving &&
       !deleting &&
       !nameError &&
+      !payeeError &&
       !multError &&
       !startError &&
       !endError &&
@@ -216,6 +235,7 @@
       description !== baseline.description ||
       num !== baseline.num ||
       notes !== baseline.notes ||
+      payee !== baseline.payee ||
       autoPost !== baseline.autoPost ||
       spreadTotal !== baseline.spreadTotal ||
       splits.length !== baseline.splits.length
@@ -249,6 +269,7 @@
       description: description.trim() ? description.trim() : null,
       num: num.trim() ? num.trim() : null,
       notes: notes.trim() ? notes.trim() : null,
+      payee: normalizePayeeName(payee) || null,
       splits: splits.map(splitToInput),
       autoPost,
       spreadTotal
@@ -387,6 +408,19 @@
           <label for="sched-num" class="text-sm font-medium">Number (optional)</label>
           <Input id="sched-num" bind:value={num} placeholder="e.g. 2024-001" maxlength={100} />
         </div>
+      </div>
+      <div class="flex flex-col gap-1.5">
+        <label for="sched-payee" class="text-sm font-medium">Payee (optional)</label>
+        <DescriptionCombobox
+          id="sched-payee"
+          bind:value={payee}
+          options={payeeSuggestions}
+          placeholder="e.g. your landlord"
+          maxlength={MAX_PAYEE_LEN + 20}
+        />
+        {#if payeeError}
+          <p role="alert" class="text-xs text-destructive">{payeeError}</p>
+        {/if}
       </div>
       <div class="flex flex-col gap-1.5">
         <label for="sched-notes" class="text-sm font-medium">Notes (optional)</label>

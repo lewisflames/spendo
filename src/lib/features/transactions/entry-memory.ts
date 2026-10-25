@@ -20,6 +20,8 @@ interface RecipeSplit {
 /** One remembered transaction shape, keyed by its description. */
 export interface TxRecipe {
   description: string;
+  /** Payee name used last time; absent in recipes saved before payees. */
+  payee?: string;
   splits: RecipeSplit[];
 }
 

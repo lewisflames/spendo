@@ -9,12 +9,19 @@
   import { Select as SelectPrimitive } from 'bits-ui';
   import DescriptionCombobox from './description-combobox.svelte';
   import { normalizeTagName, tagNameError } from '$lib/features/tags/tag-utils';
+  import {
+    MAX_PAYEE_LEN,
+    normalizePayeeName,
+    payeeNameError,
+    payeeOptions
+  } from '$lib/features/payees/payee-utils';
   import { useDialogReset } from '$lib/hooks/use-dialog-reset.svelte';
   import {
     bulkEditTransactions,
     type BulkAction,
     type BulkEditResult,
     type BulkTarget,
+    type PayeeSummary,
     type TagRef,
     type TagSummary
   } from '$lib/tauri';
@@ -33,6 +40,8 @@
     defaultDescription,
     selectionTagList,
     allTags,
+    defaultPayee,
+    allPayees,
     onDone
   }: {
     open: boolean;
@@ -52,6 +61,10 @@
     selectionTagList: TagRef[];
     /** Every tag in the book, most used first. */
     allTags: TagSummary[];
+    /** The payee the selected rows share, `''` when they differ. */
+    defaultPayee: string;
+    /** Every payee in the book, most used first. */
+    allPayees: PayeeSummary[];
     onDone: (kind: BulkAction['kind'], result: BulkEditResult) => void;
   } = $props();
 
@@ -62,6 +75,7 @@
   let tagMode = $state<'addTag' | 'removeTag'>('addTag');
   let tagName = $state('');
   let removeGuid = $state('');
+  let payeeName = $state('');
   let saving = $state(false);
   let error = $state('');
 
@@ -82,6 +96,7 @@
   );
   // "All matching" reaches rows that were never loaded, so offer every tag.
   let removable = $derived<TagRef[]>(anySource ? allTags : selectionTagList);
+  let payeeError = $derived(payeeNameError(normalizePayeeName(payeeName)));
   let tagError = $derived(tagName.trim() ? tagNameError(normalizeTagName(tagName)) : null);
   // Amounts move as they are, so only same-commodity accounts can take them.
   let toOptions = $derived(
@@ -104,6 +119,7 @@
       tagMode = kind === 'removeTag' ? 'removeTag' : 'addTag';
       tagName = '';
       removeGuid = removable[0]?.guid ?? '';
+      payeeName = defaultPayee;
       saving = false;
       error = '';
     }
@@ -123,6 +139,9 @@
       return removeGuid ? { kind: 'removeTag', tagGuid: removeGuid } : null;
     }
     if (kind === 'delete') return { kind };
+    if (kind === 'setPayee') {
+      return payeeError ? null : { kind, name: normalizePayeeName(payeeName) };
+    }
     if (kind === 'setDescription') {
       return description.trim() ? { kind, description: description.trim() } : null;
     }
@@ -136,7 +155,8 @@
     moveSplits: 'Move to another account',
     setDescription: 'Rename transactions',
     addTag: 'Tag transactions',
-    removeTag: 'Tag transactions'
+    removeTag: 'Tag transactions',
+    setPayee: 'Set the payee'
   };
 
   const SAVE_LABELS: Record<BulkAction['kind'], string> = {
@@ -144,7 +164,8 @@
     moveSplits: 'Move',
     setDescription: 'Rename',
     addTag: 'Add tag',
-    removeTag: 'Remove tag'
+    removeTag: 'Remove tag',
+    setPayee: 'Set payee'
   };
 
   async function apply() {
@@ -177,6 +198,9 @@
         {:else if isTagging}
           Add a tag to {plural(count, 'transaction')}, or take one off. Cleared and reconciled ones
           are included: tags don’t touch amounts.
+        {:else if kind === 'setPayee'}
+          Give {plural(count, 'transaction')} the same payee, or leave it blank to clear it. Cleared and
+          reconciled ones are included: payees don’t touch amounts.
         {:else}
           Give {plural(count, 'transaction')} the same description.
         {/if}
@@ -254,6 +278,20 @@
             </Select.Root>
           </div>
         {/if}
+      {:else if kind === 'setPayee'}
+        <div class="flex flex-col gap-1.5">
+          <label for="bulk-payee" class="text-sm font-medium">Payee</label>
+          <DescriptionCombobox
+            id="bulk-payee"
+            bind:value={payeeName}
+            options={payeeOptions(allPayees)}
+            placeholder="Pick one or type a new payee"
+            maxlength={MAX_PAYEE_LEN + 20}
+          />
+          {#if payeeError}
+            <p role="alert" class="text-xs text-destructive">{payeeError}</p>
+          {/if}
+        </div>
       {:else if kind === 'setDescription'}
         <div class="flex flex-col gap-1.5">
           <label for="bulk-description" class="text-sm font-medium">Description</label>

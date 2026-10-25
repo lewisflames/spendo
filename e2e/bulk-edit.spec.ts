@@ -19,7 +19,8 @@ const row = (
   guid: string,
   description: string,
   postDate: string,
-  tags: { guid: string; name: string }[] = []
+  tags: { guid: string; name: string }[] = [],
+  payee: { guid: string; name: string } | null = null
 ) => ({
   guid,
   postDate,
@@ -28,6 +29,7 @@ const row = (
   notes: null,
   totalAmount: -10,
   tags,
+  payee,
   splits: [
     { guid: `${guid}-a`, accountGuid: 'food', accountName: 'Groceries', amount: 10 },
     { guid: `${guid}-b`, accountGuid: 'bank', accountName: 'Bank', amount: -10 }
@@ -52,7 +54,10 @@ const LEDGER: BackendMocks = {
   fetch_transaction_heatmap: [],
   fetch_transactions: {
     transactions: [
-      row('t1', 'Corner shop', '2024-01-03', [{ guid: 'g-trip', name: 'Summer trip' }]),
+      row('t1', 'Corner shop', '2024-01-03', [{ guid: 'g-trip', name: 'Summer trip' }], {
+        guid: 'p-renfe',
+        name: 'Renfe'
+      }),
       row('t2', 'Market', '2024-01-02'),
       row('t3', 'Bakery', '2024-01-01')
     ],
@@ -77,11 +82,15 @@ const LEDGER: BackendMocks = {
     { guid: 'g-trip', name: 'Summer trip', transactionCount: 4, lastUsed: '2024-01-03' },
     { guid: 'g-tax', name: 'Deductible', transactionCount: 1, lastUsed: '2023-12-01' }
   ],
+  fetch_payees: [
+    { guid: 'p-renfe', name: 'Renfe', transactionCount: 18, lastUsed: '2024-01-03' },
+    { guid: 'p-gadis', name: 'Gadis', transactionCount: 15, lastUsed: '2023-12-20' }
+  ],
   bulk_edit_transactions: { changed: 3, skippedLocked: 1 }
 };
 
 /** Record every IPC call so specs can assert on the payload. */
-async function openLedger(page: Page) {
+async function openLedger(page: Page, path = '/transactions') {
   await mockBackend(page, LEDGER);
   await page.addInitScript(() => {
     type Invoke = (cmd: string, args: unknown) => Promise<unknown>;
@@ -94,7 +103,7 @@ async function openLedger(page: Page) {
       return invoke(cmd, args);
     };
   });
-  await page.goto('/transactions');
+  await page.goto(path);
   await expect(page.getByRole('link', { name: 'Corner shop' })).toBeVisible();
 }
 
@@ -228,4 +237,47 @@ test('the tag filter narrows the list request', async ({ page }) => {
         .at(-1)?.args.filters
   );
   expect(lastList).toEqual({ tagGuid: 'g-trip' });
+});
+
+test('payees link to a filtered list and bulk set payee sends the name', async ({ page }) => {
+  await openLedger(page);
+  await expect(page.getByRole('link', { name: 'Renfe' })).toHaveAttribute(
+    'href',
+    '/transactions?payee=p-renfe'
+  );
+
+  await page.getByRole('checkbox', { name: 'Select Market' }).click();
+  await page.getByRole('checkbox', { name: 'Select Bakery' }).click();
+  await page
+    .getByRole('toolbar', { name: 'Bulk actions' })
+    .getByRole('button', { name: 'Payee' })
+    .click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByLabel('Payee').fill('ren');
+  await page.getByRole('option', { name: /Renfe/ }).click();
+  await dialog.getByRole('button', { name: 'Set payee' }).click();
+
+  await expect(dialog).toHaveCount(0);
+  expect(await bulkCall(page)).toEqual({
+    input: {
+      target: { kind: 'guids', guids: ['t2', 't3'] },
+      action: { kind: 'setPayee', name: 'Renfe' }
+    }
+  });
+});
+
+test('the payee filter comes from the URL and clears from its chip', async ({ page }) => {
+  await openLedger(page, '/transactions?payee=p-renfe');
+  const lastFilters = () =>
+    page.evaluate(
+      () =>
+        (window as unknown as { __calls: { cmd: string; args: { filters?: unknown } }[] }).__calls
+          .filter((c) => c.cmd === 'fetch_transactions')
+          .at(-1)?.args.filters
+    );
+  await expect.poll(lastFilters).toEqual({ payeeGuid: 'p-renfe' });
+
+  await page.getByRole('button', { name: 'Stop filtering by Renfe' }).click();
+  await expect(page).not.toHaveURL(/payee=/);
+  await expect.poll(lastFilters).toEqual({});
 });

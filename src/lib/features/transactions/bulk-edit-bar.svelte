@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Button } from '$lib/components/ui/button';
-  import { ArrowRightLeft, PencilLine, Tag, Trash2, X } from '@lucide/svelte';
+  import { ArrowRightLeft, PencilLine, Store, Tag, Trash2, X } from '@lucide/svelte';
   import { plural } from '$lib/utils/format.svelte';
   import type { BulkAction } from '$lib/tauri';
 
@@ -45,6 +45,10 @@
     <Button variant="outline" size="sm" onclick={() => onAction('setDescription')}>
       <PencilLine aria-hidden="true" />
       Rename
+    </Button>
+    <Button variant="outline" size="sm" onclick={() => onAction('setPayee')}>
+      <Store aria-hidden="true" />
+      Payee
     </Button>
     <Button variant="outline" size="sm" onclick={() => onAction('addTag')}>
       <Tag aria-hidden="true" />

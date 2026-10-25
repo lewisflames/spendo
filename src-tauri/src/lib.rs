@@ -16,6 +16,7 @@ mod import_rules;
 mod init;
 mod lots;
 mod nav;
+mod payees;
 mod portfolio;
 mod prices;
 mod reconcile;
@@ -139,6 +140,9 @@ pub fn run() {
             tags::fetch_tags,
             tags::rename_tag,
             tags::delete_tag,
+            payees::fetch_payees,
+            payees::rename_payee,
+            payees::delete_payee,
             tax::fetch_tax_summary,
             tax::fetch_tax_roles,
             tax::save_tax_roles,

@@ -4,6 +4,7 @@ use tauri::State;
 
 use crate::db::{run_blocking, with_tx_err, AppError, AppState};
 use crate::fx;
+use crate::payees::{self, PayeeRef};
 use crate::sql;
 use crate::tags::{self, TagRef};
 use crate::utils;
@@ -49,6 +50,11 @@ pub struct TxInput {
     /// (callers that don't know about tags), `Some(vec![])` clears them.
     #[serde(default)]
     pub tags: Option<Vec<String>>,
+    /// Payee name, matched ignoring case and created when missing. `None`
+    /// leaves an edited transaction's payee as it is (callers that don't know
+    /// about payees); a blank name clears it.
+    #[serde(default)]
+    pub payee: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -125,6 +131,7 @@ pub struct TransactionRow {
     pub splits: Vec<SplitInfo>,
     pub total_amount: f64,
     pub tags: Vec<TagRef>,
+    pub payee: Option<PayeeRef>,
 }
 
 #[derive(Debug, Serialize)]
@@ -141,6 +148,7 @@ pub struct TransactionDetail {
     /// warn that deleting the transaction deletes them permanently.
     pub attachment_count: i64,
     pub tags: Vec<TagRef>,
+    pub payee: Option<PayeeRef>,
 }
 
 #[derive(Debug, Serialize)]
@@ -162,6 +170,8 @@ pub struct Filters {
     pub date_to: Option<String>,
     /// Only transactions carrying this tag.
     pub tag_guid: Option<String>,
+    /// Only transactions with this payee.
+    pub payee_guid: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -421,6 +431,12 @@ fn build_filter_conditions(
                 vec![Box::new(tag.to_string())],
             );
         }
+        if let Some(payee) = f.payee_guid.as_deref().filter(|g| !g.is_empty()) {
+            w.add(
+                "EXISTS(SELECT 1 FROM transaction_payees tp WHERE tp.tx_guid = t.guid AND tp.payee_guid = {})",
+                vec![Box::new(payee.to_string())],
+            );
+        }
     }
 
     Ok(w)
@@ -570,11 +586,13 @@ fn map_tx_rows_with(
     let guids: Vec<String> = rows.iter().map(|r| r.guid.clone()).collect();
     let (split_map, total_map) = fetch_splits_for_txns_with(conn, &guids, ctx)?;
     let mut tag_map = tags::tags_for_txns(conn, &guids)?;
+    let mut payee_map = payees::payees_for_txns(conn, &guids)?;
 
     Ok(rows
         .into_iter()
         .map(|r| TransactionRow {
             tags: tag_map.remove(&r.guid).unwrap_or_default(),
+            payee: payee_map.remove(&r.guid),
             splits: split_map
                 .get(&r.guid)
                 .map(|v| v.iter().map(|d| d.info.clone()).collect())
@@ -903,9 +921,11 @@ fn fetch_transaction_inner(
     let tags = tags::tags_for_txns(conn, &guids)?
         .remove(&base.guid)
         .unwrap_or_default();
+    let payee = payees::payees_for_txns(conn, &guids)?.remove(&base.guid);
 
     let transaction = TransactionDetail {
         tags,
+        payee,
         guid: base.guid.clone(),
         post_date: base.post_date.clone(),
         description: base.description,
@@ -1016,9 +1036,19 @@ fn reject_when_reconciled(conn: &Connection, tx_guid: &str, action: &str) -> Res
     Ok(())
 }
 
+/// `None` when the caller sent no payee, `Some(None)` to clear it.
+fn normalize_payee_input(input: &TxInput) -> Result<Option<Option<String>>, AppError> {
+    input
+        .payee
+        .as_deref()
+        .map(payees::normalize_payee_name)
+        .transpose()
+}
+
 fn create_transaction_inner(conn: &Connection, input: TxInput) -> Result<String, AppError> {
     let post_date = validate_tx_input(conn, &input)?;
     let tag_names = tags::normalize_tag_names(input.tags.as_deref().unwrap_or_default())?;
+    let payee = normalize_payee_input(&input)?.flatten();
     let tx_guid = uuid::Uuid::new_v4().to_string();
 
     with_tx_err(conn, || {
@@ -1035,6 +1065,7 @@ fn create_transaction_inner(conn: &Connection, input: TxInput) -> Result<String,
         )?;
         insert_split_rows(conn, &tx_guid, &input.splits)?;
         tags::set_transaction_tags(conn, &tx_guid, &tag_names)?;
+        payees::set_transaction_payee(conn, &tx_guid, payee.as_deref())?;
         Ok(tx_guid.clone())
     })
 }
@@ -1046,6 +1077,7 @@ fn update_transaction_inner(conn: &Connection, guid: &str, input: TxInput) -> Re
         .as_deref()
         .map(tags::normalize_tag_names)
         .transpose()?;
+    let payee = normalize_payee_input(&input)?;
     let exists: bool = conn
         .query_row(
             "SELECT 1 FROM transactions WHERE guid = ?1",
@@ -1083,6 +1115,9 @@ fn update_transaction_inner(conn: &Connection, guid: &str, input: TxInput) -> Re
         insert_split_rows(conn, guid, &input.splits)?;
         if let Some(ref names) = tag_names {
             tags::set_transaction_tags(conn, guid, names)?;
+        }
+        if let Some(ref name) = payee {
+            payees::set_transaction_payee(conn, guid, name.as_deref())?;
         }
         Ok(())
     })
@@ -1199,6 +1234,9 @@ pub enum BulkAction {
     AddTag { name: String },
     /// Remove one tag; the tag itself stays for other transactions.
     RemoveTag { tag_guid: String },
+    /// Set the payee by name (created when missing); a blank name clears it.
+    /// Splits are untouched, so cleared and reconciled ones change too.
+    SetPayee { name: String },
 }
 
 #[derive(Debug, Deserialize)]
@@ -1527,6 +1565,48 @@ fn bulk_remove_tag(
     })
 }
 
+fn bulk_set_payee(
+    conn: &Connection,
+    guids: &[String],
+    name: &str,
+) -> Result<BulkEditResult, AppError> {
+    let payee_guid = payees::normalize_payee_name(name)?
+        .map(|name| payees::ensure_payee(conn, &name))
+        .transpose()?;
+    let mut changed = 0;
+    for chunk in guids.chunks(MAX_IN_PARAMS) {
+        let mut params = sql::string_param_refs(chunk);
+        changed += match payee_guid {
+            Some(ref payee_guid) => {
+                params.push(payee_guid);
+                // Only rows whose payee actually changes count as changed.
+                conn.execute(
+                    &format!(
+                        "INSERT INTO transaction_payees (tx_guid, payee_guid)
+                         SELECT guid, ?{n} FROM transactions WHERE guid IN ({})
+                         ON CONFLICT (tx_guid) DO UPDATE SET payee_guid = excluded.payee_guid
+                         WHERE payee_guid != excluded.payee_guid",
+                        sql::in_clause(chunk.len()),
+                        n = chunk.len() + 1
+                    ),
+                    params.as_slice(),
+                )?
+            }
+            None => conn.execute(
+                &format!(
+                    "DELETE FROM transaction_payees WHERE tx_guid IN ({})",
+                    sql::in_clause(chunk.len())
+                ),
+                params.as_slice(),
+            )?,
+        } as i64;
+    }
+    Ok(BulkEditResult {
+        changed,
+        skipped_locked: 0,
+    })
+}
+
 fn bulk_edit_transactions_inner(
     conn: &Connection,
     input: BulkEditInput,
@@ -1543,6 +1623,7 @@ fn bulk_edit_transactions_inner(
         }
         BulkAction::AddTag { name } => bulk_add_tag(conn, &guids, name),
         BulkAction::RemoveTag { tag_guid } => bulk_remove_tag(conn, &guids, tag_guid),
+        BulkAction::SetPayee { name } => bulk_set_payee(conn, &guids, name),
     })
 }
 
@@ -1666,6 +1747,7 @@ mod tests {
             num: None,
             notes: Some("test".to_string()),
             tags: None,
+            payee: None,
             splits: vec![
                 SplitInput {
                     account_guid: "checking".to_string(),
@@ -1752,6 +1834,7 @@ mod tests {
                 date_from: Some("2024-1-5".to_string()),
                 date_to: None,
                 tag_guid: None,
+                payee_guid: None,
             }),
             None,
             None,
@@ -1769,6 +1852,7 @@ mod tests {
                 date_from: None,
                 date_to: Some("01/02/2024".to_string()),
                 tag_guid: None,
+                payee_guid: None,
             }),
         )
         .unwrap_err();
@@ -1894,6 +1978,7 @@ mod tests {
                 date_from: Some("2024-02-01".into()),
                 date_to: None,
                 tag_guid: None,
+                payee_guid: None,
             }),
             None,
             None,
@@ -1910,6 +1995,7 @@ mod tests {
                 date_from: None,
                 date_to: None,
                 tag_guid: None,
+                payee_guid: None,
             }),
             None,
             None,
@@ -2238,6 +2324,7 @@ mod tests {
                 date_from: Some("2024-01-01".into()),
                 date_to: Some("2024-01-31".into()),
                 tag_guid: None,
+                payee_guid: None,
             })
         };
         // Stale count: refuse instead of touching a different set of rows.
@@ -2358,6 +2445,7 @@ mod tests {
                 date_from: None,
                 date_to: None,
                 tag_guid: Some(trip),
+                payee_guid: None,
             }),
             None,
             None,
@@ -2376,6 +2464,7 @@ mod tests {
                 date_from: None,
                 date_to: None,
                 tag_guid: None,
+                payee_guid: None,
             }),
             None,
             None,
@@ -2459,5 +2548,107 @@ mod tests {
         )
         .unwrap();
         assert_eq!(again.changed, 0);
+    }
+
+    fn payee_of(conn: &Connection, guid: &str) -> Option<String> {
+        fetch_transaction_inner(conn, guid)
+            .unwrap()
+            .unwrap()
+            .transaction
+            .payee
+            .map(|p| p.name)
+    }
+
+    fn payee_input(payee: &str) -> TxInput {
+        TxInput {
+            payee: Some(payee.to_string()),
+            ..balanced_input()
+        }
+    }
+
+    #[test]
+    fn create_and_update_carry_the_payee() {
+        let conn = setup_bulk();
+        let guid = create_transaction_inner(&conn, payee_input(" Mercadona ")).unwrap();
+        assert_eq!(payee_of(&conn, &guid).as_deref(), Some("Mercadona"));
+
+        // `None` leaves the payee alone, a name replaces it, blank clears it.
+        update_transaction_inner(&conn, &guid, balanced_input()).unwrap();
+        assert_eq!(payee_of(&conn, &guid).as_deref(), Some("Mercadona"));
+        update_transaction_inner(&conn, &guid, payee_input("mercadona")).unwrap();
+        assert_eq!(payee_of(&conn, &guid).as_deref(), Some("Mercadona"));
+        update_transaction_inner(&conn, &guid, payee_input("Gadis")).unwrap();
+        assert_eq!(payee_of(&conn, &guid).as_deref(), Some("Gadis"));
+        update_transaction_inner(&conn, &guid, payee_input("  ")).unwrap();
+        assert_eq!(payee_of(&conn, &guid), None);
+
+        let err = create_transaction_inner(&conn, payee_input(&"x".repeat(101))).unwrap_err();
+        assert_eq!(err.kind(), "validation");
+    }
+
+    #[test]
+    fn list_filters_by_payee_and_searches_payee_names() {
+        let conn = setup_bulk();
+        let a = create_transaction_inner(&conn, payee_input("Corte Inglés")).unwrap();
+        create_transaction_inner(&conn, payee_input("Renfe")).unwrap();
+        let corte = payees::ensure_payee(&conn, "Corte Inglés").unwrap();
+
+        let filters = |search: Option<&str>, payee_guid: Option<String>| {
+            Some(Filters {
+                search: search.map(str::to_string),
+                date_from: None,
+                date_to: None,
+                tag_guid: None,
+                payee_guid,
+            })
+        };
+        let by_payee =
+            fetch_transactions_inner(&conn, 1, 50, filters(None, Some(corte)), None, None).unwrap();
+        assert_eq!(by_payee.total, 1);
+        assert_eq!(by_payee.transactions[0].guid, a);
+        assert_eq!(
+            by_payee.transactions[0]
+                .payee
+                .as_ref()
+                .map(|p| p.name.as_str()),
+            Some("Corte Inglés")
+        );
+
+        let by_search =
+            fetch_transactions_inner(&conn, 1, 50, filters(Some("ingl"), None), None, None)
+                .unwrap();
+        assert_eq!(by_search.total, 1);
+    }
+
+    #[test]
+    fn bulk_set_payee_applies_to_locked_transactions_and_clears() {
+        let conn = setup_bulk();
+        let a = create_transaction_inner(&conn, payee_input("Kraken")).unwrap();
+        let b = create_transaction_inner(&conn, balanced_input()).unwrap();
+        lock_tx(&conn, &b, "checking");
+
+        let set = bulk_edit_transactions_inner(
+            &conn,
+            BulkEditInput {
+                target: guids_target(&[&a, &b]),
+                action: BulkAction::SetPayee {
+                    name: "kraken".into(),
+                },
+            },
+        )
+        .unwrap();
+        assert_eq!(set.changed, 1, "`a` already had Kraken");
+        assert_eq!(payee_of(&conn, &b).as_deref(), Some("Kraken"));
+
+        let cleared = bulk_edit_transactions_inner(
+            &conn,
+            BulkEditInput {
+                target: guids_target(&[&a, &b]),
+                action: BulkAction::SetPayee { name: " ".into() },
+            },
+        )
+        .unwrap();
+        assert_eq!(cleared.changed, 2);
+        assert_eq!(payee_of(&conn, &a), None);
     }
 }

@@ -214,7 +214,7 @@
         <TransactionTable
           transactions={recent.data.transactions}
           {currency}
-          visibleColumns={['date', 'amount']}
+          visibleColumns={['date', 'payee', 'amount']}
         />
         <p class="text-xs text-muted-foreground">
           Showing the latest {Math.min(RECENT_COUNT, recent.data.total)} of {plural(

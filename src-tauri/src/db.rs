@@ -443,6 +443,24 @@ CREATE TABLE IF NOT EXISTS transaction_tags (
 
 CREATE INDEX IF NOT EXISTS idx_transaction_tags_tag ON transaction_tags(tag_guid);
 
+-- Who a transaction was with (a shop, a person, an employer); at most one per
+-- transaction. Kept beside `transactions` like `schedule_skips` so the core
+-- row keeps its GnuCash-shaped columns and older books pick this up on open.
+-- Names are unique ignoring case; links die with either side (FK cascade, so
+-- deleting a payee only clears it from its transactions).
+CREATE TABLE IF NOT EXISTS payees (
+	guid TEXT PRIMARY KEY,
+	name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+	created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS transaction_payees (
+	tx_guid TEXT PRIMARY KEY REFERENCES transactions(guid) ON DELETE CASCADE,
+	payee_guid TEXT NOT NULL REFERENCES payees(guid) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_transaction_payees_payee ON transaction_payees(payee_guid);
+
 -- Tax role per account for the tax summary; descendants inherit the nearest
 -- ancestor's role. User config like `import_rules`: account deletion and the
 -- GnuCash orphan sweep are guarded instead of cascading silently.
@@ -557,6 +575,8 @@ pub fn clear_db(conn: &Connection) -> Result<()> {
           DROP TABLE IF EXISTS tax_roles;
           DROP TABLE IF EXISTS transaction_tags;
           DROP TABLE IF EXISTS tags;
+          DROP TABLE IF EXISTS transaction_payees;
+          DROP TABLE IF EXISTS payees;
           DROP TABLE IF EXISTS budgets;
           DROP TABLE IF EXISTS csv_import_presets;
           DROP TABLE IF EXISTS import_rules;
@@ -710,6 +730,7 @@ mod tests {
             "attachments",
             "budgets",
             "commodities",
+            "payees",
             "prices",
             "recurring_schedules",
             "reconcile_batch_splits",
@@ -721,6 +742,7 @@ mod tests {
             "symbol_overrides",
             "tags",
             "tax_roles",
+            "transaction_payees",
             "transaction_tags",
             "transactions",
         ] {
@@ -766,7 +788,9 @@ mod tests {
         // Tags and tax roles are book config too.
         conn.execute_batch(
             "INSERT INTO tags (guid, name, created_at) VALUES ('g-reset', 'trip', '2024-01-01T00:00:00Z');
-             INSERT INTO transaction_tags (tx_guid, tag_guid) VALUES ('t-reset', 'g-reset');",
+             INSERT INTO transaction_tags (tx_guid, tag_guid) VALUES ('t-reset', 'g-reset');
+             INSERT INTO payees (guid, name, created_at) VALUES ('p-reset', 'Renfe', '2024-01-01T00:00:00Z');
+             INSERT INTO transaction_payees (tx_guid, payee_guid) VALUES ('t-reset', 'p-reset');",
         )
         .unwrap();
 
@@ -780,6 +804,10 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM tags", [], |r| r.get(0))
             .unwrap();
         assert_eq!(tags, 0);
+        let payees: i64 = conn
+            .query_row("SELECT COUNT(*) FROM payees", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(payees, 0);
         let attachments: i64 = conn
             .query_row("SELECT COUNT(*) FROM attachments", [], |r| r.get(0))
             .unwrap();

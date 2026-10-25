@@ -38,6 +38,9 @@ pub struct ScheduleInput {
     pub description: Option<String>,
     pub num: Option<String>,
     pub notes: Option<String>,
+    /// Payee name for every posted occurrence; created when missing.
+    #[serde(default)]
+    pub payee: Option<String>,
     pub splits: Vec<SplitInput>,
     /// Post due occurrences automatically when the book opens.
     #[serde(default)]
@@ -75,6 +78,7 @@ pub struct Schedule {
     pub description: Option<String>,
     pub num: Option<String>,
     pub notes: Option<String>,
+    pub payee: Option<String>,
     /// Template splits as entered (the totals, for a spread schedule).
     pub splits: Vec<ScheduleSplit>,
     /// Sum of the positive split amounts the next occurrence posts: the
@@ -123,6 +127,9 @@ pub(crate) struct StoredTemplate {
     pub(crate) description: Option<String>,
     pub(crate) num: Option<String>,
     pub(crate) notes: Option<String>,
+    /// Absent in templates saved before payees existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) payee: Option<String>,
     pub(crate) splits: Vec<StoredSplit>,
 }
 
@@ -391,8 +398,15 @@ fn validate_schedule_input(
         splits: input.splits.clone(),
         unreconcile: false,
         tags: None,
+        payee: None,
     };
     crate::transactions::validate_tx_body_with(&probe, &lookup)?;
+    let payee = input
+        .payee
+        .as_deref()
+        .map(crate::payees::normalize_payee_name)
+        .transpose()?
+        .flatten();
     if input.spread_total {
         validate_spread(input)?;
     }
@@ -407,6 +421,7 @@ fn validate_schedule_input(
             description: opt_text(&input.description),
             num: opt_text(&input.num),
             notes: opt_text(&input.notes),
+            payee,
             splits: input
                 .splits
                 .iter()
@@ -589,6 +604,7 @@ fn to_schedule_with_names(
         description: template.description,
         num: template.num,
         notes: template.notes,
+        payee: template.payee,
         splits: template
             .splits
             .iter()
@@ -825,6 +841,7 @@ fn post_occurrence_at(conn: &Connection, guid: &str, today: &str) -> Result<Stri
         notes: template.notes.clone(),
         unreconcile: false,
         tags: None,
+        payee: None,
         splits: template
             .splits
             .iter()
@@ -855,6 +872,7 @@ fn post_occurrence_at(conn: &Connection, guid: &str, today: &str) -> Result<Stri
             ],
         )?;
         crate::transactions::insert_split_rows(conn, &tx_guid, &input.splits)?;
+        crate::payees::set_transaction_payee(conn, &tx_guid, template.payee.as_deref())?;
         let posted = row.occurrences_posted + 1;
         let advanced =
             next_occurrence(parse_stored_date(&due)?, &row.frequency, row.interval_mult)?
@@ -1098,6 +1116,7 @@ mod tests {
             description: Some("Monthly rent".to_string()),
             num: None,
             notes: None,
+            payee: None,
             splits: vec![
                 SplitInput {
                     account_guid: "rent-exp".to_string(),
@@ -1560,5 +1579,31 @@ mod tests {
         delete_schedule_inner(&conn, &s.guid).unwrap();
         assert!(fetch_schedule_inner(&conn, &s.guid).is_err());
         assert!(fetch_schedules_inner(&conn).unwrap().is_empty());
+    }
+
+    #[test]
+    fn payee_rides_the_template_onto_posted_transactions() {
+        let conn = setup();
+        let s = create_schedule_inner(
+            &conn,
+            ScheduleInput {
+                payee: Some("  O2 ".into()),
+                ..balanced_input()
+            },
+        )
+        .unwrap();
+        assert_eq!(s.payee.as_deref(), Some("O2"));
+        let tx = post_occurrence_at(&conn, &s.guid, "2024-01-01").unwrap();
+        let payee = crate::payees::payees_for_txns(&conn, std::slice::from_ref(&tx))
+            .unwrap()
+            .remove(&tx)
+            .map(|p| p.name);
+        assert_eq!(payee.as_deref(), Some("O2"));
+
+        // Templates saved before payees existed have no `payee` key.
+        let legacy: StoredTemplate =
+            serde_json::from_str(r#"{"description":"Rent","num":null,"notes":null,"splits":[]}"#)
+                .unwrap();
+        assert_eq!(legacy.payee, None);
     }
 }

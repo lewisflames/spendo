@@ -391,6 +391,7 @@ fn parse_file_rows(
             notes: notes.clone(),
             unreconcile: false,
             tags: None,
+            payee: None,
             splits: vec![
                 transactions::SplitInput {
                     account_guid: target_guid.to_string(),

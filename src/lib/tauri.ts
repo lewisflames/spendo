@@ -109,6 +109,12 @@ export interface TagRef {
   name: string;
 }
 
+/** A payee as shown on a transaction. */
+export interface PayeeRef {
+  guid: string;
+  name: string;
+}
+
 export interface TransactionRow {
   guid: string;
   postDate: string;
@@ -119,6 +125,7 @@ export interface TransactionRow {
   totalAmount: number;
   /** Sorted by name. */
   tags: TagRef[];
+  payee: PayeeRef | null;
 }
 
 export interface Filters {
@@ -127,6 +134,8 @@ export interface Filters {
   dateTo?: string;
   /** Only transactions carrying this tag. */
   tagGuid?: string;
+  /** Only transactions with this payee. */
+  payeeGuid?: string;
 }
 
 interface TransactionsResult {
@@ -165,6 +174,7 @@ export interface TransactionDetail {
   /** Attached receipts/documents; deleting the transaction deletes them for good. */
   attachmentCount: number;
   tags: TagRef[];
+  payee: PayeeRef | null;
 }
 
 interface TransactionDetailResult {
@@ -201,6 +211,7 @@ export interface DetailTransaction {
   description: string | null;
   num?: string | null;
   notes?: string | null;
+  payee: PayeeRef | null;
   splits: SplitInfo[];
   /** Other accounts involved, outside the viewed account’s subtree. */
   counterAccounts: string[];
@@ -610,6 +621,11 @@ export interface TxInput {
   unreconcile?: boolean;
   /** Tag names, created when missing. Omit to leave an edited transaction's tags alone. */
   tags?: string[];
+  /**
+   * Payee name, matched ignoring case and created when missing; `''` clears it.
+   * Omit to leave an edited transaction's payee alone.
+   */
+  payee?: string;
 }
 
 export const createTransaction = (input: TxInput): Promise<string> =>
@@ -632,7 +648,9 @@ export type BulkAction =
   | { kind: 'moveSplits'; fromAccountGuid: string; toAccountGuid: string }
   | { kind: 'setDescription'; description: string }
   | { kind: 'addTag'; name: string }
-  | { kind: 'removeTag'; tagGuid: string };
+  | { kind: 'removeTag'; tagGuid: string }
+  /** `''` clears the payee. */
+  | { kind: 'setPayee'; name: string };
 
 export interface BulkEditResult {
   changed: number;
@@ -687,6 +705,26 @@ export const renameTag = (guid: string, name: string): Promise<string> =>
 
 /** Transactions keep their other tags. */
 export const deleteTag = (guid: string): Promise<void> => invoke('delete_tag', { guid });
+
+// ── Payees ──
+
+export interface PayeeSummary {
+  guid: string;
+  name: string;
+  transactionCount: number;
+  /** Latest post date among its transactions; `null` while unused. */
+  lastUsed: string | null;
+}
+
+/** Most used first. */
+export const fetchPayees = (): Promise<PayeeSummary[]> => invoke('fetch_payees');
+
+/** Renaming onto another payee's name merges them; resolves to the surviving payee's GUID. */
+export const renamePayee = (guid: string, name: string): Promise<string> =>
+  invoke('rename_payee', { input: { guid, name } });
+
+/** Its transactions stay, without a payee. */
+export const deletePayee = (guid: string): Promise<void> => invoke('delete_payee', { guid });
 
 // ── Attachments (receipts/documents stored inside the book) ──
 
@@ -751,6 +789,7 @@ export interface Schedule {
   description: string | null;
   num?: string | null;
   notes?: string | null;
+  payee?: string | null;
   /** Template splits as entered: the totals, for a spread schedule. */
   splits: ScheduleSplit[];
   /**
@@ -775,6 +814,7 @@ export interface ScheduleInput {
   description?: string | null;
   num?: string | null;
   notes?: string | null;
+  payee?: string | null;
   splits: SplitInput[];
   autoPost?: boolean;
   spreadTotal?: boolean;
@@ -1569,6 +1609,7 @@ type CommandPayloads = {
   delete_import_rule: void;
   delete_schedule: void;
   delete_symbol_override: void;
+  delete_payee: void;
   delete_tag: void;
   delete_transaction: void;
   export_accounts_csv: void;
@@ -1607,6 +1648,7 @@ type CommandPayloads = {
   fetch_schedules: Schedule[];
   fetch_transit_check: TransitCheck;
   fetch_symbol_overrides: SymbolOverride[];
+  fetch_payees: PayeeSummary[];
   fetch_tags: TagSummary[];
   fetch_tax_roles: TaxRoleAssignment[];
   fetch_tax_summary: TaxSummary;
@@ -1623,6 +1665,7 @@ type CommandPayloads = {
   post_schedule_occurrence: string;
   preview_gnucash_import: GnuCashPreview;
   refresh_prices: PricesResult;
+  rename_payee: string;
   rename_tag: string;
   reopen_last_reconciliation: ReopenReconcileResult;
   restore_backup: EmptyBookResult;

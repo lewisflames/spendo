@@ -4,6 +4,7 @@
   import { SvelteMap } from 'svelte/reactivity';
   import {
     fetchAccounts,
+    fetchPayees,
     fetchTags,
     fetchTransactions,
     type BulkAction,
@@ -31,7 +32,8 @@
     pageSelectionState,
     rangeRows,
     selectionAccounts,
-    selectionTags
+    selectionTags,
+    sharedPayee
   } from '$lib/features/transactions/bulk-edit';
   import { flattenAccountsForPicker } from '$lib/features/accounts/account-picker-utils';
   import { toast } from '$lib/components/ui/sonner';
@@ -78,6 +80,7 @@
   let dateFrom = $state('');
   let dateTo = $state('');
   let tagGuid = $state('');
+  let payeeGuid = $state('');
 
   let search = useDebouncedSearch(() => searchInput);
 
@@ -88,6 +91,7 @@
     dateFrom = '';
     dateTo = '';
     tagGuid = '';
+    payeeGuid = '';
   }
 
   const cols = useColumnVisibility<TransactionColumnId>(
@@ -137,6 +141,13 @@
       get: () => tagGuid || null,
       apply: (v) => (tagGuid = v ?? ''),
       replace: true
+    },
+    // Payee cells and Settings link here with `?payee=<guid>`.
+    {
+      key: 'payee',
+      get: () => payeeGuid || null,
+      apply: (v) => (payeeGuid = v ?? ''),
+      replace: true
     }
   ]);
 
@@ -144,7 +155,8 @@
     ...(search.value ? { search: search.value } : {}),
     ...(dateFrom ? { dateFrom } : {}),
     ...(dateTo ? { dateTo } : {}),
-    ...(tagGuid ? { tagGuid } : {})
+    ...(tagGuid ? { tagGuid } : {}),
+    ...(payeeGuid ? { payeeGuid } : {})
   });
 
   let currency = $derived(sessionCurrency());
@@ -182,6 +194,15 @@
     label: 'We couldn’t load your tags'
   });
   let allTags = $derived(tagsRes.data ?? []);
+
+  // Payees for the filter chip and the bulk dialog; reloaded after a bulk edit
+  // since setting a payee can create one.
+  const payeesRes = useAsyncData({
+    enabled: () => !!dbSession.value,
+    fetch: fetchPayees,
+    label: 'We couldn’t load your payees'
+  });
+  let allPayees = $derived(payeesRes.data ?? []);
 
   // ── Bulk edit ──
   // Selected rows keep their loaded data so the dialog can offer the accounts
@@ -266,6 +287,7 @@
     heatmapKey += 1;
     res.reload();
     tagsRes.reload();
+    payeesRes.reload();
     refreshSession();
   }
 </script>
@@ -292,6 +314,8 @@
       bind:dateTo
       bind:tagGuid
       tags={allTags}
+      bind:payeeGuid
+      payees={allPayees}
     >
       {#snippet extra()}
         <ColumnsMenu columns={TRANSACTION_COLUMNS} {cols} onHide={handleHideColumn} />
@@ -306,7 +330,7 @@
         <ErrorCard message={res.error} onRetry={() => res.reload()} />
       {/if}
       {#if res.data.transactions.length === 0}
-        {@const isFiltered = !!(search.value || dateFrom || dateTo || tagGuid)}
+        {@const isFiltered = !!(search.value || dateFrom || dateTo || tagGuid || payeeGuid)}
         {#if isFiltered}
           <FilteredEmptyState title="No matching transactions" onClear={clearFilters} />
         {:else if dbSession.value?.summary.totalAccounts === 0}
@@ -383,5 +407,7 @@
   defaultDescription={sharedDescription}
   selectionTagList={selectionTags(selected.values())}
   {allTags}
+  defaultPayee={allMatching ? '' : sharedPayee(selected.values())}
+  {allPayees}
   onDone={handleBulkDone}
 />

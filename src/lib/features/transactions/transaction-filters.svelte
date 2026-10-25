@@ -4,9 +4,11 @@
   import FilterBar from '$lib/components/shared/filter-bar.svelte';
   import FilterClearButton from '$lib/components/shared/filter-clear-button.svelte';
   import * as Select from '$lib/components/ui/select';
+  import { Badge } from '$lib/components/ui/badge';
+  import { X } from '@lucide/svelte';
   import { Select as SelectPrimitive } from 'bits-ui';
   import type { Snippet } from 'svelte';
-  import type { TagSummary } from '$lib/tauri';
+  import type { PayeeSummary, TagSummary } from '$lib/tauri';
 
   /** Select value for "no tag filter" (bits-ui items need a non-empty value). */
   const ANY_TAG = '__any';
@@ -17,6 +19,8 @@
     dateTo = $bindable(''),
     tagGuid = $bindable(''),
     tags = [],
+    payeeGuid = $bindable(''),
+    payees = [],
     extra = undefined,
     idPrefix = 'txn'
   }: {
@@ -27,13 +31,18 @@
     tagGuid?: string;
     /** The book's tags; the tag filter only shows when there are some. */
     tags?: TagSummary[];
+    /** Selected payee; '' = any. Set from payee links, shown as a removable chip. */
+    payeeGuid?: string;
+    /** The book's payees, to name the selected one. */
+    payees?: PayeeSummary[];
     /** Optional trailing controls (e.g. a columns toggle), right-aligned. */
     extra?: Snippet;
     /** Prefix for input IDs so multiple filter bars can mount on one page. */
     idPrefix?: string;
   } = $props();
 
-  let hasFilters = $derived(!!(search || dateFrom || dateTo || tagGuid));
+  let hasFilters = $derived(!!(search || dateFrom || dateTo || tagGuid || payeeGuid));
+  let payeeName = $derived(payees.find((p) => p.guid === payeeGuid)?.name ?? 'Unknown payee');
   let tagItems = $derived([
     { value: ANY_TAG, label: 'Any tag' },
     ...tags.map((t) => ({ value: t.guid, label: t.name }))
@@ -44,14 +53,15 @@
     dateFrom = '';
     dateTo = '';
     tagGuid = '';
+    payeeGuid = '';
   }
 </script>
 
 <FilterBar {extra}>
   <SearchInput
     id="{idPrefix}-search"
-    label="Search description, notes, memo, number"
-    placeholder="Search anything: description, notes, number…"
+    label="Search description, payee, notes, memo, number"
+    placeholder="Search anything: description, payee, notes…"
     bind:value={search}
     class="grow basis-48"
   />
@@ -84,6 +94,23 @@
           {/each}
         </Select.Content>
       </Select.Root>
+    </div>
+  {/if}
+
+  {#if payeeGuid}
+    <div class="flex flex-col gap-1">
+      <span class="text-xs text-muted-foreground">Payee</span>
+      <Badge variant="secondary" class="h-9 max-w-56 gap-1 pr-1 font-normal">
+        <span class="truncate">{payeeName}</span>
+        <button
+          type="button"
+          class="rounded-sm p-0.5 hover:bg-muted-foreground/20"
+          aria-label="Stop filtering by {payeeName}"
+          onclick={() => (payeeGuid = '')}
+        >
+          <X aria-hidden="true" class="size-3.5" />
+        </button>
+      </Badge>
     </div>
   {/if}
 

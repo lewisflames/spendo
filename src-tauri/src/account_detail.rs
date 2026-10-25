@@ -9,6 +9,7 @@ use crate::accounts;
 use crate::accounts::{AccountNode, ChildAccountInfo, ParentAccountInfo};
 use crate::db::{run_blocking, AppError, AppState};
 use crate::fx;
+use crate::payees::{self, PayeeRef};
 use crate::prices::get_cached_prices_map;
 use crate::sql;
 use crate::utils;
@@ -37,6 +38,7 @@ pub struct DetailTransaction {
     pub description: Option<String>,
     pub num: Option<String>,
     pub notes: Option<String>,
+    pub payee: Option<PayeeRef>,
     pub splits: Vec<DetailSplit>,
     /// Names of the accounts on the other side of the transaction (outside
     /// the viewed account's subtree), largest-magnitude split first.
@@ -624,6 +626,7 @@ fn enrich_page_transactions(
     sub_guids: &[String],
 ) -> Result<Vec<DetailTransaction>, AppError> {
     let notes_map = load_page_notes(conn, page_guids)?;
+    let mut payee_map = payees::payees_for_txns(conn, page_guids)?;
     let mut splits_by_guid = load_page_splits(conn, page_guids)?;
 
     let sub_set: HashSet<&str> = sub_guids.iter().map(|s| s.as_str()).collect();
@@ -642,6 +645,7 @@ fn enrich_page_transactions(
             description: description.clone(),
             num: num.clone(),
             notes: notes_map.get(tx_guid).cloned().flatten(),
+            payee: payee_map.remove(tx_guid),
             splits,
             counter_accounts,
             amount: amount_by_guid[tx_guid],

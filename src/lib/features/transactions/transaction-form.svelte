@@ -20,6 +20,12 @@
   import TagInput from '$lib/features/tags/tag-input.svelte';
   import { sameTags } from '$lib/features/tags/tag-utils';
   import {
+    MAX_PAYEE_LEN,
+    normalizePayeeName,
+    payeeNameError,
+    payeeOptions
+  } from '$lib/features/payees/payee-utils';
+  import {
     readLastAccounts,
     readRecipes,
     writeLastAccounts,
@@ -42,6 +48,7 @@
     createTransaction,
     deleteTransaction,
     fetchAccounts,
+    fetchPayees,
     fetchTags,
     updateTransaction,
     type TransactionDetail,
@@ -127,6 +134,7 @@
         description: prefill.description,
         num: '',
         notes: '',
+        payee: '',
         tags: [] as string[],
         splits: drafts
       };
@@ -137,6 +145,7 @@
         description: '',
         num: '',
         notes: '',
+        payee: '',
         tags: [] as string[],
         splits: [makeSplitDraft(nextKey()), makeSplitDraft(nextKey())]
       };
@@ -148,6 +157,7 @@
       description: initial.description ?? '',
       num: initial.num ?? '',
       notes: initial.notes ?? '',
+      payee: initial.payee?.name ?? '',
       tags: initial.tags.map((t) => t.name),
       splits: drafts
     };
@@ -157,6 +167,7 @@
   let description = $state(snapshot.description);
   let num = $state(snapshot.num);
   let notes = $state(snapshot.notes);
+  let payee = $state(snapshot.payee);
   let tags = $state<string[]>(snapshot.tags);
   let splits = $state<SplitDraft[]>(snapshot.splits);
   // Files picked before the transaction exists; attached right after save.
@@ -238,6 +249,14 @@
   });
   let knownTags = $derived((tagsRes.data ?? []).map((t) => t.name));
 
+  const payeesRes = useAsyncData({
+    enabled: () => true,
+    fetch: fetchPayees,
+    label: 'We couldn’t load your payees'
+  });
+  let payeeSuggestions = $derived(payeeOptions(payeesRes.data ?? []));
+  let payeeError = $derived(payeeNameError(normalizePayeeName(payee)));
+
   let pickerOptions = $derived(
     flattenAccountsForPicker(accountsRes.data?.trees, { hidePlaceholders: true })
   );
@@ -272,6 +291,7 @@
         description,
         num,
         notes,
+        payee,
         tags: [...tags],
         splits: splits.map((s) => ({ ...s }))
       };
@@ -326,6 +346,7 @@
       description !== baseline.description ||
       num !== baseline.num ||
       notes !== baseline.notes ||
+      payee !== baseline.payee ||
       !sameTags(tags, baseline.tags) ||
       splitsDirty
   );
@@ -338,6 +359,7 @@
   let issues = $derived.by(() => {
     const list: string[] = [];
     if (dateError) list.push(dateError);
+    if (payeeError) list.push(payeeError);
     if (splits.length < 2) list.push('Add at least two splits so both sides balance');
     for (const e of errors) {
       if (e) {
@@ -356,6 +378,7 @@
       !savingAndNew &&
       !deleting &&
       !dateError &&
+      !payeeError &&
       splits.length >= 2 &&
       errors.every((e) => !e) &&
       balanced
@@ -366,8 +389,10 @@
     if (valid.length > 0) writeLastAccounts(valid);
     const trimmed = desc.trim();
     if (!trimmed) return;
+    const payeeName = normalizePayeeName(payee);
     const recipe: TxRecipe = {
       description: trimmed,
+      ...(payeeName ? { payee: payeeName } : {}),
       splits: usedSplits.map((s) => ({
         accountGuid: s.accountGuid,
         amount: s.amount,
@@ -381,12 +406,14 @@
     writeRecipes(next);
   }
 
-  /** Description picked a remembered transaction: restore its splits while no
-   * values have been typed, so recurring entries take one click. Prefilled
-   * accounts don’t block it — an explicit pick beats the last-used guess. */
+  /** Description picked a remembered transaction: restore its payee (unless
+   * one is typed) and its splits while no values have been typed, so
+   * recurring entries take one click. Prefilled accounts don’t block it — an
+   * explicit pick beats the last-used guess. */
   function applyRecipe(desc: string) {
     const recipe = recipes.find((r) => r.description === desc);
     if (!recipe) return;
+    if (!payee.trim() && typeof recipe.payee === 'string') payee = recipe.payee;
     const untouched = splits.every((s) => !s.amount.trim() && !s.quantity.trim() && !s.memo.trim());
     if (!untouched) return;
     const restored: SplitDraft[] = [];
@@ -410,6 +437,8 @@
       description: description.trim() ? description.trim() : null,
       num: num.trim() ? num.trim() : null,
       notes: notes.trim() ? notes.trim() : null,
+      // Always sent: a blank name clears the payee.
+      payee: normalizePayeeName(payee),
       tags,
       splits: splits.map(splitToInput)
     };
@@ -451,6 +480,10 @@
     void tick().then(() => {
       if (dateError) {
         document.getElementById('tx-date')?.focus();
+        return;
+      }
+      if (payeeError) {
+        document.getElementById('tx-payee')?.focus();
         return;
       }
       const badRow = errors.findIndex((e) => !!e);
@@ -596,6 +629,7 @@
       description = '';
       num = '';
       notes = '';
+      payee = '';
       splits = splits.map((s) => ({
         ...makeSplitDraft(nextKey()),
         accountGuid: knownGuids.has(s.accountGuid) ? s.accountGuid : '',
@@ -607,6 +641,7 @@
         description,
         num,
         notes,
+        payee,
         tags: [...tags],
         splits: splits.map((s) => ({ ...s }))
       };
@@ -706,7 +741,7 @@
   <Card.Root>
     <IconCardHeader
       title="Details"
-      description="How this shows up in lists and reports: a short description, date and reference."
+      description="How this shows up in lists and reports: a short description, payee, date and reference."
     >
       {#snippet icon()}
         <Info aria-hidden="true" class="size-4 text-muted-foreground" />
@@ -724,6 +759,19 @@
           maxlength={500}
           autofocus
         />
+      </div>
+      <div class="flex flex-col gap-1.5">
+        <label for="tx-payee" class="text-sm font-medium">Payee (optional)</label>
+        <DescriptionCombobox
+          id="tx-payee"
+          bind:value={payee}
+          options={payeeSuggestions}
+          placeholder="Who was it with? A shop, a person, an employer"
+          maxlength={MAX_PAYEE_LEN + 20}
+        />
+        {#if payeeError}
+          <p role="alert" class="text-xs text-destructive">{payeeError}</p>
+        {/if}
       </div>
       <div class="grid grid-cols-1 gap-4 @xl:grid-cols-2">
         <div class="flex flex-col gap-1.5">

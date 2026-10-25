@@ -9,6 +9,7 @@
   import ImportExportCard from '$lib/features/settings/import-export-card.svelte';
   import ImportRulesCard from '$lib/features/settings/import-rules-card.svelte';
   import TagsCard from '$lib/features/settings/tags-card.svelte';
+  import PayeesCard from '$lib/features/settings/payees-card.svelte';
   import DisplayCard from '$lib/features/settings/display-card.svelte';
   import ReportingCard from '$lib/features/settings/reporting-card.svelte';
   import { appSettings, resetSettings } from '$lib/stores/settings.svelte';
@@ -27,6 +28,7 @@
     { id: 'reporting', label: 'Reporting' },
     { id: 'import-export', label: 'Import & export' },
     { id: 'import-rules', label: 'Import rules' },
+    { id: 'payees', label: 'Payees' },
     { id: 'tags', label: 'Tags' },
     { id: 'danger-zone', label: 'Danger zone' }
   ];
@@ -88,6 +90,7 @@
   <section id="reporting" class="scroll-mt-4"><ReportingCard /></section>
   <section id="import-export" class="scroll-mt-4"><ImportExportCard /></section>
   <section id="import-rules" class="scroll-mt-4"><ImportRulesCard /></section>
+  <section id="payees" class="scroll-mt-4"><PayeesCard /></section>
   <section id="tags" class="scroll-mt-4"><TagsCard /></section>
   <section id="danger-zone" class="scroll-mt-4">
     <DangerZoneCard onResetPreferences={handleResetPreferences} />

@@ -130,3 +130,44 @@ test('tags typed or picked are saved with the transaction', async ({ page }) => 
     )
     .toEqual(['work', 'Summer trip']);
 });
+
+test('a remembered description fills its payee, which is saved', async ({ page }) => {
+  await mockBackend(page, {
+    ...OPEN_BOOK,
+    fetch_payees: [{ guid: 'p-auvasa', name: 'Auvasa', transactionCount: 35, lastUsed: null }],
+    create_transaction: 'new-guid'
+  });
+  await page.addInitScript(
+    (recipe) => {
+      localStorage.setItem('tx-recent-recipes', JSON.stringify([recipe]));
+      type Invoke = (cmd: string, args: unknown) => Promise<unknown>;
+      const internals = (window as unknown as Record<string, { invoke: Invoke }>)
+        .__TAURI_INTERNALS__;
+      const invoke = internals.invoke;
+      const calls: { cmd: string; args: unknown }[] = [];
+      Object.assign(window, { __calls: calls });
+      internals.invoke = (cmd: string, args: unknown) => {
+        calls.push({ cmd, args });
+        return invoke(cmd, args);
+      };
+    },
+    { ...RECIPES[0], description: 'Bus pass top-up', payee: 'Auvasa' }
+  );
+  await page.goto('/transactions/new');
+
+  await page.getByRole('combobox', { name: 'Description' }).fill('Bus pass');
+  await page.getByRole('option', { name: /Bus pass top-up/ }).click();
+  await expect(page.getByRole('combobox', { name: 'Payee (optional)' })).toHaveValue('Auvasa');
+
+  await page.getByRole('button', { name: 'Create transaction' }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            window as unknown as { __calls: { cmd: string; args: { input: { payee: string } } }[] }
+          ).__calls.find((c) => c.cmd === 'create_transaction')?.args.input.payee
+      )
+    )
+    .toBe('Auvasa');
+});

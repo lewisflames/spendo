@@ -48,6 +48,17 @@ export function selectionAccounts(
     .map(([guid, { count }]) => ({ guid, count }));
 }
 
+/** The payee every selected row shares, or `''` when they differ or have none. */
+export function sharedPayee(rows: Iterable<Pick<TransactionRow, 'payee'>>): string {
+  let name: string | null = null;
+  for (const row of rows) {
+    const next = row.payee?.name ?? '';
+    if (name === null) name = next;
+    else if (name !== next) return '';
+  }
+  return name ?? '';
+}
+
 /** Tags the selected rows carry, most-used first (ties by name). */
 export function selectionTags(rows: Iterable<Pick<TransactionRow, 'tags'>>): TagRef[] {
   const counts = new Map<string, { tag: TagRef; count: number }>();
@@ -68,13 +79,15 @@ const DONE_VERB: Record<BulkAction['kind'], string> = {
   moveSplits: 'Moved',
   setDescription: 'Renamed',
   addTag: 'Tagged',
-  removeTag: 'Untagged'
+  removeTag: 'Untagged',
+  setPayee: 'Updated'
 };
 
 const NOTHING_TO_DO: Partial<Record<BulkAction['kind'], string>> = {
   moveSplits: 'Nothing to move. None of them use that account',
   addTag: 'Nothing changed. They all have that tag already',
-  removeTag: 'Nothing to remove. None of them have that tag'
+  removeTag: 'Nothing to remove. None of them have that tag',
+  setPayee: 'Nothing changed. They all have that payee already'
 };
 
 /** Toast text for a finished bulk edit. */

@@ -13,16 +13,17 @@
   import { useColumnVisibility } from '$lib/hooks/use-column-visibility.svelte';
   import type { AccountDetailResult, TxSortKey } from '$lib/tauri';
 
-  type ColumnId = 'transfer' | 'status' | 'amount' | 'runningBalance';
+  type ColumnId = 'payee' | 'transfer' | 'status' | 'amount' | 'runningBalance';
 
   const COLUMNS: { id: ColumnId; label: string }[] = [
+    { id: 'payee', label: 'Payee' },
     { id: 'transfer', label: 'Transfer' },
     { id: 'status', label: 'Status' },
     { id: 'amount', label: 'Amount' },
     { id: 'runningBalance', label: 'Balance' }
   ];
 
-  const DEFAULT_COLUMNS: ColumnId[] = ['transfer', 'amount'];
+  const DEFAULT_COLUMNS: ColumnId[] = ['payee', 'transfer', 'amount'];
 
   let {
     data,

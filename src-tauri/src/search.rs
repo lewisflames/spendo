@@ -117,7 +117,11 @@ fn search_transactions_inner(
                 OR t.num LIKE '%' || ?1 || '%' ESCAPE '\\'
                 OR t.notes LIKE '%' || ?1 || '%' ESCAPE '\\'
                 OR EXISTS (SELECT 1 FROM splits m WHERE m.tx_guid = t.guid
-                           AND m.memo LIKE '%' || ?1 || '%' ESCAPE '\\'))
+                           AND m.memo LIKE '%' || ?1 || '%' ESCAPE '\\')
+                OR EXISTS (SELECT 1 FROM transaction_payees tp
+                           JOIN payees p ON p.guid = tp.payee_guid
+                           WHERE tp.tx_guid = t.guid
+                             AND p.name LIKE '%' || ?1 || '%' ESCAPE '\\'))
          ORDER BY t.post_date DESC, t.guid DESC
          LIMIT ?2",
         utils::VISIBLE_TX_FILTER
