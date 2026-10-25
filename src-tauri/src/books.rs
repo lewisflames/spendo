@@ -215,6 +215,17 @@ pub async fn fetch_active_book(state: State<'_, AppState>) -> Result<ActiveBook,
     })
 }
 
+/// Which of the welcome screen's remembered book paths still point at a file,
+/// so missing ones can be shown as such instead of failing on click.
+#[tauri::command]
+pub async fn book_files_exist(paths: Vec<String>) -> Result<Vec<bool>, AppError> {
+    db::run_io(move || Ok(book_files_exist_inner(&paths))).await
+}
+
+fn book_files_exist_inner(paths: &[String]) -> Vec<bool> {
+    paths.iter().map(|p| Path::new(p).is_file()).collect()
+}
+
 #[tauri::command]
 pub async fn open_book(
     state: State<'_, AppState>,
@@ -315,6 +326,20 @@ mod tests {
         let conn = db::connect_db(&path.to_path_buf()).unwrap();
         db::init_db(&conn).unwrap();
         db::stamp_app_id(&conn);
+    }
+
+    #[test]
+    fn book_files_exist_checks_each_path() {
+        let dir = tmp_dir("exist");
+        let book = dir.join("present.spendo");
+        std::fs::write(&book, b"").unwrap();
+        let paths = vec![
+            book.to_string_lossy().to_string(),
+            dir.join("missing.spendo").to_string_lossy().to_string(),
+            dir.to_string_lossy().to_string(),
+        ];
+        assert_eq!(book_files_exist_inner(&paths), vec![true, false, false]);
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// Regression: `activate_book` used to swap the live connection first and

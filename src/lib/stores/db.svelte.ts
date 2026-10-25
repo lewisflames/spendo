@@ -1,4 +1,5 @@
 import { fetchHomeData, fetchActiveBook, type DataSummary } from '$lib/tauri';
+import { rememberBook } from './recent-books.svelte';
 
 interface DbSession {
   summary: DataSummary;
@@ -99,6 +100,8 @@ export async function loadActiveBook(): Promise<void> {
     const path = (await fetchActiveBook()).path;
     if (seq !== sessionSeq) return;
     activeBookPath.value = path;
+    // The last book reopens on startup without a switch; list it too.
+    if (path) rememberBook(path);
   } catch {
     // ignore — a later navigation retries
   }

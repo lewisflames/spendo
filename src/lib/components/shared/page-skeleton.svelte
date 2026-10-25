@@ -35,21 +35,20 @@
 </script>
 
 {#if variant === 'welcome'}
-  <div class="m-auto flex w-full max-w-2xl flex-col gap-10 py-8">
-    <div class="flex flex-col items-center gap-5">
-      <Skeleton class="size-24 rounded-2xl" />
-      <div class="flex w-full flex-col items-center gap-3">
-        <Skeleton class="h-4 w-44" />
-        <Skeleton class="h-10 w-80 max-w-full" />
-        <Skeleton class="h-4 w-full max-w-md" />
+  <div class="grid flex-1 gap-(--page-gap) @3xl:grid-cols-[5fr_6fr]">
+    <div class="flex flex-col gap-8 rounded-xl border p-6 @3xl:p-10">
+      <Skeleton class="h-10 w-36" />
+      <div class="flex flex-col gap-3">
+        <Skeleton class="h-9 w-72 max-w-full" />
+        <Skeleton class="h-4 w-full max-w-sm" />
       </div>
     </div>
-    <div class="flex flex-col items-center gap-3">
-      <div class="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+    <div class="mx-auto flex w-full max-w-md flex-col justify-center gap-6 py-6 @3xl:py-10">
+      <Skeleton class="h-6 w-32" />
+      <div class="flex flex-col gap-2 sm:flex-row">
         <Skeleton class="h-9 w-full rounded-lg sm:w-40" />
         <Skeleton class="h-9 w-full rounded-lg sm:w-40" />
       </div>
-      <Skeleton class="h-3 w-36" />
     </div>
   </div>
 {:else if variant === 'balance-sheet'}

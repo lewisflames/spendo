@@ -99,6 +99,7 @@ pub fn run() {
             home::fetch_home_data,
             home::fetch_net_worth_trend,
             books::fetch_active_book,
+            books::book_files_exist,
             books::open_book,
             books::create_book_at,
             books::save_book_as,

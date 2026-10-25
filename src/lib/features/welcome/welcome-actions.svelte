@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { isTauri } from '@tauri-apps/api/core';
   import { FolderOpen, FolderPlus, LoaderCircle } from '@lucide/svelte';
   import { Button } from '$lib/components/ui/button';
   import Kbd from '$lib/components/shared/kbd.svelte';
@@ -15,8 +14,6 @@
     onNew: () => void;
     onOpen: () => void;
   } = $props();
-
-  const inTauri = isTauri();
 
   // Resolved after mount so prerendered markup matches the hydrated label.
   let modLabel = $state('Ctrl+');
@@ -36,48 +33,42 @@
   });
 </script>
 
-<div class="flex flex-col items-center gap-3">
-  <div class="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-    <Button
-      size="lg"
-      disabled={busy !== null}
-      aria-busy={busy === 'new'}
-      aria-keyshortcuts="Meta+N Control+N"
-      bind:ref={newButton}
-      onclick={onNew}
+<div class="flex flex-col gap-2 @md:flex-row">
+  <Button
+    size="lg"
+    disabled={busy !== null}
+    aria-busy={busy === 'new'}
+    aria-keyshortcuts="Meta+N Control+N"
+    bind:ref={newButton}
+    onclick={onNew}
+  >
+    {#if busy === 'new'}
+      <LoaderCircle aria-hidden="true" class="size-4 animate-spin" />
+    {:else}
+      <FolderPlus aria-hidden="true" class="size-4" />
+    {/if}
+    {busy === 'new' ? 'Creating…' : 'New book…'}
+    <Kbd
+      class="border-primary-foreground/25 bg-primary-foreground/10 font-normal text-primary-foreground/80"
     >
-      {#if busy === 'new'}
-        <LoaderCircle aria-hidden="true" class="size-4 animate-spin" />
-      {:else}
-        <FolderPlus aria-hidden="true" class="size-4" />
-      {/if}
-      {busy === 'new' ? 'Creating…' : 'New book…'}
-      <Kbd
-        class="border-primary-foreground/25 bg-primary-foreground/10 font-normal text-primary-foreground/80"
-      >
-        {modLabel}N
-      </Kbd>
-    </Button>
+      {modLabel}N
+    </Kbd>
+  </Button>
 
-    <Button
-      size="lg"
-      variant="outline"
-      disabled={busy !== null}
-      aria-busy={busy === 'open'}
-      aria-keyshortcuts="Meta+O Control+O"
-      onclick={onOpen}
-    >
-      {#if busy === 'open'}
-        <LoaderCircle aria-hidden="true" class="size-4 animate-spin" />
-      {:else}
-        <FolderOpen aria-hidden="true" class="size-4" />
-      {/if}
-      {busy === 'open' ? 'Opening…' : 'Open book…'}
-      <Kbd class="font-normal">{modLabel}O</Kbd>
-    </Button>
-  </div>
-
-  {#if inTauri}
-    <p class="text-xs text-muted-foreground">or drop a Spendo book anywhere here</p>
-  {/if}
+  <Button
+    size="lg"
+    variant="outline"
+    disabled={busy !== null}
+    aria-busy={busy === 'open'}
+    aria-keyshortcuts="Meta+O Control+O"
+    onclick={onOpen}
+  >
+    {#if busy === 'open'}
+      <LoaderCircle aria-hidden="true" class="size-4 animate-spin" />
+    {:else}
+      <FolderOpen aria-hidden="true" class="size-4" />
+    {/if}
+    {busy === 'open' ? 'Opening…' : 'Open book…'}
+    <Kbd class="font-normal">{modLabel}O</Kbd>
+  </Button>
 </div>

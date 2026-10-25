@@ -1,32 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 1024 1024">
-  <!-- Spendo app icon: minted S-coin on a warm-amber squircle.
-       Palette: tile gradient #F59E0B → #D97706 → #B45309, glyph #FFFBEB,
-       ring + dot #FDE68A, shadows #92400E, minted edge #78350F. -->
-  <defs>
-    <linearGradient id="tileGrad" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#F59E0B"/>
-      <stop offset="0.55" stop-color="#D97706"/>
-      <stop offset="1" stop-color="#B45309"/>
-    </linearGradient>
-  </defs>
-  <rect x="0" y="0" width="1024" height="1024" rx="232" fill="url(#tileGrad)"/>
-  <rect x="30" y="30" width="964" height="964" rx="204" fill="none" stroke="#78350F" stroke-width="10" opacity="0.30"/>
-  <circle cx="512" cy="540" r="360" fill="none" stroke="#FDE68A" stroke-width="22" opacity="0.55"/>
-  <path d="M 652 398
-           C 528 366, 392 378, 356 448
-           C 326 508, 374 554, 472 572
-           C 570 590, 668 600, 668 668
-           C 668 736, 544 764, 414 736
-           C 380 729, 352 718, 336 706"
-        fill="none" stroke="#92400E" stroke-width="160" stroke-linecap="round" stroke-linejoin="round"
-        opacity="0.40" transform="translate(0 16)"/>
-  <path d="M 652 398
-           C 528 366, 392 378, 356 448
-           C 326 508, 374 554, 472 572
-           C 570 590, 668 600, 668 668
-           C 668 736, 544 764, 414 736
-           C 380 729, 352 718, 336 706"
-        fill="none" stroke="#FFFBEB" stroke-width="160" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="744" cy="276" r="56" fill="#92400E" opacity="0.40"/>
-  <circle cx="744" cy="260" r="56" fill="#FDE68A"/>
+  <!-- Spendo app icon: the .spendo book, a ribbon marking your place and a
+       rising line on its cover. Drawn on a 64-unit grid (scale 16).
+       Palette: tile #1D4ED8, cover #EFF6FF, spine #BFDBFE, ribbon #F59E0B. -->
+  <g transform="scale(16)">
+    <rect width="64" height="64" rx="15" fill="#1D4ED8"/>
+    <path d="M21 13h22a4 4 0 0 1 4 4v30a4 4 0 0 1-4 4H21a4 4 0 0 1-4-4V17a4 4 0 0 1 4-4z" fill="#EFF6FF"/>
+    <path d="M21 13h3v38h-3a4 4 0 0 1-4-4V17a4 4 0 0 1 4-4z" fill="#BFDBFE"/>
+    <path d="M36 13v12l3.5-2.75L43 25V13z" fill="#F59E0B"/>
+    <path d="M29 42l4.5-5 3.5 2.5 5.5-7" fill="none" stroke="#1D4ED8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
 </svg>

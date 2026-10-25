@@ -308,6 +308,10 @@ interface ActiveBook {
 
 export const fetchActiveBook = (): Promise<ActiveBook> => invoke('fetch_active_book');
 
+/** One flag per path: whether a remembered book file still exists. */
+export const bookFilesExist = (paths: string[]): Promise<boolean[]> =>
+  invoke('book_files_exist', { paths });
+
 interface EmptyBookResult {
   hasData: boolean;
   summary: DataSummary;
@@ -1589,6 +1593,7 @@ export const searchGlobal = (query: string, limitPerGroup?: number): Promise<Glo
  */
 type CommandPayloads = {
   add_attachments: AttachmentInfo[];
+  book_files_exist: boolean[];
   bulk_edit_transactions: BulkEditResult;
   clear_app_db: void;
   close_book: CloseBookResult;

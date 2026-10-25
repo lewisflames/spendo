@@ -2,7 +2,8 @@
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { onMount } from 'svelte';
-  import { FileDown, FileWarning } from '@lucide/svelte';
+  import { isTauri } from '@tauri-apps/api/core';
+  import { ChartLine, FileDown, FileWarning, Import, TrendingUp } from '@lucide/svelte';
   import {
     createBookViaDialog,
     openBookAt,
@@ -12,8 +13,26 @@
   import { bookDisplayName } from '$lib/utils/book';
   import { getVersion } from '@tauri-apps/api/app';
   import { useFileDrop } from '$lib/hooks/use-file-drop.svelte';
+  import { recentBooks } from '$lib/stores/recent-books.svelte';
+  import RecentBooksList from './recent-books-list.svelte';
   import WelcomeActions from './welcome-actions.svelte';
   import { isSpendoBookPath } from './welcome-utils';
+
+  const FEATURES = [
+    {
+      icon: ChartLine,
+      title: 'Spending, P&L and tax reports',
+      detail: 'Monthly totals with month-end FX'
+    },
+    {
+      icon: TrendingUp,
+      title: 'Investments',
+      detail: 'FIFO or average cost, returns and dividends'
+    },
+    { icon: Import, title: 'Bring your history', detail: 'GnuCash books and bank CSV files' }
+  ];
+
+  const inTauri = isTauri();
 
   let busy = $state<'new' | 'open' | null>(null);
   let appVersion = $state<string | null>(null);
@@ -99,44 +118,83 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<div class="relative flex flex-1 flex-col">
-  <div class="my-auto flex w-full max-w-2xl flex-col gap-10 self-center py-8">
-    <header class="flex flex-col items-center gap-5 text-center">
-      <div class="relative">
-        <div
-          class="absolute inset-3 z-0 rounded-full bg-foreground/5 blur-2xl"
-          aria-hidden="true"
-        ></div>
-        <img
-          src="/favicon.svg"
-          alt="Spendo application icon"
-          class="relative z-10 size-24 rounded-2xl shadow-md"
-        />
-      </div>
-      <div class="flex flex-col gap-3">
-        <p class="text-xs font-semibold tracking-wider text-muted-foreground uppercase">
-          Local-first finance manager
-        </p>
-        <h1 class="text-4xl font-bold tracking-tight text-balance sm:text-5xl">
-          Your money, kept on this machine.
-        </h1>
-        <p class="mx-auto max-w-md text-sm text-pretty text-muted-foreground">
-          See where your money goes, follow investments, and check reports. It all lives in portable
-          files right here.
-        </p>
-      </div>
-    </header>
+<div class="relative grid flex-1 gap-(--page-gap) @3xl:grid-cols-[5fr_6fr]">
+  <aside
+    class="relative flex flex-col gap-8 overflow-hidden rounded-xl border bg-muted/40 p-6 @3xl:p-10"
+  >
+    <!-- Faint ledger ruling in the empty lower half: decoration only. -->
+    <div
+      class="pointer-events-none absolute inset-0 bg-[repeating-linear-gradient(to_bottom,transparent_0_31px,var(--color-border)_31px_32px)] opacity-70"
+      style="mask-image: linear-gradient(to bottom, transparent 45%, black 90%)"
+      aria-hidden="true"
+    ></div>
+
+    <div class="relative flex items-center gap-3">
+      <img src="/favicon.svg" alt="" class="size-10" />
+      <span class="text-2xl font-semibold tracking-tighter">spendo</span>
+    </div>
+
+    <div class="relative flex flex-col gap-3">
+      <h1 class="text-3xl font-bold tracking-tight text-balance @5xl:text-4xl">
+        Your money, kept on this machine.
+      </h1>
+      <p class="max-w-sm text-sm text-pretty text-muted-foreground">
+        One portable book file holds every account, budget and holding. Nothing leaves your computer
+        unless you export it.
+      </p>
+    </div>
+
+    <ul class="relative hidden flex-col gap-4 @3xl:flex">
+      {#each FEATURES as feature (feature.title)}
+        <li class="flex gap-3">
+          <feature.icon aria-hidden="true" class="mt-0.5 size-4 shrink-0 text-primary" />
+          <div class="flex flex-col">
+            <span class="text-sm font-medium">{feature.title}</span>
+            <span class="text-xs text-muted-foreground">{feature.detail}</span>
+          </div>
+        </li>
+      {/each}
+    </ul>
+
+    <footer class="relative mt-auto font-mono text-xs text-muted-foreground">
+      Spendo{appVersion ? ` ${appVersion}` : ''} ·
+      <a
+        class="rounded-sm underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        href={resolve('/about')}>About</a
+      >
+    </footer>
+  </aside>
+
+  <section
+    class="@container mx-auto flex w-full max-w-md flex-col justify-center gap-6 py-6 @3xl:py-10"
+  >
+    <h2 class="text-lg font-semibold tracking-tight">
+      {recentBooks.value.length > 0 ? 'Welcome back' : 'Get started'}
+    </h2>
 
     <WelcomeActions {busy} onNew={handleNew} onOpen={handleOpen} />
-  </div>
 
-  <footer class="flex justify-center pt-8 font-mono text-xs text-muted-foreground">
-    Spendo{appVersion ? ` ${appVersion}` : ''} ·
-    <a
-      class="rounded-sm underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-      href={resolve('/about')}>About</a
-    >
-  </footer>
+    {#if recentBooks.value.length > 0}
+      <div class="flex flex-col gap-2">
+        <h3 class="text-xs font-medium text-muted-foreground">Recent books</h3>
+        <RecentBooksList disabled={busy !== null} onOpen={handleOpenPath} />
+      </div>
+    {/if}
+
+    {#if inTauri}
+      <div
+        class="flex items-center gap-3 rounded-xl border-2 border-dashed p-4 text-sm text-muted-foreground"
+      >
+        <FileDown aria-hidden="true" class="size-5 shrink-0" />
+        <div class="flex flex-col">
+          <span class="font-medium text-foreground">Drop a book here</span>
+          <span class="text-xs">
+            Or anywhere in this window. GnuCash files come in once a book is open.
+          </span>
+        </div>
+      </div>
+    {/if}
+  </section>
 
   {#if drop.dragging}
     <div

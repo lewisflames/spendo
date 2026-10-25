@@ -6,6 +6,7 @@ import { basename } from '@tauri-apps/api/path';
 import { toast } from '$lib/components/ui/sonner';
 import { activeBookPath, dbSession, setActiveBookPath, setDbSession } from '$lib/stores/db.svelte';
 import { resetNav } from '$lib/stores/nav.svelte';
+import { rememberBook } from '$lib/stores/recent-books.svelte';
 import { loadBookSettings, resetBookSettings } from '$lib/stores/book-settings.svelte';
 import { appSettings } from '$lib/stores/settings.svelte';
 import { confirmDiscardIfDirty, clearDiscardWaiver } from '$lib/stores/unsaved-changes.svelte';
@@ -47,6 +48,7 @@ async function activateBook(path: string, summary: DataSummary, message: string)
   resetNav();
   setDbSession(summary);
   setActiveBookPath(path);
+  rememberBook(path);
   await reloadBookSettings();
   toast.success(message);
 }
