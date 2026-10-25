@@ -11,6 +11,7 @@ Tauri v2 desktop app: static SvelteKit SPA (Svelte 5 runes, Tailwind v4, `@svelt
 | Type-check      | `bun run check`                                       |
 | Test (frontend) | `bun run test` (vitest; colocated `src/**/*.test.ts`) |
 | Test (UI)       | `bun run test:e2e` (Playwright; `e2e/*.spec.ts`)      |
+| Screenshots     | `bun run screenshots` (writes `docs/screenshots/`)    |
 | Lint            | `bun run lint`                                        |
 | Format          | `bun run format`                                      |
 | Tauri dev       | `bun run tauri:dev` (generates icons first)           |
@@ -99,6 +100,8 @@ Frontend work is done when `bun run check`, `bun run lint` and `bun run test` pa
 ## Landing page
 
 `site/` is a separate SvelteKit package for the GitHub Pages site (`lewisflames.github.io/spendo`): prerendered, no client JS (`csr = false`), its own `package.json`/`bun.lock` and `bun run check`, ignored by the root ESLint. The download links are resolved from the latest GitHub release at build time (`site/src/lib/release.ts`), falling back to the releases page. `.github/workflows/pages.yml` deploys on pushes touching `site/**` and after every successful release workflow; the logo comes from `src-tauri/icons/app-icon.svg` via the `$icon` alias.
+
+The README and the site show `docs/screenshots/<page>-<light|dark>.png` (site alias `$screenshots`), rendered by `bun run screenshots` (`playwright.screenshots.config.ts`, `e2e/screenshots/*.shots.ts`, so `test:e2e` skips them). They mock IPC with the demo book in `e2e/screenshots/demo-book.ts`: one invented household whose pages derive from the same monthly series, so totals agree across screens. The browser clock is frozen at its `TODAY`. When a screenshotted page starts calling a new command, add it to `DEMO_BOOK`; the run fails on any `unmocked command` text. Regenerate and commit the PNGs after visible UI changes.
 
 ## Naming glossary (do not invent synonyms)
 
