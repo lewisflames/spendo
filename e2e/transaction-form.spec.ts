@@ -106,7 +106,7 @@ test('tags typed or picked are saved with the transaction', async ({ page }) => 
   await description.fill('Groceries shop 0');
   await page.getByRole('option', { name: /Groceries shop 0/ }).click();
 
-  const tags = page.getByRole('combobox', { name: 'Tags (optional)' });
+  const tags = page.getByRole('combobox', { name: 'Tags' });
   await tags.fill('work,');
   await tags.fill('summ');
   await tags.press('ArrowDown');
@@ -157,7 +157,7 @@ test('a remembered description fills its payee, which is saved', async ({ page }
 
   await page.getByRole('combobox', { name: 'Description' }).fill('Bus pass');
   await page.getByRole('option', { name: /Bus pass top-up/ }).click();
-  await expect(page.getByRole('combobox', { name: 'Payee (optional)' })).toHaveValue('Auvasa');
+  await expect(page.getByRole('combobox', { name: 'Payee' })).toHaveValue('Auvasa');
 
   await page.getByRole('button', { name: 'Create transaction' }).click();
   await expect

@@ -270,19 +270,6 @@ export function splitBalance(splits: SplitDraft[]): number | null {
   return sum;
 }
 
-/** Debit (negative legs) and credit (positive legs) totals, or null if invalid. */
-export function splitTotals(splits: SplitDraft[]): { debit: number; credit: number } | null {
-  let debit = 0;
-  let credit = 0;
-  for (const s of splits) {
-    const n = parseAmount(s.amount);
-    if (n === null) return null;
-    if (n < 0) debit += Math.abs(n);
-    else credit += n;
-  }
-  return { debit, credit };
-}
-
 /**
  * Index of the one split that still needs an amount when every other row
  * parses and at least one row carries a value, or -1. Powers the "fill

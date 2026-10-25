@@ -3,11 +3,10 @@
   import { tick, untrack } from 'svelte';
   import { beforeNavigate, goto } from '$app/navigation';
   import { Input } from '$lib/components/ui/input';
-  import { Textarea } from '$lib/components/ui/textarea';
   import { Button } from '$lib/components/ui/button';
   import * as Card from '$lib/components/ui/card';
   import IconCardHeader from '$lib/components/shared/icon-card-header.svelte';
-  import { ChevronLeft, CopyPlus, Info, Trash2 } from '@lucide/svelte';
+  import { ArrowLeftRight, ChevronLeft, CopyPlus, Info, Trash2 } from '@lucide/svelte';
   import { DatePicker } from '$lib/components/shared/date-picker';
   import PageHeader, { type Breadcrumb } from '$lib/components/layout/page-header.svelte';
   import OverflowMenu, { type OverflowAction } from '$lib/components/shared/overflow-menu.svelte';
@@ -133,7 +132,6 @@
         postDate: todayStr(),
         description: prefill.description,
         num: '',
-        notes: '',
         payee: '',
         tags: [] as string[],
         splits: drafts
@@ -144,7 +142,6 @@
         postDate: todayStr(),
         description: '',
         num: '',
-        notes: '',
         payee: '',
         tags: [] as string[],
         splits: [makeSplitDraft(nextKey()), makeSplitDraft(nextKey())]
@@ -156,7 +153,6 @@
       postDate: initial.postDate.slice(0, 10),
       description: initial.description ?? '',
       num: initial.num ?? '',
-      notes: initial.notes ?? '',
       payee: initial.payee?.name ?? '',
       tags: initial.tags.map((t) => t.name),
       splits: drafts
@@ -166,7 +162,6 @@
   let postDate = $state(snapshot.postDate);
   let description = $state(snapshot.description);
   let num = $state(snapshot.num);
-  let notes = $state(snapshot.notes);
   let payee = $state(snapshot.payee);
   let tags = $state<string[]>(snapshot.tags);
   let splits = $state<SplitDraft[]>(snapshot.splits);
@@ -182,15 +177,8 @@
   let confirmUnreconcileOpen = $state(false);
   let discardDialogOpen = $state(false);
 
+  // Tooltips show the key this platform actually presses, not a hardcoded Ctrl.
   const modKey = modKeyLabel();
-  // The save chord belongs to the form, so platforms show the key they
-  // actually press instead of a hardcoded Ctrl.
-  let saveHint = $derived(
-    mode === 'create' && onSavedAndNew
-      ? `${modKey}+S saves. Add Shift to jump straight to the next one.`
-      : `${modKey}+S saves.`
-  );
-  let headerText = $derived(headerDescription ? `${headerDescription} ${saveHint}` : saveHint);
 
   // Edit-only secondary actions live in the header’s overflow menu.
   let moreActions = $derived.by((): OverflowAction[] => {
@@ -224,6 +212,7 @@
   let primaryLabel = $derived(
     saveLabel ?? (mode === 'edit' ? 'Save changes' : 'Create transaction')
   );
+  let saveHint = $derived(`${primaryLabel} (${modKey}+S)`);
   let formError = $state('');
   let showErrors = $state(false);
   let didPrefillAccounts = $state(false);
@@ -290,7 +279,6 @@
         postDate,
         description,
         num,
-        notes,
         payee,
         tags: [...tags],
         splits: splits.map((s) => ({ ...s }))
@@ -345,7 +333,6 @@
       postDate !== baseline.postDate ||
       description !== baseline.description ||
       num !== baseline.num ||
-      notes !== baseline.notes ||
       payee !== baseline.payee ||
       !sameTags(tags, baseline.tags) ||
       splitsDirty
@@ -436,7 +423,6 @@
       postDate,
       description: description.trim() ? description.trim() : null,
       num: num.trim() ? num.trim() : null,
-      notes: notes.trim() ? notes.trim() : null,
       // Always sent: a blank name clears the payee.
       payee: normalizePayeeName(payee),
       tags,
@@ -628,7 +614,6 @@
       // expenses share a tag); clear the rest.
       description = '';
       num = '';
-      notes = '';
       payee = '';
       splits = splits.map((s) => ({
         ...makeSplitDraft(nextKey()),
@@ -640,7 +625,6 @@
         postDate,
         description,
         num,
-        notes,
         payee,
         tags: [...tags],
         splits: splits.map((s) => ({ ...s }))
@@ -703,7 +687,7 @@
 <svelte:window onkeydown={handleKeydown} />
 
 <div class="page-stack w-full">
-  <PageHeader {title} description={headerText} {breadcrumbs}>
+  <PageHeader {title} description={headerDescription} {breadcrumbs}>
     <Button type="button" variant="outline" onclick={requestCancel} disabled={busy}>Cancel</Button>
     {#if mode === 'create' && onSavedAndNew}
       <Button
@@ -731,96 +715,12 @@
       type="button"
       onclick={() => void handleSave()}
       disabled={busy}
-      {@attach tooltip(canSave ? undefined : 'Check the highlighted fields')}
+      {@attach tooltip(canSave ? saveHint : 'Check the highlighted fields')}
     >
       {saving ? 'Saving…' : primaryLabel}
     </Button>
     <OverflowMenu actions={moreActions} />
   </PageHeader>
-
-  <Card.Root>
-    <IconCardHeader
-      title="Details"
-      description="How this shows up in lists and reports: a short description, payee, date and reference."
-    >
-      {#snippet icon()}
-        <Info aria-hidden="true" class="size-4 text-muted-foreground" />
-      {/snippet}
-    </IconCardHeader>
-    <Card.Content class="flex flex-col gap-4">
-      <div class="flex flex-col gap-1.5">
-        <label for="tx-desc" class="text-sm font-medium">Description</label>
-        <DescriptionCombobox
-          id="tx-desc"
-          bind:value={description}
-          options={descriptionOptions}
-          onPick={applyRecipe}
-          placeholder="What was this for?"
-          maxlength={500}
-          autofocus
-        />
-      </div>
-      <div class="flex flex-col gap-1.5">
-        <label for="tx-payee" class="text-sm font-medium">Payee (optional)</label>
-        <DescriptionCombobox
-          id="tx-payee"
-          bind:value={payee}
-          options={payeeSuggestions}
-          placeholder="Who was it with? A shop, a person, an employer"
-          maxlength={MAX_PAYEE_LEN + 20}
-        />
-        {#if payeeError}
-          <p role="alert" class="text-xs text-destructive">{payeeError}</p>
-        {/if}
-      </div>
-      <div class="grid grid-cols-1 gap-4 @xl:grid-cols-2">
-        <div class="flex flex-col gap-1.5">
-          <label for="tx-date" class="text-sm font-medium">Date</label>
-          <DatePicker
-            id="tx-date"
-            bind:value={postDate}
-            placeholder="Pick a date"
-            invalid={!!dateError}
-            max={today}
-            describedBy={dateError ? 'tx-date-error' : 'tx-date-hint'}
-          />
-          {#if dateError}
-            <p id="tx-date-error" role="alert" class="text-xs text-destructive">{dateError}</p>
-          {:else}
-            <p id="tx-date-hint" class="text-xs text-muted-foreground">
-              Manual entries use today or earlier. Imported future-dated rows stay out of balances,
-              budgets and net worth.
-            </p>
-          {/if}
-        </div>
-        <div class="flex flex-col gap-1.5">
-          <label for="tx-num" class="text-sm font-medium">Number (optional)</label>
-          <Input id="tx-num" bind:value={num} placeholder="e.g. Check #101" maxlength={100} />
-          <p class="text-xs text-muted-foreground">
-            A check or reference number, if you’ve got one.
-          </p>
-        </div>
-      </div>
-      <div class="flex flex-col gap-1.5">
-        <label for="tx-notes" class="text-sm font-medium">Notes (optional)</label>
-        <Textarea
-          id="tx-notes"
-          bind:value={notes}
-          placeholder="Anything worth remembering?"
-          rows={3}
-          maxlength={2000}
-        />
-      </div>
-      <div class="flex flex-col gap-1.5">
-        <label for="tx-tags" class="text-sm font-medium">Tags (optional)</label>
-        <TagInput id="tx-tags" bind:value={tags} known={knownTags} describedBy="tx-tags-hint" />
-        <p id="tx-tags-hint" class="text-xs text-muted-foreground">
-          Labels that cut across accounts, like a trip or a project. Press Enter or comma after each
-          one.
-        </p>
-      </div>
-    </Card.Content>
-  </Card.Root>
 
   {#if futureDate}
     <p
@@ -840,25 +740,99 @@
     </p>
   {/if}
 
-  <SplitEditor
-    bind:splits
-    options={pickerOptions}
-    loading={accountsRes.loading}
-    loadError={accountsRes.error ?? ''}
-    showErrors={effectiveShowErrors}
-    makeKey={nextKey}
-    idPrefix={SPLIT_ID_PREFIX}
-  />
+  <Card.Root>
+    <IconCardHeader title="Details">
+      {#snippet icon()}
+        <Info aria-hidden="true" class="size-4 text-muted-foreground" />
+      {/snippet}
+    </IconCardHeader>
+    <Card.Content class="flex flex-col gap-4">
+      <div class="grid grid-cols-2 gap-4 @xl:grid-cols-[11rem_minmax(0,1fr)_9rem]">
+        <div class="flex flex-col gap-1.5">
+          <label for="tx-date" class="text-sm font-medium">Date</label>
+          <DatePicker
+            id="tx-date"
+            bind:value={postDate}
+            placeholder="Pick a date"
+            invalid={!!dateError}
+            max={today}
+            describedBy={dateError ? 'tx-date-error' : undefined}
+          />
+        </div>
+        <div class="col-span-2 row-start-1 flex flex-col gap-1.5 @xl:col-span-1 @xl:row-start-auto">
+          <label for="tx-desc" class="text-sm font-medium">Description</label>
+          <DescriptionCombobox
+            id="tx-desc"
+            bind:value={description}
+            options={descriptionOptions}
+            onPick={applyRecipe}
+            placeholder="What was this for?"
+            maxlength={500}
+            autofocus
+          />
+        </div>
+        <div class="flex flex-col gap-1.5">
+          <label for="tx-num" class="text-sm font-medium">Number</label>
+          <Input
+            id="tx-num"
+            bind:value={num}
+            placeholder="Optional"
+            maxlength={100}
+            {@attach tooltip('A check or reference number')}
+          />
+        </div>
+        {#if dateError}
+          <p id="tx-date-error" role="alert" class="col-span-full -mt-2 text-xs text-destructive">
+            {dateError}
+          </p>
+        {/if}
+      </div>
+      <div class="grid grid-cols-1 gap-4 @xl:grid-cols-2">
+        <div class="flex flex-col gap-1.5">
+          <label for="tx-payee" class="text-sm font-medium">Payee</label>
+          <DescriptionCombobox
+            id="tx-payee"
+            bind:value={payee}
+            options={payeeSuggestions}
+            placeholder="A shop, a person, an employer"
+            maxlength={MAX_PAYEE_LEN + 20}
+          />
+          {#if payeeError}
+            <p role="alert" class="text-xs text-destructive">{payeeError}</p>
+          {/if}
+        </div>
+        <div class="flex flex-col gap-1.5">
+          <label for="tx-tags" class="text-sm font-medium">Tags</label>
+          <TagInput
+            id="tx-tags"
+            bind:value={tags}
+            known={knownTags}
+            placeholder="A trip, a project… Enter or comma adds one"
+          />
+        </div>
+      </div>
+    </Card.Content>
+  </Card.Root>
 
-  {#if mode === 'edit' && hasLockedSplits}
-    <p
-      role="note"
-      class="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-foreground"
-    >
-      {plural(lockedSplitCount, 'split')} here {lockedSplitCount === 1 ? 'is' : 'are'} cleared or reconciled.
-      Saving puts them back to New; you’ll be asked to confirm.
-    </p>
-  {/if}
+  <Card.Root>
+    <IconCardHeader title="Splits">
+      {#snippet icon()}
+        <ArrowLeftRight aria-hidden="true" class="size-4 text-muted-foreground" />
+      {/snippet}
+    </IconCardHeader>
+    <Card.Content>
+      <SplitEditor
+        bind:splits
+        options={pickerOptions}
+        loading={accountsRes.loading}
+        loadError={accountsRes.error ?? ''}
+        showErrors={effectiveShowErrors}
+        makeKey={nextKey}
+        idPrefix={SPLIT_ID_PREFIX}
+        title=""
+      />
+    </Card.Content>
+  </Card.Root>
 
   {#if !canSave && showErrors}
     <div

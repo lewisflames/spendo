@@ -7,6 +7,7 @@
   import { AccountPicker } from '$lib/components/shared/account-picker';
   import {
     ArrowRightLeft,
+    Check,
     ChevronDown,
     ChevronUp,
     Copy,
@@ -28,7 +29,6 @@
     remainderFor,
     splitBalance,
     splitErrors,
-    splitTotals,
     type SplitDraft
   } from './split-draft';
 
@@ -47,6 +47,7 @@
     options?: PickerAccount[];
     loading?: boolean;
     loadError?: string;
+    /** Section heading; empty when the surrounding card already names it. */
     title?: string;
     addLabel?: string;
     showErrors?: boolean;
@@ -57,22 +58,23 @@
   let errors = $derived(splitErrors(splits));
   let balance = $derived(splitBalance(splits));
   let balanced = $derived(isBalanced(balance));
-  let totals = $derived(splitTotals(splits));
 
-  // Exactly one row still needs an amount: offer to fill it (button, ghost
-  // placeholder and Enter) instead of making users hunt for the scale icon.
+  // Exactly one row still needs an amount: offer to fill it (footer button,
+  // ghost placeholder and Enter).
   let autoFill = $derived(autoFillIndex(splits));
+  let autoFillAmount = $derived(autoFill >= 0 ? remainderFor(autoFill, splits) : null);
   let showQtyColumn = $derived(splits.some((s) => s.showQuantity));
+  // The actions column has a fixed width so the header row, which has no
+  // buttons in it, shares out the `fr` columns exactly like the rows below.
   // Tailwind sees both class strings in this file, so either grid is generated.
   let gridCols = $derived(
     showQtyColumn
-      ? '@xl:grid-cols-[minmax(0,2fr)_9rem_7rem_minmax(0,1.5fr)_auto]'
-      : '@xl:grid-cols-[minmax(0,2fr)_9rem_minmax(0,1.5fr)_auto]'
+      ? '@xl:grid-cols-[minmax(0,2fr)_9rem_10rem_minmax(0,1.5fr)_2rem]'
+      : '@xl:grid-cols-[minmax(0,2fr)_9rem_minmax(0,1.5fr)_2rem]'
   );
 
   let typeByGuid = $derived(new Map(options.map((o) => [o.guid, o.accountType])));
   let labelByGuid = $derived(new Map(options.map((o) => [o.guid, o.display])));
-  let commodityByGuid = $derived(new Map(options.map((o) => [o.guid, o.commodity])));
 
   // Auto-reveal quantity when the picked account carries shares. Tracked per
   // row so a deliberate hide isn’t re-opened on every render.
@@ -178,26 +180,19 @@
     const amount = parseAmount(s.amount);
     const quantity = parseAmount(s.quantity);
     if (amount === null || quantity === null || Math.abs(quantity) < 1e-9) return null;
-    const commodity = commodityByGuid.get(s.accountGuid);
-    const price = formatSessionCurrency(Math.abs(amount / quantity));
-    return commodity ? `${price} / ${commodity}` : price;
+    return `@ ${formatSessionCurrency(Math.abs(amount / quantity))}`;
+  }
+
+  function hideQuantity(s: SplitDraft) {
+    s.showQuantity = false;
+    s.quantity = '';
   }
 </script>
 
 <div class="flex flex-col gap-3">
-  <div class="flex items-center justify-between">
+  {#if title}
     <h3 class="text-sm font-medium">{title}</h3>
-    <Button
-      type="button"
-      variant="outline"
-      size="sm"
-      onclick={addSplit}
-      disabled={splits.length >= 50}
-    >
-      <Plus aria-hidden="true" class="size-3.5" />
-      {addLabel}
-    </Button>
-  </div>
+  {/if}
 
   {#if loadError}
     <p role="alert" class="text-xs text-destructive">{loadError}</p>
@@ -222,7 +217,7 @@
         {@const remainder = remainderFor(i, splits)}
         {@const price = unitPrice(s)}
         <div
-          class="grid grid-cols-2 gap-2 p-3 @xl:items-center @xl:gap-2 @xl:px-3 @xl:py-2 {gridCols}"
+          class="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_2rem] gap-2 p-3 @xl:items-start @xl:px-3 @xl:py-2 {gridCols}"
         >
           <div class="col-span-2 @xl:col-span-1">
             <AccountPicker
@@ -236,11 +231,16 @@
               onSelect={() => focusAmount(s.key)}
             />
           </div>
-          <div class="col-span-1 flex flex-col gap-1">
+          <!-- Narrow: the menu sits beside the account; @xl renders it in the last column. -->
+          <div class="col-start-3 row-start-1 flex justify-end @xl:hidden">
+            {@render rowMenu(s, i, label, remainder)}
+          </div>
+          <div class="{showQtyColumn ? 'col-span-1' : 'col-span-full'} @xl:col-span-1">
             <Input
               id="{idPrefix}-{s.key}-amount"
               type="text"
               inputmode="decimal"
+              class="text-right tabular-nums"
               bind:value={s.amount}
               placeholder={autoFill === i && remainder !== null
                 ? formatDraftAmount(remainder)
@@ -250,39 +250,26 @@
               aria-invalid={showErrors && parseAmount(s.amount) === null}
               onkeydown={(e) => handleAmountKeydown(e, i)}
             />
-            {#if price}
-              <p class="text-[11px] text-muted-foreground tabular-nums">{price}</p>
-            {/if}
           </div>
           {#if showQtyColumn}
-            <div class="col-span-1 flex items-center gap-1">
+            <div class="col-span-2 flex flex-col gap-1 @xl:col-span-1">
               {#if s.showQuantity}
                 <Input
                   id="{idPrefix}-{s.key}-qty"
                   type="text"
                   inputmode="decimal"
+                  class="text-right tabular-nums"
                   bind:value={s.quantity}
-                  placeholder="Qty"
+                  placeholder="Quantity"
                   aria-label="{label} quantity"
                 />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  class="size-8 shrink-0"
-                  aria-label="Hide quantity for {label}"
-                  {@attach tooltip('Hide quantity')}
-                  onclick={() => {
-                    s.showQuantity = false;
-                    s.quantity = '';
-                  }}
-                >
-                  <X aria-hidden="true" class="size-3.5" />
-                </Button>
+                {#if price}
+                  <p class="text-right text-[11px] text-muted-foreground tabular-nums">{price}</p>
+                {/if}
               {/if}
             </div>
           {/if}
-          <div class="col-span-2 @xl:col-span-1">
+          <div class="col-span-full @xl:col-span-1">
             <Input
               id="{idPrefix}-{s.key}-memo"
               bind:value={s.memo}
@@ -291,97 +278,14 @@
               aria-label="{label} memo"
             />
           </div>
-          <div class="col-span-2 flex justify-end gap-0.5 @xl:col-span-1 @xl:justify-center">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              class="size-7 text-muted-foreground"
-              onclick={() => fillRemainder(i)}
-              disabled={remainder === null}
-              aria-label="Fill {label} to balance"
-              {@attach tooltip('Fill to balance')}
-            >
-              <Scale aria-hidden="true" class="size-3.5" />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              class="size-7 text-muted-foreground"
-              onclick={() => removeSplit(s.key)}
-              disabled={splits.length <= 2}
-              aria-label="Remove {label}"
-              title="Remove split"
-            >
-              <Trash2 aria-hidden="true" class="size-3.5" />
-            </Button>
-            <DropdownMenu.Root>
-              <DropdownMenu.Trigger>
-                {#snippet child({ props })}
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    class="size-7 text-muted-foreground"
-                    {...props}
-                    aria-label="More actions for {label}"
-                    {@attach tooltip('More actions')}
-                  >
-                    <Ellipsis aria-hidden="true" class="size-3.5" />
-                  </Button>
-                {/snippet}
-              </DropdownMenu.Trigger>
-              <DropdownMenu.Content align="end">
-                <DropdownMenu.Item disabled={i === 0} onclick={() => moveSplit(s.key, -1)}>
-                  <ChevronUp aria-hidden="true" />
-                  Move up
-                </DropdownMenu.Item>
-                <DropdownMenu.Item
-                  disabled={i === splits.length - 1}
-                  onclick={() => moveSplit(s.key, 1)}
-                >
-                  <ChevronDown aria-hidden="true" />
-                  Move down
-                </DropdownMenu.Item>
-                <DropdownMenu.Item
-                  disabled={parseAmount(s.amount) === null}
-                  onclick={() => negateAmount(s)}
-                >
-                  <ArrowRightLeft aria-hidden="true" />
-                  Negate amount
-                </DropdownMenu.Item>
-                {#if s.showQuantity}
-                  <DropdownMenu.Item
-                    onclick={() => {
-                      s.showQuantity = false;
-                      s.quantity = '';
-                    }}
-                  >
-                    <X aria-hidden="true" />
-                    Remove quantity
-                  </DropdownMenu.Item>
-                {:else}
-                  <DropdownMenu.Item onclick={() => (s.showQuantity = true)}>
-                    <Plus aria-hidden="true" />
-                    Add quantity
-                  </DropdownMenu.Item>
-                {/if}
-                <DropdownMenu.Item
-                  disabled={splits.length >= 50}
-                  onclick={() => duplicateSplit(s.key)}
-                >
-                  <Copy aria-hidden="true" />
-                  Duplicate split
-                </DropdownMenu.Item>
-              </DropdownMenu.Content>
-            </DropdownMenu.Root>
+          <div class="hidden justify-center @xl:flex">
+            {@render rowMenu(s, i, label, remainder)}
           </div>
           {#if showErrors && errors[i]}
             <p
               id="{idPrefix}-{s.key}-error"
               role="alert"
-              class="col-span-2 text-xs text-destructive @xl:col-span-full"
+              class="col-span-full text-xs text-destructive"
             >
               {errors[i]}
             </p>
@@ -389,50 +293,120 @@
         </div>
       {/each}
     </div>
-  </div>
 
-  <div
-    class="rounded-lg border px-3 py-2 text-sm {balanced
-      ? 'border-success/40 bg-success/10 text-success'
-      : showErrors || balance !== null
-        ? 'border-destructive/40 bg-destructive/10 text-destructive'
-        : 'text-muted-foreground'}"
-    role="status"
-  >
-    {#if autoFill >= 0}
-      <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <span class="tabular-nums">
-          One split left to fill. Row {autoFill + 1} balances with {formatSessionCurrency(
-            remainderFor(autoFill, splits) ?? 0
-          )}.
-        </span>
+    <div
+      class="flex flex-wrap items-center justify-between gap-2 border-t bg-muted/30 px-3 py-2 @xl:grid {gridCols}"
+    >
+      <div>
         <Button
           type="button"
-          variant="outline"
+          variant="ghost"
           size="sm"
-          class="h-6 px-2"
-          onclick={() => fillRemainder(autoFill)}
+          class="-ml-2 text-muted-foreground"
+          onclick={addSplit}
+          disabled={splits.length >= 50}
         >
-          Fill row {autoFill + 1}
+          <Plus aria-hidden="true" class="size-3.5" />
+          {addLabel}
         </Button>
       </div>
-    {:else if totals}
-      {#if balanced}
-        <span class="tabular-nums">Balanced · {formatSessionCurrency(totals.credit)}</span>
-      {:else}
-        <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+      <div
+        class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm @xl:col-[2/-1] {balanced
+          ? 'text-success'
+          : showErrors && autoFill < 0
+            ? 'text-destructive'
+            : 'text-muted-foreground'}"
+        role="status"
+      >
+        {#if autoFill >= 0 && autoFillAmount !== null}
           <span class="tabular-nums">
-            Money out {formatSessionCurrency(totals.debit)} · Money in {formatSessionCurrency(
-              totals.credit
-            )}
+            Row {autoFill + 1} balances at {formatSessionCurrency(autoFillAmount)}
           </span>
-          <span class="tabular-nums">· Off by {formatSessionCurrency(Math.abs(balance ?? 0))}</span>
-        </div>
-      {/if}
-    {:else if showErrors}
-      Add an amount to every split.
-    {:else}
-      Splits should net to zero. Try 1,000.00 or even 10+5.
-    {/if}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            class="h-6 px-2"
+            onclick={() => fillRemainder(autoFill)}
+          >
+            Fill row {autoFill + 1}
+          </Button>
+        {:else if balanced}
+          <Check aria-hidden="true" class="size-4" />
+          <span>Balanced</span>
+        {:else if balance !== null}
+          <span class="text-destructive tabular-nums">
+            Off by {formatSessionCurrency(Math.abs(balance))}
+          </span>
+        {:else if showErrors}
+          Add an amount to every split.
+        {:else}
+          Splits net to zero.
+        {/if}
+      </div>
+    </div>
   </div>
 </div>
+
+{#snippet rowMenu(s: SplitDraft, i: number, label: string, remainder: number | null)}
+  <DropdownMenu.Root>
+    <DropdownMenu.Trigger>
+      {#snippet child({ props })}
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          class="size-8 text-muted-foreground"
+          {...props}
+          aria-label="Actions for {label}"
+          {@attach tooltip('Split actions')}
+        >
+          <Ellipsis aria-hidden="true" class="size-4" />
+        </Button>
+      {/snippet}
+    </DropdownMenu.Trigger>
+    <DropdownMenu.Content align="end">
+      <DropdownMenu.Item disabled={remainder === null} onclick={() => fillRemainder(i)}>
+        <Scale aria-hidden="true" />
+        Fill to balance
+      </DropdownMenu.Item>
+      <DropdownMenu.Item disabled={parseAmount(s.amount) === null} onclick={() => negateAmount(s)}>
+        <ArrowRightLeft aria-hidden="true" />
+        Negate amount
+      </DropdownMenu.Item>
+      {#if s.showQuantity}
+        <DropdownMenu.Item onclick={() => hideQuantity(s)}>
+          <X aria-hidden="true" />
+          Remove quantity
+        </DropdownMenu.Item>
+      {:else}
+        <DropdownMenu.Item onclick={() => (s.showQuantity = true)}>
+          <Plus aria-hidden="true" />
+          Add quantity
+        </DropdownMenu.Item>
+      {/if}
+      <DropdownMenu.Separator />
+      <DropdownMenu.Item disabled={i === 0} onclick={() => moveSplit(s.key, -1)}>
+        <ChevronUp aria-hidden="true" />
+        Move up
+      </DropdownMenu.Item>
+      <DropdownMenu.Item disabled={i === splits.length - 1} onclick={() => moveSplit(s.key, 1)}>
+        <ChevronDown aria-hidden="true" />
+        Move down
+      </DropdownMenu.Item>
+      <DropdownMenu.Item disabled={splits.length >= 50} onclick={() => duplicateSplit(s.key)}>
+        <Copy aria-hidden="true" />
+        Duplicate split
+      </DropdownMenu.Item>
+      <DropdownMenu.Separator />
+      <DropdownMenu.Item
+        variant="destructive"
+        disabled={splits.length <= 2}
+        onclick={() => removeSplit(s.key)}
+      >
+        <Trash2 aria-hidden="true" />
+        Remove split
+      </DropdownMenu.Item>
+    </DropdownMenu.Content>
+  </DropdownMenu.Root>
+{/snippet}

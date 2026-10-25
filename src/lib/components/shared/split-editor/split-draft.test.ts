@@ -10,8 +10,7 @@ import {
   remainderFor,
   splitBalance,
   splitErrors,
-  splitToInput,
-  splitTotals
+  splitToInput
 } from './split-draft';
 
 describe('parseAmount', () => {
@@ -125,24 +124,7 @@ describe('splitBalance / isBalanced', () => {
   });
 });
 
-describe('splitTotals / remainderFor', () => {
-  it('splits debits and credits', () => {
-    const splits = [
-      { ...makeSplitDraft(1), amount: '100' },
-      { ...makeSplitDraft(2), amount: '-40' },
-      { ...makeSplitDraft(3), amount: '-60' }
-    ];
-    expect(splitTotals(splits)).toEqual({ debit: 100, credit: 100 });
-  });
-
-  it('returns null totals when any amount is invalid', () => {
-    const splits = [
-      { ...makeSplitDraft(1), amount: '10' },
-      { ...makeSplitDraft(2), amount: '' }
-    ];
-    expect(splitTotals(splits)).toBeNull();
-  });
-
+describe('remainderFor', () => {
   it('computes the balancing remainder for a row', () => {
     const splits = [
       { ...makeSplitDraft(1), amount: '100' },
