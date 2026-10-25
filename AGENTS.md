@@ -15,6 +15,7 @@ Tauri v2 desktop app: static SvelteKit SPA (Svelte 5 runes, Tailwind v4, `@svelt
 | Format          | `bun run format`                                      |
 | Tauri dev       | `bun run tauri:dev` (generates icons first)           |
 | Tauri build     | `bun run tauri:build` (generates icons first)         |
+| Landing page    | `cd site && bun run dev` (own package, see below)     |
 
 Frontend work is done when `bun run check`, `bun run lint` and `bun run test` pass; Rust unit tests run with `cargo test` in `src-tauri/`.
 
@@ -94,6 +95,10 @@ Frontend work is done when `bun run check`, `bun run lint` and `bun run test` pa
 - `tauri.ts`: leaf payload types are module-private; export only what other modules import.
 - localStorage keys are stable and unversioned (e.g. `spendo-settings`, `cols:budgets`) — no `:v2` suffixes or legacy branches; drop unknown or invalid stored values instead. A stored selection always wins: new default columns appear only with no stored state or after "Reset to default".
 - The transaction form stages attachments picked before a create save in `pendingAttachments` and attaches them with `addAttachments` right after `createTransaction`; a failed attach leaves the transaction saved. Extension/count rules live in `$lib/features/transactions/attachment-utils.ts`, mirrored from `attachments.rs`.
+
+## Landing page
+
+`site/` is a separate SvelteKit package for the GitHub Pages site (`lewisflames.github.io/spendo`): prerendered, no client JS (`csr = false`), its own `package.json`/`bun.lock` and `bun run check`, ignored by the root ESLint. The download links are resolved from the latest GitHub release at build time (`site/src/lib/release.ts`), falling back to the releases page. `.github/workflows/pages.yml` deploys on pushes touching `site/**` and after every successful release workflow; the logo comes from `src-tauri/icons/app-icon.svg` via the `$icon` alias.
 
 ## Naming glossary (do not invent synonyms)
 

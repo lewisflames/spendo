@@ -1,5 +1,7 @@
 # Spendo
 
+[lewisflames.github.io/spendo](https://lewisflames.github.io/spendo)
+
 A local-first personal finance app for macOS and Linux. Your money lives in a single `.spendo` file on your own disk: no account, no cloud.
 
 - Accounts, transactions and split entries
@@ -37,7 +39,7 @@ bun run tauri:dev    # run the app
 bun run check && bun run lint && bun run test
 ```
 
-The frontend is SvelteKit with Tailwind; the backend is Rust over SQLite. See [AGENTS.md](AGENTS.md) for architecture and conventions, and [docs/releasing.md](docs/releasing.md) for cutting a release.
+The frontend is SvelteKit with Tailwind; the backend is Rust over SQLite. See [AGENTS.md](AGENTS.md) for architecture and conventions, and [docs/releasing.md](docs/releasing.md) for cutting a release. The landing page lives in `site/` and deploys to GitHub Pages.
 
 ## License
 
