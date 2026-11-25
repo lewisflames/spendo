@@ -5,7 +5,8 @@ const KINDS: readonly string[] = [
   'validation',
   'io',
   'db',
-  'internal'
+  'internal',
+  'bookChanged'
 ] satisfies BackendErrorKind[];
 
 /** Whether `e` is a command rejection (`{ kind, message }` from Rust `AppError`). */

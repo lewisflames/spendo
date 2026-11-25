@@ -3,6 +3,7 @@ mod accounts;
 mod accounts_mut;
 mod attachments;
 mod backups;
+mod book_file;
 mod books;
 mod budgets;
 mod csv_import;
@@ -64,6 +65,7 @@ pub fn run() {
                 {
                     Some(c) => {
                         db::stamp_app_id(&c);
+                        book_file::watch(&c);
                         if let Err(e) = crate::init::ensure_default_roots(&c) {
                             eprintln!("spendo: could not seed default accounts: {e}");
                         }
@@ -104,6 +106,7 @@ pub fn run() {
             books::create_book_at,
             books::save_book_as,
             books::close_book,
+            books::reload_changed_book,
             backups::fetch_backups,
             backups::create_backup,
             backups::delete_backup,

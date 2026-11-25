@@ -241,6 +241,29 @@ pub async fn open_book(
     Ok(result)
 }
 
+/// Reopen the active book when its file changed behind the connection
+/// (another device's sync replaced it; see `book_file`). Runs on window focus
+/// and after any command failed with `bookChanged`. Returns `null` when the
+/// file is unchanged or no book is open. Reopening goes through the normal
+/// swap path, so `book_generation` bumps and in-flight writes are discarded.
+#[tauri::command]
+pub async fn reload_changed_book(
+    state: State<'_, AppState>,
+) -> Result<Option<HomeDataResult>, AppError> {
+    let Some(path) = db::lock(&state.db_path).clone() else {
+        return Ok(None);
+    };
+    // A checked no-op is the file check itself, taken under the DB lock.
+    match db::run_blocking(state.db.clone(), |_| Ok(())).await {
+        Ok(()) => return Ok(None),
+        Err(AppError::BookChanged(_)) => {}
+        Err(e) => return Err(e),
+    }
+    let open_path = path.clone();
+    let new_conn = db::run_io(move || open_book_inner(&open_path)).await?;
+    activate_book(&state, path, new_conn).await.map(Some)
+}
+
 #[tauri::command]
 pub async fn create_book_at(
     state: State<'_, AppState>,

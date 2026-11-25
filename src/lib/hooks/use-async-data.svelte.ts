@@ -1,4 +1,5 @@
 import type { BackendErrorKind } from '$lib/tauri';
+import { bookRevision } from '$lib/stores/db.svelte';
 import { errKind, errMsg } from '$lib/utils/error';
 
 interface AsyncDataConfig<T> {
@@ -27,7 +28,8 @@ interface AsyncDataConfig<T> {
 /**
  * Effect-scoped async fetch with cancellation, replacing the repeated
  * `let cancelled = false; …; return () => { cancelled = true }` boilerplate.
- * Re-runs whenever the reactive state read by `enabled`/`fetch` changes;
+ * Re-runs whenever the reactive state read by `enabled`/`fetch` changes, and
+ * after the open book was reloaded in place (`bookRevision`);
  * stale results are dropped. Previous data is kept while refetching.
  */
 export function useAsyncData<T>({ enabled, fetch, onSuccess, onError, label }: AsyncDataConfig<T>) {
@@ -48,6 +50,7 @@ export function useAsyncData<T>({ enabled, fetch, onSuccess, onError, label }: A
 
     let cancelled = false;
     void reloadSeq;
+    void bookRevision.value;
     loading = true;
     error = null;
     errorKind = null;

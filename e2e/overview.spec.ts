@@ -81,3 +81,18 @@ test('links the month cards to their reports for the same period', async ({ page
     page.getByRole('link', { name: 'Net worth, open the balance sheet' })
   ).toHaveAttribute('href', '/reports/balance-sheet');
 });
+
+test('reloads the book on focus after another device replaced it', async ({ page }) => {
+  const summary = OVERVIEW.fetch_home_data as { summary: object };
+  await mockBackend(page, {
+    ...OVERVIEW,
+    fetch_net_worth_trend: [],
+    get_book_settings: {},
+    reload_changed_book: { hasData: true, summary: summary.summary }
+  });
+  await page.goto('/');
+  await expect(page.getByText('Your net worth story starts')).toBeVisible();
+
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect(page.getByText('This book was updated on another device. Reloaded.')).toBeVisible();
+});

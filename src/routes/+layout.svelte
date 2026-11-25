@@ -25,6 +25,8 @@
   import { NAV_CHORD_TARGETS } from '$lib/features/nav/nav-items';
   import { refreshNav } from '$lib/stores/nav.svelte';
   import { autoPostForBook } from '$lib/features/schedules/auto-post';
+  import { reloadBookIfChanged } from '$lib/features/book/book-actions';
+  import { onBookChanged } from '$lib/tauri';
   import { TitleBar } from '$lib/components/layout/title-bar';
   import { cn } from '$lib/utils';
   import { Sonner, toast } from '$lib/components/ui/sonner';
@@ -77,6 +79,10 @@
       .catch(() => {})
       .then(() => loadActiveBook());
   });
+
+  // Another device may have replaced the book file (synced folder): check on
+  // focus, and reload whenever a command was refused because of it.
+  onBookChanged(() => void reloadBookIfChanged());
 
   // Keep sidebar roots + badges current while a book is open: they refresh on
   // navigation and whenever the data summary changes (mutations that return no
@@ -188,6 +194,8 @@
 </script>
 
 <svelte:document onkeydown={handleKeydown} />
+
+<svelte:window onfocus={() => void reloadBookIfChanged()} />
 
 <div class="[--header-height:calc(--spacing(10))]">
   <Sidebar.Provider class={cn('flex flex-col', !showSidebar && 'bg-sidebar')}>

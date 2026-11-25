@@ -1,13 +1,25 @@
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 
+let bookChangedHandler: (() => void) | null = null;
+
+/** Called whenever a command fails with `bookChanged` (the book file was
+ * replaced behind the open connection), so the book can be reloaded. */
+export function onBookChanged(handler: () => void): void {
+  bookChangedHandler = handler;
+}
+
 /** Typed `invoke`: the command name picks its payload type from `CommandPayloads`. */
 const invoke = <K extends Command>(
   cmd: K,
   args?: Record<string, unknown>
-): Promise<CommandPayloads[K]> => tauriInvoke<CommandPayloads[K]>(cmd, args);
+): Promise<CommandPayloads[K]> =>
+  tauriInvoke<CommandPayloads[K]>(cmd, args).catch((e: unknown) => {
+    if ((e as Partial<BackendError> | null)?.kind === 'bookChanged') bookChangedHandler?.();
+    throw e;
+  });
 
 /** Variant of the Rust `AppError` a command failed with. */
-export type BackendErrorKind = 'notFound' | 'validation' | 'io' | 'db' | 'internal';
+export type BackendErrorKind = 'notFound' | 'validation' | 'io' | 'db' | 'internal' | 'bookChanged';
 
 /** Every command rejects with this shape (serialized `AppError`). */
 export interface BackendError {
@@ -330,6 +342,11 @@ export const createBookAt = (path: string, currency: string): Promise<EmptyBookR
 
 export const saveBookAs = (path: string): Promise<EmptyBookResult> =>
   invoke('save_book_as', { path });
+
+/** Reopen the active book if another device replaced its file; `null` when
+ * it is unchanged or no book is open. */
+export const reloadChangedBook = (): Promise<EmptyBookResult | null> =>
+  invoke('reload_changed_book');
 
 /** Close the active book and return to the book-less placeholder. */
 export const closeBook = (): Promise<CloseBookResult> => invoke('close_book');
@@ -1670,6 +1687,7 @@ type CommandPayloads = {
   post_schedule_occurrence: string;
   preview_gnucash_import: GnuCashPreview;
   refresh_prices: PricesResult;
+  reload_changed_book: EmptyBookResult | null;
   rename_payee: string;
   rename_tag: string;
   reopen_last_reconciliation: ReopenReconcileResult;

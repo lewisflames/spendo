@@ -4,7 +4,13 @@ import { open, save } from '@tauri-apps/plugin-dialog';
 import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { basename } from '@tauri-apps/api/path';
 import { toast } from '$lib/components/ui/sonner';
-import { activeBookPath, dbSession, setActiveBookPath, setDbSession } from '$lib/stores/db.svelte';
+import {
+  activeBookPath,
+  bookRevision,
+  dbSession,
+  setActiveBookPath,
+  setDbSession
+} from '$lib/stores/db.svelte';
 import { resetNav } from '$lib/stores/nav.svelte';
 import { rememberBook } from '$lib/stores/recent-books.svelte';
 import { loadBookSettings, resetBookSettings } from '$lib/stores/book-settings.svelte';
@@ -14,6 +20,7 @@ import {
   closeBook,
   createBookAt,
   openBook,
+  reloadChangedBook,
   restoreBackup,
   saveBookAs,
   type DataSummary
@@ -209,6 +216,35 @@ export async function restoreBackupFile(fileName: string): Promise<boolean> {
       switching = false;
     }
   });
+}
+
+let reloading: Promise<void> | null = null;
+
+/**
+ * Reopen the book when another device replaced its file (sync tools rename a
+ * fresh copy over it). Runs on window focus and whenever a command failed with
+ * `bookChanged`; concurrent callers share one attempt. Unlike a switch it
+ * stays on the current page and keeps form edits: the old file is gone, so
+ * there is nothing to discard, and mounted pages refetch via `bookRevision`.
+ */
+export function reloadBookIfChanged(): Promise<void> {
+  if (switching || !activeBookPath.value) return Promise.resolve();
+  reloading ??= (async () => {
+    try {
+      const result = await reloadChangedBook();
+      if (!result) return;
+      resetNav();
+      setDbSession(result.summary);
+      bookRevision.value += 1;
+      await reloadBookSettings();
+      toast.success('This book was updated on another device. Reloaded.');
+    } catch (e: unknown) {
+      toast.error(errMsg(e, 'We couldn’t reload the book'));
+    } finally {
+      reloading = null;
+    }
+  })();
+  return reloading;
 }
 
 export async function copyActiveBookPath(): Promise<boolean> {

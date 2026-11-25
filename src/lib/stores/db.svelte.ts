@@ -15,6 +15,12 @@ export const activeBookPath = $state<{ value: string | null }>({ value: null });
  * force-refreshes (home revalidates on every visit), so shell/redirect logic
  * can tell a cold start apart from a refresh without flapping.
  */
+/**
+ * Bumped when the open book was reloaded in place (another device replaced
+ * its file). `useAsyncData` reads it, so every mounted page refetches.
+ */
+export const bookRevision = $state<{ value: number }>({ value: 0 });
+
 export const dbBootstrapping = $state<{ value: boolean }>({ value: true });
 
 /**

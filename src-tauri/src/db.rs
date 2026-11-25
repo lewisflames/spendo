@@ -85,13 +85,45 @@ pub(crate) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// `AppError::Internal` (logged with the command's name) instead of letting
 /// it unwind through the guard. A transaction the panic left open is rolled
 /// back, so the next command starts from a clean connection.
+///
+/// The book file is checked first (`book_file::ensure_unchanged`): a command
+/// on a connection whose file another device replaced fails with
+/// `AppError::BookChanged` instead of writing into the orphaned file. Our own
+/// writes are adopted afterwards (`book_file::refresh`).
 pub(crate) fn with_conn<T>(
     db: &Mutex<Connection>,
     command: &str,
     f: impl FnOnce(&mut Connection) -> Result<T, AppError>,
 ) -> Result<T, AppError> {
     let mut conn = lock(db);
-    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(&mut conn)));
+    crate::book_file::ensure_unchanged(&conn)?;
+    let result = guarded(&mut conn, command, f);
+    crate::book_file::refresh(&conn);
+    result
+}
+
+/// [`with_conn`] for book swaps: no file check up front (switching away from,
+/// or reloading, a replaced book must work), and a successful closure starts
+/// watching whatever file the connection now has open.
+fn with_swap_conn<T>(
+    db: &Mutex<Connection>,
+    command: &str,
+    f: impl FnOnce(&mut Connection) -> Result<T, AppError>,
+) -> Result<T, AppError> {
+    let mut conn = lock(db);
+    let result = guarded(&mut conn, command, f);
+    if result.is_ok() {
+        crate::book_file::watch(&conn);
+    }
+    result
+}
+
+fn guarded<T>(
+    conn: &mut Connection,
+    command: &str,
+    f: impl FnOnce(&mut Connection) -> Result<T, AppError>,
+) -> Result<T, AppError> {
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(conn)));
     match outcome {
         Ok(result) => result,
         Err(payload) => {
@@ -187,6 +219,9 @@ pub enum AppError {
     Db(DbError),
     /// Panicked command or failed background task: a bug, not user input.
     Internal(String),
+    /// The book file was replaced, changed or removed behind the open
+    /// connection (see `book_file`); nothing ran, the frontend reloads.
+    BookChanged(String),
 }
 
 impl AppError {
@@ -198,6 +233,7 @@ impl AppError {
             AppError::Io(_) => "io",
             AppError::Db(_) => "db",
             AppError::Internal(_) => "internal",
+            AppError::BookChanged(_) => "bookChanged",
         }
     }
 }
@@ -238,7 +274,8 @@ impl std::fmt::Display for AppError {
             AppError::NotFound(m)
             | AppError::Validation(m)
             | AppError::Io(m)
-            | AppError::Internal(m) => write!(f, "{m}"),
+            | AppError::Internal(m)
+            | AppError::BookChanged(m) => write!(f, "{m}"),
             AppError::Db(e) => write!(f, "{}", e.message),
         }
     }
@@ -262,13 +299,17 @@ impl From<rusqlite::Error> for AppError {
 /// the `Connection` itself (`*conn = new_conn`), which needs `&mut`. Same
 /// rule applies — callers must do file I/O (validate, connect new file) before
 /// entering, and never lock directly inside an `async fn`.
+///
+/// Unlike `run_blocking` it skips the book-file check (see [`with_swap_conn`]),
+/// so in-place rewrites such as a restore must call
+/// `book_file::ensure_unchanged` themselves.
 pub async fn run_swap_blocking<T, F>(db: Arc<Mutex<Connection>>, f: F) -> Result<T, AppError>
 where
     F: FnOnce(&mut Connection) -> Result<T, AppError> + Send + 'static,
     T: Send + 'static,
 {
     let command = command_name::<F>();
-    tauri::async_runtime::spawn_blocking(move || with_conn(&db, command, f))
+    tauri::async_runtime::spawn_blocking(move || with_swap_conn(&db, command, f))
         .await
         .map_err(task_failed)?
 }

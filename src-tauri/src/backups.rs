@@ -454,6 +454,9 @@ pub async fn restore_backup(
     // SAFETY: like Save As, the restore must run against the live connection,
     // so its file I/O (safety snapshot, page copy) happens under the DB lock.
     let summary = db::run_swap_blocking(state.db.clone(), move |conn| {
+        // Swaps skip the book-file check; a restore writes in place, so it
+        // must not land in a file another device already replaced.
+        crate::book_file::ensure_unchanged(conn)?;
         let summary = restore_backup_inner(conn, &app_data_dir, &file_name)?;
         generation.fetch_add(1, Ordering::SeqCst);
         Ok(summary)
