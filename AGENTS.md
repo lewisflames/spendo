@@ -35,7 +35,7 @@ CI (`.github/workflows/checks.yml`, called by `ci.yml` on pushes to `main` and p
 ## Architecture
 
 - All backend calls go through `invoke()` via `$lib/tauri.ts` — no `+server.ts` / `+page.server.ts`.
-- One active `.spendo` book opened in place. Every connection swap bumps `book_generation` while the DB lock is held; long-running network writes capture the generation before fetching and abort if it changed. Books carry `PRAGMA application_id` (`SPENDO_APP_ID`). No migrations by design (pre-release): `SCHEMA` is the source of truth, so schema changes mean a reset (Settings → Clear all data or delete the book) plus re-import.
+- One active `.spendo` book opened in place. Every connection swap bumps `book_generation` while the DB lock is held; long-running network writes capture the generation before fetching and abort if it changed. Books carry `PRAGMA application_id` (`SPENDO_APP_ID`) and run in rollback-journal mode (`db::use_rollback_journal`, on open and after a restore) so synced folders always hold committed data; never switch books to WAL. No migrations by design (pre-release): `SCHEMA` is the source of truth, so schema changes mean a reset (Settings → Clear all data or delete the book) plus re-import.
 - Routes contain only route files; page components/types live in `$lib/features/<domain>/`, domain utilities in `$lib/utils/`.
 - Store convention: `.svelte.ts` modules using `$state()` wrapped in `{ value }` — every store, including scalar flags.
 - Every page needs the Rust backend: develop with `bun run tauri:dev`. A plain browser (`bun run dev`) has no backend, so `invoke()` calls reject.

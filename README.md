@@ -61,6 +61,10 @@ chmod +x Spendo_*_amd64.AppImage && ./Spendo_*_amd64.AppImage
 2. Optionally bring in your history from GnuCash or a bank CSV via the book menu (or `Ctrl+K`).
 3. Changes are saved as you go. Use **Save as…** in the book menu for a backup copy.
 
+### Keeping a book in a synced folder
+
+Every save lands in the `.spendo` file itself, so a book can live in a Syncthing, Dropbox or iCloud folder. While Spendo writes, SQLite keeps short-lived files next to it: tell the sync tool to ignore `*.spendo-journal`, `*.spendo-wal` and `*.spendo-shm`. Open the book on one device at a time.
+
 ## Development
 
 You need [Bun](https://bun.sh), [Rust](https://rustup.rs) and the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/).
