@@ -20,6 +20,8 @@ Tauri v2 desktop app: static SvelteKit SPA (Svelte 5 runes, Tailwind v4, `@svelt
 
 Frontend work is done when `bun run check`, `bun run lint` and `bun run test` pass; Rust unit tests run with `cargo test` in `src-tauri/`.
 
+CI (`.github/workflows/checks.yml`, called by `ci.yml` on pushes to `main` and pull requests, and by `release.yml` before publishing) runs those plus `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `bun run test:e2e`; a failing check blocks the release. Bun is pinned (`1.4.5`) in `checks.yml`, `release.yml` and `pages.yml`: bump all three together.
+
 ## Code style
 
 - Svelte 5 runes: `$props()`, `$derived()`, `$state()`; events as `onclick`; children via `{@render children()}`.
