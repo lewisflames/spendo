@@ -386,7 +386,10 @@ fn restore_backup_inner(
         }
     }
     conn.flush_prepared_statement_cache();
-    // Heal the restored content the same way an open does.
+    // Heal the restored content the same way an open does. The page copy
+    // brings the snapshot's journal mode along, and snapshots of books from
+    // before rollback-journal mode carry WAL.
+    db::use_rollback_journal(conn)?;
     db::init_db(conn)?;
     db::stamp_app_id(conn);
     crate::init::ensure_default_roots(conn)?;
@@ -643,6 +646,47 @@ mod tests {
             .expect("before-restore snapshot");
         restore_backup_inner(&mut conn, &app, &undo.file_name).unwrap();
         assert_eq!(tx_count(&conn), 0);
+        std::fs::remove_dir_all(&app).ok();
+    }
+
+    #[test]
+    fn snapshots_and_restores_keep_the_book_in_rollback_journal_mode() {
+        let app = tmp_dir("journal");
+        let path = app.join("book.spendo");
+        let mut conn = book_with_tx(&path);
+        let journal = |c: &Connection| -> String {
+            c.query_row("PRAGMA journal_mode", [], |r| r.get(0))
+                .unwrap()
+        };
+        assert_eq!(journal(&conn), "delete");
+        let dir = dir_for_conn(&app, &conn).unwrap();
+        let snap = snapshot_into(&conn, &dir, BackupReason::Manual, None).unwrap();
+        let snap_conn = Connection::open(dir.join(&snap.file_name)).unwrap();
+        assert_eq!(journal(&snap_conn), "delete");
+        drop(snap_conn);
+
+        // A snapshot taken back when books ran in WAL mode.
+        let old_name = file_name_for(Utc::now() - chrono::Duration::days(1), BackupReason::Manual);
+        let old = Connection::open(dir.join(&old_name)).unwrap();
+        old.execute_batch("PRAGMA journal_mode = WAL;").unwrap();
+        db::init_db(&old).unwrap();
+        db::stamp_app_id(&old);
+        drop(old);
+
+        restore_backup_inner(&mut conn, &app, &old_name).unwrap();
+        assert_eq!(tx_count(&conn), 0);
+        assert_eq!(journal(&conn), "delete");
+        conn.execute(
+            "INSERT INTO transactions (guid, post_date, description) VALUES ('t2', '2026-01-03', 'Tea')",
+            [],
+        )
+        .unwrap();
+        let wal = PathBuf::from(format!("{}-wal", path.display()));
+        assert!(!wal.exists());
+        drop(conn);
+        let reopened = db::connect_db(&path).unwrap();
+        assert_eq!(journal(&reopened), "delete");
+        assert_eq!(tx_count(&reopened), 1);
         std::fs::remove_dir_all(&app).ok();
     }
 

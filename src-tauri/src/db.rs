@@ -542,17 +542,44 @@ pub fn connect_db(db_path: &PathBuf) -> Result<Connection> {
     Ok(conn)
 }
 
-/// Shared connection configuration: FK enforcement on every connection, WAL
-/// only for file-backed books (in-memory DBs have no sidecars), and a busy
+/// Shared connection configuration: FK enforcement on every connection, a busy
 /// timeout so a second process or tool touching the file waits instead of
-/// failing instantly with `database is locked`.
+/// failing instantly with `database is locked`, and rollback-journal mode for
+/// file-backed books (in-memory DBs have no journal file).
 fn configure_connection(conn: &Connection, file_backed: bool) -> Result<()> {
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;
-    if file_backed {
-        conn.execute_batch("PRAGMA journal_mode = WAL;")?;
-    }
     conn.busy_timeout(std::time::Duration::from_secs(5))?;
+    if file_backed {
+        use_rollback_journal(conn)?;
+    }
     Ok(())
+}
+
+/// Keep every commit in the main file: books live in synced folders
+/// (Syncthing, Dropbox, iCloud), which copy the `.spendo` file but must ignore
+/// SQLite's sidecars, so WAL would leave the latest saves behind in
+/// `<book>-wal` until a checkpoint. The journal mode is stored in the file, so
+/// this also converts books created in WAL mode: SQLite checkpoints them and
+/// removes their `-wal`/`-shm`. A conversion blocked by another process still
+/// holding the book open is logged, not fatal; the next open retries it.
+pub fn use_rollback_journal(conn: &Connection) -> Result<()> {
+    match conn.pragma_update_and_check(None, "journal_mode", "DELETE", |r| r.get::<_, String>(0)) {
+        Ok(mode) if mode.eq_ignore_ascii_case("delete") => Ok(()),
+        Ok(mode) => {
+            eprintln!("spendo: book stayed in {mode} journal mode");
+            Ok(())
+        }
+        Err(rusqlite::Error::SqliteFailure(e, _))
+            if matches!(
+                e.code,
+                rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+            ) =>
+        {
+            eprintln!("spendo: book is busy, it stays in WAL mode until the next open");
+            Ok(())
+        }
+        Err(e) => Err(e),
+    }
 }
 
 /// Fresh in-memory placeholder book (schema, no rows) for the book-less state:
@@ -564,8 +591,8 @@ pub fn open_placeholder() -> Result<Connection> {
     Ok(conn)
 }
 
-/// Open a GnuCash source file strictly read-only: never enables WAL or writes
-/// anything next to the user's original book.
+/// Open a GnuCash source file strictly read-only: never changes its journal
+/// mode or writes anything next to the user's original book.
 pub fn connect_source_db(db_path: &PathBuf) -> Result<Connection> {
     Connection::open_with_flags(db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
 }
@@ -578,9 +605,10 @@ pub fn stamp_app_id(conn: &Connection) {
         .ok();
 }
 
-/// Best-effort WAL checkpoint before a book switch or `VACUUM INTO`: flushes
-/// `-wal`/`-shm` sidecars back into the main file so no data lingers next to
-/// the old book. Never fails the caller (e.g. in-memory placeholder has no WAL).
+/// Best-effort WAL checkpoint before a book switch: books run in rollback-journal
+/// mode, so this only matters for one whose conversion was blocked
+/// (`use_rollback_journal`), flushing its `-wal` back into the main file. A
+/// no-op otherwise; never fails the caller.
 pub fn checkpoint(conn: &Connection) {
     conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);").ok();
 }
@@ -680,6 +708,103 @@ mod tests {
                 serde_json::json!({ "kind": kind, "message": message })
             );
         }
+    }
+
+    fn tmp_book(tag: &str) -> (PathBuf, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("spendo-db-{tag}-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("book.spendo");
+        (dir, path)
+    }
+
+    fn sidecar(path: &Path, suffix: &str) -> PathBuf {
+        let mut name = path.as_os_str().to_os_string();
+        name.push(suffix);
+        PathBuf::from(name)
+    }
+
+    fn journal_mode(conn: &Connection) -> String {
+        conn.query_row("PRAGMA journal_mode", [], |r| r.get(0))
+            .unwrap()
+    }
+
+    #[test]
+    fn saves_reach_the_main_file_while_the_book_is_open() {
+        let (dir, path) = tmp_book("delete-mode");
+        let conn = connect_db(&path).unwrap();
+        assert_eq!(journal_mode(&conn), "delete");
+        init_db(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO app_settings (key, value) VALUES ('k', 'v')",
+            [],
+        )
+        .unwrap();
+
+        // A copy of just the main file (what a sync tool ignoring sidecars
+        // sees) already holds the save, with the app's connection still open.
+        assert!(!sidecar(&path, "-wal").exists());
+        let copy = dir.join("copy.spendo");
+        std::fs::copy(&path, &copy).unwrap();
+        let other = Connection::open(&copy).unwrap();
+        let value: String = other
+            .query_row("SELECT value FROM app_settings WHERE key = 'k'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(value, "v");
+        drop(conn);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn opening_a_wal_book_converts_it_and_removes_its_sidecars() {
+        let (dir, path) = tmp_book("wal-convert");
+        let legacy = Connection::open(&path).unwrap();
+        legacy.execute_batch("PRAGMA journal_mode = WAL;").unwrap();
+        init_db(&legacy).unwrap();
+        legacy
+            .execute(
+                "INSERT INTO app_settings (key, value) VALUES ('k', 'v')",
+                [],
+            )
+            .unwrap();
+        // Keep the last commit in the `-wal` file only.
+        legacy
+            .execute_batch("PRAGMA wal_autocheckpoint = 0;")
+            .unwrap();
+        legacy
+            .execute(
+                "UPDATE app_settings SET value = 'latest' WHERE key = 'k'",
+                [],
+            )
+            .unwrap();
+        // Copy the book with its uncheckpointed `-wal`, as left by a crash.
+        let path = {
+            let src = path;
+            let dst = dir.join("legacy.spendo");
+            std::fs::copy(&src, &dst).unwrap();
+            std::fs::copy(sidecar(&src, "-wal"), sidecar(&dst, "-wal")).unwrap();
+            drop(legacy);
+            dst
+        };
+        assert!(sidecar(&path, "-wal").exists());
+
+        let conn = connect_db(&path).unwrap();
+        assert_eq!(journal_mode(&conn), "delete");
+        assert!(!sidecar(&path, "-wal").exists());
+        assert!(!sidecar(&path, "-shm").exists());
+        let value: String = conn
+            .query_row("SELECT value FROM app_settings WHERE key = 'k'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(value, "latest");
+        drop(conn);
+
+        // The mode is stored in the file: a plain reopen stays in DELETE mode.
+        let reopened = Connection::open(&path).unwrap();
+        assert_eq!(journal_mode(&reopened), "delete");
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     fn table_names(conn: &Connection) -> Vec<String> {

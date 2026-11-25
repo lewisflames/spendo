@@ -113,10 +113,11 @@ fn escape_path_for_sql(path: &Path) -> String {
 }
 
 /// Remove a previous file at the Save As target (`VACUUM INTO` refuses to
-/// overwrite) plus any stale WAL sidecars (`<file>-wal`/`<file>-shm`).
+/// overwrite) plus any stale sidecars (`-wal`/`-shm`, rollback `-journal`):
+/// SQLite would replay a leftover one into the new file.
 fn remove_target(path: &Path) {
     std::fs::remove_file(path).ok();
-    for suffix in ["-wal", "-shm"] {
+    for suffix in ["-wal", "-shm", "-journal"] {
         // Append to the OsString so non-UTF-8 paths keep their exact bytes.
         let mut name = path.as_os_str().to_os_string();
         name.push(suffix);
@@ -181,8 +182,8 @@ async fn activate_book(
 }
 
 /// Close the active book and return to the book-less placeholder. Writes are
-/// persisted live, so there is nothing to save; the checkpoint flushes WAL
-/// sidecars next to the closed file. The sidecar clear must not fail the
+/// persisted live, so there is nothing to save; the checkpoint flushes a
+/// leftover WAL (`db::checkpoint`) next to the closed file. The sidecar clear must not fail the
 /// close, so it is logged, not bubbled.
 #[tauri::command]
 pub async fn close_book(state: State<'_, AppState>) -> Result<HomeDataResult, AppError> {
@@ -483,11 +484,13 @@ mod tests {
         let dst = dir.join("nested").join("dst.spendo");
         std::fs::create_dir_all(dst.parent().unwrap()).unwrap();
         std::fs::write(&dst, "stale, not a database").unwrap();
-        let wal = format!("{}-wal", dst.display());
-        std::fs::write(&wal, "stale").unwrap();
+        let sidecars = ["-wal", "-shm", "-journal"].map(|s| format!("{}{s}", dst.display()));
+        for sidecar in &sidecars {
+            std::fs::write(sidecar, "stale").unwrap();
+        }
         remove_target(&dst);
         assert!(!dst.exists());
-        assert!(!Path::new(&wal).exists());
+        assert!(sidecars.iter().all(|s| !Path::new(s).exists()));
 
         let fresh = save_book_as_inner(&conn, &dst).unwrap();
         let count: i64 = fresh
@@ -502,6 +505,10 @@ mod tests {
             .query_row("PRAGMA application_id", [], |r| r.get(0))
             .unwrap();
         assert_eq!(id, db::SPENDO_APP_ID);
+        let mode: String = fresh
+            .query_row("PRAGMA journal_mode", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(mode, "delete");
         drop(fresh);
         drop(conn);
 
