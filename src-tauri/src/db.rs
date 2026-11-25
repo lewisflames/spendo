@@ -1,7 +1,7 @@
 use rusqlite::{Connection, Result};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicU64;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 pub struct AppState {
     pub db: Arc<Mutex<Connection>>,
@@ -27,7 +27,7 @@ impl AppState {
     /// Those writes use `std::fs::write`, which truncates — exporting onto the
     /// live `.spendo` file would destroy the book.
     pub fn ensure_not_active_book(&self, target: &Path) -> Result<(), AppError> {
-        let active = self.db_path.lock()?.clone();
+        let active = lock(&self.db_path).clone();
         if let Some(active) = active {
             if crate::utils::same_path(&active, target) {
                 return Err(AppError::Validation(
@@ -66,9 +66,68 @@ where
     F: FnOnce(&Connection) -> Result<T, AppError> + Send + 'static,
     T: Send + 'static,
 {
-    tauri::async_runtime::spawn_blocking(move || f(&*db.lock()?))
+    let command = command_name::<F>();
+    tauri::async_runtime::spawn_blocking(move || with_conn(&db, command, |conn| f(conn)))
         .await
         .map_err(task_failed)?
+}
+
+/// Lock a mutex even if an earlier panic poisoned it. The guarded state is
+/// still consistent: DB writes go through [`with_tx_err`], whose transaction
+/// rolls back on drop (unwinding included), and [`with_conn`] rolls back
+/// anything a panic left open. Refusing the lock instead would fail every
+/// later command until restart.
+pub(crate) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Lock the connection and run `f`, turning a panic into
+/// `AppError::Internal` (logged with the command's name) instead of letting
+/// it unwind through the guard. A transaction the panic left open is rolled
+/// back, so the next command starts from a clean connection.
+pub(crate) fn with_conn<T>(
+    db: &Mutex<Connection>,
+    command: &str,
+    f: impl FnOnce(&mut Connection) -> Result<T, AppError>,
+) -> Result<T, AppError> {
+    let mut conn = lock(db);
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(&mut conn)));
+    match outcome {
+        Ok(result) => result,
+        Err(payload) => {
+            let message = panic_message(payload.as_ref());
+            eprintln!("spendo: panic in {command}: {message}");
+            if !conn.is_autocommit() {
+                if let Err(e) = conn.execute_batch("ROLLBACK") {
+                    eprintln!("spendo: rollback after panic in {command} failed: {e}");
+                }
+            }
+            Err(AppError::Internal(format!(
+                "Unexpected error in {command}: {message}"
+            )))
+        }
+    }
+}
+
+/// The command a `run_blocking` closure belongs to, from its type name
+/// (`spendo_app_lib::transactions::create_transaction::{{closure}}::{{closure}}`
+/// → `transactions::create_transaction`).
+fn command_name<F>() -> &'static str {
+    let mut name = std::any::type_name::<F>();
+    while let Some(outer) = name.strip_suffix("::{{closure}}") {
+        name = outer;
+    }
+    name.strip_prefix("spendo_app_lib::").unwrap_or(name)
+}
+
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "panic".to_string()
+    }
 }
 
 fn task_failed(e: tauri::Error) -> AppError {
@@ -126,7 +185,7 @@ pub enum AppError {
     /// Filesystem or network failure outside the database.
     Io(String),
     Db(DbError),
-    /// Poisoned lock or failed background task: a bug, not user input.
+    /// Panicked command or failed background task: a bug, not user input.
     Internal(String),
 }
 
@@ -150,12 +209,6 @@ impl serde::Serialize for AppError {
         out.serialize_field("kind", self.kind())?;
         out.serialize_field("message", &self.to_string())?;
         out.end()
-    }
-}
-
-impl<T> From<std::sync::PoisonError<T>> for AppError {
-    fn from(e: std::sync::PoisonError<T>) -> AppError {
-        AppError::Internal(e.to_string())
     }
 }
 
@@ -214,7 +267,8 @@ where
     F: FnOnce(&mut Connection) -> Result<T, AppError> + Send + 'static,
     T: Send + 'static,
 {
-    tauri::async_runtime::spawn_blocking(move || f(&mut *db.lock()?))
+    let command = command_name::<F>();
+    tauri::async_runtime::spawn_blocking(move || with_conn(&db, command, f))
         .await
         .map_err(task_failed)?
 }
@@ -898,5 +952,69 @@ mod tests {
         assert!(ensure_same_book(&generation, 7).is_ok());
         generation.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         assert!(ensure_same_book(&generation, 7).is_err());
+    }
+
+    fn shared_db() -> Arc<Mutex<Connection>> {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE t (x INTEGER)").unwrap();
+        Arc::new(Mutex::new(conn))
+    }
+
+    fn count_rows(db: &Arc<Mutex<Connection>>) -> Result<i64, AppError> {
+        tauri::async_runtime::block_on(run_blocking(db.clone(), |conn| {
+            Ok(conn.query_row("SELECT COUNT(*) FROM t", [], |r| r.get(0))?)
+        }))
+    }
+
+    #[test]
+    fn panic_in_run_blocking_leaves_later_commands_working() {
+        let db = shared_db();
+        let err = tauri::async_runtime::block_on(run_blocking(db.clone(), |conn| {
+            with_tx_err(conn, || -> Result<(), AppError> {
+                conn.execute("INSERT INTO t VALUES (1)", [])?;
+                panic!("boom");
+            })
+        }))
+        .unwrap_err();
+        assert_eq!(err.kind(), "internal");
+        let message = err.to_string();
+        assert!(message.contains("boom"), "{message}");
+        assert!(
+            message.contains("db::tests::panic_in_run_blocking_leaves_later_commands_working"),
+            "{message}"
+        );
+        assert!(!db.is_poisoned());
+        // The panicked insert rolled back and the connection still serves.
+        assert_eq!(count_rows(&db).unwrap(), 0);
+    }
+
+    #[test]
+    fn panic_with_open_transaction_rolls_it_back() {
+        let db = shared_db();
+        let err = tauri::async_runtime::block_on(run_swap_blocking(
+            db.clone(),
+            |conn| -> Result<(), AppError> {
+                conn.execute_batch("BEGIN; INSERT INTO t VALUES (1);")?;
+                panic!("mid-transaction");
+            },
+        ))
+        .unwrap_err();
+        assert_eq!(err.kind(), "internal");
+        assert!(lock(&db).is_autocommit());
+        assert_eq!(count_rows(&db).unwrap(), 0);
+    }
+
+    #[test]
+    fn poisoned_lock_is_recovered() {
+        let db = shared_db();
+        let poisoner = db.clone();
+        std::thread::spawn(move || {
+            let _guard = poisoner.lock().unwrap();
+            panic!("poison");
+        })
+        .join()
+        .unwrap_err();
+        assert!(db.is_poisoned());
+        assert_eq!(count_rows(&db).unwrap(), 0);
     }
 }

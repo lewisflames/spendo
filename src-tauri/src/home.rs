@@ -240,7 +240,7 @@ pub async fn fetch_home_data(state: State<'_, AppState>) -> Result<HomeDataResul
     // freshly seeded book still needs its shell so pages can show their empty
     // states and the import paths stay reachable. `has_data` keeps tracking
     // whether accounts exist; only `summary` is tied to the book being open.
-    let book_open = state.db_path.lock()?.is_some();
+    let book_open = crate::db::lock(&state.db_path).is_some();
     run_blocking(state.db.clone(), move |conn| {
         if !book_open {
             return Ok(HomeDataResult {

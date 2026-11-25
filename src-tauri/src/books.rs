@@ -170,7 +170,7 @@ async fn activate_book(
     })
     .await?;
     // Brief path-mutex hold in async context: plain PathBuf clone, no I/O.
-    *state.db_path.lock()? = Some(new_path.clone());
+    *db::lock(&state.db_path) = Some(new_path.clone());
     if let Err(e) = db::write_last_book(&state.app_data_dir, &new_path) {
         eprintln!("spendo: {e}");
     }
@@ -196,7 +196,7 @@ pub async fn close_book(state: State<'_, AppState>) -> Result<HomeDataResult, Ap
         Ok(())
     })
     .await?;
-    *state.db_path.lock()? = None;
+    *db::lock(&state.db_path) = None;
     db::clear_last_book(&state.app_data_dir);
     Ok(HomeDataResult {
         has_data: false,
@@ -209,7 +209,7 @@ pub async fn close_book(state: State<'_, AppState>) -> Result<HomeDataResult, Ap
 /// with no DB access — so no blocking-thread hop is needed.
 #[tauri::command]
 pub async fn fetch_active_book(state: State<'_, AppState>) -> Result<ActiveBook, AppError> {
-    let guard = state.db_path.lock()?;
+    let guard = db::lock(&state.db_path);
     Ok(ActiveBook {
         path: guard.as_ref().map(|p| p.to_string_lossy().to_string()),
     })
@@ -261,9 +261,7 @@ pub async fn save_book_as(
     // Saving onto the open file is a no-op: just re-report its summary. Compare
     // canonical forms too: `sub/../book.spendo` aliases the live file, and the
     // stale-target sweep below would otherwise delete it before copying.
-    let is_same = state
-        .db_path
-        .lock()?
+    let is_same = db::lock(&state.db_path)
         .as_ref()
         .is_some_and(|p| crate::utils::same_path(p, &new_path));
     if is_same {
@@ -302,7 +300,7 @@ pub async fn save_book_as(
         get_summary(conn)
     })
     .await?;
-    *state.db_path.lock()? = Some(new_path.clone());
+    *db::lock(&state.db_path) = Some(new_path.clone());
     if let Err(e) = db::write_last_book(&state.app_data_dir, &new_path) {
         eprintln!("spendo: {e}");
     }

@@ -309,10 +309,9 @@ fn daily_snapshot_inner(
 }
 
 fn run_daily_check(db: &Mutex<Connection>, app_data_dir: &Path) {
-    let result = match db.lock() {
-        Ok(conn) => daily_snapshot_inner(&conn, app_data_dir),
-        Err(e) => Err(AppError::from(e)),
-    };
+    let result = db::with_conn(db, "backups::daily_check", |conn| {
+        daily_snapshot_inner(conn, app_data_dir)
+    });
     if let Err(e) = result {
         eprintln!("spendo: daily backup failed: {e}");
     }
@@ -398,7 +397,7 @@ fn restore_backup_inner(
 pub async fn fetch_backups(state: State<'_, AppState>) -> Result<BackupList, AppError> {
     // Listing is plain disk I/O, so it reads the recorded path instead of
     // taking the DB lock; a swap racing this only shows a stale list.
-    let book = state.db_path.lock()?.clone();
+    let book = db::lock(&state.db_path).clone();
     let Some(book) = book else {
         return Ok(BackupList {
             folder: None,
@@ -428,9 +427,7 @@ pub async fn create_backup(state: State<'_, AppState>) -> Result<BackupEntry, Ap
 
 #[tauri::command]
 pub async fn delete_backup(state: State<'_, AppState>, file_name: String) -> Result<(), AppError> {
-    let book = state
-        .db_path
-        .lock()?
+    let book = db::lock(&state.db_path)
         .clone()
         .ok_or_else(|| AppError::Validation("No book open".to_string()))?;
     let dir = backup_dir(&state.app_data_dir, &book);
