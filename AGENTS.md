@@ -67,6 +67,7 @@ CI (`.github/workflows/checks.yml`, called by `ci.yml` on pushes to `main` and p
 ## Backend conventions
 
 - Every DB-touching command runs through `db::run_blocking(state.db.clone(), move |conn| …)` — never lock the connection directly inside an `async fn`. Non-DB file I/O goes through `db::run_io(…)`; read import/CSV files before `run_blocking` so the DB lock is never held during disk I/O. Book switching follows the same rule via the mutable counterpart `db::run_swap_blocking`.
+- Lock `AppState` mutexes with `db::lock` (recovers a poisoned lock), never `.lock()?`. Release builds unwind: `run_blocking`/`run_swap_blocking` catch a closure's panic, roll back a transaction it left open, log it with the command name and return `Internal`, so later commands keep working.
 - Use `db::with_tx_err(conn, || …)` instead of manual `BEGIN`/`COMMIT`/`ROLLBACK` (RAII rollback on drop). Private cores follow `<command>_inner(conn, …)` and return `Result<T, db::AppError>` (`NotFound`/`Validation`/`Io`/`Db`/`Internal`); commands return `Result<T, AppError>` too and stay thin wrappers. `AppError` crosses IPC as `{ kind, message }` (`BackendError` in `tauri.ts`).
 - Never match SQLite errors by message text — `DbError` carries the extended code (`is_foreign_key()`).
 - Read helpers tolerate only `QueryReturnedNoRows` (`.optional()`); never swallow DB failures with `.ok()` or `unwrap_or_default()`.
