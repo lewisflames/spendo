@@ -10,7 +10,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Same checks as ci.yml: a failing build never reaches the updater or the AUR.
+  checks:
+    uses: ./.github/workflows/checks.yml
+
   publish:
+    needs: checks
     permissions:
       contents: write
     strategy:
@@ -63,7 +68,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: '1.4.5'
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
