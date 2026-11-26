@@ -1,6 +1,13 @@
 # Releasing
 
-One command cuts a release from an up-to-date, clean `main`:
+First refresh the README and landing-page screenshots, and commit them if they changed:
+
+```sh
+bun run screenshots
+git add docs/screenshots && git commit -m "docs: refresh screenshots"
+```
+
+Then one command cuts a release from an up-to-date, clean `main`:
 
 ```sh
 bun run release patch    # or minor, major, or an exact version like 1.2.0
