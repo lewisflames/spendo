@@ -4,10 +4,10 @@ use std::sync::atomic::Ordering;
 use tauri::State;
 
 use crate::db::{self, AppState};
-use crate::home::{get_summary, HomeDataResult};
+use crate::home::{get_summary, HomeDataResult, OpenedBook};
 use crate::migrations;
 
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, serde::Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ActiveBook {
     pub path: Option<String>,
@@ -157,7 +157,7 @@ async fn activate_book(
     state: &State<'_, AppState>,
     new_path: PathBuf,
     new_conn: rusqlite::Connection,
-) -> Result<HomeDataResult, AppError> {
+) -> Result<OpenedBook, AppError> {
     let generation = state.book_generation.clone();
     let summary = db::run_swap_blocking(state.db.clone(), move |conn| {
         db::checkpoint(conn);
@@ -169,9 +169,9 @@ async fn activate_book(
     if let Err(e) = db::write_last_book(&state.app_data_dir, &new_path) {
         eprintln!("spendo: {e}");
     }
-    Ok(HomeDataResult {
+    Ok(OpenedBook {
         has_data: true,
-        summary: Some(summary),
+        summary,
     })
 }
 
@@ -180,6 +180,7 @@ async fn activate_book(
 /// leftover WAL (`db::checkpoint`) next to the closed file. The sidecar clear must not fail the
 /// close, so it is logged, not bubbled.
 #[tauri::command]
+#[specta::specta]
 pub async fn close_book(state: State<'_, AppState>) -> Result<HomeDataResult, AppError> {
     let generation = state.book_generation.clone();
     db::run_swap_blocking(state.db.clone(), move |conn| {
@@ -203,6 +204,7 @@ pub async fn close_book(state: State<'_, AppState>) -> Result<HomeDataResult, Ap
 /// install before any New/Open). Locks only the path mutex — a PathBuf clone
 /// with no DB access — so no blocking-thread hop is needed.
 #[tauri::command]
+#[specta::specta]
 pub async fn fetch_active_book(state: State<'_, AppState>) -> Result<ActiveBook, AppError> {
     let guard = db::lock(&state.db_path);
     Ok(ActiveBook {
@@ -213,6 +215,7 @@ pub async fn fetch_active_book(state: State<'_, AppState>) -> Result<ActiveBook,
 /// Which of the welcome screen's remembered book paths still point at a file,
 /// so missing ones can be shown as such instead of failing on click.
 #[tauri::command]
+#[specta::specta]
 pub async fn book_files_exist(paths: Vec<String>) -> Result<Vec<bool>, AppError> {
     db::run_io(move || Ok(book_files_exist_inner(&paths))).await
 }
@@ -222,10 +225,8 @@ fn book_files_exist_inner(paths: &[String]) -> Vec<bool> {
 }
 
 #[tauri::command]
-pub async fn open_book(
-    state: State<'_, AppState>,
-    path: String,
-) -> Result<HomeDataResult, AppError> {
+#[specta::specta]
+pub async fn open_book(state: State<'_, AppState>, path: String) -> Result<OpenedBook, AppError> {
     let new_path = PathBuf::from(&path);
     // Validate + connect on a blocking thread before touching shared state.
     let open_path = new_path.clone();
@@ -242,9 +243,10 @@ pub async fn open_book(
 /// file is unchanged or no book is open. Reopening goes through the normal
 /// swap path, so `book_generation` bumps and in-flight writes are discarded.
 #[tauri::command]
+#[specta::specta]
 pub async fn reload_changed_book(
     state: State<'_, AppState>,
-) -> Result<Option<HomeDataResult>, AppError> {
+) -> Result<Option<OpenedBook>, AppError> {
     let Some(path) = db::lock(&state.db_path).clone() else {
         return Ok(None);
     };
@@ -261,11 +263,12 @@ pub async fn reload_changed_book(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn create_book_at(
     state: State<'_, AppState>,
     path: String,
     currency: String,
-) -> Result<HomeDataResult, AppError> {
+) -> Result<OpenedBook, AppError> {
     let new_path = PathBuf::from(&path);
     let create_path = new_path.clone();
     let new_conn = db::run_io(move || create_book_at_inner(&create_path, &currency)).await?;
@@ -273,10 +276,11 @@ pub async fn create_book_at(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn save_book_as(
     state: State<'_, AppState>,
     path: String,
-) -> Result<HomeDataResult, AppError> {
+) -> Result<OpenedBook, AppError> {
     let new_path = PathBuf::from(&path);
     // Saving onto the open file is a no-op: just re-report its summary. Compare
     // canonical forms too: `sub/../book.spendo` aliases the live file, and the
@@ -286,9 +290,9 @@ pub async fn save_book_as(
         .is_some_and(|p| crate::utils::same_path(p, &new_path));
     if is_same {
         return db::run_blocking(state.db.clone(), move |conn| {
-            Ok(HomeDataResult {
+            Ok(OpenedBook {
                 has_data: true,
-                summary: Some(get_summary(conn)?),
+                summary: get_summary(conn)?,
             })
         })
         .await;
@@ -324,9 +328,9 @@ pub async fn save_book_as(
     if let Err(e) = db::write_last_book(&state.app_data_dir, &new_path) {
         eprintln!("spendo: {e}");
     }
-    Ok(HomeDataResult {
+    Ok(OpenedBook {
         has_data: true,
-        summary: Some(summary),
+        summary,
     })
 }
 

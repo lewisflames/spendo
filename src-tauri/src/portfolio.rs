@@ -19,7 +19,7 @@ use crate::utils;
 /// Approximate number of points targeted when sampling the portfolio value trend.
 const TREND_SAMPLE_TARGET: i64 = 180;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct HoldingAccount {
     pub account_guid: String,
@@ -30,7 +30,7 @@ pub struct HoldingAccount {
     pub cost_basis: f64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PortfolioHolding {
     pub commodity_guid: String,
@@ -63,7 +63,7 @@ pub struct PortfolioHolding {
     pub accounts: Vec<HoldingAccount>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PortfolioValuePoint {
     pub date: String,
@@ -71,7 +71,7 @@ pub struct PortfolioValuePoint {
     pub cost_basis: f64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PortfolioData {
     pub total_market_value: f64,
@@ -91,21 +91,21 @@ pub struct PortfolioData {
 
 /// Saved rebalance target for one commodity. Book-scoped user config like
 /// `import_rules`.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AllocationTarget {
     pub commodity_guid: String,
     pub target_pct: f64,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AllocationTargetInput {
     pub commodity_guid: String,
     pub target_pct: f64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct HoldingTransaction {
     pub guid: String,
@@ -123,7 +123,7 @@ pub struct HoldingTransaction {
     pub running_shares: f64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenLot {
     pub acquired: String,
@@ -134,7 +134,7 @@ pub struct OpenLot {
     pub unrealized_gain: Option<f64>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct RealizedGainRow {
     pub date: String,
@@ -149,7 +149,7 @@ pub struct RealizedGainRow {
     pub gain: f64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct RealizedGainsReport {
     pub year: i32,
@@ -166,7 +166,7 @@ pub struct RealizedGainsReport {
     pub years: Vec<i32>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct HoldingDividend {
     pub tx_guid: String,
@@ -175,7 +175,7 @@ pub struct HoldingDividend {
     pub amount: f64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct HoldingDetail {
     pub holding: PortfolioHolding,
@@ -1404,6 +1404,7 @@ pub(crate) fn realized_gains_inner(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn fetch_realized_gains(
     state: State<'_, AppState>,
     year: i32,
@@ -1720,11 +1721,13 @@ fn fetch_holding_detail_inner(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn fetch_portfolio_data(state: State<'_, AppState>) -> Result<PortfolioData, AppError> {
     run_blocking(state.db.clone(), fetch_portfolio_data_inner).await
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn fetch_holding_detail(
     state: State<'_, AppState>,
     commodity_guid: String,
@@ -1739,6 +1742,7 @@ pub async fn fetch_holding_detail(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn fetch_allocation_targets(
     state: State<'_, AppState>,
 ) -> Result<Vec<AllocationTarget>, AppError> {
@@ -1749,6 +1753,7 @@ pub async fn fetch_allocation_targets(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn save_allocation_targets(
     state: State<'_, AppState>,
     targets: Vec<AllocationTargetInput>,

@@ -1,5 +1,21 @@
 use crate::db::AppError;
 
+/// Sortable ledger columns shared by the transactions list and account detail.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub enum TxSortKey {
+    Date,
+    Description,
+    Amount,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub enum SortDir {
+    Asc,
+    Desc,
+}
+
 /// Account types displayed with reversed sign (credit balances read positive).
 /// TRADING is included: trading accounts accumulate currency/commodity
 /// trading gains as net credits, and the balance-sheet identity only holds if

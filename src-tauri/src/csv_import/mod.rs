@@ -30,48 +30,61 @@ const SAMPLE_ROWS: usize = 5;
 /// Column→field mapping. Exactly one of `amountCol` or the
 /// `debitCol`+`creditCol` pair must be set; indices are 0-based into the
 /// parsed record (missing cells read as empty).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CsvMapping {
     pub date_col: usize,
     pub desc_col: usize,
+    #[serde(default)]
     pub amount_col: Option<usize>,
+    #[serde(default)]
     pub debit_col: Option<usize>,
+    #[serde(default)]
     pub credit_col: Option<usize>,
+    #[serde(default)]
     pub num_col: Option<usize>,
+    #[serde(default)]
     pub notes_col: Option<usize>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CsvPreviewInput {
     pub path: String,
     /// Hash of the file bytes as detected; the preview refuses to run against
     /// different content so the dry run always matches what was parsed.
     pub file_sha256: String,
+    #[serde(default)]
     pub encoding: Option<String>,
+    #[serde(default)]
     pub delimiter: Option<String>,
+    #[serde(default)]
     pub has_header: Option<bool>,
     pub mapping: CsvMapping,
     pub target_account_guid: String,
     pub offset_account_guid: String,
     /// `"dmy"` (default) or `"mdy"` — resolves ambiguous `01/02/2026`.
+    #[serde(default)]
     pub date_preference: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CsvCommitInput {
     pub path: String,
     /// Hash captured at detect/preview time; the commit aborts when the file
     /// changed in between (row keys would otherwise select different rows).
     pub file_sha256: String,
+    #[serde(default)]
     pub encoding: Option<String>,
+    #[serde(default)]
     pub delimiter: Option<String>,
+    #[serde(default)]
     pub has_header: Option<bool>,
     pub mapping: CsvMapping,
     pub target_account_guid: String,
     pub offset_account_guid: String,
+    #[serde(default)]
     pub date_preference: Option<String>,
     pub selected_keys: Vec<i64>,
     /// Upsert the mapping as this header layout's preset when the commit lands.
@@ -81,7 +94,7 @@ pub struct CsvCommitInput {
 /// Saved mapping for one bank-statement layout, applied automatically when a
 /// file with the same normalized header row is detected. Headerless files get
 /// no preset (no stable key).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CsvPreset {
     pub signature: String,
@@ -95,7 +108,7 @@ pub struct CsvPreset {
     pub offset_account_guid: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CsvDetectResult {
     pub encoding: String,
@@ -114,7 +127,7 @@ pub struct CsvDetectResult {
     pub preset: Option<CsvPreset>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CsvPreviewRow {
     pub key: i64,
@@ -132,7 +145,7 @@ pub struct CsvPreviewRow {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CsvPreviewResult {
     pub rows: Vec<CsvPreviewRow>,
@@ -144,7 +157,7 @@ pub struct CsvPreviewResult {
     pub max_date: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CsvCommitResult {
     pub created: i64,
@@ -505,6 +518,7 @@ fn duplicate_flags_for_rows(
 // ── Commands ─────────────────────────────────────────────────────────────────
 
 #[tauri::command]
+#[specta::specta]
 pub async fn csv_detect(
     state: State<'_, AppState>,
     path: String,
@@ -653,6 +667,7 @@ fn preview_inner(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn csv_preview(
     state: State<'_, AppState>,
     input: CsvPreviewInput,
@@ -905,6 +920,7 @@ fn insert_staged_rows(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn csv_commit(
     state: State<'_, AppState>,
     input: CsvCommitInput,
@@ -932,6 +948,7 @@ pub async fn csv_commit(
 
 /// Forget a saved mapping (the wizard's "Forget" action).
 #[tauri::command]
+#[specta::specta]
 pub async fn delete_csv_preset(
     state: State<'_, AppState>,
     signature: String,

@@ -9,7 +9,7 @@ use crate::fx;
 use crate::tree;
 use crate::utils;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ProfitLossRow {
     pub account_guid: String,
@@ -22,7 +22,7 @@ pub struct ProfitLossRow {
     pub change_pct: Option<f64>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ProfitLossReport {
     pub date_from: String,
@@ -636,7 +636,7 @@ pub(crate) fn fetch_pnl_report_inner(
     })
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PnlTrendPoint {
     pub month: String,
@@ -686,6 +686,7 @@ fn fetch_pnl_trend_inner(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn fetch_pnl_report(
     state: State<'_, AppState>,
     date_from: String,
@@ -706,6 +707,7 @@ pub async fn fetch_pnl_report(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn fetch_pnl_trend(
     state: State<'_, AppState>,
     date_from: String,

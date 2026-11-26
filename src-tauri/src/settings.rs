@@ -10,6 +10,7 @@ use crate::lots::CostMethod;
 use crate::tags;
 
 #[tauri::command]
+#[specta::specta]
 pub async fn clear_app_db(state: State<'_, AppState>) -> Result<(), AppError> {
     // Clearing the book invalidates any in-flight price refresh (which checks
     // only the generation before writing), so bump it under the DB lock.
@@ -26,22 +27,86 @@ pub async fn clear_app_db(state: State<'_, AppState>) -> Result<(), AppError> {
 
 // ── Book-scoped settings (travel with the `.spendo` file) ──
 
+// Wire values of the enumerated settings, for the generated bindings only:
+// the settings stay `String`s, and `validate_book_setting` accepts exactly
+// these (see `setting_enums_match_validation`).
+
+#[derive(Serialize, specta::Type)]
+#[allow(dead_code)]
+pub enum PnlPeriodId {
+    #[serde(rename = "this_month")]
+    ThisMonth,
+    #[serde(rename = "this_quarter")]
+    ThisQuarter,
+    #[serde(rename = "this_year")]
+    ThisYear,
+    #[serde(rename = "last_12_months")]
+    Last12Months,
+}
+
+#[derive(Serialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+#[allow(dead_code)]
+pub enum PriceAutoRefresh {
+    Off,
+    OnStartup,
+}
+
+#[derive(Serialize, specta::Type)]
+#[allow(dead_code)]
+pub enum CsvDelimiter {
+    #[serde(rename = ",")]
+    Comma,
+    #[serde(rename = ";")]
+    Semicolon,
+}
+
+#[derive(Serialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+#[allow(dead_code)]
+pub enum ExportDateFormat {
+    Iso,
+    Locale,
+}
+
+#[derive(Serialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+#[allow(dead_code)]
+pub enum AutoBackup {
+    Daily,
+    Off,
+}
+
+#[derive(Serialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+#[allow(dead_code)]
+pub enum CostBasisMethod {
+    Fifo,
+    Average,
+}
+
 /// Full book-settings snapshot served to the frontend (camelCase). Stored as
 /// individual `TEXT` rows in `app_settings`; missing rows fall back to
 /// defaults.
-#[derive(Serialize, PartialEq, Debug)]
+#[derive(Serialize, PartialEq, Debug, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct BookSettings {
     pub fiscal_year_start_month: u8,
+    #[specta(type = PnlPeriodId)]
     pub default_pnl_period: String,
+    #[specta(type = PriceAutoRefresh)]
     pub price_auto_refresh: String,
+    #[specta(type = CsvDelimiter)]
     pub export_csv_delimiter: String,
+    #[specta(type = ExportDateFormat)]
     pub export_date_format: String,
+    #[specta(type = AutoBackup)]
     pub auto_backup: String,
     /// Clearing account whose transfer legs the transit check pairs up
     /// (account GUID; empty = off).
     pub transit_account: String,
     /// How sales are matched to lots for realized gains: `fifo` or `average`.
+    #[specta(type = CostBasisMethod)]
     pub cost_basis_method: String,
     /// Tag whose transactions the tax summary lists as deductible expenses
     /// (tag GUID; empty = none).
@@ -222,11 +287,13 @@ fn set_book_setting_inner(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn get_book_settings(state: State<'_, AppState>) -> Result<BookSettings, AppError> {
     run_blocking(state.db.clone(), get_book_settings_inner).await
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn set_book_setting(
     state: State<'_, AppState>,
     key: String,
@@ -242,6 +309,70 @@ pub async fn set_book_setting(
 mod tests {
     use super::*;
     use crate::db;
+
+    fn wire(v: impl Serialize) -> String {
+        serde_json::to_value(v)
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+
+    /// The binding enums list exactly the values the validator accepts.
+    #[test]
+    fn setting_enums_match_validation() {
+        let sets: [(&str, Vec<String>); 6] = [
+            (
+                "default_pnl_period",
+                vec![
+                    wire(PnlPeriodId::ThisMonth),
+                    wire(PnlPeriodId::ThisQuarter),
+                    wire(PnlPeriodId::ThisYear),
+                    wire(PnlPeriodId::Last12Months),
+                ],
+            ),
+            (
+                "price_auto_refresh",
+                vec![
+                    wire(PriceAutoRefresh::Off),
+                    wire(PriceAutoRefresh::OnStartup),
+                ],
+            ),
+            (
+                "export_csv_delimiter",
+                vec![wire(CsvDelimiter::Comma), wire(CsvDelimiter::Semicolon)],
+            ),
+            (
+                "export_date_format",
+                vec![wire(ExportDateFormat::Iso), wire(ExportDateFormat::Locale)],
+            ),
+            (
+                "auto_backup",
+                vec![wire(AutoBackup::Daily), wire(AutoBackup::Off)],
+            ),
+            (
+                "cost_basis_method",
+                vec![wire(CostBasisMethod::Fifo), wire(CostBasisMethod::Average)],
+            ),
+        ];
+        for (key, values) in sets {
+            for v in &values {
+                assert!(validate_book_setting(key, v).is_ok(), "{key}={v}");
+            }
+            assert!(validate_book_setting(key, "nope").is_err(), "{key}");
+        }
+        let defaults = default_book_settings();
+        for (key, v) in [
+            ("default_pnl_period", &defaults.default_pnl_period),
+            ("price_auto_refresh", &defaults.price_auto_refresh),
+            ("export_csv_delimiter", &defaults.export_csv_delimiter),
+            ("export_date_format", &defaults.export_date_format),
+            ("auto_backup", &defaults.auto_backup),
+            ("cost_basis_method", &defaults.cost_basis_method),
+        ] {
+            assert!(validate_book_setting(key, v).is_ok(), "default {key}={v}");
+        }
+    }
 
     fn mem_db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();

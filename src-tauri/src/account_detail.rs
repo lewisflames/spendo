@@ -13,8 +13,9 @@ use crate::payees::{self, PayeeRef};
 use crate::prices::get_cached_prices_map;
 use crate::sql;
 use crate::utils;
+use crate::utils::{SortDir, TxSortKey};
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct DetailSplit {
     pub guid: String,
@@ -30,7 +31,7 @@ pub struct DetailSplit {
     pub reconcile_state: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct DetailTransaction {
     pub guid: String,
@@ -52,7 +53,7 @@ pub struct DetailTransaction {
     pub reconcile_state: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountDetailInfo {
     pub guid: String,
@@ -72,7 +73,7 @@ pub struct AccountDetailInfo {
     pub child_accounts: Vec<ChildAccountInfo>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountSummary {
     pub total_transactions: i64,
@@ -80,7 +81,7 @@ pub struct AccountSummary {
     pub total_expenses: f64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountDetailResult {
     pub account: AccountDetailInfo,
@@ -107,8 +108,8 @@ struct TxQuery<'a> {
     date_from: Option<&'a str>,
     date_to: Option<&'a str>,
     search: Option<&'a str>,
-    sort_by: Option<&'a str>,
-    sort_dir: Option<&'a str>,
+    sort_by: Option<TxSortKey>,
+    sort_dir: Option<SortDir>,
 }
 
 /// Grouped per-transaction effects keyed by GUID: `(post_date, description,
@@ -555,38 +556,27 @@ fn order_page_guids(
     tx_order: &[String],
     tx_map: &TxGroups,
     amount_by_guid: &HashMap<String, f64>,
-    sort_by: Option<&str>,
-    sort_dir: Option<&str>,
+    sort_by: Option<TxSortKey>,
+    sort_dir: Option<SortDir>,
     safe_page: i64,
     page_size: i64,
 ) -> Vec<String> {
     let offset = ((safe_page - 1) * page_size) as usize;
     let take = page_size as usize;
 
-    #[derive(Clone, Copy, PartialEq)]
-    enum SortKey {
-        Date,
-        Description,
-        Amount,
-    }
-
-    let key = match sort_by.unwrap_or("date") {
-        "description" => SortKey::Description,
-        "amount" => SortKey::Amount,
-        _ => SortKey::Date,
-    };
+    let key = sort_by.unwrap_or(TxSortKey::Date);
     let ascending = match (key, sort_dir) {
-        (SortKey::Date, Some("asc")) => true,
-        (SortKey::Date, _) => false,
-        (SortKey::Description, Some("desc")) => false,
-        (SortKey::Description, _) => true,
-        (SortKey::Amount, Some("desc")) => false,
-        (SortKey::Amount, _) => true,
+        (TxSortKey::Date, Some(SortDir::Asc)) => true,
+        (TxSortKey::Date, _) => false,
+        (TxSortKey::Description, Some(SortDir::Desc)) => false,
+        (TxSortKey::Description, _) => true,
+        (TxSortKey::Amount, Some(SortDir::Desc)) => false,
+        (TxSortKey::Amount, _) => true,
     };
 
     // Precompute lowercase keys once instead of allocating per comparison.
     let desc_keys: HashMap<&String, String> = match key {
-        SortKey::Description => tx_order
+        TxSortKey::Description => tx_order
             .iter()
             .map(|g| (g, tx_map[g].1.as_deref().unwrap_or("").to_lowercase()))
             .collect(),
@@ -596,9 +586,9 @@ fn order_page_guids(
     let mut ordered: Vec<&String> = tx_order.iter().collect();
     ordered.sort_by(|a, b| {
         let cmp = match key {
-            SortKey::Date => tx_map[*a].0.cmp(&tx_map[*b].0).then_with(|| a.cmp(b)),
-            SortKey::Description => desc_keys[a].cmp(&desc_keys[b]).then_with(|| a.cmp(b)),
-            SortKey::Amount => amount_by_guid[*a]
+            TxSortKey::Date => tx_map[*a].0.cmp(&tx_map[*b].0).then_with(|| a.cmp(b)),
+            TxSortKey::Description => desc_keys[a].cmp(&desc_keys[b]).then_with(|| a.cmp(b)),
+            TxSortKey::Amount => amount_by_guid[*a]
                 .total_cmp(&amount_by_guid[*b])
                 .then_with(|| a.cmp(b)),
         };
@@ -765,6 +755,7 @@ fn split_counter_and_reconcile_state(
 }
 
 #[tauri::command]
+#[specta::specta]
 // The flat argument list IS the IPC contract — the frontend invokes with
 // individual camelCase keys, so it can't be grouped without changing the wire format.
 #[allow(clippy::too_many_arguments)]
@@ -776,8 +767,8 @@ pub async fn fetch_account_detail(
     date_from: Option<String>,
     date_to: Option<String>,
     search: Option<String>,
-    sort_by: Option<String>,
-    sort_dir: Option<String>,
+    sort_by: Option<TxSortKey>,
+    sort_dir: Option<SortDir>,
 ) -> Result<AccountDetailResult, AppError> {
     run_blocking(state.db.clone(), move |conn| {
         fetch_account_detail_inner(
@@ -789,15 +780,15 @@ pub async fn fetch_account_detail(
                 date_from: date_from.as_deref(),
                 date_to: date_to.as_deref(),
                 search: search.as_deref(),
-                sort_by: sort_by.as_deref(),
-                sort_dir: sort_dir.as_deref(),
+                sort_by,
+                sort_dir,
             },
         )
     })
     .await
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountBalancePoint {
     /// Day as `YYYY-MM-DD` (named `date` like the other trend points).
@@ -952,6 +943,7 @@ fn fetch_account_balance_trend_inner(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn fetch_account_balance_trend(
     state: State<'_, AppState>,
     guid: String,
@@ -1260,8 +1252,8 @@ mod tests {
                 date_from: None,
                 date_to: None,
                 search: None,
-                sort_by: Some("amount"),
-                sort_dir: Some("desc"),
+                sort_by: Some(TxSortKey::Amount),
+                sort_dir: Some(SortDir::Desc),
             },
         )
         .unwrap();
@@ -1280,8 +1272,8 @@ mod tests {
                 date_from: None,
                 date_to: None,
                 search: None,
-                sort_by: Some("amount"),
-                sort_dir: Some("asc"),
+                sort_by: Some(TxSortKey::Amount),
+                sort_dir: Some(SortDir::Asc),
             },
         )
         .unwrap();

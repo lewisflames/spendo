@@ -11,7 +11,7 @@ use crate::prices::{get_cached_prices_map, PriceHistory};
 use crate::tree;
 use crate::utils;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountNode {
     pub guid: String,
@@ -27,14 +27,14 @@ pub struct AccountNode {
     pub children: Vec<AccountNode>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TypeSummary {
     pub count: i64,
     pub total_balance: f64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountsResult {
     pub trees: Vec<AccountNode>,
@@ -414,7 +414,7 @@ pub fn get_subaccount_guids(conn: &Connection, guid: &str) -> Result<Vec<String>
 /// accounts tree (credit-normal signs, investment mark-to-market, FX
 /// conversion). Carries everything the account-detail child table renders,
 /// so that view needs no second full-tree fetch.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ChildAccountInfo {
     pub guid: String,
@@ -431,7 +431,7 @@ pub struct ChildAccountInfo {
 /// Slim view of the parent account for the balance-composition pie: enough to
 /// label it and express this account's share of its balance. `None` for
 /// top-level accounts whose parent is the (excluded) ROOT node.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ParentAccountInfo {
     pub guid: String,
@@ -505,20 +505,23 @@ pub fn fetch_children_and_subtree(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn fetch_accounts(state: State<'_, AppState>) -> Result<AccountsResult, AppError> {
     run_blocking(state.db.clone(), fetch_accounts_inner).await
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct BalanceSheetInput {
     /// `YYYY-MM-DD`; `None` is today, valued like the accounts page.
+    #[serde(default)]
     pub as_of: Option<String>,
     /// Optional second date for a comparison column.
+    #[serde(default)]
     pub compare_to: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct BalanceSheetResult {
     /// The resolved valuation date (today when the input had none).
@@ -556,6 +559,7 @@ pub(crate) fn fetch_balance_sheet_inner(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn fetch_balance_sheet(
     state: State<'_, AppState>,
     input: BalanceSheetInput,
@@ -569,7 +573,7 @@ pub async fn fetch_balance_sheet(
 /// One ACCOUNTS-group destination: the top-level account representing a
 /// category. `guid`/`name` are `None` only while a book has no account of
 /// that category (healed by `init::ensure_default_roots` on book open).
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct NavRoot {
     pub category: String,
@@ -634,13 +638,14 @@ fn nav_roots_inner(conn: &Connection) -> Result<Vec<NavRoot>, AppError> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn fetch_nav_roots(state: State<'_, AppState>) -> Result<Vec<NavRoot>, AppError> {
     run_blocking(state.db.clone(), nav_roots_inner).await
 }
 
 /// Book currencies for the account commodity picker. Thin wrapper over the
 /// existing `fx::list_book_currencies` helper (previously backend-only).
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct BookCurrency {
     pub guid: String,
@@ -655,6 +660,7 @@ fn fetch_book_currencies_inner(conn: &Connection) -> Result<Vec<BookCurrency>, A
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn fetch_book_currencies(
     state: State<'_, AppState>,
 ) -> Result<Vec<BookCurrency>, AppError> {

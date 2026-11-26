@@ -17,7 +17,7 @@ use crate::db::{self, AppError, AppState};
 
 const MARKER: &str = ".sync-conflict-";
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncConflictCopy {
     pub path: String,
@@ -29,7 +29,7 @@ pub struct SyncConflictCopy {
 }
 
 /// One transaction as one side has it.
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ConflictTx {
     pub guid: String,
@@ -42,17 +42,31 @@ pub struct ConflictTx {
     pub accounts: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ConflictChange {
     pub book: ConflictTx,
     pub copy: ConflictTx,
-    /// What differs: `date`, `description`, `payee`, `number`, `notes`,
-    /// `tags`, `splits` (accounts, amounts, memos), `status` (reconcile states).
-    pub fields: Vec<&'static str>,
+    pub fields: Vec<ConflictField>,
 }
 
-#[derive(Debug, Serialize)]
+/// What differs between the book's and the copy's version of a transaction.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub enum ConflictField {
+    Date,
+    Description,
+    Payee,
+    Number,
+    Notes,
+    Tags,
+    /// Accounts, amounts or memos.
+    Splits,
+    /// Reconcile states only.
+    Status,
+}
+
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncConflictReview {
     pub copy: SyncConflictCopy,
@@ -317,31 +331,31 @@ fn summary(guid: &str, snap: &TxSnap) -> ConflictTx {
     }
 }
 
-fn changed_fields(book: &TxSnap, copy: &TxSnap) -> Vec<&'static str> {
+fn changed_fields(book: &TxSnap, copy: &TxSnap) -> Vec<ConflictField> {
     let blank = |s: &Option<String>| s.as_deref().unwrap_or("").to_string();
     let mut fields = Vec::new();
     if book.post_date != copy.post_date {
-        fields.push("date");
+        fields.push(ConflictField::Date);
     }
     if blank(&book.description) != blank(&copy.description) {
-        fields.push("description");
+        fields.push(ConflictField::Description);
     }
     if book.payee != copy.payee {
-        fields.push("payee");
+        fields.push(ConflictField::Payee);
     }
     if blank(&book.num) != blank(&copy.num) {
-        fields.push("number");
+        fields.push(ConflictField::Number);
     }
     if blank(&book.notes) != blank(&copy.notes) {
-        fields.push("notes");
+        fields.push(ConflictField::Notes);
     }
     if book.tags != copy.tags {
-        fields.push("tags");
+        fields.push(ConflictField::Tags);
     }
     if book.splits != copy.splits {
-        fields.push("splits");
+        fields.push(ConflictField::Splits);
     } else if book.states != copy.states {
-        fields.push("status");
+        fields.push(ConflictField::Status);
     }
     fields
 }
@@ -414,6 +428,7 @@ fn active_path(state: &State<'_, AppState>) -> Option<PathBuf> {
 
 /// Conflict copies next to the open book, newest first; empty without one.
 #[tauri::command]
+#[specta::specta]
 pub async fn list_sync_conflicts(
     state: State<'_, AppState>,
 ) -> Result<Vec<SyncConflictCopy>, AppError> {
@@ -426,6 +441,7 @@ pub async fn list_sync_conflicts(
 /// Compare a conflict copy (by file name, next to the open book) with the open
 /// book. The copy is read first, outside the DB lock; the book after, under it.
 #[tauri::command]
+#[specta::specta]
 pub async fn review_sync_conflict(
     state: State<'_, AppState>,
     file_name: String,
@@ -615,7 +631,7 @@ mod tests {
             ["t-gone"]
         );
 
-        let changes: Vec<(&str, &[&str])> = review
+        let changes: Vec<(&str, &[ConflictField])> = review
             .changed
             .iter()
             .map(|c| (c.book.guid.as_str(), c.fields.as_slice()))
@@ -623,8 +639,15 @@ mod tests {
         assert_eq!(
             changes,
             [
-                ("t-edit", &["description", "tags", "splits"][..]),
-                ("t-same", &["status"][..])
+                (
+                    "t-edit",
+                    &[
+                        ConflictField::Description,
+                        ConflictField::Tags,
+                        ConflictField::Splits
+                    ][..]
+                ),
+                ("t-same", &[ConflictField::Status][..])
             ]
         );
         let edit = &review.changed[0];

@@ -18,6 +18,7 @@ function schedule(partial: Partial<Schedule> = {}): Schedule {
     description: 'Monthly rent',
     num: null,
     notes: null,
+    payee: null,
     splits: [],
     previewAmount: 1000,
     autoPost: false,

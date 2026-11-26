@@ -233,6 +233,34 @@ impl serde::Serialize for AppError {
     }
 }
 
+/// Wire shape of [`AppError`], exported to the bindings as `BackendError`.
+#[derive(serde::Serialize, specta::Type)]
+#[allow(dead_code)] // only describes the type for the bindings
+struct BackendError {
+    kind: BackendErrorKind,
+    message: String,
+}
+
+/// [`AppError::kind`] values.
+#[derive(serde::Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
+enum BackendErrorKind {
+    NotFound,
+    Validation,
+    Io,
+    Db,
+    Internal,
+    BookChanged,
+    ReadOnly,
+}
+
+impl specta::Type for AppError {
+    fn definition(types: &mut specta::Types) -> specta::datatype::DataType {
+        BackendError::definition(types)
+    }
+}
+
 /// A database failure with its message plus the extended SQLite result code,
 /// so callers can match failure kinds (e.g. foreign-key) without substrings.
 #[derive(Debug)]

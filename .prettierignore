@@ -11,3 +11,6 @@ bun.lockb
 # Landing page build output (site/.gitignore)
 /site/build/
 /site/.svelte-kit/
+
+# Generated from the Rust commands (`bun run bindings`)
+/src/lib/bindings.ts

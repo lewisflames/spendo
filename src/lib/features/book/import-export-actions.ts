@@ -53,7 +53,7 @@ async function saveExport(
   defaultPath: string,
   filter: { name: string; extensions: string[] },
   ensureExtension: (path: string) => string,
-  run: (path: string) => Promise<string | void>,
+  run: (path: string) => Promise<string | null>,
   label: string
 ): Promise<boolean> {
   if (busy || !dbSession.value) return false;

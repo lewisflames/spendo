@@ -13,7 +13,7 @@ const MATCH_WINDOW_DAYS: i64 = 14;
 
 /// A clearing-account leg with no opposite leg within the window: money that
 /// left one account and hasn't been recorded arriving (or vice versa).
-#[derive(Debug, Serialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Clone, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenLeg {
     pub tx_guid: String,
@@ -25,7 +25,7 @@ pub struct OpenLeg {
     pub days_open: i64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TransitCheck {
     /// The `transit_account` book setting, when it names an existing account.
@@ -144,6 +144,7 @@ fn fetch_transit_check_inner(
 /// Unpaired transfer legs in the book's clearing account (`transit_account`
 /// setting); empty with no account when the setting is off.
 #[tauri::command]
+#[specta::specta]
 pub async fn fetch_transit_check(state: State<'_, AppState>) -> Result<TransitCheck, AppError> {
     run_blocking(state.db.clone(), |conn| {
         fetch_transit_check_inner(conn, chrono::Local::now().date_naive())

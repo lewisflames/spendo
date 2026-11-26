@@ -9,6 +9,7 @@ use crate::sql;
 use crate::tags::{self, TagRef};
 use crate::utils;
 use crate::utils::opt_text;
+use crate::utils::{SortDir, TxSortKey};
 
 /// Fixed denominators for manual-entry rational storage. `commodities` carries
 /// no SCU/fraction column, so per-commodity precision is out of scope for the
@@ -23,21 +24,25 @@ const BALANCE_EPS: f64 = 1e-6;
 /// amount exactly as displayed in the detail view (debits/credits sum to
 /// zero); `quantity` defaults to `amount` for cash accounts and carries share
 /// counts for investments.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SplitInput {
     pub account_guid: String,
     pub amount: f64,
+    #[serde(default)]
     pub quantity: Option<f64>,
+    #[serde(default)]
     pub memo: Option<String>,
 }
 
 /// Manual transaction payload (create + update share this shape).
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TxInput {
     pub post_date: String,
+    #[serde(default)]
     pub description: Option<String>,
+    #[serde(default)]
     pub num: Option<String>,
     /// `None` leaves an edited transaction's notes as they are (the edit form
     /// no longer shows them); a blank string clears them.
@@ -60,7 +65,7 @@ pub struct TxInput {
     pub payee: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SplitInfo {
     pub guid: String,
@@ -107,7 +112,7 @@ impl SplitData {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SplitDetail {
     pub guid: String,
@@ -123,7 +128,7 @@ pub struct SplitDetail {
     pub account_code: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TransactionRow {
     pub guid: String,
@@ -137,7 +142,7 @@ pub struct TransactionRow {
     pub payee: Option<PayeeRef>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TransactionDetail {
     pub guid: String,
@@ -154,7 +159,7 @@ pub struct TransactionDetail {
     pub payee: Option<PayeeRef>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TransactionDetailResult {
     pub transaction: TransactionDetail,
@@ -165,19 +170,24 @@ pub struct TransactionDetailResult {
     pub next_guid: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Filters {
+    #[serde(default)]
     pub search: Option<String>,
+    #[serde(default)]
     pub date_from: Option<String>,
+    #[serde(default)]
     pub date_to: Option<String>,
     /// Only transactions carrying this tag.
+    #[serde(default)]
     pub tag_guid: Option<String>,
     /// Only transactions with this payee.
+    #[serde(default)]
     pub payee_guid: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TransactionsResult {
     pub transactions: Vec<TransactionRow>,
@@ -188,7 +198,7 @@ pub struct TransactionsResult {
 }
 
 /// Per-day transaction count for the activity heatmap. `date` is `YYYY-MM-DD`.
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Debug, Serialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct HeatmapPoint {
     pub date: String,
@@ -661,8 +671,8 @@ fn fetch_transactions_inner(
     page: i64,
     page_size: i64,
     filters: Option<Filters>,
-    sort_by: Option<&str>,
-    sort_dir: Option<&str>,
+    sort_by: Option<TxSortKey>,
+    sort_dir: Option<SortDir>,
 ) -> Result<TransactionsResult, AppError> {
     let w = build_filter_conditions(&filters, 0)?;
     let where_clause = w.where_clause();
@@ -678,11 +688,11 @@ fn fetch_transactions_inner(
     // Amount sorting needs the FX-converted totals, which are computed in
     // Rust. Fetch one lightweight total row per matching transaction, sort,
     // paginate, then enrich only the page's transactions.
-    if sort_by == Some("amount") {
+    if sort_by == Some(TxSortKey::Amount) {
         let ctx = load_fx_context(conn)?;
         let mut totals = fetch_tx_totals(conn, &where_clause, &w.params, &ctx)?;
 
-        let ascending = sort_dir == Some("asc");
+        let ascending = sort_dir == Some(SortDir::Asc);
         totals.sort_by(|a, b| {
             let cmp = a.1.total_cmp(&b.1).then_with(|| a.0.cmp(&b.0));
             if ascending {
@@ -743,11 +753,13 @@ fn fetch_transactions_inner(
     }
 
     let order_clause = match (sort_by, sort_dir) {
-        (Some("description"), Some("asc")) => {
+        (Some(TxSortKey::Description), Some(SortDir::Asc)) => {
             "ORDER BY COALESCE(LOWER(description), '') ASC, guid ASC"
         }
-        (Some("description"), _) => "ORDER BY COALESCE(LOWER(description), '') DESC, guid DESC",
-        (Some("date"), Some("asc")) => "ORDER BY post_date ASC, guid ASC",
+        (Some(TxSortKey::Description), _) => {
+            "ORDER BY COALESCE(LOWER(description), '') DESC, guid DESC"
+        }
+        (Some(TxSortKey::Date), Some(SortDir::Asc)) => "ORDER BY post_date ASC, guid ASC",
         _ => "ORDER BY post_date DESC, guid DESC",
     };
 
@@ -820,28 +832,23 @@ fn fetch_transaction_heatmap_inner(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn fetch_transactions(
     state: State<'_, AppState>,
     page: i64,
     page_size: i64,
     filters: Option<Filters>,
-    sort_by: Option<String>,
-    sort_dir: Option<String>,
+    sort_by: Option<TxSortKey>,
+    sort_dir: Option<SortDir>,
 ) -> Result<TransactionsResult, AppError> {
     run_blocking(state.db.clone(), move |conn| {
-        fetch_transactions_inner(
-            conn,
-            page,
-            page_size,
-            filters,
-            sort_by.as_deref(),
-            sort_dir.as_deref(),
-        )
+        fetch_transactions_inner(conn, page, page_size, filters, sort_by, sort_dir)
     })
     .await
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn fetch_transaction_heatmap(
     state: State<'_, AppState>,
     filters: Option<Filters>,
@@ -951,6 +958,7 @@ fn fetch_transaction_inner(
 /// `None` when no transaction with that GUID exists (the frontend shows a
 /// not-found state instead of an error card).
 #[tauri::command]
+#[specta::specta]
 pub async fn fetch_transaction(
     state: State<'_, AppState>,
     guid: String,
@@ -1157,6 +1165,7 @@ fn delete_transaction_inner(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn create_transaction(
     state: State<'_, AppState>,
     input: TxInput,
@@ -1168,6 +1177,7 @@ pub async fn create_transaction(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn update_transaction(
     state: State<'_, AppState>,
     guid: String,
@@ -1180,6 +1190,7 @@ pub async fn update_transaction(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn delete_transaction(
     state: State<'_, AppState>,
     guid: String,
@@ -1198,7 +1209,7 @@ pub async fn delete_transaction(
 /// matching the list filters ("Select all matching"). `expected_count` is the
 /// total the user saw; a mismatch means the list changed underneath them
 /// (another edit, an import, a book switch) and the edit is refused.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, specta::Type)]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",
@@ -1214,7 +1225,7 @@ pub enum BulkTarget {
     },
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, specta::Type)]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",
@@ -1243,14 +1254,14 @@ pub enum BulkAction {
     SetPayee { name: String },
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct BulkEditInput {
     pub target: BulkTarget,
     pub action: BulkAction,
 }
 
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Debug, Serialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct BulkEditResult {
     /// Transactions the action changed.
@@ -1619,6 +1630,7 @@ fn bulk_edit_transactions_inner(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn bulk_edit_transactions(
     state: State<'_, AppState>,
     input: BulkEditInput,
@@ -2003,22 +2015,50 @@ mod tests {
         assert_eq!(page2.transactions[0].guid, "t1");
 
         // Amount sorting uses the FX-converted transaction total.
-        let asc =
-            fetch_transactions_inner(&conn, 1, 50, None, Some("amount"), Some("asc")).unwrap();
+        let asc = fetch_transactions_inner(
+            &conn,
+            1,
+            50,
+            None,
+            Some(TxSortKey::Amount),
+            Some(SortDir::Asc),
+        )
+        .unwrap();
         assert_eq!(asc.transactions[0].guid, "t2");
-        let desc =
-            fetch_transactions_inner(&conn, 1, 50, None, Some("amount"), Some("desc")).unwrap();
+        let desc = fetch_transactions_inner(
+            &conn,
+            1,
+            50,
+            None,
+            Some(TxSortKey::Amount),
+            Some(SortDir::Desc),
+        )
+        .unwrap();
         assert_eq!(desc.transactions[0].guid, "t1");
 
         // Amount-sorted pagination slices the sorted list and still enriches
         // only the page's transactions with their totals.
-        let amount_page_1 =
-            fetch_transactions_inner(&conn, 1, 1, None, Some("amount"), Some("desc")).unwrap();
+        let amount_page_1 = fetch_transactions_inner(
+            &conn,
+            1,
+            1,
+            None,
+            Some(TxSortKey::Amount),
+            Some(SortDir::Desc),
+        )
+        .unwrap();
         assert_eq!(amount_page_1.total_pages, 2);
         assert_eq!(amount_page_1.transactions[0].guid, "t1");
         assert_eq!(amount_page_1.transactions[0].total_amount, 50.0);
-        let amount_page_2 =
-            fetch_transactions_inner(&conn, 2, 1, None, Some("amount"), Some("desc")).unwrap();
+        let amount_page_2 = fetch_transactions_inner(
+            &conn,
+            2,
+            1,
+            None,
+            Some(TxSortKey::Amount),
+            Some(SortDir::Desc),
+        )
+        .unwrap();
         assert_eq!(amount_page_2.transactions[0].guid, "t2");
         assert_eq!(amount_page_2.transactions[0].total_amount, -15.0);
     }

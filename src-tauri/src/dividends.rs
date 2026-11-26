@@ -41,14 +41,14 @@ pub struct DividendEvent {
     pub amount: f64,
 }
 
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Debug, Serialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct DividendAccount {
     pub account_guid: String,
     pub account_name: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct DividendLinksInput {
     pub commodity_guid: String,
@@ -306,6 +306,7 @@ fn set_dividend_links_inner(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn set_dividend_links(
     state: State<'_, AppState>,
     input: DividendLinksInput,

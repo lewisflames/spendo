@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex};
 use tauri::State;
 
 use crate::db::{self, AppError, AppState};
-use crate::home::{get_summary, HomeDataResult};
+use crate::home::{get_summary, OpenedBook};
 
 /// Daily snapshots kept per book (one per day, so about a week back).
 const KEEP_DAILY: usize = 7;
@@ -34,7 +34,7 @@ const EXTENSION: &str = "spendo";
 /// UTC timestamp at the start of every snapshot file name.
 const STAMP_FORMAT: &str = "%Y%m%dT%H%M%S%.3f";
 
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub enum BackupReason {
     Daily,
@@ -86,7 +86,7 @@ impl BackupReason {
     }
 }
 
-#[derive(Serialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Debug, Clone, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct BackupEntry {
     pub file_name: String,
@@ -95,7 +95,7 @@ pub struct BackupEntry {
     pub byte_size: u64,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct BackupList {
     /// Snapshot folder of the active book; `None` while book-less.
@@ -446,6 +446,7 @@ fn restore_backup_inner(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn fetch_backups(state: State<'_, AppState>) -> Result<BackupList, AppError> {
     // Listing is plain disk I/O, so it reads the recorded path instead of
     // taking the DB lock; a swap racing this only shows a stale list.
@@ -468,6 +469,7 @@ pub async fn fetch_backups(state: State<'_, AppState>) -> Result<BackupList, App
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn create_backup(state: State<'_, AppState>) -> Result<BackupEntry, AppError> {
     let app_data_dir = state.app_data_dir.clone();
     db::run_blocking(state.db.clone(), move |conn| {
@@ -478,6 +480,7 @@ pub async fn create_backup(state: State<'_, AppState>) -> Result<BackupEntry, Ap
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn delete_backup(state: State<'_, AppState>, file_name: String) -> Result<(), AppError> {
     let book = db::lock(&state.db_path)
         .clone()
@@ -494,10 +497,11 @@ pub async fn delete_backup(state: State<'_, AppState>, file_name: String) -> Res
 /// Restore a snapshot into the open book in place (same file, same path).
 /// Content changes wholesale, so this bumps `book_generation` like a swap.
 #[tauri::command]
+#[specta::specta]
 pub async fn restore_backup(
     state: State<'_, AppState>,
     file_name: String,
-) -> Result<HomeDataResult, AppError> {
+) -> Result<OpenedBook, AppError> {
     let app_data_dir = state.app_data_dir.clone();
     let generation = state.book_generation.clone();
     // SAFETY: like Save As, the restore must run against the live connection,
@@ -511,9 +515,9 @@ pub async fn restore_backup(
         Ok(summary)
     })
     .await?;
-    Ok(HomeDataResult {
+    Ok(OpenedBook {
         has_data: true,
-        summary: Some(summary),
+        summary,
     })
 }
 

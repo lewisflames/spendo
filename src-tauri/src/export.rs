@@ -1,5 +1,5 @@
 use rusqlite::Connection;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use tauri::State;
@@ -7,6 +7,7 @@ use tauri::State;
 use crate::db::{run_blocking, run_io, AppError, AppState};
 use crate::fx;
 use crate::portfolio::{realized_gains_inner, RealizedGainRow};
+use crate::settings::{CsvDelimiter, ExportDateFormat};
 use crate::tax::{fetch_tax_summary_inner, TaxSection, TaxSummary};
 use crate::tree;
 use crate::utils;
@@ -324,35 +325,57 @@ const ACCOUNTS_EXPORT_HEADERS: [&str; 10] = [
     "Parent GUID",
 ];
 
-#[derive(Debug, Deserialize)]
+/// Field order of a locale date (`date_parts`), for the generated bindings;
+/// the field stays a `String` checked when formatting.
+#[derive(Serialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+#[allow(dead_code)]
+pub enum DateParts {
+    Dmy,
+    Mdy,
+    Ymd,
+}
+
+#[derive(Debug, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TransactionsExportInput {
     pub path: String,
+    #[specta(type = CsvDelimiter)]
     pub delimiter: String,
     /// `"iso"` keeps `YYYY-MM-DD`; `"locale"` renders via `date_parts` /
     /// `date_separator` (derived from `Intl.DateTimeFormat` in the webview so
     /// the file matches the locale the user sees).
+    #[specta(type = ExportDateFormat)]
     pub date_format: String,
+    #[specta(type = Option<DateParts>)]
+    #[serde(default)]
     pub date_parts: Option<String>,
+    #[serde(default)]
     pub date_separator: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountsExportInput {
     pub path: String,
+    #[specta(type = CsvDelimiter)]
     pub delimiter: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct RealizedGainsExportInput {
     pub path: String,
     pub year: i32,
+    #[specta(type = CsvDelimiter)]
     pub delimiter: String,
     /// Same date options as [`TransactionsExportInput`].
+    #[specta(type = ExportDateFormat)]
     pub date_format: String,
+    #[specta(type = Option<DateParts>)]
+    #[serde(default)]
     pub date_parts: Option<String>,
+    #[serde(default)]
     pub date_separator: Option<String>,
 }
 
@@ -368,11 +391,12 @@ const REALIZED_GAINS_EXPORT_HEADERS: [&str; 9] = [
     "Currency",
 ];
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TaxSummaryExportInput {
     pub path: String,
     pub year: i32,
+    #[specta(type = CsvDelimiter)]
     pub delimiter: String,
 }
 
@@ -532,6 +556,7 @@ fn account_row_cells(row: &ExportAccountRow) -> Vec<String> {
 /// Full-book transactions CSV written straight to the user's chosen path: rows
 /// are read under the DB lock, the file write happens on `run_io` without it.
 #[tauri::command]
+#[specta::specta]
 pub async fn export_transactions_csv(
     state: State<'_, AppState>,
     input: TransactionsExportInput,
@@ -563,6 +588,7 @@ pub async fn export_transactions_csv(
 
 /// Full account-tree CSV written straight to the user's chosen path.
 #[tauri::command]
+#[specta::specta]
 pub async fn export_accounts_csv(
     state: State<'_, AppState>,
     input: AccountsExportInput,
@@ -584,6 +610,7 @@ pub async fn export_accounts_csv(
 /// One year's realized gains (one row per lot a sale consumed), written
 /// straight to the user's chosen path.
 #[tauri::command]
+#[specta::specta]
 pub async fn export_realized_gains_csv(
     state: State<'_, AppState>,
     input: RealizedGainsExportInput,
@@ -667,6 +694,7 @@ fn tax_summary_cells(s: &TaxSummary) -> Vec<Vec<String>> {
 
 /// Writes the tax summary for one year as CSV.
 #[tauri::command]
+#[specta::specta]
 pub async fn export_tax_summary_csv(
     state: State<'_, AppState>,
     input: TaxSummaryExportInput,
@@ -695,6 +723,26 @@ pub async fn export_tax_summary_csv(
 mod tests {
     use super::*;
     use crate::db::init_db;
+
+    /// The binding enums list exactly the values the validators accept.
+    #[test]
+    fn option_enums_match_validation() {
+        let wire = |v: serde_json::Value| v.as_str().unwrap().to_string();
+        for d in [CsvDelimiter::Comma, CsvDelimiter::Semicolon] {
+            assert!(validate_delimiter(&wire(serde_json::to_value(d).unwrap())).is_ok());
+        }
+        for p in [DateParts::Dmy, DateParts::Mdy, DateParts::Ymd] {
+            let p = wire(serde_json::to_value(p).unwrap());
+            assert!(
+                validate_date_options("locale", Some(&p), None).is_ok(),
+                "{p}"
+            );
+        }
+        for f in [ExportDateFormat::Iso, ExportDateFormat::Locale] {
+            let f = wire(serde_json::to_value(f).unwrap());
+            assert!(validate_date_options(&f, None, None).is_ok(), "{f}");
+        }
+    }
 
     fn setup() -> Connection {
         let conn = Connection::open_in_memory().unwrap();

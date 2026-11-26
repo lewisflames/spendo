@@ -30,6 +30,9 @@ csv = "1"
 encoding_rs = "0.8"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+specta = { version = "=2.0.0-rc.28", features = ["derive", "chrono"] }
+specta-typescript = "=0.0.15"
+tauri-specta = { version = "=2.0.0-rc.29", features = ["typescript"] }
 
 [profile.release]
 codegen-units = 1

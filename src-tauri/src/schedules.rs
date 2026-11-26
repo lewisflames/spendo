@@ -21,21 +21,40 @@ pub const FREQUENCIES: [&str; 6] = [
     "yearly",
 ];
 
+/// [`FREQUENCIES`] for the generated bindings; `frequency` stays a `String`.
+#[derive(Serialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+#[allow(dead_code)]
+pub enum ScheduleFrequency {
+    Daily,
+    Weekly,
+    Biweekly,
+    Monthly,
+    Quarterly,
+    Yearly,
+}
+
 // ── Wire structs ─────────────────────────────────────────────────────────────
 
 /// Create/update payload: recurrence rule + a transaction template. One flat
 /// `Input` struct per backend conventions (template fields mirror `TxInput`,
 /// minus `postDate` — the due date supplies it at posting time).
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ScheduleInput {
     pub name: String,
+    #[specta(type = ScheduleFrequency)]
     pub frequency: String,
+    #[serde(default)]
     pub interval_mult: Option<i64>,
     pub start_date: String,
+    #[serde(default)]
     pub end_date: Option<String>,
+    #[serde(default)]
     pub max_occurrences: Option<i64>,
+    #[serde(default)]
     pub description: Option<String>,
+    #[serde(default)]
     pub num: Option<String>,
     /// `None` keeps an edited schedule's template notes (the form no longer
     /// shows them); a blank string clears them.
@@ -53,7 +72,7 @@ pub struct ScheduleInput {
     pub spread_total: bool,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ScheduleSplit {
     pub account_guid: String,
@@ -63,11 +82,12 @@ pub struct ScheduleSplit {
     pub memo: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Schedule {
     pub guid: String,
     pub name: String,
+    #[specta(type = ScheduleFrequency)]
     pub frequency: String,
     pub interval_mult: i64,
     pub start_date: String,
@@ -96,14 +116,14 @@ pub struct Schedule {
 /// Outcome of `post_due_schedules`: occurrences posted, plus the schedules
 /// that stopped on a validation error (e.g. an account became a placeholder)
 /// so the user can fix them.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AutoPostResult {
     pub posted: i64,
     pub failed: Vec<AutoPostFailure>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AutoPostFailure {
     pub guid: String,
@@ -964,6 +984,7 @@ fn post_due_schedules_inner(conn: &Connection, today: &str) -> Result<AutoPostRe
 // ── Commands ─────────────────────────────────────────────────────────────────
 
 #[tauri::command]
+#[specta::specta]
 pub async fn create_schedule(
     state: State<'_, AppState>,
     input: ScheduleInput,
@@ -975,6 +996,7 @@ pub async fn create_schedule(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn update_schedule(
     state: State<'_, AppState>,
     guid: String,
@@ -987,6 +1009,7 @@ pub async fn update_schedule(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn delete_schedule(state: State<'_, AppState>, guid: String) -> Result<(), AppError> {
     run_blocking(state.db.clone(), move |conn| {
         delete_schedule_inner(conn, &guid)
@@ -995,6 +1018,7 @@ pub async fn delete_schedule(state: State<'_, AppState>, guid: String) -> Result
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn set_schedule_active(
     state: State<'_, AppState>,
     guid: String,
@@ -1007,11 +1031,13 @@ pub async fn set_schedule_active(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn fetch_schedules(state: State<'_, AppState>) -> Result<Vec<Schedule>, AppError> {
     run_blocking(state.db.clone(), fetch_schedules_inner).await
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn fetch_schedule(
     state: State<'_, AppState>,
     guid: String,
@@ -1025,6 +1051,7 @@ pub async fn fetch_schedule(
 /// Post the due occurrence now. Returns the new transaction GUID so the
 /// frontend can navigate to its detail page.
 #[tauri::command]
+#[specta::specta]
 pub async fn post_schedule_occurrence(
     state: State<'_, AppState>,
     guid: String,
@@ -1038,6 +1065,7 @@ pub async fn post_schedule_occurrence(
 /// Post what auto-post schedules have due; the layout runs this when a book
 /// opens.
 #[tauri::command]
+#[specta::specta]
 pub async fn post_due_schedules(state: State<'_, AppState>) -> Result<AutoPostResult, AppError> {
     run_blocking(state.db.clone(), |conn| {
         post_due_schedules_inner(conn, &chrono::Local::now().format("%Y-%m-%d").to_string())
@@ -1048,6 +1076,7 @@ pub async fn post_due_schedules(state: State<'_, AppState>) -> Result<AutoPostRe
 /// Skip the due occurrence without posting. Returns the new pointer (`None`
 /// when the skip completed the schedule).
 #[tauri::command]
+#[specta::specta]
 pub async fn skip_schedule_occurrence(
     state: State<'_, AppState>,
     guid: String,
@@ -1062,6 +1091,22 @@ pub async fn skip_schedule_occurrence(
 mod tests {
     use super::*;
     use crate::db::init_db;
+
+    #[test]
+    fn frequency_enum_matches_frequencies() {
+        use ScheduleFrequency::*;
+        let wire: Vec<String> = [Daily, Weekly, Biweekly, Monthly, Quarterly, Yearly]
+            .into_iter()
+            .map(|f| {
+                serde_json::to_value(f)
+                    .unwrap()
+                    .as_str()
+                    .unwrap()
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(wire, FREQUENCIES);
+    }
 
     fn setup() -> Connection {
         let conn = Connection::open_in_memory().unwrap();

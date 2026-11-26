@@ -25,7 +25,7 @@ const ALLOWED_TYPES: [(&str, &str); 6] = [
     ("webp", "image/webp"),
 ];
 
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Debug, Serialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AttachmentInfo {
     pub guid: String,
@@ -35,7 +35,7 @@ pub struct AttachmentInfo {
     pub created_at: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AttachmentAddInput {
     pub tx_guid: String,
@@ -271,6 +271,7 @@ fn fetch_blob(conn: &Connection, guid: &str) -> Result<(String, String, Vec<u8>)
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn fetch_attachments(
     state: State<'_, AppState>,
     tx_guid: String,
@@ -282,6 +283,7 @@ pub async fn fetch_attachments(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn add_attachments(
     state: State<'_, AppState>,
     input: AttachmentAddInput,
@@ -304,6 +306,7 @@ pub async fn add_attachments(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn delete_attachment(state: State<'_, AppState>, guid: String) -> Result<(), AppError> {
     run_blocking(state.db.clone(), move |conn| {
         delete_attachment_inner(conn, &guid)
@@ -312,6 +315,7 @@ pub async fn delete_attachment(state: State<'_, AppState>, guid: String) -> Resu
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn export_attachment(
     state: State<'_, AppState>,
     guid: String,
@@ -330,6 +334,7 @@ pub async fn export_attachment(
 /// application. The opener runs in Rust, so no new capability scopes are
 /// needed for arbitrary user-chosen paths.
 #[tauri::command]
+#[specta::specta]
 pub async fn open_attachment(
     app: AppHandle,
     state: State<'_, AppState>,

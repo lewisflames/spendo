@@ -28,7 +28,7 @@ pub struct CommodityInfo {
     pub full_name: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PriceEntry {
     pub mnemonic: String,
@@ -37,7 +37,7 @@ pub struct PriceEntry {
     pub currency: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PricesResult {
     pub prices: Vec<PriceEntry>,
@@ -45,14 +45,14 @@ pub struct PricesResult {
     pub errors: Vec<PriceError>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PriceError {
     pub mnemonic: String,
     pub error: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PriceHistoryEntry {
     pub date: String,
@@ -176,7 +176,7 @@ pub fn get_price_history(
     Ok(rows)
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SymbolOverride {
     pub commodity_guid: String,
@@ -963,6 +963,7 @@ pub fn latest_quote_currencies(conn: &Connection) -> Result<HashMap<String, Stri
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn fetch_symbol_overrides(
     state: State<'_, AppState>,
 ) -> Result<Vec<SymbolOverride>, AppError> {
@@ -1005,6 +1006,7 @@ fn set_symbol_override_inner(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn set_symbol_override(
     state: State<'_, AppState>,
     commodity_guid: String,
@@ -1026,6 +1028,7 @@ fn delete_symbol_override_inner(conn: &Connection, commodity_guid: &str) -> Resu
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn delete_symbol_override(
     state: State<'_, AppState>,
     commodity_guid: String,
@@ -1057,6 +1060,7 @@ pub(crate) fn write_prices_and_log(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn refresh_prices(state: State<'_, AppState>) -> Result<PricesResult, AppError> {
     let generation = state.book_generation.load(Ordering::SeqCst);
     let pre = db::run_blocking(state.db.clone(), read_price_data).await?;

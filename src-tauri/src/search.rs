@@ -13,7 +13,7 @@ pub const MIN_QUERY_LEN: usize = 2;
 const DEFAULT_LIMIT: i64 = 5;
 const MAX_LIMIT: i64 = 10;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchAccount {
     pub guid: String,
@@ -24,7 +24,7 @@ pub struct SearchAccount {
     pub description: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchTransaction {
     pub guid: String,
@@ -33,7 +33,7 @@ pub struct SearchTransaction {
     pub num: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchHolding {
     pub commodity_guid: String,
@@ -42,7 +42,7 @@ pub struct SearchHolding {
     pub namespace: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchBudget {
     pub account_guid: String,
@@ -51,7 +51,7 @@ pub struct SearchBudget {
     pub year: i32,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct GlobalSearchResult {
     pub accounts: Vec<SearchAccount>,
@@ -224,6 +224,7 @@ fn search_global_inner(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn search_global(
     state: State<'_, AppState>,
     query: String,

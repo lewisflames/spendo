@@ -30,7 +30,7 @@ function budgetRow(partial: Partial<BudgetActualRow>): BudgetActualRow {
     guid: 'budget',
     accountGuid: 'food',
     accountName: 'Food',
-    accountDescription: undefined,
+    accountDescription: null,
     accountCode: null,
     accountType: 'EXPENSE',
     budgetAmount: 0,

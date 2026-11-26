@@ -28,14 +28,18 @@ pub const ACCOUNT_TYPES: [&str; 15] = [
 
 /// Shared create/update payload. `parent_guid = None` means top-level (stored
 /// as the internal ROOT's guid).
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountInput {
     pub name: String,
     pub account_type: String,
+    #[serde(default)]
     pub parent_guid: Option<String>,
+    #[serde(default)]
     pub code: Option<String>,
+    #[serde(default)]
     pub description: Option<String>,
+    #[serde(default)]
     pub commodity_guid: Option<String>,
     pub placeholder: bool,
 }
@@ -397,6 +401,7 @@ fn delete_account_inner(conn: &Connection, guid: &str) -> Result<(), AppError> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn create_account(
     state: State<'_, AppState>,
     input: AccountInput,
@@ -408,6 +413,7 @@ pub async fn create_account(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn update_account(
     state: State<'_, AppState>,
     guid: String,
@@ -420,6 +426,7 @@ pub async fn update_account(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn delete_account(state: State<'_, AppState>, guid: String) -> Result<(), AppError> {
     run_blocking(state.db.clone(), move |conn| {
         delete_account_inner(conn, &guid)

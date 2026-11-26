@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use tauri::State;
 
 use crate::db::{run_blocking, with_tx_err, AppError, AppState};
-use crate::home::{get_summary, HomeDataResult};
+use crate::home::{get_summary, OpenedBook};
 use crate::utils;
 
 /// Canonical root accounts every book gets: (display name, category). The
@@ -101,7 +101,7 @@ pub(crate) fn seed_empty_book(conn: &Connection, mnemonic: &str) -> Result<(), A
     })
 }
 
-fn set_base_currency_inner(conn: &Connection, currency: &str) -> Result<HomeDataResult, AppError> {
+fn set_base_currency_inner(conn: &Connection, currency: &str) -> Result<OpenedBook, AppError> {
     let mnemonic = normalize_mnemonic(currency)?;
 
     let root: Option<(String, Option<String>)> = conn
@@ -143,17 +143,18 @@ fn set_base_currency_inner(conn: &Connection, currency: &str) -> Result<HomeData
         rusqlite::params![commodity_guid, root_guid],
     )?;
 
-    Ok(HomeDataResult {
+    Ok(OpenedBook {
         has_data: true,
-        summary: Some(get_summary(conn)?),
+        summary: get_summary(conn)?,
     })
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn set_base_currency(
     state: State<'_, AppState>,
     currency: String,
-) -> Result<HomeDataResult, AppError> {
+) -> Result<OpenedBook, AppError> {
     run_blocking(state.db.clone(), move |conn| {
         set_base_currency_inner(conn, &currency)
     })
@@ -255,7 +256,7 @@ mod tests {
         let conn = setup();
         seed_empty_book(&conn, "USD").unwrap();
         let result = set_base_currency_inner(&conn, "eur").unwrap();
-        assert_eq!(result.summary.unwrap().currency, "EUR");
+        assert_eq!(result.summary.currency, "EUR");
     }
 
     #[test]

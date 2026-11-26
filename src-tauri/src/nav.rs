@@ -7,7 +7,7 @@ use crate::db::{run_blocking, AppState};
 use crate::utils;
 
 /// Counts rendered as badges on the app sidebar.
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Default, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct NavBadges {
     /// Active schedules whose next occurrence is due today or overdue.
@@ -51,6 +51,7 @@ fn nav_badges_inner(conn: &Connection) -> Result<NavBadges, AppError> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn fetch_nav_badges(state: State<'_, AppState>) -> Result<NavBadges, AppError> {
     run_blocking(state.db.clone(), nav_badges_inner).await
 }

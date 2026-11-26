@@ -17,6 +17,8 @@ function candidate(
     txGuid: `tx-${splitGuid}`,
     postDate,
     description: null,
+    num: null,
+    memo: null,
     amount,
     reconcileState: 'n',
     counterAccounts: [],

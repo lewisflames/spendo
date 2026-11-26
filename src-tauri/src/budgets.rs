@@ -15,7 +15,7 @@ use crate::utils;
 /// Carryover is always applied (no opt-out): each year's remaining is
 /// `(annual + carry-in) − actual`, where carry-in sums `(budget − actual)`
 /// over earlier years that have a budget row — years without one are skipped.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Budget {
     pub guid: String,
@@ -29,14 +29,14 @@ pub struct Budget {
     pub created_at: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct BudgetDateRange {
     pub earliest_date: Option<String>,
     pub latest_date: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct BudgetActualRow {
     pub guid: String,
@@ -59,7 +59,7 @@ pub struct BudgetActualRow {
 
 /// One month within a yearly budget detail: read-only pacing slice derived
 /// from the year's effective total (annual + carry-in).
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct MonthlySlice {
     pub month: i32,
@@ -70,7 +70,7 @@ pub struct MonthlySlice {
     pub pacing_percentage: f64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct BudgetYearSummary {
     pub budget_amount: f64,
@@ -85,7 +85,7 @@ pub struct BudgetYearSummary {
     pub elapsed_months: i32,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct BudgetDetail {
     pub budget: Budget,
@@ -751,6 +751,7 @@ fn fetch_budget_date_range_inner(conn: &Connection) -> Result<BudgetDateRange, A
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn set_budget_year_amount(
     state: State<'_, AppState>,
     account_guid: String,
@@ -764,6 +765,7 @@ pub async fn set_budget_year_amount(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn fetch_budget_years(
     state: State<'_, AppState>,
     account_guid: String,
@@ -775,6 +777,7 @@ pub async fn fetch_budget_years(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn delete_budget_year(
     state: State<'_, AppState>,
     account_guid: String,
@@ -787,6 +790,7 @@ pub async fn delete_budget_year(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn fetch_budget_vs_actual(
     state: State<'_, AppState>,
     year: i32,
@@ -798,6 +802,7 @@ pub async fn fetch_budget_vs_actual(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn fetch_budget_detail(
     state: State<'_, AppState>,
     account_guid: String,
@@ -810,6 +815,7 @@ pub async fn fetch_budget_detail(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn fetch_budget_date_range(
     state: State<'_, AppState>,
 ) -> Result<BudgetDateRange, AppError> {

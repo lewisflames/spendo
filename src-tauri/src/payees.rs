@@ -18,7 +18,7 @@ use crate::utils;
 pub const MAX_PAYEE_LEN: usize = 100;
 
 /// A payee as shown on a transaction.
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PayeeRef {
     pub guid: String,
@@ -26,7 +26,7 @@ pub struct PayeeRef {
 }
 
 /// A payee with its usage, for the editor suggestions and Settings.
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Debug, Serialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PayeeSummary {
     pub guid: String,
@@ -36,7 +36,7 @@ pub struct PayeeSummary {
     pub last_used: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct RenamePayeeInput {
     pub guid: String,
@@ -211,12 +211,14 @@ fn delete_payee_inner(conn: &Connection, guid: &str) -> Result<(), AppError> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn fetch_payees(state: State<'_, AppState>) -> Result<Vec<PayeeSummary>, AppError> {
     run_blocking(state.db.clone(), fetch_payees_inner).await
 }
 
 /// Returns the surviving payee's GUID (the merge target when names collide).
 #[tauri::command]
+#[specta::specta]
 pub async fn rename_payee(
     state: State<'_, AppState>,
     input: RenamePayeeInput,
@@ -228,6 +230,7 @@ pub async fn rename_payee(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn delete_payee(state: State<'_, AppState>, guid: String) -> Result<(), AppError> {
     run_blocking(state.db.clone(), move |conn| {
         delete_payee_inner(conn, &guid)

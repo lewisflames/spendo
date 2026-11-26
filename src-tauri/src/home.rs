@@ -10,7 +10,7 @@ use crate::fx;
 use crate::prices::{get_cached_prices_map, PriceHistory};
 use crate::utils;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct DataSummary {
     pub currency: String,
@@ -23,11 +23,20 @@ pub struct DataSummary {
     pub read_only: bool,
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct HomeDataResult {
     pub has_data: bool,
     pub summary: Option<DataSummary>,
+}
+
+/// A book just opened, created, saved as, reloaded or restored (or its base
+/// currency set): it always has a summary.
+#[derive(serde::Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenedBook {
+    pub has_data: bool,
+    pub summary: DataSummary,
 }
 
 pub fn get_summary(conn: &Connection) -> Result<DataSummary, AppError> {
@@ -118,7 +127,7 @@ pub fn get_summary(conn: &Connection) -> Result<DataSummary, AppError> {
 
 /// One month-end point of the net worth trend, in report currency.
 /// `liabilities` is the amount owed (positive when in debt).
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct NetWorthPoint {
     /// YYYY-MM-DD: the month's last day, or today for the current month.
@@ -231,6 +240,7 @@ fn fetch_net_worth_trend_inner(conn: &Connection) -> Result<Vec<NetWorthPoint>, 
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn fetch_net_worth_trend(
     state: State<'_, AppState>,
 ) -> Result<Vec<NetWorthPoint>, AppError> {
@@ -238,6 +248,7 @@ pub async fn fetch_net_worth_trend(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn fetch_home_data(state: State<'_, AppState>) -> Result<HomeDataResult, AppError> {
     // A book being open is not the same as a book having data: a cleared or
     // freshly seeded book still needs its shell so pages can show their empty

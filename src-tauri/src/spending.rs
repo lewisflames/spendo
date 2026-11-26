@@ -12,19 +12,22 @@ use crate::db::{run_blocking, AppError, AppState};
 use crate::reports::{self, AccountMeta, ConvertedBucket};
 use crate::utils;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SpendingInput {
     pub date_from: String,
     pub date_to: String,
+    #[serde(default)]
     pub prev_date_from: Option<String>,
+    #[serde(default)]
     pub prev_date_to: Option<String>,
     /// Expense account whose children become the categories; `None` starts
     /// at the top of the expense tree.
+    #[serde(default)]
     pub parent_guid: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SpendingCategory {
     pub account_guid: String,
@@ -40,14 +43,14 @@ pub struct SpendingCategory {
     pub change_pct: Option<f64>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SpendingCrumb {
     pub account_guid: String,
     pub account_name: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SpendingReport {
     pub date_from: String,
@@ -312,6 +315,7 @@ fn fetch_spending_report_inner(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn fetch_spending_report(
     state: State<'_, AppState>,
     input: SpendingInput,

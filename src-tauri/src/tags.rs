@@ -20,7 +20,7 @@ pub const MAX_TAG_LEN: usize = 40;
 pub const MAX_TAGS_PER_TX: usize = 20;
 
 /// A tag as shown on a transaction.
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TagRef {
     pub guid: String,
@@ -28,7 +28,7 @@ pub struct TagRef {
 }
 
 /// A tag with its usage, for the editor suggestions and Settings.
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Debug, Serialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TagSummary {
     pub guid: String,
@@ -38,7 +38,7 @@ pub struct TagSummary {
     pub last_used: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct RenameTagInput {
     pub guid: String,
@@ -243,12 +243,14 @@ fn delete_tag_inner(conn: &Connection, guid: &str) -> Result<(), AppError> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn fetch_tags(state: State<'_, AppState>) -> Result<Vec<TagSummary>, AppError> {
     run_blocking(state.db.clone(), fetch_tags_inner).await
 }
 
 /// Returns the surviving tag's GUID (the merge target when names collide).
 #[tauri::command]
+#[specta::specta]
 pub async fn rename_tag(
     state: State<'_, AppState>,
     input: RenameTagInput,
@@ -257,6 +259,7 @@ pub async fn rename_tag(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn delete_tag(state: State<'_, AppState>, guid: String) -> Result<(), AppError> {
     run_blocking(state.db.clone(), move |conn| delete_tag_inner(conn, &guid)).await
 }

@@ -33,7 +33,8 @@ describe('bulk edit selection', () => {
       guid: `${accountGuid}-split`,
       accountGuid,
       accountName,
-      amount: 1
+      amount: 1,
+      memo: null
     });
     const accounts = selectionAccounts([
       { guid: 't1', splits: [split('bank', 'Bank'), split('food', 'Food')] },

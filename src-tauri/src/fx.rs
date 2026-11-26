@@ -198,7 +198,7 @@ pub fn convert_optional(
 /// A security held in the book with no cached price. Distinct from a missing
 /// FX rate: refreshing only helps if the symbol resolves, otherwise the user
 /// must set an explicit symbol override on the holding.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct MissingPrice {
     pub mnemonic: String,

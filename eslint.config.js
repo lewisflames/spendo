@@ -11,7 +11,7 @@ const gitignorePath = path.resolve(import.meta.dirname, '.gitignore');
 export default defineConfig(
   includeIgnoreFile(gitignorePath),
   // The landing page is its own package (site/package.json) with its own check.
-  { ignores: ['site/'] },
+  { ignores: ['site/', 'src/lib/bindings.ts'] },
   js.configs.recommended,
   ts.configs.recommended,
   svelte.configs.recommended,

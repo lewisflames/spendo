@@ -30,7 +30,7 @@ const BALANCE_EPS: f64 = 0.005;
 /// Cap on state changes accepted in one save/finish call.
 const MAX_SPLIT_UPDATES: usize = 2000;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ReconcileCandidate {
     pub split_guid: String,
@@ -50,7 +50,7 @@ pub struct ReconcileCandidate {
     pub counter_accounts: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ReconcileInfo {
     pub account_guid: String,
@@ -74,7 +74,7 @@ pub struct ReconcileInfo {
 
 /// One reconcilable account's progress, merged into the `/reconcile` index so
 /// accounts with work (or saved progress) stand out without opening each one.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ReconcileAccountSummary {
     pub account_guid: String,
@@ -87,7 +87,7 @@ pub struct ReconcileAccountSummary {
     pub last_reconciled_date: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ReopenReconcileResult {
     pub reopened_count: i64,
@@ -97,14 +97,14 @@ pub struct ReopenReconcileResult {
     pub through_date: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SplitStateUpdate {
     pub split_guid: String,
     pub state: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct MarkReconcileInput {
     pub account_guid: String,
@@ -114,13 +114,13 @@ pub struct MarkReconcileInput {
     pub updates: Vec<SplitStateUpdate>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct MarkReconcileResult {
     pub updated: i64,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct FinishReconcileInput {
     pub account_guid: String,
@@ -132,7 +132,7 @@ pub struct FinishReconcileInput {
     pub updates: Vec<SplitStateUpdate>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct FinishReconcileResult {
     pub reconciled_count: i64,
@@ -836,6 +836,7 @@ fn fetch_reconcile_summaries_inner(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn fetch_reconcile_info(
     state: State<'_, AppState>,
     account_guid: String,
@@ -848,6 +849,7 @@ pub async fn fetch_reconcile_info(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn mark_reconcile_splits(
     state: State<'_, AppState>,
     input: MarkReconcileInput,
@@ -859,6 +861,7 @@ pub async fn mark_reconcile_splits(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn finish_reconciliation(
     state: State<'_, AppState>,
     input: FinishReconcileInput,
@@ -870,6 +873,7 @@ pub async fn finish_reconciliation(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn reopen_last_reconciliation(
     state: State<'_, AppState>,
     account_guid: String,
@@ -881,6 +885,7 @@ pub async fn reopen_last_reconciliation(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn fetch_reconcile_summaries(
     state: State<'_, AppState>,
 ) -> Result<Vec<ReconcileAccountSummary>, AppError> {

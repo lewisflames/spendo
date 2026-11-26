@@ -23,7 +23,7 @@ use crate::{portfolio, settings, tags, utils};
 /// Years between a tax year and the postings that settle its return.
 pub const SETTLEMENT_LAG_YEARS: i32 = 1;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum TaxRole {
     /// Gross wages (INCOME).
@@ -79,20 +79,20 @@ impl TaxRole {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TaxRoleAssignment {
     pub account_guid: String,
     pub role: TaxRole,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveTaxRolesInput {
     pub roles: Vec<TaxRoleAssignment>,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TaxLine {
     pub account_guid: String,
@@ -101,7 +101,7 @@ pub struct TaxLine {
     pub amount: f64,
 }
 
-#[derive(Debug, Default, Serialize, PartialEq)]
+#[derive(Debug, Default, Serialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TaxSection {
     /// Ordered by account code, then name.
@@ -109,7 +109,7 @@ pub struct TaxSection {
     pub total: f64,
 }
 
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Debug, Serialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct RealizedTotals {
     pub gains: f64,
@@ -119,7 +119,7 @@ pub struct RealizedTotals {
     pub disposals: i64,
 }
 
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Debug, Serialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct DeductibleTotals {
     pub tag_guid: String,
@@ -129,7 +129,7 @@ pub struct DeductibleTotals {
     pub transactions: i64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TaxSummary {
     pub year: i32,
@@ -140,6 +140,7 @@ pub struct TaxSummary {
     pub is_partial: bool,
     /// Year whose postings settle this year's return.
     pub settlement_year: i32,
+    #[specta(type = crate::settings::CostBasisMethod)]
     pub cost_basis_method: String,
     pub employment_income: TaxSection,
     pub employment_withholding: TaxSection,
@@ -522,6 +523,7 @@ pub(crate) fn fetch_tax_summary_inner(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn fetch_tax_summary(
     state: State<'_, AppState>,
     year: i32,
@@ -533,6 +535,7 @@ pub async fn fetch_tax_summary(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn fetch_tax_roles(
     state: State<'_, AppState>,
 ) -> Result<Vec<TaxRoleAssignment>, AppError> {
@@ -540,6 +543,7 @@ pub async fn fetch_tax_roles(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn save_tax_roles(
     state: State<'_, AppState>,
     input: SaveTaxRolesInput,

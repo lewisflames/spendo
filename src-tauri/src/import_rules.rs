@@ -8,11 +8,12 @@ use crate::utils;
 /// One description-match rule: the first rule (by priority, then id) whose
 /// pattern matches a CSV row's description picks that row's category. Rules
 /// are book-scoped user config.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportRule {
     pub id: i64,
     pub priority: i64,
+    #[specta(type = MatchType)]
     pub match_type: String,
     pub pattern: String,
     pub account_guid: String,
@@ -21,13 +22,23 @@ pub struct ImportRule {
     pub account_code: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportRuleInput {
     pub priority: i64,
+    #[specta(type = MatchType)]
     pub match_type: String,
     pub pattern: String,
     pub account_guid: String,
+}
+
+/// `match_type` values for the generated bindings; checked by `validate_rule_input`.
+#[derive(Serialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+#[allow(dead_code)]
+pub enum MatchType {
+    Contains,
+    Equals,
 }
 
 const MAX_PATTERN_CHARS: usize = 200;
@@ -301,11 +312,13 @@ pub(crate) fn resolve_account(
 // ── Commands ─────────────────────────────────────────────────────────────────
 
 #[tauri::command]
+#[specta::specta]
 pub async fn fetch_import_rules(state: State<'_, AppState>) -> Result<Vec<ImportRule>, AppError> {
     run_blocking(state.db.clone(), fetch_import_rules_inner).await
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn create_import_rule(
     state: State<'_, AppState>,
     input: ImportRuleInput,
@@ -317,6 +330,7 @@ pub async fn create_import_rule(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn update_import_rule(
     state: State<'_, AppState>,
     id: i64,
@@ -329,6 +343,7 @@ pub async fn update_import_rule(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn delete_import_rule(state: State<'_, AppState>, id: i64) -> Result<(), AppError> {
     run_blocking(state.db.clone(), move |conn| {
         delete_import_rule_inner(conn, id)
@@ -337,6 +352,7 @@ pub async fn delete_import_rule(state: State<'_, AppState>, id: i64) -> Result<(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn move_import_rule(
     state: State<'_, AppState>,
     id: i64,
