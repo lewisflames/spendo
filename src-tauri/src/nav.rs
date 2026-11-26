@@ -106,7 +106,7 @@ mod tests {
         add_tx(&conn, "t1", "2024-01-10", None);
         add_tx(&conn, "t2", "2024-01-11", Some("c"));
         add_tx(&conn, "t3", "2024-01-12", Some("y"));
-        // GnuCash's default "not reconciled" state counts too.
+        // The default "not reconciled" state counts too.
         add_tx(&conn, "t4", "2024-01-13", Some("n"));
         // Future-dated rows are excluded by the shared visibility window.
         add_tx(&conn, "t5", "9999-01-01", None);

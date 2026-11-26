@@ -94,7 +94,7 @@ fn expense_children(meta: &HashMap<String, AccountMeta>) -> HashMap<&str, Vec<&s
     children
 }
 
-/// Expense accounts without an expense parent. A single root (GnuCash's
+/// Expense accounts without an expense parent. A single root (the
 /// `Expenses` placeholder) is the implicit top, so the top level lists its
 /// children instead of one lonely bar.
 fn top_level(meta: &HashMap<String, AccountMeta>, children: &HashMap<&str, Vec<&str>>) -> Level {

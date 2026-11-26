@@ -197,7 +197,7 @@ mod tests {
         // Paired: out of the bank on the 31st, into the broker on the 4th.
         leg(&conn, "out-1", "2026-07-31", 145_430, "bank");
         leg(&conn, "in-1", "2026-08-04", -145_430, "broker");
-        // Imported legs carry GnuCash timestamps; they pair the same way.
+        // Legs with a time of day pair the same way.
         leg(&conn, "out-2", "2026-08-31 10:59:00", 102_249, "bank");
         leg(&conn, "in-2", "2026-09-01 10:59:00", -102_249, "broker");
         // Open: sent, never recorded arriving.

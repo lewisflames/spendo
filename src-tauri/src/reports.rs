@@ -782,7 +782,7 @@ mod tests {
                 params![tag, date],
             )
             .unwrap();
-            // Double entry like GnuCash: debit positive, credit negative.
+            // Double entry: debit positive, credit negative.
             conn.execute(
                 "INSERT INTO splits (guid, tx_guid, account_guid, value_num, value_denom, quantity_num, quantity_denom)
                  VALUES (?1, ?2, ?3, ?4, 100, ?4, 100)",

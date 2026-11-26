@@ -1,6 +1,6 @@
 //! Payees: who a transaction was with (a shop, a person, an employer). One
 //! payee per transaction at most, kept in `transaction_payees` beside the
-//! GnuCash-shaped `transactions` row. Callers pass a name;
+//! core `transactions` row. Callers pass a name;
 //! [`set_transaction_payee`] resolves it case-insensitively and creates
 //! missing ones, so the editor never needs a separate "create payee" step.
 

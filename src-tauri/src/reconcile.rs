@@ -367,7 +367,7 @@ fn apply_split_updates(conn: &Connection, pending: &[(String, String)]) -> Resul
 }
 
 /// Last reconciled day for an account with no finished batch: its `'y'`
-/// splits were reconciled outside Spendo (e.g. an imported GnuCash book).
+/// splits were reconciled outside Spendo (e.g. an imported book).
 /// Display only; those statements can't be reopened. Truncated to the day
 /// because imported books carry `HH:MM:SS`.
 fn unbatched_last_reconciled_date(
@@ -693,7 +693,7 @@ fn reopen_last_reconciliation_inner(
     let reopened_count = guids.len() as i64;
     with_tx_err(conn, || -> Result<(), AppError> {
         for guid in &guids {
-            // `'c'` keeps the GnuCash `reconciled = 1` convention used by
+            // `'c'` keeps the `reconciled = 1` convention used by
             // `apply_split_updates`, so the editor still warns.
             conn.execute(
                 "UPDATE splits SET reconcile_state = 'c', reconciled = 1 WHERE guid = ?1",
@@ -794,7 +794,7 @@ fn fetch_reconcile_summaries_inner(
     }
     {
         // Accounts with `'y'` splits but no batch row were reconciled outside
-        // Spendo (e.g. an imported GnuCash book). Truncate to the day:
+        // Spendo (e.g. an imported book). Truncate to the day:
         // imported books carry `HH:MM:SS`.
         let mut stmt = conn.prepare(&format!(
             "SELECT s.account_guid, substr(MAX(t.post_date), 1, 10)

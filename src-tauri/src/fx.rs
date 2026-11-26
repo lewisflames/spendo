@@ -8,7 +8,7 @@ use crate::utils;
 /// Detect the book's report (display) currency GUID.
 ///
 /// Priority:
-/// 1. The ROOT account's commodity (GnuCash book default currency)
+/// 1. The ROOT account's commodity (the book's default currency)
 /// 2. The currency with the most split value
 /// 3. The first CURRENCY commodity
 ///

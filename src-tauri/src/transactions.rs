@@ -13,7 +13,7 @@ use crate::utils::opt_text;
 /// Fixed denominators for manual-entry rational storage. `commodities` carries
 /// no SCU/fraction column, so per-commodity precision is out of scope for the
 /// MVP: 4dp covers all fiat + sub-cent FX rounding, 8dp covers fractional
-/// shares (GnuCash default).
+/// shares.
 pub const VALUE_DENOM: i64 = 10_000;
 pub const QUANTITY_DENOM: i64 = 100_000_000;
 /// Balance tolerance for the zero-sum check on display/raw amounts.
@@ -78,7 +78,7 @@ struct SplitData {
     /// investment accounts; equals `amount` for plain currency accounts.
     quantity: f64,
     reconciled: bool,
-    /// GnuCash reconcile state ('n' new, 'c' cleared, 'y' reconciled).
+    /// Reconcile state ('n' new, 'c' cleared, 'y' reconciled).
     reconcile_state: Option<String>,
     /// Description of the split's account (falls back to its name in the UI).
     account_description: Option<String>,
@@ -282,9 +282,8 @@ pub(crate) fn validate_tx_input_with(
     Ok(post_date)
 }
 
-/// The account facts split validation needs. Resolved through a lookup so the
-/// GnuCash schedule preview can validate template splits against a set of
-/// accounts that will exist only after the merge (source ∪ destination).
+/// The account facts split validation needs. Resolved through a lookup so
+/// callers validating many rows (CSV preview) can cache it.
 #[derive(Debug, Clone)]
 pub(crate) struct SplitAccountInfo {
     pub placeholder: i64,

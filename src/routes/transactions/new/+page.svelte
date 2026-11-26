@@ -46,7 +46,7 @@
     label: 'We couldn’t load this holding'
   });
 
-  // GnuCash's dividend shape: a zero split on the holding's account (largest
+  // Dividend shape: a zero split on the holding's account (largest
   // position first) ties the payment to it; the income side defaults to the
   // first linked dividend account.
   let dividendPrefill = $derived.by(() => {

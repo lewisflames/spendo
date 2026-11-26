@@ -88,7 +88,7 @@ impl LotSummary {
 /// Replay one commodity's events. Same-day buys go before sells so a
 /// same-day round trip doesn't read as an oversell.
 ///
-/// - No share change: ignored (transfers between accounts, GnuCash gain
+/// - No share change: ignored (transfers between accounts, value-only gain
 ///   splits, zero-amount dividend splits).
 /// - Shares added or removed with no money while a position stays open: a
 ///   stock split, which rescales the open lots and keeps their basis.
@@ -285,7 +285,7 @@ mod tests {
 
     #[test]
     fn zero_share_events_are_ignored() {
-        // A transfer nets to zero shares; a GnuCash gain split moves value only.
+        // A transfer nets to zero shares; a gain split moves value only.
         let s = replay(
             &[
                 ev("2024-01-10", 10.0, 1000.0),

@@ -11,11 +11,9 @@ use crate::tax::{fetch_tax_summary_inner, TaxSection, TaxSummary};
 use crate::tree;
 use crate::utils;
 
-/// One CSV row per split, mirroring GnuCash's multiline export so the file can
-/// be re-imported via `File → Import → Import Transactions from CSV`
-/// (Multi-split checked, `GnuCash Export Settings` preset). Transaction-level
-/// fields repeat on every split row — the importer tolerates repeats and it
-/// keeps the CSV self-describing without blank-continuation parsing.
+/// One CSV row per split (multi-split layout). Transaction-level fields
+/// repeat on every split row so the CSV stays self-describing without
+/// blank-continuation parsing.
 ///
 /// This is a complete dump: unlike the ledger queries it deliberately does NOT
 /// apply the visibility window, so future-dated transactions survive the
@@ -39,15 +37,15 @@ pub struct ExportSplitRow {
     pub account_name: String,
     /// Raw native amount (`value_num/value_denom`): no FX, no sign flips.
     pub amount: f64,
-    /// GnuCash reconcile state ('n'/'c'/'y') or blank.
+    /// Reconcile state ('n'/'c'/'y') or blank.
     pub reconcile_state: Option<String>,
     /// `amount/quantity` for investments, else `1`.
     pub price: f64,
     pub payee: Option<String>,
 }
 
-/// One CSV row per account in parent-before-child (pre-order DFS) order so a
-/// GnuCash account import can recreate parents first. Balances are
+/// One CSV row per account in parent-before-child (pre-order DFS) order so an
+/// account import can recreate parents first. Balances are
 /// deliberately omitted: they are report-currency converted snapshots and
 /// would corrupt a re-import — balances rebuild from the transactions file.
 #[derive(Debug, Clone)]
@@ -294,8 +292,8 @@ fn fetch_export_accounts_inner(conn: &Connection) -> Result<Vec<ExportAccountRow
 
 // ── CSV assembly + wire inputs ───────────────────────────────────────────────
 
-/// Column order of the transactions export (GnuCash multi-split shape, with
-/// Spendo's payee appended so GnuCash's own columns keep their positions).
+/// Column order of the transactions export (multi-split shape, with the payee
+/// appended so the earlier columns keep their positions).
 const TRANSACTIONS_EXPORT_HEADERS: [&str; 14] = [
     "Date",
     "Transaction ID",

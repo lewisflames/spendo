@@ -47,7 +47,7 @@ pub struct DetailTransaction {
     /// at the transaction's date (the delta of `running_balance`).
     pub amount: f64,
     pub running_balance: f64,
-    /// GnuCash reconcile state ('n'/'c'/'y') of the transaction's splits
+    /// Reconcile state ('n'/'c'/'y') of the transaction's splits
     /// within the viewed subtree ('y' wins over 'c').
     pub reconcile_state: Option<String>,
 }
@@ -806,7 +806,7 @@ pub struct AccountBalancePoint {
 }
 
 /// Per-(day, currency) signed split-value deltas for the account subtree.
-/// Amounts carry GnuCash display signs (credit-normal accounts negated) via
+/// Amounts carry display signs (credit-normal accounts negated) via
 /// `signed_amount_expr`, so running sums can be aggregated as-is.
 /// Half-open dates (`>= start AND < date(end, '+1 day')`): `post_date` carries
 /// `HH:MM:SS`, so `<= YYYY-MM-DD` would drop end-day timed rows.
