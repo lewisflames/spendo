@@ -8,7 +8,7 @@ A local-first personal finance app for macOS and Linux. Your money lives in a si
 - Yearly budgets, profit and loss, and a balance sheet
 - Investment portfolio with prices from Yahoo Finance
 - Statement reconciliation and scheduled transactions
-- Import from GnuCash (`.gnucash` SQLite files) or bank CSV statements
+- Import bank CSV statements, with rules that pick categories
 - Automatic daily backups, plus a safety snapshot before every import or reset
 
 <picture>
@@ -58,7 +58,7 @@ chmod +x Spendo_*_amd64.AppImage && ./Spendo_*_amd64.AppImage
 ## Getting started
 
 1. Create a new book or open an existing `.spendo` file from the welcome screen.
-2. Optionally bring in your history from GnuCash or a bank CSV via the book menu (or `Ctrl+K`).
+2. Optionally bring in your history from a bank CSV via the book menu (or `Ctrl+K`).
 3. Changes are saved as you go. Use **Save as…** in the book menu for a backup copy.
 
 ### Keeping a book in a synced folder

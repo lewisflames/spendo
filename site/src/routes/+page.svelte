@@ -73,7 +73,7 @@
     {
       icon: FileInput,
       title: 'Bring your history',
-      body: 'Merge a GnuCash book or import bank CSV statements, always previewed before anything is written. Rules pick categories.'
+      body: 'Import bank CSV statements, always previewed before anything is written. Rules pick categories.'
     },
     {
       icon: History,
@@ -210,10 +210,10 @@
           >
         </li>
         <li class="rounded-lg border bg-card p-4">
-          <span class="font-medium">Coming from GnuCash?</span>
+          <span class="font-medium">Synced your way.</span>
           <span class="text-muted-foreground">
-            Merge a <code class="font-mono">.gnucash</code> SQLite book as often as you like. The source
-            is only ever read.</span
+            Keep a book in a Syncthing, Dropbox or iCloud folder. Spendo reloads it when another
+            device changes the file.</span
           >
         </li>
       </ul>
