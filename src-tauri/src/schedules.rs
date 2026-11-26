@@ -6,7 +6,8 @@ use tauri::State;
 
 use crate::db::{run_blocking, with_tx_err, AppError, AppState};
 use crate::sql;
-use crate::transactions::{SplitInput, TxInput};
+use crate::transactions::{self, SplitInput, TxInput};
+use crate::units::Units;
 use crate::utils;
 use crate::utils::opt_text;
 
@@ -107,7 +108,7 @@ pub struct Schedule {
     /// Sum of the positive split amounts the next occurrence posts: the
     /// transfer size behind a balanced template, or one slice of a spread
     /// total. Rendered in list rows (a raw sum is always 0).
-    pub preview_amount: f64,
+    pub preview_amount: Units,
     pub auto_post: bool,
     pub spread_total: bool,
     pub created_at: String,
@@ -252,11 +253,6 @@ pub(crate) fn next_occurrence(
     })
 }
 
-/// Whole cents of an amount (spread schedules work at cent precision).
-fn to_cents(amount: f64) -> i64 {
-    (amount * 100.0).round() as i64
-}
-
 /// `a / n` rounded half away from zero, so a split and its negated
 /// counterpart round to exact opposites.
 fn div_round(a: i64, n: i64) -> i64 {
@@ -267,18 +263,19 @@ fn div_round(a: i64, n: i64) -> i64 {
 /// spread schedule posts: each split's slice is `round(total·(k+1)/n) −
 /// round(total·k/n)`, so the `n` slices sum exactly to the total and differ by
 /// at most a cent. The largest split absorbs any cross-split rounding so every
-/// occurrence balances on its own.
-fn spread_occurrence_amounts(totals: &[f64], occurrences: i64, index: i64) -> Vec<f64> {
+/// occurrence balances on its own. Slices are whole cents (totals are
+/// validated to be), computed in integers.
+fn spread_occurrence_amounts(totals: &[Units], occurrences: i64, index: i64) -> Vec<Units> {
     let n = occurrences.max(1);
     let k = index.clamp(0, n - 1);
     let mut cents: Vec<i64> = totals
         .iter()
         .map(|t| {
-            let t = to_cents(*t);
+            let t = t.round_to_cents();
             div_round(t * (k + 1), n) - div_round(t * k, n)
         })
         .collect();
-    if let Some(anchor) = (0..totals.len()).max_by_key(|&i| to_cents(totals[i]).abs()) {
+    if let Some(anchor) = (0..totals.len()).max_by_key(|&i| totals[i].abs()) {
         let others: i64 = cents
             .iter()
             .enumerate()
@@ -287,17 +284,25 @@ fn spread_occurrence_amounts(totals: &[f64], occurrences: i64, index: i64) -> Ve
             .sum();
         cents[anchor] = -others;
     }
-    cents.into_iter().map(|c| c as f64 / 100.0).collect()
+    cents.into_iter().map(Units::from_cents).collect()
 }
 
 /// The split amounts the occurrence at `index` posts: the template as-is, or
 /// its slice of the total for a spread schedule.
-fn occurrence_amounts(template: &StoredTemplate, spread: Option<i64>, index: i64) -> Vec<f64> {
-    let totals: Vec<f64> = template.splits.iter().map(|s| s.amount).collect();
-    match spread {
+fn occurrence_amounts(
+    template: &StoredTemplate,
+    spread: Option<i64>,
+    index: i64,
+) -> Result<Vec<Units>, AppError> {
+    let totals = template
+        .splits
+        .iter()
+        .map(|s| transactions::split_units(s.amount))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(match spread {
         Some(n) => spread_occurrence_amounts(&totals, n, index),
         None => totals,
-    }
+    })
 }
 
 /// Occurrence count a spread schedule divides by (`None` when not spread).
@@ -458,7 +463,7 @@ fn validate_schedule_input(
 
 /// A spread total needs a fixed occurrence count to divide by, plain currency
 /// splits (share quantities can't be sliced meaningfully) and totals that
-/// balance in whole cents, so every slice balances too.
+/// balance exactly in whole cents, so every slice balances too.
 fn validate_spread(input: &ScheduleInput) -> Result<(), AppError> {
     if input.max_occurrences.is_none() {
         return Err(AppError::Validation(
@@ -471,11 +476,21 @@ fn validate_spread(input: &ScheduleInput) -> Result<(), AppError> {
                 .to_string(),
         ));
     }
-    let cents: i64 = input.splits.iter().map(|s| to_cents(s.amount)).sum();
-    if cents != 0 {
+    let totals = input
+        .splits
+        .iter()
+        .map(|s| transactions::split_units(s.amount))
+        .collect::<Result<Vec<_>, _>>()?;
+    if totals.iter().any(|t| t.to_cents().is_none()) {
         return Err(AppError::Validation(
-            "Spread totals must balance in whole cents".to_string(),
+            "Spread totals can't go below a cent".to_string(),
         ));
+    }
+    let off: Units = totals.iter().sum();
+    if !off.is_zero() {
+        return Err(AppError::Validation(format!(
+            "Spread totals are out of balance by {off}"
+        )));
     }
     Ok(())
 }
@@ -574,8 +589,8 @@ pub(crate) fn parse_template(template_json: &str) -> Result<StoredTemplate, AppE
         .map_err(|e| AppError::Validation(format!("Corrupt schedule data: {e}")))
 }
 
-fn preview_amount(amounts: &[f64]) -> f64 {
-    amounts.iter().filter(|a| **a > 0.0).sum()
+fn preview_amount(amounts: &[Units]) -> Units {
+    amounts.iter().filter(|a| **a > Units::ZERO).sum()
 }
 
 fn template_account_guids(template_json: &str) -> Result<Vec<String>, AppError> {
@@ -595,7 +610,7 @@ fn to_schedule_with_names(
         &template,
         spread_count(row.spread_total, row.max_occurrences),
         row.occurrences_posted + row.skipped_count,
-    );
+    )?;
     Ok(Schedule {
         guid: row.guid,
         name: row.name,
@@ -830,7 +845,7 @@ fn post_occurrence_at(conn: &Connection, guid: &str, today: &str) -> Result<Stri
         &template,
         spread_count(row.spread_total, row.max_occurrences),
         row.occurrences_posted + row.skipped_count,
-    );
+    )?;
     let input = TxInput {
         post_date: due.clone(),
         description: template.description.clone(),
@@ -845,7 +860,8 @@ fn post_occurrence_at(conn: &Connection, guid: &str, today: &str) -> Result<Stri
             .zip(amounts)
             .map(|(s, amount)| SplitInput {
                 account_guid: s.account_guid.clone(),
-                amount,
+                // `TxInput` takes decimals; saving recovers these exact units.
+                amount: amount.to_f64(),
                 quantity: s.quantity,
                 memo: s.memo.clone(),
             })
@@ -1183,29 +1199,34 @@ mod tests {
             .unwrap()
     }
 
+    fn cents(amounts: &[f64]) -> Vec<Units> {
+        amounts.iter().map(|a| Units::from_f64(*a)).collect()
+    }
+
     #[test]
     fn spread_slices_sum_to_total_and_balance() {
-        let totals = [1199.0, -1199.0];
-        let slices: Vec<Vec<f64>> = (0..96)
+        let totals = cents(&[1199.0, -1199.0]);
+        let slices: Vec<Vec<Units>> = (0..96)
             .map(|k| spread_occurrence_amounts(&totals, 96, k))
             .collect();
-        let sum: i64 = slices.iter().map(|s| to_cents(s[0])).sum();
-        assert_eq!(sum, 119_900);
+        let sum: Units = slices.iter().map(|s| s[0]).sum();
+        assert_eq!(sum, totals[0]);
         for s in &slices {
-            assert_eq!(to_cents(s[0]) + to_cents(s[1]), 0);
-            assert!((1248..=1249).contains(&to_cents(s[0])));
+            assert!((s[0] + s[1]).is_zero());
+            let c = s[0].to_cents().expect("slices are whole cents");
+            assert!((1248..=1249).contains(&c));
         }
         // Three legs that round independently still balance per occurrence.
-        let totals = [10.0, -5.0, -5.0];
-        let mut legs = [0i64; 3];
+        let totals = cents(&[10.0, -5.0, -5.0]);
+        let mut legs = [Units::ZERO; 3];
         for k in 0..3 {
             let s = spread_occurrence_amounts(&totals, 3, k);
-            assert_eq!(s.iter().map(|a| to_cents(*a)).sum::<i64>(), 0);
+            assert!(s.iter().sum::<Units>().is_zero());
             for (leg, a) in legs.iter_mut().zip(&s) {
-                *leg += to_cents(*a);
+                *leg += *a;
             }
         }
-        assert_eq!(legs, [1000, -500, -500]);
+        assert_eq!(legs.to_vec(), totals);
     }
 
     #[test]
@@ -1223,6 +1244,16 @@ mod tests {
             create_schedule_inner(&conn, with_qty),
             Err(AppError::Validation(_))
         ));
+        // Totals balance exactly, in whole cents.
+        let mut sub_cent = spread_input();
+        sub_cent.splits[0].amount = 1199.005;
+        sub_cent.splits[1].amount = -1199.005;
+        let err = create_schedule_inner(&conn, sub_cent).unwrap_err();
+        assert_eq!(err.to_string(), "Spread totals can't go below a cent");
+        let mut off = spread_input();
+        off.splits[1].amount = -1198.99;
+        let err = create_schedule_inner(&conn, off).unwrap_err();
+        assert!(err.to_string().contains("out of balance by 0.01"), "{err}");
     }
 
     #[test]
@@ -1231,22 +1262,23 @@ mod tests {
         let s = create_schedule_inner(&conn, spread_input()).unwrap();
         assert!(s.spread_total);
         assert_eq!(s.splits[0].amount, 1199.0); // the editor sees the total
+        let totals = cents(&[1199.0, -1199.0]);
         assert_eq!(
-            to_cents(s.preview_amount),
-            to_cents(spread_occurrence_amounts(&[1199.0, -1199.0], 96, 0)[0])
+            s.preview_amount,
+            spread_occurrence_amounts(&totals, 96, 0)[0]
         );
         post_occurrence_at(&conn, &s.guid, "2024-01-01").unwrap();
         let after = fetch_schedule_inner(&conn, &s.guid).unwrap();
         assert_eq!(
-            to_cents(after.preview_amount),
-            to_cents(spread_occurrence_amounts(&[1199.0, -1199.0], 96, 1)[0])
+            after.preview_amount,
+            spread_occurrence_amounts(&totals, 96, 1)[0]
         );
         let posted = posted_amounts(&conn, "rent-exp");
         assert_eq!(
             posted,
-            vec![to_cents(
-                spread_occurrence_amounts(&[1199.0, -1199.0], 96, 0)[0]
-            )]
+            vec![spread_occurrence_amounts(&totals, 96, 0)[0]
+                .to_cents()
+                .unwrap()]
         );
     }
 
@@ -1409,7 +1441,7 @@ mod tests {
         let s = create_schedule_inner(&conn, balanced_input()).unwrap();
         assert_eq!(s.next_due_date.as_deref(), Some("2024-01-01"));
         assert_eq!(s.interval_mult, 1);
-        assert_eq!(s.preview_amount, 1000.0);
+        assert_eq!(s.preview_amount, Units::from_f64(1000.0));
         assert!(s.active);
         assert_eq!(s.splits.len(), 2);
         assert_eq!(s.splits[0].account_name.as_deref(), Some("Rent"));

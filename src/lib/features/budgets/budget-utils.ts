@@ -1,5 +1,6 @@
 import type { AccountNode, BudgetActualRow, BudgetDateRange } from '$lib/tauri';
 import { yearOf } from '$lib/utils/format.svelte';
+import { sumUnits, toUnits, UNIT_SCALE, type Units } from '$lib/utils/units';
 
 export interface YearOption {
   value: string;
@@ -86,14 +87,27 @@ export function accountNameMap(trees: AccountNode[] | undefined): Record<string,
   return map;
 }
 
+/** Why a typed annual target can't be saved, or `''`. Budgets are stored in
+ * whole cents (`budgets.rs`), so a sub-cent amount is refused, not rounded. */
+export function budgetAmountError(amount: number): string {
+  if (!(amount > 0)) return 'Enter an amount above zero';
+  if (toUnits(amount) % (UNIT_SCALE / 100) !== 0) return 'Budgets can’t go below a cent';
+  return '';
+}
+
+/** A twelfth of an annual budget, rounded to the unit. */
+export function monthlyBudget(annual: Units): Units {
+  return Math.round(annual / 12) as Units;
+}
+
 export interface BudgetTotals {
-  budgetAmount: number;
-  monthlyAmount: number;
-  rolloverBalance: number;
-  actualAmount: number;
-  expectedYtd: number;
-  delta: number;
-  remaining: number;
+  budgetAmount: Units;
+  monthlyAmount: Units;
+  rolloverBalance: Units;
+  actualAmount: Units;
+  expectedYtd: Units;
+  delta: Units;
+  remaining: Units;
   /** Weighted across rows: spent ÷ expected. Mirrors the backend’s guard. */
   pacingPercentage: number;
   /** Uniform per year; 0 for an empty selection. */
@@ -102,28 +116,19 @@ export interface BudgetTotals {
 
 /** Aggregate a table selection into footer totals. */
 export function budgetTotals(rows: BudgetActualRow[]): BudgetTotals {
-  const totals: BudgetTotals = {
-    budgetAmount: 0,
-    monthlyAmount: 0,
-    rolloverBalance: 0,
-    actualAmount: 0,
-    expectedYtd: 0,
-    delta: 0,
-    remaining: 0,
-    pacingPercentage: 0,
+  const sum = (pick: (row: BudgetActualRow) => Units) => sumUnits(rows.map(pick));
+  const budgetAmount = sum((r) => r.budgetAmount);
+  const actualAmount = sum((r) => r.actualAmount);
+  const expectedYtd = sum((r) => r.expectedYtd);
+  return {
+    budgetAmount,
+    monthlyAmount: monthlyBudget(budgetAmount),
+    rolloverBalance: sum((r) => r.rolloverBalance),
+    actualAmount,
+    expectedYtd,
+    delta: sum((r) => r.delta),
+    remaining: sum((r) => r.remaining),
+    pacingPercentage: expectedYtd > 0 ? (Math.max(0, actualAmount) / expectedYtd) * 100 : 0,
     elapsedMonths: rows[0]?.elapsedMonths ?? 0
   };
-  for (const row of rows) {
-    totals.budgetAmount += row.budgetAmount;
-    totals.monthlyAmount += row.budgetAmount / 12;
-    totals.rolloverBalance += row.rolloverBalance;
-    totals.actualAmount += row.actualAmount;
-    totals.expectedYtd += row.expectedYtd;
-    totals.delta += row.delta;
-    totals.remaining += row.remaining;
-  }
-  if (totals.expectedYtd > 0) {
-    totals.pacingPercentage = (Math.max(0, totals.actualAmount) / totals.expectedYtd) * 100;
-  }
-  return totals;
 }

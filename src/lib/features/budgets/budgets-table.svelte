@@ -48,7 +48,8 @@
   import type { BudgetActualRow } from '$lib/tauri';
   import type { ColumnVisibility } from '$lib/hooks/use-column-visibility.svelte';
   import PacingBar from './pacing-bar.svelte';
-  import { budgetTotals } from './budget-utils';
+  import { budgetTotals, monthlyBudget } from './budget-utils';
+  import { fromUnits, type Units } from '$lib/utils/units';
 
   let {
     rows,
@@ -70,12 +71,12 @@
 
   let skeletonCols = $derived(cols.visibleColumns.length + 1);
 
-  function fmt(n: number): string {
-    return formatCurrency(n, currency);
+  function fmt(amount: Units): string {
+    return formatCurrency(fromUnits(amount), currency);
   }
 
-  function fmtSigned(n: number): string {
-    return formatSignedCurrency(n, currency);
+  function fmtSigned(amount: Units): string {
+    return formatSignedCurrency(fromUnits(amount), currency);
   }
 </script>
 
@@ -159,7 +160,7 @@
           {/if}
           {#if cols.isVisible('monthly')}
             <Table.Cell class="py-2.5 text-right tabular-nums">
-              {fmt(item.budgetAmount / 12)}
+              {fmt(monthlyBudget(item.budgetAmount))}
             </Table.Cell>
           {/if}
           {#if cols.isVisible('carryIn')}

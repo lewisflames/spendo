@@ -7,6 +7,7 @@
   import { dbSession, dbBootstrapping } from '$lib/stores/db.svelte';
   import { sessionCurrency } from '$lib/utils/format.svelte';
   import { fetchBudgetDetail, fetchBudgetDateRange, fetchAccounts } from '$lib/tauri';
+  import { ZERO_UNITS } from '$lib/utils/units';
   import { useAsyncData } from '$lib/hooks/use-async-data.svelte';
   import { useUrlParams, yearParam } from '$lib/hooks/use-url-params.svelte';
   import { Pencil, PiggyBank, Plus } from '@lucide/svelte';
@@ -175,7 +176,7 @@
       bind:open={showEditDialog}
       {accountGuid}
       year={detail?.budget.year ?? by.year}
-      amount={detail?.budget.amount ?? 0}
+      amount={detail?.budget.amount ?? ZERO_UNITS}
       exists={detail !== null}
       {currency}
       {accountName}

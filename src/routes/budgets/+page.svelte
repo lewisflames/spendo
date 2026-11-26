@@ -14,6 +14,8 @@
     plural
   } from '$lib/utils/format.svelte';
   import { fetchBudgetVsActual, fetchAccounts, fetchBudgetDateRange } from '$lib/tauri';
+  import type { BudgetActualRow } from '$lib/tauri';
+  import { fromUnits, sumUnits, type Units } from '$lib/utils/units';
   import { openBudget } from '$lib/utils/navigation';
   import { useUrlParams, yearParam, debouncedSearchParam } from '$lib/hooks/use-url-params.svelte';
   import { useDebouncedSearch } from '$lib/hooks/use-debounced-search.svelte';
@@ -93,9 +95,12 @@
   // Dim during refetches only; the initial load shows the skeleton instead.
   let yearLoading = $derived(res.loading && res.data !== null);
 
-  let totalEffective = $derived((rows ?? []).reduce((s, r) => s + r.effectiveTotal, 0));
-  let totalSpent = $derived((rows ?? []).reduce((s, r) => s + r.actualAmount, 0));
-  let totalRemaining = $derived((rows ?? []).reduce((s, r) => s + r.remaining, 0));
+  // Exact sums, turned into decimals once for the KPI cards.
+  const total = (pick: (row: BudgetActualRow) => Units) =>
+    fromUnits(sumUnits((rows ?? []).map(pick)));
+  let totalEffective = $derived(total((r) => r.effectiveTotal));
+  let totalSpent = $derived(total((r) => r.actualAmount));
+  let totalRemaining = $derived(total((r) => r.remaining));
 
   let accountPaths = $derived(accountPathMap(accountsData?.trees));
 

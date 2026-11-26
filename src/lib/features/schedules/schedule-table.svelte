@@ -11,6 +11,7 @@
   import { CalendarCheck, SkipForward, Pencil, Pause, Play } from '@lucide/svelte';
   import type { Schedule } from '$lib/tauri';
   import { formatCurrency, formatDate, parseLocalDate, plural } from '$lib/utils/format.svelte';
+  import { fromUnits } from '$lib/utils/units';
   import {
     frequencyLabel,
     isPostable,
@@ -112,7 +113,7 @@
           {/if}
         </Table.Cell>
         <Table.Cell class="py-2.5 text-right font-medium whitespace-nowrap tabular-nums">
-          {formatCurrency(schedule.previewAmount, currency)}
+          {formatCurrency(fromUnits(schedule.previewAmount), currency)}
         </Table.Cell>
         <Table.Cell class="py-2.5 whitespace-nowrap tabular-nums">
           {occurrenceLabel(schedule)}

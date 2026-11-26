@@ -7,6 +7,7 @@
     signColor
   } from '$lib/utils/format.svelte';
   import type { BudgetYearSummary } from '$lib/tauri';
+  import { fromUnits, subUnits, type Units } from '$lib/utils/units';
 
   let {
     summary,
@@ -14,27 +15,30 @@
     currency
   }: {
     summary: BudgetYearSummary;
-    annualTarget: number;
+    annualTarget: Units;
     currency: string;
   } = $props();
+
+  let carry = $derived(fromUnits(summary.rolloverBalance));
+  let remaining = $derived(fromUnits(summary.remaining));
 </script>
 
 <!-- Yearly summary -->
 <div class="grid grid-cols-1 gap-6 @xl:grid-cols-2 @4xl:grid-cols-4">
-  <KpiCard title="Annual target" value={fmt(clampZero(annualTarget))} />
+  <KpiCard title="Annual target" value={fmt(clampZero(fromUnits(annualTarget)))} />
   <KpiCard
     title="Carry-in (Jan 1)"
-    value={formatSignedCurrency(clampZero(summary.rolloverBalance), currency)}
-    valueClass={signColor(clampZero(summary.rolloverBalance))}
+    value={formatSignedCurrency(clampZero(carry), currency)}
+    valueClass={signColor(clampZero(carry))}
   />
   <KpiCard
     title="Spent (YTD)"
-    value={fmt(clampZero(summary.actualAmount))}
-    valueClass={signColor(clampZero(summary.effectiveTotal - summary.actualAmount))}
+    value={fmt(clampZero(fromUnits(summary.actualAmount)))}
+    valueClass={signColor(subUnits(summary.effectiveTotal, summary.actualAmount))}
   />
   <KpiCard
     title="Remaining"
-    value={formatSignedCurrency(clampZero(summary.remaining), currency)}
-    valueClass={signColor(clampZero(summary.remaining))}
+    value={formatSignedCurrency(clampZero(remaining), currency)}
+    valueClass={signColor(clampZero(remaining))}
   />
 </div>

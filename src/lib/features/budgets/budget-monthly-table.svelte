@@ -4,11 +4,8 @@
   import TableShell from '$lib/components/shared/table-shell.svelte';
   import EmptyValue from '$lib/components/shared/empty-value.svelte';
   import PacingBar from './pacing-bar.svelte';
-  import {
-    formatSessionCurrency as fmt,
-    formatSignedCurrency,
-    signColor
-  } from '$lib/utils/format.svelte';
+  import { formatSessionCurrency, formatSignedCurrency, signColor } from '$lib/utils/format.svelte';
+  import { fromUnits, type Units } from '$lib/utils/units';
   import { monthName } from '$lib/utils/date-utils.svelte';
   import { appSettings } from '$lib/stores/settings.svelte';
   import type { MonthlySlice } from '$lib/tauri';
@@ -22,6 +19,8 @@
     elapsedMonths: number;
     currency: string;
   } = $props();
+
+  const fmt = (amount: Units) => formatSessionCurrency(fromUnits(amount));
 </script>
 
 <!-- Monthly pacing breakdown (read-only) -->
@@ -64,7 +63,7 @@
           {#if isFuture}
             <EmptyValue />
           {:else}
-            {formatSignedCurrency(e.delta, currency)}
+            {formatSignedCurrency(fromUnits(e.delta), currency)}
           {/if}
         </Table.Cell>
         <Table.Cell class="py-2.5">

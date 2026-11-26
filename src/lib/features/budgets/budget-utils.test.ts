@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { toUnits as u } from '$lib/utils/units';
 import { ZERO_UNITS } from '$lib/utils/units';
 import type { AccountNode, BudgetActualRow } from '$lib/tauri';
 import {
   accountNameMap,
+  budgetAmountError,
   accountPathMap,
   budgetTotals,
   budgetYearBounds,
@@ -34,16 +36,16 @@ function budgetRow(partial: Partial<BudgetActualRow>): BudgetActualRow {
     accountDescription: null,
     accountCode: null,
     accountType: 'EXPENSE',
-    budgetAmount: 0,
-    actualAmount: 0,
-    remaining: 0,
+    budgetAmount: u(0),
+    actualAmount: u(0),
+    remaining: u(0),
     percentage: 0,
-    rolloverBalance: 0,
-    expectedYtd: 0,
+    rolloverBalance: u(0),
+    expectedYtd: u(0),
     pacingPercentage: 0,
-    delta: 0,
+    delta: u(0),
     elapsedMonths: 6,
-    effectiveTotal: 0,
+    effectiveTotal: u(0),
     ...partial
   };
 }
@@ -118,76 +120,87 @@ describe('accountPathMap / accountNameMap', () => {
   });
 });
 
+describe('budgetAmountError', () => {
+  it('accepts positive whole-cent amounts only', () => {
+    expect(budgetAmountError(1200)).toBe('');
+    expect(budgetAmountError(0.01)).toBe('');
+    expect(budgetAmountError(0)).toBe('Enter an amount above zero');
+    expect(budgetAmountError(Number.NaN)).toBe('Enter an amount above zero');
+    expect(budgetAmountError(12.345)).toBe('Budgets can’t go below a cent');
+  });
+});
+
 describe('budgetTotals', () => {
   it('sums every amount field across rows', () => {
     const totals = budgetTotals([
       budgetRow({
-        budgetAmount: 1200,
-        rolloverBalance: 300,
-        actualAmount: 400,
-        expectedYtd: 500,
-        delta: 100,
-        remaining: 1100,
+        budgetAmount: u(1200),
+        rolloverBalance: u(300),
+        actualAmount: u(400),
+        expectedYtd: u(500),
+        delta: u(100),
+        remaining: u(1100),
         elapsedMonths: 6
       }),
       budgetRow({
-        budgetAmount: 600,
-        rolloverBalance: -100,
-        actualAmount: 700,
-        expectedYtd: 350,
-        delta: -350,
-        remaining: -200,
+        budgetAmount: u(600),
+        rolloverBalance: u(-100),
+        actualAmount: u(700),
+        expectedYtd: u(350),
+        delta: u(-350),
+        remaining: u(-200),
         elapsedMonths: 6
       })
     ]);
     expect(totals).toEqual({
-      budgetAmount: 1800,
-      monthlyAmount: 150,
-      rolloverBalance: 200,
-      actualAmount: 1100,
-      expectedYtd: 850,
-      delta: -250,
-      remaining: 900,
+      budgetAmount: u(1800),
+      monthlyAmount: u(150),
+      rolloverBalance: u(200),
+      actualAmount: u(1100),
+      expectedYtd: u(850),
+      delta: u(-250),
+      remaining: u(900),
       pacingPercentage: (1100 / 850) * 100,
       elapsedMonths: 6
     });
   });
 
   it('derives monthlyAmount from the annual amount', () => {
-    const totals = budgetTotals([budgetRow({ budgetAmount: 1000 })]);
-    expect(totals.monthlyAmount).toBeCloseTo(1000 / 12);
+    const totals = budgetTotals([budgetRow({ budgetAmount: u(1000) })]);
+    // A twelfth, rounded to the unit.
+    expect(totals.monthlyAmount).toBe(u(1000 / 12));
   });
 
   it('weights pacing by aggregate expected, not per-row percentages', () => {
     // A large underspent budget dominates a small overspent one.
     const totals = budgetTotals([
-      budgetRow({ actualAmount: 100, expectedYtd: 1000, pacingPercentage: 10 }),
-      budgetRow({ actualAmount: 200, expectedYtd: 200, pacingPercentage: 100 })
+      budgetRow({ actualAmount: u(100), expectedYtd: u(1000), pacingPercentage: 10 }),
+      budgetRow({ actualAmount: u(200), expectedYtd: u(200), pacingPercentage: 100 })
     ]);
     expect(totals.pacingPercentage).toBeCloseTo((300 / 1200) * 100);
   });
 
   it('clamps negative spent and zero expected to 0 pacing', () => {
     expect(
-      budgetTotals([budgetRow({ actualAmount: -50, expectedYtd: 100 })]).pacingPercentage
+      budgetTotals([budgetRow({ actualAmount: u(-50), expectedYtd: u(100) })]).pacingPercentage
     ).toBe(0);
-    expect(budgetTotals([budgetRow({ actualAmount: 50, expectedYtd: 0 })]).pacingPercentage).toBe(
-      0
-    );
     expect(
-      budgetTotals([budgetRow({ actualAmount: 50, expectedYtd: -100 })]).pacingPercentage
+      budgetTotals([budgetRow({ actualAmount: u(50), expectedYtd: u(0) })]).pacingPercentage
+    ).toBe(0);
+    expect(
+      budgetTotals([budgetRow({ actualAmount: u(50), expectedYtd: u(-100) })]).pacingPercentage
     ).toBe(0);
   });
 
   it('returns zeroed totals for an empty selection', () => {
     expect(budgetTotals([])).toEqual({
-      budgetAmount: 0,
-      monthlyAmount: 0,
-      rolloverBalance: 0,
-      actualAmount: 0,
-      expectedYtd: 0,
-      delta: 0,
-      remaining: 0,
+      budgetAmount: u(0),
+      monthlyAmount: u(0),
+      rolloverBalance: u(0),
+      actualAmount: u(0),
+      expectedYtd: u(0),
+      delta: u(0),
+      remaining: u(0),
       pacingPercentage: 0,
       elapsedMonths: 0
     });

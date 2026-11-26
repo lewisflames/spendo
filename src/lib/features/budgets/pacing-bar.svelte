@@ -3,6 +3,7 @@
   import { Progress } from '$lib/components/ui/progress';
   import { formatAllocPct } from '$lib/utils/format.svelte';
   import { cn } from '$lib/utils';
+  import { negUnits, type Units } from '$lib/utils/units';
 
   let {
     pacingPercentage,
@@ -14,10 +15,10 @@
     tooltip = true
   }: {
     pacingPercentage: number;
-    actualAmount: number;
-    expectedYtd: number;
-    delta: number;
-    fmt: (n: number) => string;
+    actualAmount: Units;
+    expectedYtd: Units;
+    delta: Units;
+    fmt: (amount: Units) => string;
     size?: 'sm' | 'md';
     tooltip?: boolean;
   } = $props();
@@ -55,7 +56,7 @@
         {#if delta >= 0}
           ({fmt(delta)} under)
         {:else}
-          ({fmt(-delta)} over)
+          ({fmt(negUnits(delta))} over)
         {/if}
       </p>
     </Tooltip.Content>

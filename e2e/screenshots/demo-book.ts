@@ -845,16 +845,16 @@ function budgetRows() {
       accountDescription: null,
       accountCode: null,
       accountType: 'EXPENSE',
-      budgetAmount,
-      actualAmount,
-      remaining: round2(budgetAmount - actualAmount),
+      budgetAmount: toUnits(budgetAmount),
+      actualAmount: toUnits(actualAmount),
+      remaining: toUnits(budgetAmount - actualAmount),
       percentage: round2((actualAmount / budgetAmount) * 100),
-      rolloverBalance: 0,
-      expectedYtd,
+      rolloverBalance: ZERO_UNITS,
+      expectedYtd: toUnits(expectedYtd),
       pacingPercentage: round2((actualAmount / expectedYtd) * 100),
-      delta: round2(expectedYtd - actualAmount),
+      delta: toUnits(expectedYtd - actualAmount),
       elapsedMonths: elapsed,
-      effectiveTotal: budgetAmount
+      effectiveTotal: toUnits(budgetAmount)
     };
   });
 }

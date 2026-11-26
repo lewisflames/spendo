@@ -213,16 +213,16 @@ pub fn convert_units(
     convert_units_tracked(amount, from_currency, report_currency, fx, None)
 }
 
-/// Convert an amount whose currency may be absent (e.g. splits on accounts
-/// with no commodity): `None` passes through unconverted.
-pub fn convert_optional(
-    amount: f64,
+/// [`convert_units`] for an amount whose currency may be absent: `None`
+/// passes through unconverted.
+pub fn convert_units_optional(
+    amount: Units,
     commodity: Option<&str>,
     report_currency: &str,
     fx: &HashMap<String, f64>,
-) -> f64 {
+) -> Units {
     match commodity {
-        Some(mn) => convert(amount, mn, report_currency, fx),
+        Some(mn) => convert_units(amount, mn, report_currency, fx),
         None => amount,
     }
 }

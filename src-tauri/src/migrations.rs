@@ -735,7 +735,8 @@ mod tests {
         );
         let rows = crate::budgets::fetch_budget_vs_actual_inner(&conn, 2025).unwrap();
         let food = serde_json::to_value(&rows).unwrap();
-        assert_eq!(food[0]["budgetAmount"], 1234.56, "{food}");
+        // 1234.56 in exact units (1/10000).
+        assert_eq!(food[0]["budgetAmount"], 12_345_600, "{food}");
 
         // Nothing else was lost.
         for (table, n) in [

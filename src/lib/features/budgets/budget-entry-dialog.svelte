@@ -5,6 +5,8 @@
   import { Input } from '$lib/components/ui/input';
 
   import { setBudgetYearAmount, deleteBudgetYear } from '$lib/tauri';
+  import { fromUnits, toUnits, type Units } from '$lib/utils/units';
+  import { budgetAmountError } from './budget-utils';
   import { errMsg } from '$lib/utils/error';
 
   let {
@@ -21,7 +23,7 @@
     open: boolean;
     accountGuid: string;
     year: number;
-    amount: number;
+    amount: Units;
     exists?: boolean;
     currency?: string;
     accountName?: string;
@@ -37,15 +39,15 @@
   let formError = $state('');
   let showErrors = $state(false);
 
-  let amountError = $derived(amount > 0 ? '' : 'Enter an amount above zero');
-  let canSave = $derived(!loading && amount > 0);
+  let amountError = $derived(budgetAmountError(amount));
+  let canSave = $derived(!loading && !amountError);
 
   // Re-initialize the form whenever the dialog opens (user interaction), so
   // it always reflects the target year.
   useDialogReset(() => open, syncFromEntry);
 
   function syncFromEntry() {
-    amount = initialAmount;
+    amount = fromUnits(initialAmount);
     formError = '';
     showErrors = false;
     loading = false;
@@ -62,7 +64,7 @@
     loading = true;
     formError = '';
     try {
-      await setBudgetYearAmount(accountGuid, year, amount);
+      await setBudgetYearAmount(accountGuid, year, toUnits(amount));
       open = false;
       onSave?.();
     } catch (e: unknown) {

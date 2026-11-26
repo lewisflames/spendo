@@ -9,12 +9,15 @@ use uuid::Uuid;
 
 use crate::db::{run_blocking, AppState};
 use crate::fx;
+use crate::units::{Units, VALUE_UNITS};
 use crate::utils;
 
 /// Per-account, per-year budget. A year without a row simply has no budget.
 /// Carryover is always applied (no opt-out): each year's remaining is
 /// `(annual + carry-in) − actual`, where carry-in sums `(budget − actual)`
 /// over earlier years that have a budget row — years without one are skipped.
+/// Amounts are exact [`Units`] in the report currency; only actuals held in
+/// another currency are converted (and rounded) through FX.
 #[derive(Debug, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Budget {
@@ -25,7 +28,7 @@ pub struct Budget {
     pub account_code: Option<String>,
     pub account_type: String,
     pub year: i32,
-    pub amount: f64,
+    pub amount: Units,
     pub created_at: String,
 }
 
@@ -45,16 +48,16 @@ pub struct BudgetActualRow {
     pub account_description: Option<String>,
     pub account_code: Option<String>,
     pub account_type: String,
-    pub budget_amount: f64,
-    pub actual_amount: f64,
-    pub remaining: f64,
+    pub budget_amount: Units,
+    pub actual_amount: Units,
+    pub remaining: Units,
     pub percentage: f64,
-    pub rollover_balance: f64,
-    pub expected_ytd: f64,
+    pub rollover_balance: Units,
+    pub expected_ytd: Units,
     pub pacing_percentage: f64,
-    pub delta: f64,
+    pub delta: Units,
     pub elapsed_months: i32,
-    pub effective_total: f64,
+    pub effective_total: Units,
 }
 
 /// One month within a yearly budget detail: read-only pacing slice derived
@@ -63,25 +66,25 @@ pub struct BudgetActualRow {
 #[serde(rename_all = "camelCase")]
 pub struct MonthlySlice {
     pub month: i32,
-    pub actual_amount: f64,
-    pub cumulative_actual: f64,
-    pub cumulative_expected: f64,
-    pub delta: f64,
+    pub actual_amount: Units,
+    pub cumulative_actual: Units,
+    pub cumulative_expected: Units,
+    pub delta: Units,
     pub pacing_percentage: f64,
 }
 
 #[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct BudgetYearSummary {
-    pub budget_amount: f64,
-    pub rollover_balance: f64,
-    pub effective_total: f64,
-    pub actual_amount: f64,
-    pub expected_ytd: f64,
-    pub remaining: f64,
+    pub budget_amount: Units,
+    pub rollover_balance: Units,
+    pub effective_total: Units,
+    pub actual_amount: Units,
+    pub expected_ytd: Units,
+    pub remaining: Units,
     pub percentage: f64,
     pub pacing_percentage: f64,
-    pub delta: f64,
+    pub delta: Units,
     pub elapsed_months: i32,
 }
 
@@ -116,18 +119,24 @@ fn validate_year(year: i32) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Budget amounts are stored in whole cents.
-fn to_cents(amount: f64) -> i64 {
-    (amount * 100.0).round() as i64
-}
+/// Largest budget accepted, in whole currency units.
+const MAX_BUDGET: i64 = 1_000_000_000;
 
-fn validate_amount(amount: f64) -> Result<(), AppError> {
-    if !amount.is_finite() || to_cents(amount) <= 0 {
+/// Budget amounts are stored in whole cents: returns the cents to store.
+fn validate_amount(amount: Units) -> Result<i64, AppError> {
+    if amount <= Units::ZERO {
         return Err(AppError::Validation(
             "Enter a budget amount above zero".to_string(),
         ));
     }
-    Ok(())
+    if amount > Units::new(MAX_BUDGET * Units::SCALE) {
+        return Err(AppError::Validation(
+            "Enter a budget amount up to 1,000,000,000".to_string(),
+        ));
+    }
+    amount
+        .to_cents()
+        .ok_or_else(|| AppError::Validation("Budget amounts can't go below a cent".to_string()))
 }
 
 /// Months elapsed in `year` for pacing: 12 for past years, the current month
@@ -147,33 +156,30 @@ fn elapsed_months_for_year(year: i32) -> i32 {
 
 /// Expected YTD with front-loaded carry: the annual target is prorated
 /// (`annual × elapsed / 12`) while the carry-in counts in full from January
-/// as an unprorated buffer. Returns `(expected_ytd, pacing_pct, delta)`.
-fn pacing_stats(annual: f64, carry: f64, actual: f64, elapsed: i32) -> (f64, f64, f64) {
+/// as an unprorated buffer. The proration rounds to the nearest unit, so
+/// December's expected total is exactly `annual + carry`. Returns
+/// `(expected_ytd, pacing_pct, delta)`.
+fn pacing_stats(annual: Units, carry: Units, actual: Units, elapsed: i32) -> (Units, f64, Units) {
     let expected = if elapsed <= 0 {
-        0.0
+        Units::ZERO
     } else {
-        annual * (elapsed as f64) / 12.0 + carry
+        annual.mul_div_round(i64::from(elapsed), 12) + carry
     };
-    let pacing = if expected > 0.0 {
-        (actual.max(0.0) / expected) * 100.0
+    let pacing = if expected > Units::ZERO {
+        actual.max(Units::ZERO).percent_of(expected)
     } else {
         0.0
     };
-    let delta = expected - actual;
-    (expected, pacing, delta)
+    (expected, pacing, expected - actual)
 }
 
-fn full_year_percentage(actual: f64, effective: f64) -> f64 {
-    if effective != 0.0 {
-        (actual.max(0.0) / effective) * 100.0
-    } else {
-        0.0
-    }
+fn full_year_percentage(actual: Units, effective: Units) -> f64 {
+    actual.max(Units::ZERO).percent_of(effective)
 }
 
 fn budget_select_sql() -> &'static str {
     "SELECT b.guid, b.account_guid, a.name, a.description, a.code, a.account_type,
-	        b.year, b.amount_cents / 100.0, b.created_at
+	        b.year, b.amount_cents * 100, b.created_at
 	 FROM budgets b
 	 JOIN accounts a ON a.guid = b.account_guid
 	 WHERE b.account_guid = ?1 AND b.year = ?2"
@@ -229,10 +235,10 @@ fn set_budget_year_amount_inner(
     conn: &Connection,
     account_guid: &str,
     year: i32,
-    amount: f64,
+    amount: Units,
 ) -> Result<Budget, AppError> {
     assert_expense_account(conn, account_guid)?;
-    validate_amount(amount)?;
+    let cents = validate_amount(amount)?;
     validate_year(year)?;
     conn.execute(
         "INSERT INTO budgets (guid, account_guid, year, amount_cents, created_at)
@@ -243,7 +249,7 @@ fn set_budget_year_amount_inner(
             Uuid::new_v4().to_string(),
             account_guid,
             year,
-            to_cents(amount),
+            cents,
             utils::iso_now()
         ],
     )?;
@@ -281,9 +287,9 @@ fn delete_budget_year_inner(
 
 /// All yearly budgets as `(account_guid → year → amount)` for expense
 /// accounts. Only years with a row count towards carryover.
-fn yearly_budgets_map(conn: &Connection) -> Result<HashMap<String, HashMap<i32, f64>>, AppError> {
+fn yearly_budgets_map(conn: &Connection) -> Result<HashMap<String, HashMap<i32, Units>>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT b.account_guid, b.year, b.amount_cents / 100.0
+        "SELECT b.account_guid, b.year, b.amount_cents * 100
 			 FROM budgets b
 			 JOIN accounts a ON a.guid = b.account_guid
 			 WHERE a.account_type = 'EXPENSE'",
@@ -293,11 +299,11 @@ fn yearly_budgets_map(conn: &Connection) -> Result<HashMap<String, HashMap<i32, 
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, i32>(1)?,
-                row.get::<_, f64>(2)?,
+                row.get::<_, Units>(2)?,
             ))
         })?
         .collect::<Result<Vec<_>, _>>()?;
-    let mut map: HashMap<String, HashMap<i32, f64>> = HashMap::new();
+    let mut map: HashMap<String, HashMap<i32, Units>> = HashMap::new();
     for (account_guid, year, amount) in rows {
         map.entry(account_guid).or_default().insert(year, amount);
     }
@@ -313,7 +319,7 @@ fn fetch_monthly_actuals(
     start_n: i64,
     end_n: i64,
     fx_map: &HashMap<String, f64>,
-) -> Result<HashMap<i64, f64>, AppError> {
+) -> Result<HashMap<i64, Units>, AppError> {
     let sql = format!(
         "WITH RECURSIVE
          descendants(descendant_guid) AS (
@@ -329,28 +335,29 @@ fn fetch_monthly_actuals(
          JOIN commodities c ON c.guid = a2.commodity_guid
          WHERE t.post_date >= ?2 AND t.post_date < ?3 AND {}
          GROUP BY 1, 2",
-        utils::signed_amount_expr(utils::RAW_AMOUNT, "a2.account_type"),
+        utils::signed_amount_expr(VALUE_UNITS, "a2.account_type"),
         utils::VISIBLE_TX_FILTER
     );
     let mut stmt = conn.prepare(&sql)?;
     let start = format!("{}-01", utils::format_month(start_n));
     let end = format!("{}-01", utils::format_month(end_n));
-    let rows: Vec<(String, Option<String>, f64)> = stmt
+    let rows: Vec<(String, Option<String>, Units)> = stmt
         .query_map(rusqlite::params![account_guid, start, end], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, Option<String>>(1)?,
-                row.get::<_, f64>(2)?,
+                row.get::<_, Units>(2)?,
             ))
         })?
         .collect::<Result<Vec<_>, _>>()?;
 
     let report_currency = fx::report_currency_or_empty(conn)?;
-    let mut actuals: HashMap<i64, f64> = HashMap::new();
+    let mut actuals: HashMap<i64, Units> = HashMap::new();
     for (ym, commodity, total) in rows {
-        let converted = fx::convert_optional(total, commodity.as_deref(), &report_currency, fx_map);
+        let converted =
+            fx::convert_units_optional(total, commodity.as_deref(), &report_currency, fx_map);
         let n = utils::month_number(&ym)?;
-        *actuals.entry(n).or_insert(0.0) += converted;
+        *actuals.entry(n).or_default() += converted;
     }
     Ok(actuals)
 }
@@ -363,7 +370,7 @@ fn fetch_monthly_actuals(
 fn compute_cumulative_carryovers(
     conn: &Connection,
     year: i32,
-) -> Result<HashMap<String, f64>, AppError> {
+) -> Result<HashMap<String, Units>, AppError> {
     let period_start = format!("{year:04}-01-01");
 
     let yearly = yearly_budgets_map(conn)?;
@@ -389,48 +396,48 @@ fn compute_cumulative_carryovers(
          WHERE t.post_date >= ?1 AND t.post_date < ?2 AND {}
          GROUP BY d.budget_account_guid, 2, 3",
         descendants_cte(""),
-        utils::signed_amount_expr(utils::RAW_AMOUNT, "a2.account_type"),
+        utils::signed_amount_expr(VALUE_UNITS, "a2.account_type"),
         utils::VISIBLE_TX_FILTER
     );
     let mut stmt = conn.prepare(&sql)?;
     let start = format!("{start_year:04}-01-01");
-    let rows: Vec<(String, String, Option<String>, f64)> = stmt
+    let rows: Vec<(String, String, Option<String>, Units)> = stmt
         .query_map(rusqlite::params![start, period_start], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, Option<String>>(2)?,
-                row.get::<_, f64>(3)?,
+                row.get::<_, Units>(3)?,
             ))
         })?
         .collect::<Result<Vec<_>, _>>()?;
 
     let report_currency = fx::report_currency_or_empty(conn)?;
     let fx_map = fx::get_fx_map(conn, Some(&period_start))?;
-    let mut yearly_actuals: HashMap<String, HashMap<i32, f64>> = HashMap::new();
+    let mut yearly_actuals: HashMap<String, HashMap<i32, Units>> = HashMap::new();
     for (account_guid, y, commodity, total) in rows {
         let converted =
-            fx::convert_optional(total, commodity.as_deref(), &report_currency, &fx_map);
+            fx::convert_units_optional(total, commodity.as_deref(), &report_currency, &fx_map);
         if let Ok(yi) = y.parse::<i32>() {
             *yearly_actuals
                 .entry(account_guid)
                 .or_default()
                 .entry(yi)
-                .or_insert(0.0) += converted;
+                .or_default() += converted;
         }
     }
 
-    let mut carryovers: HashMap<String, f64> = HashMap::new();
+    let mut carryovers: HashMap<String, Units> = HashMap::new();
     for (guid, years) in &yearly {
         let first = match years.keys().copied().min() {
             Some(f) if f < year => f,
             _ => continue,
         };
         let ya = yearly_actuals.get(guid).cloned().unwrap_or_default();
-        let mut total = 0.0;
+        let mut total = Units::ZERO;
         for y in first..year {
             if let Some(budget) = years.get(&y) {
-                total += budget - ya.get(&y).copied().unwrap_or(0.0);
+                total += *budget - ya.get(&y).copied().unwrap_or_default();
             }
         }
         carryovers.insert(guid.clone(), total);
@@ -446,9 +453,9 @@ type RawBudgetRow = (
     Option<String>,
     Option<String>,
     String,
-    f64,
+    Units,
     Option<String>,
-    f64,
+    Units,
 );
 
 #[derive(Clone)]
@@ -459,8 +466,8 @@ struct BudgetAgg {
     account_description: Option<String>,
     account_code: Option<String>,
     account_type: String,
-    budget_amount: f64,
-    actual_amount: f64,
+    budget_amount: Units,
+    actual_amount: Units,
 }
 
 /// Fetch one raw row per budget/commodity with its in-window, unconverted
@@ -474,7 +481,7 @@ fn fetch_budget_actual_raw_rows(
     let mut stmt = conn.prepare(&format!(
         "{}
 			 SELECT b.guid, b.account_guid, a.name, a.description, a.code, a.account_type,
-			        b.amount_cents / 100.0,
+			        b.amount_cents * 100,
 			        c.mnemonic,
 			        COALESCE(SUM(ps.value), 0) as actual_amount
 			  FROM budgets b
@@ -493,7 +500,7 @@ fn fetch_budget_actual_raw_rows(
 			  GROUP BY b.guid, c.mnemonic
 			  ORDER BY a.name",
         descendants_cte("WHERE b.year = ?3"),
-        utils::RAW_AMOUNT,
+        VALUE_UNITS,
         utils::VISIBLE_TX_FILTER
     ))?;
 
@@ -506,9 +513,9 @@ fn fetch_budget_actual_raw_rows(
                 row.get::<_, Option<String>>(3)?,
                 row.get::<_, Option<String>>(4)?,
                 row.get::<_, String>(5)?,
-                row.get::<_, f64>(6)?,
+                row.get::<_, Units>(6)?,
                 row.get::<_, Option<String>>(7)?,
-                row.get::<_, f64>(8)?,
+                row.get::<_, Units>(8)?,
             ))
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -536,8 +543,12 @@ fn aggregate_budget_actuals(
         actual_amount,
     ) in raw_rows
     {
-        let converted =
-            fx::convert_optional(actual_amount, commodity.as_deref(), report_currency, fx_map);
+        let converted = fx::convert_units_optional(
+            actual_amount,
+            commodity.as_deref(),
+            report_currency,
+            fx_map,
+        );
         match aggs.get_mut(&account_guid) {
             Some(agg) => agg.actual_amount += converted,
             None => {
@@ -565,14 +576,14 @@ fn aggregate_budget_actuals(
 fn build_budget_actual_rows(
     aggs: &HashMap<String, BudgetAgg>,
     agg_order: &[String],
-    carryovers: &HashMap<String, f64>,
+    carryovers: &HashMap<String, Units>,
     elapsed: i32,
 ) -> Vec<BudgetActualRow> {
     let mut rows: Vec<BudgetActualRow> = agg_order
         .iter()
         .map(|guid| {
             let agg = &aggs[guid];
-            let carry = carryovers.get(guid).copied().unwrap_or(0.0);
+            let carry = carryovers.get(guid).copied().unwrap_or_default();
             let effective = agg.budget_amount + carry;
             let remaining = effective - agg.actual_amount;
             let percentage = full_year_percentage(agg.actual_amount, effective);
@@ -642,21 +653,21 @@ fn fetch_budget_detail_inner(
     let period_end = format!("{:04}-01-01", year + 1);
 
     let mut stmt = conn.prepare(
-        "SELECT year, amount_cents / 100.0 FROM budgets
+        "SELECT year, amount_cents * 100 FROM budgets
 			 WHERE account_guid = ?1
 			 ORDER BY year",
     )?;
-    let raw_entries: Vec<(i32, f64)> = stmt
+    let raw_entries: Vec<(i32, Units)> = stmt
         .query_map([account_guid], |row| {
-            Ok((row.get::<_, i32>(0)?, row.get::<_, f64>(1)?))
+            Ok((row.get::<_, i32>(0)?, row.get::<_, Units>(1)?))
         })?
         .collect::<Result<Vec<_>, _>>()?;
-    let yearly: HashMap<i32, f64> = raw_entries.iter().map(|(y, a)| (*y, *a)).collect();
+    let yearly: HashMap<i32, Units> = raw_entries.iter().map(|(y, a)| (*y, *a)).collect();
 
     // Carry-in at Jan 1 of the selected year (always applied). Only years
     // with a budget row count; earlier years without one are skipped.
     let first_year = yearly.keys().copied().min();
-    let mut carry = 0.0;
+    let mut carry = Units::ZERO;
     if let Some(fy) = first_year {
         if fy < year {
             let fx_carry = fx::get_fx_map(conn, Some(&period_start))?;
@@ -666,14 +677,10 @@ fn fetch_budget_detail_inner(
                 fetch_monthly_actuals(conn, account_guid, start_n, end_n, &fx_carry)?;
             for y in fy..year {
                 if let Some(amount) = yearly.get(&y) {
-                    let mut actual_y = 0.0;
-                    for m in 0..12 {
-                        actual_y += month_actuals
-                            .get(&(y as i64 * 12 + m))
-                            .copied()
-                            .unwrap_or(0.0);
-                    }
-                    carry += amount - actual_y;
+                    let actual_y: Units = (0..12)
+                        .filter_map(|m| month_actuals.get(&(y as i64 * 12 + m)))
+                        .sum();
+                    carry += *amount - actual_y;
                 }
             }
         }
@@ -685,12 +692,12 @@ fn fetch_budget_detail_inner(
     let end_n = (year as i64 + 1) * 12;
     let month_actuals = fetch_monthly_actuals(conn, account_guid, start_n, end_n, &fx_year)?;
 
-    let mut monthly: Vec<(i32, f64)> = Vec::with_capacity(12);
+    let mut monthly: Vec<(i32, Units)> = Vec::with_capacity(12);
     for m in 1..=12 {
         let n = year as i64 * 12 + (m - 1) as i64;
-        monthly.push((m, month_actuals.get(&n).copied().unwrap_or(0.0)));
+        monthly.push((m, month_actuals.get(&n).copied().unwrap_or_default()));
     }
-    let actual_amount: f64 = monthly.iter().map(|(_, a)| *a).sum();
+    let actual_amount: Units = monthly.iter().map(|(_, a)| *a).sum();
 
     let effective = annual_amount + carry;
     let remaining = effective - actual_amount;
@@ -700,7 +707,7 @@ fn fetch_budget_detail_inner(
         pacing_stats(annual_amount, carry, actual_amount, elapsed);
 
     let mut monthly_entries = Vec::with_capacity(12);
-    let mut cum = 0.0;
+    let mut cum = Units::ZERO;
     for (m, actual_m) in monthly {
         cum += actual_m;
         // Reuse the front-loaded pacing rule: annual prorated, carry in full.
@@ -756,7 +763,7 @@ pub async fn set_budget_year_amount(
     state: State<'_, AppState>,
     account_guid: String,
     year: i32,
-    amount: f64,
+    amount: Units,
 ) -> Result<Budget, AppError> {
     run_blocking(state.db.clone(), move |conn| {
         set_budget_year_amount_inner(conn, &account_guid, year, amount)
@@ -871,27 +878,32 @@ mod tests {
         .unwrap();
     }
 
-    fn assert_close(a: f64, b: f64) {
-        assert!((a - b).abs() < 0.02, "expected {b}, got {a}");
+    fn u(amount: f64) -> Units {
+        Units::from_f64(amount)
+    }
+
+    /// Budget amounts are exact: `actual` must equal `expected` to the unit.
+    fn assert_units(actual: Units, expected: f64) {
+        assert_eq!(actual, u(expected), "expected {expected}, got {actual}");
     }
 
     #[test]
     fn carryover_skips_years_without_budget() {
         let conn = setup();
         // Only 2022 and 2024 have budgets; 2023 has none and is skipped.
-        set_budget_year_amount_inner(&conn, "food", 2022, 1200.0).unwrap();
-        set_budget_year_amount_inner(&conn, "food", 2024, 1200.0).unwrap();
+        set_budget_year_amount_inner(&conn, "food", 2022, u(1200.0)).unwrap();
+        set_budget_year_amount_inner(&conn, "food", 2024, u(1200.0)).unwrap();
         add_spend(&conn, "t1", "2022-05-10", "food", 600.0);
         add_spend(&conn, "t2", "2023-06-10", "food", 9999.0);
 
         // 2024: carry = (2022: 1200 − 600); 2023 is skipped despite spending.
         let rows = fetch_budget_vs_actual_inner(&conn, 2024).unwrap();
         assert_eq!(rows.len(), 1);
-        assert_close(rows[0].budget_amount, 1200.0);
-        assert_close(rows[0].actual_amount, 0.0);
-        assert_close(rows[0].rollover_balance, 600.0);
-        assert_close(rows[0].remaining, 1800.0);
-        assert_close(rows[0].effective_total, 1800.0);
+        assert_units(rows[0].budget_amount, 1200.0);
+        assert_units(rows[0].actual_amount, 0.0);
+        assert_units(rows[0].rollover_balance, 600.0);
+        assert_units(rows[0].remaining, 1800.0);
+        assert_units(rows[0].effective_total, 1800.0);
 
         // 2023 has no budget rows at all: nothing is listed.
         let rows = fetch_budget_vs_actual_inner(&conn, 2023).unwrap();
@@ -902,108 +914,108 @@ mod tests {
     fn carryover_window_starts_at_first_budget_year() {
         let conn = setup();
         // Transactions in 2021 predate the first budget and are ignored.
-        set_budget_year_amount_inner(&conn, "food", 2022, 1200.0).unwrap();
-        set_budget_year_amount_inner(&conn, "food", 2023, 1200.0).unwrap();
+        set_budget_year_amount_inner(&conn, "food", 2022, u(1200.0)).unwrap();
+        set_budget_year_amount_inner(&conn, "food", 2023, u(1200.0)).unwrap();
         add_spend(&conn, "t0", "2021-05-10", "food", 5000.0);
         add_spend(&conn, "t1", "2022-05-10", "food", 600.0);
 
         // 2023: carry = (2022: 1200 − 600) = 600.
         let rows = fetch_budget_vs_actual_inner(&conn, 2023).unwrap();
         assert_eq!(rows.len(), 1);
-        assert_close(rows[0].budget_amount, 1200.0);
-        assert_close(rows[0].actual_amount, 0.0);
-        assert_close(rows[0].rollover_balance, 600.0);
-        assert_close(rows[0].remaining, 1800.0);
-        assert_close(rows[0].effective_total, 1800.0);
+        assert_units(rows[0].budget_amount, 1200.0);
+        assert_units(rows[0].actual_amount, 0.0);
+        assert_units(rows[0].rollover_balance, 600.0);
+        assert_units(rows[0].remaining, 1800.0);
+        assert_units(rows[0].effective_total, 1800.0);
     }
 
     #[test]
     fn carryover_includes_descendant_transactions() {
         let conn = setup();
-        set_budget_year_amount_inner(&conn, "dining", 2023, 2400.0).unwrap();
-        set_budget_year_amount_inner(&conn, "dining", 2024, 2400.0).unwrap();
+        set_budget_year_amount_inner(&conn, "dining", 2023, u(2400.0)).unwrap();
+        set_budget_year_amount_inner(&conn, "dining", 2024, u(2400.0)).unwrap();
         // First transaction is on the child account, March 2023, spending 300.
         add_spend(&conn, "t1", "2023-03-15", "restaurant", 300.0);
 
         // 2024: carry = 2023: 2400 − 300 = 2100.
         let rows = fetch_budget_vs_actual_inner(&conn, 2024).unwrap();
         assert_eq!(rows.len(), 1);
-        assert_close(rows[0].budget_amount, 2400.0);
-        assert_close(rows[0].rollover_balance, 2100.0);
-        assert_close(rows[0].remaining, 4500.0);
+        assert_units(rows[0].budget_amount, 2400.0);
+        assert_units(rows[0].rollover_balance, 2100.0);
+        assert_units(rows[0].remaining, 4500.0);
     }
 
     #[test]
     fn overspending_reduces_carryover() {
         let conn = setup();
-        set_budget_year_amount_inner(&conn, "food", 2024, 1200.0).unwrap();
-        set_budget_year_amount_inner(&conn, "food", 2025, 1200.0).unwrap();
+        set_budget_year_amount_inner(&conn, "food", 2024, u(1200.0)).unwrap();
+        set_budget_year_amount_inner(&conn, "food", 2025, u(1200.0)).unwrap();
         // Overspend in the first year: 1500 against a 1200 budget.
         add_spend(&conn, "t1", "2024-01-05", "food", 1500.0);
 
         // 2025: carry = 1200 − 1500 = −300.
         let rows = fetch_budget_vs_actual_inner(&conn, 2025).unwrap();
-        assert_close(rows[0].rollover_balance, -300.0);
-        assert_close(rows[0].remaining, 900.0);
+        assert_units(rows[0].rollover_balance, -300.0);
+        assert_units(rows[0].remaining, 900.0);
     }
 
     #[test]
     fn no_transactions_yields_zero_carryover() {
         let conn = setup();
-        set_budget_year_amount_inner(&conn, "unused", 2024, 960.0).unwrap();
+        set_budget_year_amount_inner(&conn, "unused", 2024, u(960.0)).unwrap();
 
         let rows = fetch_budget_vs_actual_inner(&conn, 2024).unwrap();
-        assert_close(rows[0].budget_amount, 960.0);
-        assert_close(rows[0].actual_amount, 0.0);
-        assert_close(rows[0].rollover_balance, 0.0);
-        assert_close(rows[0].remaining, 960.0);
+        assert_units(rows[0].budget_amount, 960.0);
+        assert_units(rows[0].actual_amount, 0.0);
+        assert_units(rows[0].rollover_balance, 0.0);
+        assert_units(rows[0].remaining, 960.0);
 
         let detail = fetch_budget_detail_inner(&conn, "unused", 2024).unwrap();
         assert_eq!(detail.monthly_entries.len(), 12);
-        assert_close(detail.summary.rollover_balance, 0.0);
-        assert_close(detail.budget.amount, 960.0);
+        assert_units(detail.summary.rollover_balance, 0.0);
+        assert_units(detail.budget.amount, 960.0);
     }
 
     #[test]
     fn budgets_are_per_year() {
         let conn = setup();
-        set_budget_year_amount_inner(&conn, "food", 2024, 600.0).unwrap();
-        set_budget_year_amount_inner(&conn, "food", 2025, 1200.0).unwrap();
+        set_budget_year_amount_inner(&conn, "food", 2024, u(600.0)).unwrap();
+        set_budget_year_amount_inner(&conn, "food", 2025, u(1200.0)).unwrap();
         add_spend(&conn, "t1", "2024-01-05", "food", 600.0);
         add_spend(&conn, "t2", "2025-02-10", "food", 1400.0);
 
         // 2025: carry = 2024: 600 − 600 = 0.
         let rows = fetch_budget_vs_actual_inner(&conn, 2025).unwrap();
         assert_eq!(rows.len(), 1);
-        assert_close(rows[0].budget_amount, 1200.0);
-        assert_close(rows[0].rollover_balance, 0.0);
-        assert_close(rows[0].actual_amount, 1400.0);
-        assert_close(rows[0].remaining, -200.0);
+        assert_units(rows[0].budget_amount, 1200.0);
+        assert_units(rows[0].rollover_balance, 0.0);
+        assert_units(rows[0].actual_amount, 1400.0);
+        assert_units(rows[0].remaining, -200.0);
 
         // 2026 has no budget: the account is not listed. Carry would be
         // 2024: 0 + 2025: 1200 − 1400 = −200 once 2026 is created.
         let rows = fetch_budget_vs_actual_inner(&conn, 2026).unwrap();
         assert!(rows.is_empty());
-        set_budget_year_amount_inner(&conn, "food", 2026, 1200.0).unwrap();
+        set_budget_year_amount_inner(&conn, "food", 2026, u(1200.0)).unwrap();
         let rows = fetch_budget_vs_actual_inner(&conn, 2026).unwrap();
-        assert_close(rows[0].rollover_balance, -200.0);
+        assert_units(rows[0].rollover_balance, -200.0);
 
         // Detail shows each year's own amount.
         let d2024 = fetch_budget_detail_inner(&conn, "food", 2024).unwrap();
-        assert_close(d2024.budget.amount, 600.0);
+        assert_units(d2024.budget.amount, 600.0);
         let d2025 = fetch_budget_detail_inner(&conn, "food", 2025).unwrap();
-        assert_close(d2025.budget.amount, 1200.0);
+        assert_units(d2025.budget.amount, 1200.0);
     }
 
     #[test]
     fn upsert_overwrites_same_year() {
         let conn = setup();
-        let created = set_budget_year_amount_inner(&conn, "food", 2024, 600.0).unwrap();
+        let created = set_budget_year_amount_inner(&conn, "food", 2024, u(600.0)).unwrap();
         assert_eq!(created.year, 2024);
-        assert_close(created.amount, 600.0);
+        assert_units(created.amount, 600.0);
 
-        let updated = set_budget_year_amount_inner(&conn, "food", 2024, 900.0).unwrap();
-        assert_close(updated.amount, 900.0);
+        let updated = set_budget_year_amount_inner(&conn, "food", 2024, u(900.0)).unwrap();
+        assert_units(updated.amount, 900.0);
 
         // Still a single row for the year.
         let count: i64 = conn
@@ -1014,7 +1026,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 1);
-        assert_close(
+        assert_units(
             fetch_budget_detail_inner(&conn, "food", 2024)
                 .unwrap()
                 .budget
@@ -1027,8 +1039,8 @@ mod tests {
     fn budget_years_lists_taken_years_ascending() {
         let conn = setup();
         assert!(fetch_budget_years_inner(&conn, "food").unwrap().is_empty());
-        set_budget_year_amount_inner(&conn, "food", 2026, 900.0).unwrap();
-        set_budget_year_amount_inner(&conn, "food", 2024, 600.0).unwrap();
+        set_budget_year_amount_inner(&conn, "food", 2026, u(900.0)).unwrap();
+        set_budget_year_amount_inner(&conn, "food", 2024, u(600.0)).unwrap();
         assert_eq!(
             fetch_budget_years_inner(&conn, "food").unwrap(),
             vec![2024, 2026]
@@ -1041,13 +1053,13 @@ mod tests {
     #[test]
     fn delete_year_removes_only_that_year() {
         let conn = setup();
-        set_budget_year_amount_inner(&conn, "food", 2024, 600.0).unwrap();
-        set_budget_year_amount_inner(&conn, "food", 2025, 1200.0).unwrap();
+        set_budget_year_amount_inner(&conn, "food", 2024, u(600.0)).unwrap();
+        set_budget_year_amount_inner(&conn, "food", 2025, u(1200.0)).unwrap();
         add_spend(&conn, "t1", "2024-01-05", "food", 600.0);
 
         // 2025 carry with the 2024 row: 600 − 600 = 0.
         let rows = fetch_budget_vs_actual_inner(&conn, 2025).unwrap();
-        assert_close(rows[0].rollover_balance, 0.0);
+        assert_units(rows[0].rollover_balance, 0.0);
 
         delete_budget_year_inner(&conn, "food", 2024).unwrap();
 
@@ -1057,14 +1069,14 @@ mod tests {
         assert!(rows.is_empty());
         let rows = fetch_budget_vs_actual_inner(&conn, 2025).unwrap();
         assert_eq!(rows.len(), 1);
-        assert_close(rows[0].budget_amount, 1200.0);
-        assert_close(rows[0].rollover_balance, 0.0);
+        assert_units(rows[0].budget_amount, 1200.0);
+        assert_units(rows[0].rollover_balance, 0.0);
     }
 
     #[test]
     fn detail_missing_year_errors() {
         let conn = setup();
-        set_budget_year_amount_inner(&conn, "food", 2024, 600.0).unwrap();
+        set_budget_year_amount_inner(&conn, "food", 2024, u(600.0)).unwrap();
         let err = fetch_budget_detail_inner(&conn, "food", 2025).unwrap_err();
         assert_eq!(err.to_string(), "No budget for this year");
     }
@@ -1072,8 +1084,8 @@ mod tests {
     #[test]
     fn detail_has_twelve_monthly_slices_with_pacing() {
         let conn = setup();
-        set_budget_year_amount_inner(&conn, "food", 2022, 1200.0).unwrap();
-        set_budget_year_amount_inner(&conn, "food", 2023, 1200.0).unwrap();
+        set_budget_year_amount_inner(&conn, "food", 2022, u(1200.0)).unwrap();
+        set_budget_year_amount_inner(&conn, "food", 2023, u(1200.0)).unwrap();
         add_spend(&conn, "t1", "2022-05-10", "food", 600.0);
         add_spend(&conn, "t2", "2023-01-15", "food", 100.0);
         add_spend(&conn, "t3", "2023-02-15", "food", 100.0);
@@ -1082,67 +1094,93 @@ mod tests {
         let detail = fetch_budget_detail_inner(&conn, "food", 2023).unwrap();
         assert_eq!(detail.budget.year, 2023);
         assert_eq!(detail.monthly_entries.len(), 12);
-        assert_close(detail.summary.rollover_balance, 600.0);
-        assert_close(detail.summary.effective_total, 1800.0);
-        assert_close(detail.summary.actual_amount, 200.0);
-        assert_close(detail.summary.remaining, 1600.0);
+        assert_units(detail.summary.rollover_balance, 600.0);
+        assert_units(detail.summary.effective_total, 1800.0);
+        assert_units(detail.summary.actual_amount, 200.0);
+        assert_units(detail.summary.remaining, 1600.0);
 
         // January cumulative: 100 vs front-loaded expected 1200/12 + 600 = 700.
         let jan = &detail.monthly_entries[0];
         assert_eq!(jan.month, 1);
-        assert_close(jan.actual_amount, 100.0);
-        assert_close(jan.cumulative_actual, 100.0);
-        assert_close(jan.cumulative_expected, 700.0);
+        assert_units(jan.actual_amount, 100.0);
+        assert_units(jan.cumulative_actual, 100.0);
+        assert_units(jan.cumulative_expected, 700.0);
         // February cumulative: 200 vs 2400/12 + 600 = 800.
         let feb = &detail.monthly_entries[1];
-        assert_close(feb.cumulative_actual, 200.0);
-        assert_close(feb.cumulative_expected, 800.0);
+        assert_units(feb.cumulative_actual, 200.0);
+        assert_units(feb.cumulative_expected, 800.0);
     }
 
     #[test]
     fn pacing_uses_expected_ytd() {
         let conn = setup();
-        set_budget_year_amount_inner(&conn, "food", 2023, 1200.0).unwrap();
+        set_budget_year_amount_inner(&conn, "food", 2023, u(1200.0)).unwrap();
         // No spending: pacing must be 0 and delta equals expected YTD.
         // Front-loaded: annual × elapsed/12 + carry (carry is 0 here).
         let rows = fetch_budget_vs_actual_inner(&conn, 2023).unwrap();
         let elapsed = rows[0].elapsed_months;
         assert!((0..=12).contains(&elapsed));
-        let expected = rows[0].budget_amount * (elapsed as f64) / 12.0 + rows[0].rollover_balance;
-        assert_close(rows[0].expected_ytd, expected);
-        assert_close(rows[0].delta, expected - rows[0].actual_amount);
+        let expected =
+            rows[0].budget_amount.mul_div_round(i64::from(elapsed), 12) + rows[0].rollover_balance;
+        assert_eq!(rows[0].expected_ytd, expected);
+        assert_eq!(rows[0].delta, expected - rows[0].actual_amount);
     }
 
     #[test]
     fn front_loaded_carry_counts_in_full() {
         let conn = setup();
-        set_budget_year_amount_inner(&conn, "food", 2022, 1200.0).unwrap();
-        set_budget_year_amount_inner(&conn, "food", 2023, 1200.0).unwrap();
+        set_budget_year_amount_inner(&conn, "food", 2022, u(1200.0)).unwrap();
+        set_budget_year_amount_inner(&conn, "food", 2023, u(1200.0)).unwrap();
         add_spend(&conn, "t1", "2022-05-10", "food", 600.0);
 
         // 2023: annual 1200, carry 600. Front-loaded January expects
         // 1200/12 + 600 = 700 (not 1800/12 = 150).
         let detail = fetch_budget_detail_inner(&conn, "food", 2023).unwrap();
-        assert_close(detail.summary.rollover_balance, 600.0);
-        assert_close(detail.monthly_entries[0].cumulative_expected, 700.0);
-        assert_close(detail.monthly_entries[11].cumulative_expected, 1800.0);
+        assert_units(detail.summary.rollover_balance, 600.0);
+        assert_units(detail.monthly_entries[0].cumulative_expected, 700.0);
+        assert_units(detail.monthly_entries[11].cumulative_expected, 1800.0);
     }
 
     #[test]
     fn invalid_year_and_amount_rejected() {
         let conn = setup();
-        set_budget_year_amount_inner(&conn, "food", 2024, 1200.0).unwrap();
-        assert!(set_budget_year_amount_inner(&conn, "food", 1800, 500.0).is_err());
-        assert!(set_budget_year_amount_inner(&conn, "food", 2024, 0.0).is_err());
-        assert!(set_budget_year_amount_inner(&conn, "food", 2025, 500.0).is_ok());
+        set_budget_year_amount_inner(&conn, "food", 2024, u(1200.0)).unwrap();
+        assert!(set_budget_year_amount_inner(&conn, "food", 1800, u(500.0)).is_err());
+        assert!(set_budget_year_amount_inner(&conn, "food", 2024, u(0.0)).is_err());
+        assert!(set_budget_year_amount_inner(&conn, "food", 2025, u(500.0)).is_ok());
         assert!(fetch_budget_vs_actual_inner(&conn, 1800).is_err());
         assert!(fetch_budget_detail_inner(&conn, "food", 1800).is_err());
     }
 
     #[test]
+    fn sub_cent_and_huge_amounts_rejected() {
+        let conn = setup();
+        let err =
+            set_budget_year_amount_inner(&conn, "food", 2024, Units::new(12_345)).unwrap_err();
+        assert_eq!(err.to_string(), "Budget amounts can't go below a cent");
+        assert!(set_budget_year_amount_inner(&conn, "food", 2024, u(2e9)).is_err());
+        let ok = set_budget_year_amount_inner(&conn, "food", 2024, u(1234.56)).unwrap();
+        assert_eq!(ok.amount, Units::new(12_345_600));
+    }
+
+    #[test]
+    fn pacing_rounds_to_the_unit_and_ends_on_the_total() {
+        let conn = setup();
+        // 100.01 / 12 doesn't divide: months round, December is exact.
+        set_budget_year_amount_inner(&conn, "food", 2022, u(100.01)).unwrap();
+        let detail = fetch_budget_detail_inner(&conn, "food", 2022).unwrap();
+        assert_eq!(
+            detail.monthly_entries[0].cumulative_expected,
+            Units::new(83_342)
+        );
+        assert_eq!(detail.monthly_entries[11].cumulative_expected, u(100.01));
+        assert_eq!(detail.summary.remaining, u(100.01));
+    }
+
+    #[test]
     fn non_expense_accounts_rejected() {
         let conn = setup();
-        assert!(set_budget_year_amount_inner(&conn, "root", 2024, 500.0).is_err());
-        assert!(set_budget_year_amount_inner(&conn, "missing", 2024, 500.0).is_err());
+        assert!(set_budget_year_amount_inner(&conn, "root", 2024, u(500.0)).is_err());
+        assert!(set_budget_year_amount_inner(&conn, "missing", 2024, u(500.0)).is_err());
     }
 }

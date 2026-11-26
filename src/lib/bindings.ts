@@ -130,7 +130,7 @@ export const commands = {
 	fetchSymbolOverrides: (options?: InvokeOptions) => __TAURI_INVOKE<SymbolOverride[]>("fetch_symbol_overrides", undefined, options),
 	setSymbolOverride: (commodityGuid: string, symbol: string, options?: InvokeOptions) => __TAURI_INVOKE<SymbolOverride>("set_symbol_override", { commodityGuid, symbol }, options),
 	deleteSymbolOverride: (commodityGuid: string, options?: InvokeOptions) => __TAURI_INVOKE<null>("delete_symbol_override", { commodityGuid }, options),
-	setBudgetYearAmount: (accountGuid: string, year: number, amount: number, options?: InvokeOptions) => __TAURI_INVOKE<Budget>("set_budget_year_amount", { accountGuid, year, amount }, options),
+	setBudgetYearAmount: (accountGuid: string, year: number, amount: number & { readonly __brand: "Units" }, options?: InvokeOptions) => __TAURI_INVOKE<Budget>("set_budget_year_amount", { accountGuid, year, amount }, options),
 	fetchBudgetYears: (accountGuid: string, options?: InvokeOptions) => __TAURI_INVOKE<number[]>("fetch_budget_years", { accountGuid }, options),
 	deleteBudgetYear: (accountGuid: string, year: number, options?: InvokeOptions) => __TAURI_INVOKE<null>("delete_budget_year", { accountGuid, year }, options),
 	fetchBudgetVsActual: (year: number, options?: InvokeOptions) => __TAURI_INVOKE<BudgetActualRow[]>("fetch_budget_vs_actual", { year }, options),
@@ -416,6 +416,8 @@ export type BookSettings = {
  *  Carryover is always applied (no opt-out): each year's remaining is
  *  `(annual + carry-in) − actual`, where carry-in sums `(budget − actual)`
  *  over earlier years that have a budget row — years without one are skipped.
+ *  Amounts are exact [`Units`] in the report currency; only actuals held in
+ *  another currency are converted (and rounded) through FX.
  */
 export type Budget = {
 	guid: string,
@@ -425,7 +427,7 @@ export type Budget = {
 	accountCode: string | null,
 	accountType: string,
 	year: number,
-	amount: number,
+	amount: number & { readonly __brand: "Units" },
 	createdAt: string,
 };
 
@@ -436,16 +438,16 @@ export type BudgetActualRow = {
 	accountDescription: string | null,
 	accountCode: string | null,
 	accountType: string,
-	budgetAmount: number,
-	actualAmount: number,
-	remaining: number,
+	budgetAmount: number & { readonly __brand: "Units" },
+	actualAmount: number & { readonly __brand: "Units" },
+	remaining: number & { readonly __brand: "Units" },
 	percentage: number,
-	rolloverBalance: number,
-	expectedYtd: number,
+	rolloverBalance: number & { readonly __brand: "Units" },
+	expectedYtd: number & { readonly __brand: "Units" },
 	pacingPercentage: number,
-	delta: number,
+	delta: number & { readonly __brand: "Units" },
 	elapsedMonths: number,
-	effectiveTotal: number,
+	effectiveTotal: number & { readonly __brand: "Units" },
 };
 
 export type BudgetDateRange = {
@@ -460,15 +462,15 @@ export type BudgetDetail = {
 };
 
 export type BudgetYearSummary = {
-	budgetAmount: number,
-	rolloverBalance: number,
-	effectiveTotal: number,
-	actualAmount: number,
-	expectedYtd: number,
-	remaining: number,
+	budgetAmount: number & { readonly __brand: "Units" },
+	rolloverBalance: number & { readonly __brand: "Units" },
+	effectiveTotal: number & { readonly __brand: "Units" },
+	actualAmount: number & { readonly __brand: "Units" },
+	expectedYtd: number & { readonly __brand: "Units" },
+	remaining: number & { readonly __brand: "Units" },
 	percentage: number,
 	pacingPercentage: number,
-	delta: number,
+	delta: number & { readonly __brand: "Units" },
 	elapsedMonths: number,
 };
 
@@ -918,10 +920,10 @@ export type MissingPrice = {
  */
 export type MonthlySlice = {
 	month: number,
-	actualAmount: number,
-	cumulativeActual: number,
-	cumulativeExpected: number,
-	delta: number,
+	actualAmount: number & { readonly __brand: "Units" },
+	cumulativeActual: number & { readonly __brand: "Units" },
+	cumulativeExpected: number & { readonly __brand: "Units" },
+	delta: number & { readonly __brand: "Units" },
 	pacingPercentage: number,
 };
 
@@ -1293,7 +1295,7 @@ export type Schedule = {
 	 *  transfer size behind a balanced template, or one slice of a spread
 	 *  total. Rendered in list rows (a raw sum is always 0).
 	 */
-	previewAmount: number,
+	previewAmount: number & { readonly __brand: "Units" },
 	autoPost: boolean,
 	spreadTotal: boolean,
 	createdAt: string,

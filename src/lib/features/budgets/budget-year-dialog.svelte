@@ -9,7 +9,8 @@
   import { fetchBudgetYears, setBudgetYearAmount } from '$lib/tauri';
   import { errMsg } from '$lib/utils/error';
   import type { AccountsResult, BudgetDateRange } from '$lib/tauri';
-  import { flattenExpenseAccounts } from './budget-utils';
+  import { budgetAmountError, flattenExpenseAccounts } from './budget-utils';
+  import { toUnits } from '$lib/utils/units';
   import AccountLabel from '$lib/features/accounts/account-label.svelte';
   import { useBudgetYear } from '$lib/hooks/use-budget-year.svelte';
 
@@ -119,7 +120,7 @@
   });
 
   let accountError = $derived(target ? '' : 'Choose an expense account to continue');
-  let amountError = $derived(amount > 0 ? '' : 'Enter an amount above zero');
+  let amountError = $derived(budgetAmountError(amount));
   let yearError = $derived(
     existingYears !== null && existingYears.includes(Number(by.yearSel))
       ? 'There’s already a budget for this year. Pick another one'
@@ -133,7 +134,7 @@
       target !== null &&
       existingYears !== null &&
       !noFreeYears &&
-      amount > 0 &&
+      !amountError &&
       !yearError
   );
   let saveDisabled = $derived(!canSave);
@@ -176,7 +177,7 @@
     loading = true;
     formError = '';
     try {
-      await setBudgetYearAmount(target, y, amount);
+      await setBudgetYearAmount(target, y, toUnits(amount));
       open = false;
       onSave?.(target, y);
     } catch (e: unknown) {

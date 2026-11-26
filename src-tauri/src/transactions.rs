@@ -228,6 +228,11 @@ fn validate_post_date(post_date: &str) -> Result<String, AppError> {
     Ok(normalized)
 }
 
+/// A split amount as exact [`Units`], with the same checks as saving it.
+pub(crate) fn split_units(amount: f64) -> Result<Units, AppError> {
+    Ok(Units::new(to_value_rational(amount)?.0))
+}
+
 fn to_value_rational(amount: f64) -> Result<(i64, i64), AppError> {
     if !amount.is_finite() {
         return Err(AppError::Validation(
@@ -377,8 +382,7 @@ pub(crate) fn validate_tx_body_with(
         }
         // Balance on the stored integers, so what passes here sums to exactly
         // zero on disk.
-        let (value_num, _) = to_value_rational(s.amount)?;
-        sum += Units::new(value_num);
+        sum += split_units(s.amount)?;
         if let Some(q) = s.quantity {
             if !q.is_finite() {
                 return Err(AppError::Validation(format!(

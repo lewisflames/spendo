@@ -64,6 +64,48 @@ impl Units {
         Units((amount * Self::SCALE as f64).round() as i64)
     }
 
+    /// Units per cent: budgets and spread schedules work in whole cents.
+    pub const PER_CENT: i64 = Self::SCALE / 100;
+
+    pub const fn from_cents(cents: i64) -> Self {
+        Units(cents * Self::PER_CENT)
+    }
+
+    /// Nearest whole cent, half away from zero.
+    pub fn round_to_cents(self) -> i64 {
+        let c = Self::PER_CENT;
+        self.0.signum() * ((2 * self.0.abs() + c) / (2 * c))
+    }
+
+    /// Whole cents, or `None` when the amount has sub-cent digits.
+    pub fn to_cents(self) -> Option<i64> {
+        (self.0 % Self::PER_CENT == 0).then_some(self.0 / Self::PER_CENT)
+    }
+
+    /// `self · num / den` rounded half away from zero, in integers (so an
+    /// amount and its negation round to exact opposites). Widened to `i128`,
+    /// so the product can't overflow.
+    pub fn mul_div_round(self, num: i64, den: i64) -> Self {
+        let den = i128::from(den.max(1));
+        let product = i128::from(self.0) * i128::from(num);
+        let rounded = product.signum() * ((2 * product.abs() + den) / (2 * den));
+        Units(rounded as i64)
+    }
+
+    /// `self / other` as a percentage (0 when `other` is zero). A ratio is
+    /// display-only, so it may be a float.
+    pub fn percent_of(self, other: Units) -> f64 {
+        if other.is_zero() {
+            0.0
+        } else {
+            self.0 as f64 / other.0 as f64 * 100.0
+        }
+    }
+
+    pub fn max(self, other: Units) -> Self {
+        Units(self.0.max(other.0))
+    }
+
     pub fn abs(self) -> Self {
         Units(self.0.abs())
     }

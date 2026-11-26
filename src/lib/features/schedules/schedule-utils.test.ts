@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { toUnits } from '$lib/utils/units';
 import type { Schedule } from '$lib/tauri';
 import { frequencyLabel, isPostable, occurrenceLabel, scheduleStatus } from './schedule-utils';
 
@@ -20,7 +21,7 @@ function schedule(partial: Partial<Schedule> = {}): Schedule {
     notes: null,
     payee: null,
     splits: [],
-    previewAmount: 1000,
+    previewAmount: toUnits(1000),
     autoPost: false,
     spreadTotal: false,
     createdAt: '2024-01-01T00:00:00Z',
