@@ -27,6 +27,7 @@ mod search;
 mod settings;
 mod spending;
 mod sql;
+mod sync_conflicts;
 mod tags;
 mod tax;
 mod transactions;
@@ -100,6 +101,8 @@ pub fn run() {
             books::save_book_as,
             books::close_book,
             books::reload_changed_book,
+            sync_conflicts::list_sync_conflicts,
+            sync_conflicts::review_sync_conflict,
             backups::fetch_backups,
             backups::create_backup,
             backups::delete_backup,
