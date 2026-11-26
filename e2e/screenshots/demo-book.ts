@@ -1,6 +1,5 @@
-import type { AccountNode, TransactionRow } from '../../src/lib/tauri';
+import type { AccountNode, Command, CommandResults, TransactionRow } from '../../src/lib/tauri';
 import { toUnits, ZERO_UNITS } from '../../src/lib/utils/units';
-import type { BackendMocks } from '../fixtures';
 
 /**
  * A made-up household book for the README and landing-page screenshots. Every
@@ -868,9 +867,98 @@ const totalUnrealized = sum(holdings.map((h) => h.unrealizedGain ?? 0));
 const totalRealized = sum(holdings.map((h) => h.realizedGain));
 const totalDividends = sum(holdings.map((h) => h.dividends));
 
+/**
+ * Commands no screenshotted page calls. Every other command needs a demo
+ * answer in `DEMO_BOOK`, so a new command fails `bun run check` until it is
+ * mocked there or listed here.
+ */
+type OffScreen =
+  | 'add_attachments'
+  | 'book_files_exist'
+  | 'bulk_edit_transactions'
+  | 'clear_app_db'
+  | 'close_book'
+  | 'create_account'
+  | 'create_backup'
+  | 'create_book_at'
+  | 'create_import_rule'
+  | 'create_schedule'
+  | 'create_transaction'
+  | 'csv_commit'
+  | 'csv_detect'
+  | 'csv_preview'
+  | 'delete_account'
+  | 'delete_attachment'
+  | 'delete_backup'
+  | 'delete_budget_year'
+  | 'delete_csv_preset'
+  | 'delete_import_rule'
+  | 'delete_payee'
+  | 'delete_schedule'
+  | 'delete_symbol_override'
+  | 'delete_tag'
+  | 'delete_transaction'
+  | 'export_accounts_csv'
+  | 'export_attachment'
+  | 'export_realized_gains_csv'
+  | 'export_tax_summary_csv'
+  | 'export_transactions_csv'
+  | 'fetch_account_balance_trend'
+  | 'fetch_account_detail'
+  | 'fetch_attachments'
+  | 'fetch_backups'
+  | 'fetch_balance_sheet'
+  | 'fetch_book_currencies'
+  | 'fetch_budget_detail'
+  | 'fetch_budget_years'
+  | 'fetch_holding_detail'
+  | 'fetch_import_rules'
+  | 'fetch_nav_roots'
+  | 'fetch_realized_gains'
+  | 'fetch_reconcile_info'
+  | 'fetch_reconcile_summaries'
+  | 'fetch_schedule'
+  | 'fetch_schedules'
+  | 'fetch_symbol_overrides'
+  | 'fetch_tax_roles'
+  | 'fetch_tax_summary'
+  | 'fetch_transaction'
+  | 'fetch_transit_check'
+  | 'finish_reconciliation'
+  | 'mark_reconcile_splits'
+  | 'move_import_rule'
+  | 'open_attachment'
+  | 'open_book'
+  | 'post_due_schedules'
+  | 'post_schedule_occurrence'
+  | 'refresh_prices'
+  | 'rename_payee'
+  | 'rename_tag'
+  | 'reopen_last_reconciliation'
+  | 'restore_backup'
+  | 'review_sync_conflict'
+  | 'save_allocation_targets'
+  | 'save_book_as'
+  | 'save_tax_roles'
+  | 'search_global'
+  | 'set_base_currency'
+  | 'set_book_setting'
+  | 'set_budget_year_amount'
+  | 'set_dividend_links'
+  | 'set_schedule_active'
+  | 'set_symbol_override'
+  | 'skip_schedule_occurrence'
+  | 'update_account'
+  | 'update_import_rule'
+  | 'update_schedule'
+  | 'update_transaction';
+
 /** Every command the screenshotted pages call, with the demo book's answers. */
-export const DEMO_BOOK: BackendMocks = {
+export type DemoBook = { [K in Exclude<Command, OffScreen>]: CommandResults[K] };
+
+export const DEMO_BOOK: DemoBook = {
   fetch_active_book: { path: '/home/alex/Documents/Household.spendo' },
+  reload_changed_book: null,
   list_sync_conflicts: [],
   fetch_home_data: {
     hasData: true,
@@ -928,7 +1016,9 @@ export const DEMO_BOOK: BackendMocks = {
     holdings,
     valueTrend
   },
-  fetch_allocation_targets: []
+  fetch_allocation_targets: [],
+  // Screens override this with their own page size (`transactionsFor`).
+  fetch_transactions: transactionsPage(25)
 };
 
 /** `fetch_transactions` answers depend on the page size each screen asks for. */
