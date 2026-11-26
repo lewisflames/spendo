@@ -7,7 +7,7 @@
     "dev": "vite dev",
     "build": "vite build",
     "prepare": "svelte-kit sync",
-    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && tsc -p e2e",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "bindings": "cd src-tauri && cargo test --lib bindings::export_bindings -- --ignored",
     "test": "vitest run",

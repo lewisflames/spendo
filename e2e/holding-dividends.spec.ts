@@ -1,4 +1,4 @@
-import { expect, mockBackend, test, type BackendMocks } from './fixtures';
+import { accountsResult, type BackendMocks, expect, mockBackend, test } from './fixtures';
 
 const HOLDING = {
   commodityGuid: 'c-aapl',
@@ -34,7 +34,8 @@ const MOCKS: BackendMocks = {
       totalTransactions: 2,
       earliestDate: '2024-01-10',
       latestDate: '2024-03-01',
-      netWorth: 1500
+      netWorth: 1500,
+      readOnly: false
     }
   },
   fetch_nav_badges: { dueSchedules: 0, unclearedTransactions: 0 },
@@ -56,7 +57,7 @@ const MOCKS: BackendMocks = {
     pageSize: 25,
     totalPages: 1
   },
-  fetch_accounts: { trees: [] }
+  fetch_accounts: accountsResult({ trees: [] })
 };
 
 test('lists dividends and the linked income accounts', async ({ page }) => {

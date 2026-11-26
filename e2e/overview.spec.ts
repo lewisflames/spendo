@@ -1,4 +1,4 @@
-import { expect, mockBackend, test, type BackendMocks } from './fixtures';
+import { type BackendMocks, bookSettings, expect, mockBackend, pnlReport, test } from './fixtures';
 
 const point = (date: string, assets: number, liabilities: number) => ({
   date,
@@ -17,20 +17,12 @@ const OVERVIEW: BackendMocks = {
       totalTransactions: 2,
       earliestDate: '2024-01-10',
       latestDate: '2024-02-05',
-      netWorth: 5
+      netWorth: 5,
+      readOnly: false
     }
   },
   fetch_nav_badges: { dueSchedules: 0, unclearedTransactions: 0 },
-  fetch_pnl_report: {
-    rows: [],
-    totalIncome: 0,
-    totalExpenses: 0,
-    netIncome: 0,
-    prevTotalIncome: 0,
-    prevTotalExpenses: 0,
-    prevNetIncome: 0,
-    missingFx: []
-  },
+  fetch_pnl_report: pnlReport(),
   fetch_pnl_trend: [],
   fetch_transactions: { transactions: [], total: 0, page: 1, pageSize: 8, totalPages: 1 }
 };
@@ -83,12 +75,12 @@ test('links the month cards to their reports for the same period', async ({ page
 });
 
 test('reloads the book on focus after another device replaced it', async ({ page }) => {
-  const summary = OVERVIEW.fetch_home_data as { summary: object };
+  const summary = OVERVIEW.fetch_home_data!.summary!;
   await mockBackend(page, {
     ...OVERVIEW,
     fetch_net_worth_trend: [],
-    get_book_settings: {},
-    reload_changed_book: { hasData: true, summary: summary.summary }
+    get_book_settings: bookSettings(),
+    reload_changed_book: { hasData: true, summary }
   });
   await page.goto('/');
   await expect(page.getByText('Your net worth story starts')).toBeVisible();

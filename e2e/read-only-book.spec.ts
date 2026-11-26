@@ -1,4 +1,4 @@
-import { expect, mockBackend, test, type BackendMocks } from './fixtures';
+import { type BackendMocks, expect, mockBackend, pnlReport, test } from './fixtures';
 
 const summary = (readOnly: boolean) => ({
   currency: 'EUR',
@@ -13,16 +13,7 @@ const summary = (readOnly: boolean) => ({
 const BOOK: BackendMocks = {
   fetch_active_book: { path: '/tmp/test.spendo' },
   fetch_nav_badges: { dueSchedules: 0, unclearedTransactions: 0 },
-  fetch_pnl_report: {
-    rows: [],
-    totalIncome: 0,
-    totalExpenses: 0,
-    netIncome: 0,
-    prevTotalIncome: 0,
-    prevTotalExpenses: 0,
-    prevNetIncome: 0,
-    missingFx: []
-  },
+  fetch_pnl_report: pnlReport(),
   fetch_pnl_trend: [],
   fetch_net_worth_trend: [],
   fetch_transactions: { transactions: [], total: 0, page: 1, pageSize: 8, totalPages: 1 },

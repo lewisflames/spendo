@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import { expect, mockBackend, test, type BackendMocks } from './fixtures';
+import { accountsResult, type BackendMocks, expect, mockBackend, test } from './fixtures';
 
 const account = (guid: string, name: string, accountType: string) => ({
   guid,
@@ -31,8 +31,8 @@ const row = (
   tags,
   payee,
   splits: [
-    { guid: `${guid}-a`, accountGuid: 'food', accountName: 'Groceries', amount: 10 },
-    { guid: `${guid}-b`, accountGuid: 'bank', accountName: 'Bank', amount: -10 }
+    { guid: `${guid}-a`, accountGuid: 'food', accountName: 'Groceries', amount: 10, memo: null },
+    { guid: `${guid}-b`, accountGuid: 'bank', accountName: 'Bank', amount: -10, memo: null }
   ]
 });
 
@@ -47,7 +47,8 @@ const LEDGER: BackendMocks = {
       totalTransactions: 5,
       earliestDate: '2024-01-01',
       latestDate: '2024-01-03',
-      netWorth: 0
+      netWorth: 0,
+      readOnly: false
     }
   },
   fetch_nav_badges: { dueSchedules: 0, unclearedTransactions: 0 },
@@ -66,7 +67,7 @@ const LEDGER: BackendMocks = {
     pageSize: 3,
     totalPages: 2
   },
-  fetch_accounts: {
+  fetch_accounts: accountsResult({
     trees: [
       account('bank', 'Bank', 'BANK'),
       account('food', 'Groceries', 'EXPENSE'),
@@ -77,7 +78,7 @@ const LEDGER: BackendMocks = {
     reportCurrency: 'EUR',
     retainedEarnings: 0,
     unrealizedGains: 0
-  },
+  }),
   fetch_tags: [
     { guid: 'g-trip', name: 'Summer trip', transactionCount: 4, lastUsed: '2024-01-03' },
     { guid: 'g-tax', name: 'Deductible', transactionCount: 1, lastUsed: '2023-12-01' }

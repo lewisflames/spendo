@@ -1,4 +1,5 @@
-import { expect, mockBackend, test, type BackendMocks } from './fixtures';
+import type { TaxSummary } from '../src/lib/tauri';
+import { accountsResult, type BackendMocks, expect, mockBackend, test } from './fixtures';
 
 const BASE: BackendMocks = {
   fetch_active_book: { path: '/tmp/test.spendo' },
@@ -10,7 +11,8 @@ const BASE: BackendMocks = {
       totalTransactions: 40,
       earliestDate: '2025-01-01',
       latestDate: '2026-06-30',
-      netWorth: 10000
+      netWorth: 10000,
+      readOnly: false
     }
   },
   fetch_nav_badges: { dueSchedules: 0, unclearedTransactions: 0 },
@@ -29,7 +31,7 @@ const section = (...lines: ReturnType<typeof line>[]) => ({
 });
 const empty = { lines: [], total: 0 };
 
-const SUMMARY = {
+const SUMMARY: TaxSummary = {
   year: 2025,
   years: [2024, 2025],
   reportCurrency: 'EUR',
@@ -93,7 +95,7 @@ test('offers to set up roles when nothing is tagged yet', async ({ page }) => {
       deductible: null
     },
     fetch_tax_roles: [],
-    fetch_accounts: {
+    fetch_accounts: accountsResult({
       trees: [
         {
           guid: 'income',
@@ -128,7 +130,7 @@ test('offers to set up roles when nothing is tagged yet', async ({ page }) => {
       reportCurrency: 'EUR',
       retainedEarnings: 0,
       unrealizedGains: 0
-    },
+    }),
     save_tax_roles: [{ accountGuid: 'payroll', role: 'employment_income' }]
   });
   await page.goto('/reports/tax?year=2025');

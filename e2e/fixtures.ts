@@ -1,7 +1,12 @@
 import type { Page } from '@playwright/test';
+import type { CommandResults } from '../src/lib/tauri';
 
-/** Canned command results keyed by command name; values must be JSON-serializable. */
-export type BackendMocks = Record<string, unknown>;
+/**
+ * Canned command results keyed by command name, typed against the generated
+ * bindings so a renamed Rust field breaks `bun run check`. Values must be
+ * JSON-serializable.
+ */
+export type BackendMocks = { [K in keyof CommandResults]?: CommandResults[K] };
 
 /** Answers every session needs: the layout checks the book file on focus and
  * looks for sync conflict copies next to it. */
@@ -24,7 +29,7 @@ export async function mockBackend(page: Page, mocks: BackendMocks): Promise<void
         __TAURI_INTERNALS__: {
           metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main' } },
           invoke: async (cmd: string) => {
-            if (Object.hasOwn(mocks, cmd)) return structuredClone(mocks[cmd]);
+            if (Object.hasOwn(mocks, cmd)) return structuredClone(mocks[cmd as keyof BackendMocks]);
             throw { kind: 'internal', message: `unmocked command: ${cmd}` };
           },
           transformCallback: (cb: (data: unknown) => void) => {
@@ -49,3 +54,59 @@ export const NO_BOOK: BackendMocks = {
 };
 
 export { expect, test } from '@playwright/test';
+
+type AccountsResult = NonNullable<BackendMocks['fetch_accounts']>;
+
+/** `fetch_accounts` result: the given fields over an empty, balanced book. */
+export const accountsResult = (fields: Partial<AccountsResult>): AccountsResult => ({
+  trees: [],
+  byType: {},
+  totalAccounts: 0,
+  reportCurrency: 'EUR',
+  retainedEarnings: 0,
+  unrealizedGains: 0,
+  balanceCheck: 0,
+  missingFx: [],
+  missingPrices: [],
+  ...fields
+});
+
+type ProfitLossReport = NonNullable<BackendMocks['fetch_pnl_report']>;
+
+/** `fetch_pnl_report` result: the given fields over an empty report. */
+export const pnlReport = (fields: Partial<ProfitLossReport> = {}): ProfitLossReport => ({
+  dateFrom: '2024-01-01',
+  dateTo: '2024-01-31',
+  prevDateFrom: '2023-12-01',
+  prevDateTo: '2023-12-31',
+  reportCurrency: 'EUR',
+  incomeRows: [],
+  incomeRootGuid: null,
+  totalIncome: 0,
+  totalIncomePrev: 0,
+  expenseRows: [],
+  expenseRootGuid: null,
+  totalExpenses: 0,
+  totalExpensesPrev: 0,
+  netIncome: 0,
+  netIncomePrev: 0,
+  netIncomeChangePct: null,
+  missingFx: [],
+  ...fields
+});
+
+type BookSettings = NonNullable<BackendMocks['get_book_settings']>;
+
+/** `get_book_settings` result: the given fields over the backend defaults. */
+export const bookSettings = (fields: Partial<BookSettings> = {}): BookSettings => ({
+  fiscalYearStartMonth: 1,
+  defaultPnlPeriod: 'last_12_months',
+  priceAutoRefresh: 'off',
+  exportCsvDelimiter: ',',
+  exportDateFormat: 'iso',
+  autoBackup: 'daily',
+  transitAccount: '',
+  costBasisMethod: 'fifo',
+  taxDeductibleTag: '',
+  ...fields
+});

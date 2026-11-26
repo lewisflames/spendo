@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import { expect, mockBackend, test, type BackendMocks } from './fixtures';
+import { accountsResult, type BackendMocks, expect, mockBackend, test } from './fixtures';
 
 const account = (guid: string, name: string, accountType: string) => ({
   guid,
@@ -26,18 +26,19 @@ const OPEN_BOOK: BackendMocks = {
       totalTransactions: 0,
       earliestDate: null,
       latestDate: null,
-      netWorth: 0
+      netWorth: 0,
+      readOnly: false
     }
   },
   fetch_nav_badges: { dueSchedules: 0, unclearedTransactions: 0 },
-  fetch_accounts: {
+  fetch_accounts: accountsResult({
     trees: [account('bank', 'Bank', 'BANK'), account('food', 'Groceries', 'EXPENSE')],
     byType: {},
     totalAccounts: 2,
     reportCurrency: 'EUR',
     retainedEarnings: 0,
     unrealizedGains: 0
-  }
+  })
 };
 
 const RECIPES = Array.from({ length: 8 }, (_, i) => ({

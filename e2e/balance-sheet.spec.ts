@@ -50,7 +50,8 @@ const BASE: BackendMocks = {
       totalTransactions: 2,
       earliestDate: '2025-01-10',
       latestDate: '2026-06-01',
-      netWorth: 300
+      netWorth: 300,
+      readOnly: false
     }
   },
   fetch_nav_badges: { dueSchedules: 0, unclearedTransactions: 0 }

@@ -1,3 +1,4 @@
+import type { TransactionRow } from '../../src/lib/tauri';
 import type { BackendMocks } from '../fixtures';
 
 /**
@@ -480,18 +481,7 @@ function accountsResult() {
 
 // ── Transactions ──
 
-type Split = { guid: string; accountGuid: string; accountName: string; amount: number };
-type Tx = {
-  guid: string;
-  postDate: string;
-  description: string;
-  num: null;
-  notes: null;
-  splits: Split[];
-  totalAmount: number;
-  tags: { guid: string; name: string }[];
-  payee: { guid: string; name: string } | null;
-};
+type Tx = TransactionRow;
 
 const PAYEES: Record<string, string> = {
   employer: 'Northwind Studio',
@@ -547,8 +537,14 @@ function tx(
     num: null,
     notes: null,
     splits: [
-      { guid: `${guid}-a`, accountGuid: from, accountName: ACCOUNT_NAMES[from], amount: -amount },
-      { guid: `${guid}-b`, accountGuid: to, accountName: ACCOUNT_NAMES[to], amount }
+      {
+        guid: `${guid}-a`,
+        accountGuid: from,
+        accountName: ACCOUNT_NAMES[from],
+        amount: -amount,
+        memo: null
+      },
+      { guid: `${guid}-b`, accountGuid: to, accountName: ACCOUNT_NAMES[to], amount, memo: null }
     ],
     totalAmount: inflow ? amount : -amount,
     tags: [],
@@ -774,6 +770,7 @@ function pnlThisMonth() {
   const row = (accountGuid: string, accountName: string, current: number, previous: number) => ({
     accountGuid,
     accountName,
+    accountDescription: null,
     accountCode: null,
     indent: 0,
     currentAmount: current,
@@ -837,6 +834,7 @@ function budgetRows() {
       guid: `budget-${c.guid}`,
       accountGuid: c.guid,
       accountName: c.name,
+      accountDescription: null,
       accountCode: null,
       accountType: 'EXPENSE',
       budgetAmount,
@@ -874,7 +872,8 @@ export const DEMO_BOOK: BackendMocks = {
       totalTransactions: TOTAL_TRANSACTIONS,
       earliestDate: '2023-01-02',
       latestDate: TODAY,
-      netWorth: netWorth[netWorth.length - 1].netWorth
+      netWorth: netWorth[netWorth.length - 1].netWorth,
+      readOnly: false
     }
   },
   fetch_nav_badges: { dueSchedules: 1, unclearedTransactions: 0 },
