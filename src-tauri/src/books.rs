@@ -12,18 +12,8 @@ pub struct ActiveBook {
     pub path: Option<String>,
 }
 
-/// Guidance returned when the user points Open at a GnuCash source file.
-/// Those share table names with our schema, so the error must steer toward
-/// Import instead of just saying "invalid".
-fn gnucash_guidance() -> String {
-    "This looks like a GnuCash book, not a Spendo (.spendo) book. \
-     Open or create a Spendo book first, then bring its data in via Import from GnuCash."
-        .to_string()
-}
-
 /// Check that `path` is an openable Spendo book: a Spendo `application_id`
-/// stamp. GnuCash sources and random SQLite/text files are rejected with
-/// actionable errors.
+/// stamp. Other SQLite databases and random files are rejected.
 pub(crate) fn validate_spendo_db(path: &Path) -> Result<(), AppError> {
     validate_spendo_db_inner(path)
 }
@@ -35,12 +25,7 @@ fn validate_spendo_db_inner(path: &Path) -> Result<(), AppError> {
             path.display()
         )));
     }
-    // Extension hint first: a valid Spendo book renamed to .gnucash is still
-    // opened via Import, never via Open.
-    if path.extension().and_then(|e| e.to_str()) == Some("gnucash") {
-        return Err(AppError::Validation(gnucash_guidance()));
-    }
-    let probe = db::connect_source_db(&path.to_path_buf())
+    let probe = db::connect_read_only(&path.to_path_buf())
         .map_err(|e| AppError::Io(format!("We couldn't open that file: {}", e)))?;
 
     let app_id: Result<i32, _> = probe.query_row("PRAGMA application_id", [], |row| row.get(0));
@@ -56,18 +41,6 @@ fn validate_spendo_db_inner(path: &Path) -> Result<(), AppError> {
         Ok(_) => {}
     }
 
-    // GnuCash sources share our core table names; detect their `slots` table
-    // so the error can steer toward Import instead of a generic rejection.
-    let has_slots: bool = probe
-        .query_row(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'slots'",
-            [],
-            |_| Ok(()),
-        )
-        .is_ok();
-    if has_slots {
-        return Err(AppError::Validation(gnucash_guidance()));
-    }
     Err(AppError::Validation(format!(
         "Not a Spendo database: {}",
         path.display()
@@ -407,32 +380,6 @@ mod tests {
             db::init_db(&conn).unwrap();
         }
         assert!(validate_spendo_db_inner(&legacy).is_err());
-
-        std::fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn validate_rejects_gnucash_sources() {
-        let dir = tmp_dir("gnucash");
-        // GnuCash-shaped: core tables + slots, no application_id.
-        let src = dir.join("book.db");
-        let conn = db::connect_db(&src.to_path_buf()).unwrap();
-        conn.execute_batch(
-            "CREATE TABLE commodities (guid TEXT PRIMARY KEY, mnemonic TEXT, namespace TEXT, fullname TEXT);
-             CREATE TABLE accounts (guid TEXT PRIMARY KEY, name TEXT, account_type TEXT, parent_guid TEXT, code TEXT, description TEXT, placeholder INTEGER, commodity_guid TEXT);
-             CREATE TABLE transactions (guid TEXT PRIMARY KEY, post_date TEXT, description TEXT, num TEXT, notes TEXT);
-             CREATE TABLE splits (guid TEXT PRIMARY KEY, tx_guid TEXT, account_guid TEXT, value_num INTEGER, value_denom INTEGER, quantity_num INTEGER, quantity_denom INTEGER, reconciled INTEGER, reconcile_state TEXT, memo TEXT);
-             CREATE TABLE slots (obj_guid TEXT, name TEXT, string_val TEXT);",
-        )
-        .unwrap();
-        let err = validate_spendo_db_inner(&src).unwrap_err();
-        assert!(err.to_string().contains("GnuCash"), "unexpected: {err}");
-
-        // Extension check fires even for real Spendo content.
-        let renamed = dir.join("real.gnucash");
-        stamped_book(&renamed);
-        let err = validate_spendo_db_inner(&renamed).unwrap_err();
-        assert!(err.to_string().contains("GnuCash"), "unexpected: {err}");
 
         std::fs::remove_dir_all(&dir).ok();
     }

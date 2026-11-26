@@ -14,8 +14,8 @@ describe('isSpendoBookPath', () => {
     expect(isSpendoBookPath('/tmp/old.sqlite')).toBe(true);
   });
 
-  it('rejects source books and other files', () => {
-    expect(isSpendoBookPath('/tmp/export.gnucash')).toBe(false);
+  it('rejects other files', () => {
+    expect(isSpendoBookPath('/tmp/export.xml')).toBe(false);
     expect(isSpendoBookPath('/tmp/statement.csv')).toBe(false);
     expect(isSpendoBookPath('/tmp/spendo.txt')).toBe(false);
     expect(isSpendoBookPath('/tmp/notes')).toBe(false);

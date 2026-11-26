@@ -2,7 +2,7 @@
 //! dividend to a commodity when either
 //!
 //! - it also touches that commodity's investment accounts with a zero-amount
-//!   split (GnuCash's convention) or a share purchase (reinvestment), and with
+//!   split or a share purchase (reinvestment), and with
 //!   no sale or value-only move (those are realized-gain bookings), or
 //! - it has no investment splits and posts to an income account linked to
 //!   the commodity in `dividend_links`.
@@ -208,16 +208,6 @@ fn load_links(conn: &Connection) -> Result<HashMap<String, String>, AppError> {
     Ok(rows)
 }
 
-/// Accounts carrying a dividend link, which the orphan sweep and account
-/// deletion must not drop through the FK cascade.
-pub(crate) fn linked_account_guids(conn: &Connection) -> Result<Vec<String>, AppError> {
-    let mut stmt = conn.prepare("SELECT account_guid FROM dividend_links")?;
-    let rows = stmt
-        .query_map([], |row| row.get::<_, String>(0))?
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(rows)
-}
-
 /// Income accounts linked to one commodity, by name.
 pub(crate) fn linked_accounts(
     conn: &Connection,
@@ -415,7 +405,7 @@ mod tests {
     #[test]
     fn gain_bookings_and_unlinked_income_are_not_dividends() {
         let conn = setup();
-        // GnuCash realized-gain transaction: value-only stock split.
+        // Realized-gain booking: value-only stock split.
         add_tx(
             &conn,
             "g1",
@@ -507,6 +497,5 @@ mod tests {
         // Replacing a commodity's own links is fine, and empty clears them.
         assert_eq!(set("c-aapl", &["div", "div-vwce"]).unwrap().len(), 2);
         assert!(set("c-aapl", &[]).unwrap().is_empty());
-        assert!(linked_account_guids(&conn).unwrap().is_empty());
     }
 }

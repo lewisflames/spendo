@@ -29,7 +29,7 @@
       title: 'Investments',
       detail: 'FIFO or average cost, returns and dividends'
     },
-    { icon: Import, title: 'Bring your history', detail: 'GnuCash books and bank CSV files' }
+    { icon: Import, title: 'Bring your history', detail: 'Bank CSV statements, mapped once' }
   ];
 
   const inTauri = isTauri();
@@ -39,9 +39,6 @@
 
   const drop = useFileDrop(handleDrop);
   const dropBookPath = $derived(drop.paths.find(isSpendoBookPath) ?? null);
-  const dropIsGnucash = $derived(
-    drop.paths.some((path) => path.toLowerCase().endsWith('.gnucash'))
-  );
 
   onMount(() => {
     getVersion()
@@ -92,11 +89,7 @@
     if (busy) return;
     const path = paths.find(isSpendoBookPath);
     if (!path) {
-      if (paths.some((p) => p.toLowerCase().endsWith('.gnucash'))) {
-        toast.error('Open a book before importing a GnuCash file');
-      } else {
-        toast.error('Not a Spendo book');
-      }
+      toast.error('Not a Spendo book');
       return;
     }
     void handleOpenPath(path);
@@ -188,9 +181,7 @@
         <FileDown aria-hidden="true" class="size-5 shrink-0" />
         <div class="flex flex-col">
           <span class="font-medium text-foreground">Drop a book here</span>
-          <span class="text-xs">
-            Or anywhere in this window. GnuCash files come in once a book is open.
-          </span>
+          <span class="text-xs">Or anywhere in this window</span>
         </div>
       </div>
     {/if}
@@ -205,11 +196,6 @@
           <FileDown aria-hidden="true" class="size-7 text-primary" />
           <p class="max-w-xs text-sm font-medium">
             Drop to open {bookDisplayName(dropBookPath)}
-          </p>
-        {:else if dropIsGnucash}
-          <FileWarning aria-hidden="true" class="size-7 text-destructive" />
-          <p class="max-w-xs text-sm font-medium">
-            Start a book first, then bring in that GnuCash file
           </p>
         {:else}
           <FileWarning aria-hidden="true" class="size-7 text-muted-foreground" />

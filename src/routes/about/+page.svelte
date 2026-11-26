@@ -41,7 +41,7 @@
       <p class="text-sm text-muted-foreground">
         Spendo is a local-first finance manager. Your money lives in portable
         <code>.spendo</code> books on this machine: transactions, accounts, budgets, schedules, reports
-        and investment prices. GnuCash books and bank CSVs can be imported into the open book.
+        and investment prices. Bank CSVs can be imported into the open book.
       </p>
       {#if appVersion}
         <p class="font-mono text-xs text-muted-foreground">Version {appVersion}</p>

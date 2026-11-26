@@ -31,7 +31,6 @@
   import { cn } from '$lib/utils';
   import { Sonner, toast } from '$lib/components/ui/sonner';
   import KeyboardShortcutsDialog from '$lib/components/layout/keyboard-shortcuts-dialog.svelte';
-  import GnuCashImportDialog from '$lib/features/book/gnucash-import-dialog.svelte';
   import AccountDialog from '$lib/features/accounts/account-dialog.svelte';
   import { accountDialog } from '$lib/features/accounts/account-dialog-state.svelte';
   import {
@@ -220,8 +219,6 @@
 <Sonner theme={resolvedTheme} />
 
 <KeyboardShortcutsDialog />
-
-<GnuCashImportDialog />
 
 <AccountDialog
   bind:open={accountDialog.value}

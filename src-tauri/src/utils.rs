@@ -1,7 +1,7 @@
 use crate::db::AppError;
 
 /// Account types displayed with reversed sign (credit balances read positive).
-/// TRADING is included: GnuCash trading books accumulate currency/commodity
+/// TRADING is included: trading accounts accumulate currency/commodity
 /// trading gains as net credits, and the balance-sheet identity only holds if
 /// they are negated like other credit-normal types (see `accounts.rs`).
 pub const CREDIT_NORMAL: [&str; 6] = [
@@ -296,21 +296,6 @@ pub fn same_path(a: &std::path::Path, b: &std::path::Path) -> bool {
         (Ok(a), Ok(b)) => a == b,
         _ => a == b,
     }
-}
-
-/// Validate that a path points at an existing `.gnucash` file.
-pub fn validate_gnucash_path(path: &str) -> Result<(), AppError> {
-    let p = std::path::Path::new(path);
-    if p.extension().and_then(|e| e.to_str()) != Some("gnucash") {
-        return Err(AppError::Validation(format!(
-            "Not a .gnucash file: {}",
-            path
-        )));
-    }
-    if !p.is_file() {
-        return Err(AppError::Validation(format!("File not found: {}", path)));
-    }
-    Ok(())
 }
 
 /// Lowercase hex encoding of a digest (SHA-256 file and row hashes).

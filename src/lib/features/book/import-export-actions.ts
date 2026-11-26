@@ -1,31 +1,21 @@
 import { goto } from '$app/navigation';
 import { resolve } from '$app/paths';
 import { basename } from '@tauri-apps/api/path';
-import { open, save } from '@tauri-apps/plugin-dialog';
+import { save } from '@tauri-apps/plugin-dialog';
 import { toast } from '$lib/components/ui/sonner';
-import { toastPriceResult } from '$lib/features/portfolio/price-utils';
 import { bookSettings, loadBookSettings } from '$lib/stores/book-settings.svelte';
-import { activeBookPath, dbSession, setDbSession } from '$lib/stores/db.svelte';
+import { activeBookPath, dbSession } from '$lib/stores/db.svelte';
 import { appSettings } from '$lib/stores/settings.svelte';
 import {
   exportAccountsCsv,
   exportRealizedGainsCsv,
   exportTaxSummaryCsv,
-  exportTransactionsCsv,
-  importGnucash,
-  previewGnucashImport
+  exportTransactionsCsv
 } from '$lib/tauri';
 import { ensureCsvExtension } from '$lib/utils/book';
 import { todayStr } from '$lib/utils/date-utils.svelte';
 import { errMsg } from '$lib/utils/error';
 import { exportDatePattern, exportFilename } from './exporters';
-import {
-  closeGnucashImportDialog,
-  gnucashImportDialog,
-  openGnucashImportDialog
-} from './gnucash-import-dialog-state.svelte';
-
-const GNUCASH_FILTER = { name: 'GnuCash', extensions: ['gnucash'] };
 const CSV_FILTER = { name: 'CSV', extensions: ['csv'] };
 
 /**
@@ -35,78 +25,9 @@ const CSV_FILTER = { name: 'CSV', extensions: ['csv'] };
  */
 let busy = false;
 
-/** The CSV wizard needs a page (mapping + preview); GnuCash import doesn’t. */
+/** The CSV wizard needs a page (mapping + preview). */
 export function openCsvImport(): void {
   void goto(resolve('/import/csv'));
-}
-
-/** Hash, dry-run and open the confirmation dialog for a GnuCash source. */
-async function openPreview(path: string, filename: string): Promise<boolean> {
-  const loading = toast.loading(`Reading ${filename}…`);
-  try {
-    const preview = await previewGnucashImport(path, filename);
-    openGnucashImportDialog(preview);
-    return true;
-  } finally {
-    toast.dismiss(loading);
-  }
-}
-
-/** Pick a `.gnucash` file, preview it and open the confirmation dialog. */
-export async function importGnucashViaDialog(): Promise<boolean> {
-  if (busy || !dbSession.value) return false;
-  let selected: string | string[] | null;
-  try {
-    selected = await open({ multiple: false, filters: [GNUCASH_FILTER] });
-  } catch (e: unknown) {
-    toast.error(errMsg(e, 'We couldn’t open the file picker'));
-    return false;
-  }
-  if (!selected || Array.isArray(selected)) return false;
-  try {
-    return await openPreview(selected, await basename(selected));
-  } catch (e: unknown) {
-    toast.error(errMsg(e, 'We couldn’t preview that file'));
-    return false;
-  }
-}
-
-/** Runs the merge for the pending preview once the user confirms. */
-export async function confirmGnucashImport(deleteOrphans: boolean): Promise<boolean> {
-  const preview = gnucashImportDialog.value.preview;
-  if (!preview || busy || !dbSession.value) return false;
-  busy = true;
-  gnucashImportDialog.value.importing = true;
-  const loading = toast.loading(`Importing ${preview.filename}…`);
-  try {
-    const result = await importGnucash({
-      path: preview.path,
-      filename: preview.filename,
-      sha256: preview.sha256,
-      deleteOrphans
-    });
-    setDbSession(result.summary);
-    closeGnucashImportDialog();
-    const transactionsChanged =
-      result.transactionsAdded + result.transactionsUpdated + result.transactionsOrphaned;
-    if (transactionsChanged) {
-      const parts = [`${result.transactionsAdded} added`];
-      if (result.transactionsUpdated) parts.push(`${result.transactionsUpdated} updated`);
-      if (result.transactionsOrphaned) parts.push(`${result.transactionsOrphaned} removed`);
-      toast.success(`Imported ${preview.filename} (${parts.join(' · ')})`);
-    } else {
-      toast.warning('No new data imported');
-    }
-    toastPriceResult(result.prices, { fixHint: true });
-    return true;
-  } catch (e: unknown) {
-    toast.error(errMsg(e, 'We couldn’t finish that import'));
-    return false;
-  } finally {
-    toast.dismiss(loading);
-    gnucashImportDialog.value.importing = false;
-    busy = false;
-  }
 }
 
 /** Export preferences live in the book; load them on demand so the menu and
@@ -171,7 +92,7 @@ function bookStem(): string {
   return path.split(/[\\/]/).pop() || 'spendo';
 }
 
-/** Full-book transactions CSV dump (one row per split, GnuCash-compatible). */
+/** Full-book transactions CSV dump (one row per split). */
 export async function exportTransactionsCsvViaDialog(): Promise<boolean> {
   if (busy || !dbSession.value) return false;
   const opts = await exportOptions();

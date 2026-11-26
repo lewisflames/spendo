@@ -1036,16 +1036,6 @@ pub async fn delete_symbol_override(
     .await
 }
 
-/// Empty result used when there is nothing priceable to fetch (e.g. a fresh
-/// import without securities). Not an error — callers treat it as a no-op.
-pub(crate) fn empty_prices_result() -> PricesResult {
-    PricesResult {
-        prices: vec![],
-        fetched_at: utils::iso_now(),
-        errors: vec![],
-    }
-}
-
 /// Single transaction so prices + refresh_log commit atomically; a mid-write
 /// failure must not leave partial prices behind. The log row is only stamped
 /// when at least one price actually landed — a refresh that fetched nothing

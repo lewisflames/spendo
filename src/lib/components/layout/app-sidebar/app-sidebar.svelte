@@ -30,7 +30,6 @@
   import {
     exportAccountsCsvViaDialog,
     exportTransactionsCsvViaDialog,
-    importGnucashViaDialog,
     openCsvImport
   } from '$lib/features/book/import-export-actions';
   import { NAV_GROUPS } from '$lib/features/nav/nav-items';
@@ -189,22 +188,10 @@
               <FolderSearch aria-hidden="true" />
               Show in folder
             </DropdownMenu.Item>
-            <DropdownMenu.Sub>
-              <DropdownMenu.SubTrigger>
-                <Upload aria-hidden="true" />
-                Import
-              </DropdownMenu.SubTrigger>
-              <DropdownMenu.SubContent>
-                <DropdownMenu.Item onclick={() => void importGnucashViaDialog()}>
-                  <Database aria-hidden="true" />
-                  GnuCash SQLite
-                </DropdownMenu.Item>
-                <DropdownMenu.Item onclick={() => openCsvImport()}>
-                  <FileSpreadsheet aria-hidden="true" />
-                  Bank CSV
-                </DropdownMenu.Item>
-              </DropdownMenu.SubContent>
-            </DropdownMenu.Sub>
+            <DropdownMenu.Item onclick={() => openCsvImport()}>
+              <Upload aria-hidden="true" />
+              Import bank CSV…
+            </DropdownMenu.Item>
             <DropdownMenu.Sub>
               <DropdownMenu.SubTrigger>
                 <FileDown aria-hidden="true" />

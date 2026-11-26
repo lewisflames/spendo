@@ -298,20 +298,6 @@ pub(crate) fn resolve_account(
         .map(str::to_string))
 }
 
-/// Accounts referenced by rules. The GnuCash orphan sweep must skip them: the
-/// FK cascade would silently drop the rules.
-pub(crate) fn rule_account_guids(conn: &Connection) -> Result<Vec<String>, AppError> {
-    let mut stmt = conn
-        .prepare("SELECT DISTINCT account_guid FROM import_rules")
-        .map_err(AppError::from)?;
-    let rows = stmt
-        .query_map([], |row| row.get::<_, String>(0))
-        .map_err(AppError::from)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(AppError::from)?;
-    Ok(rows)
-}
-
 // ── Commands ─────────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -489,15 +475,5 @@ mod tests {
 
         assert!(move_import_rule_inner(&conn, 999, 1).is_err());
         assert!(move_import_rule_inner(&conn, first.id, 2).is_err());
-    }
-
-    #[test]
-    fn rule_accounts_are_listed_for_sweep_protection() {
-        let conn = setup();
-        create_import_rule_inner(&conn, &rule(1, "contains", "a", "coffee")).unwrap();
-        create_import_rule_inner(&conn, &rule(2, "contains", "b", "groceries")).unwrap();
-        let mut guids = rule_account_guids(&conn).unwrap();
-        guids.sort();
-        assert_eq!(guids, vec!["coffee".to_string(), "groceries".to_string()]);
     }
 }

@@ -281,7 +281,7 @@
   <EmptyState
     card
     title="No investments yet"
-    description="Once your book holds investments, say after a GnuCash import, they’ll land here."
+    description="Once your book holds investments, they’ll land here."
   >
     {#snippet icon()}
       <TrendingUp aria-hidden="true" class="text-muted-foreground" />

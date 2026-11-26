@@ -1,7 +1,7 @@
 //! Automatic book snapshots. Each book gets its own folder under
 //! `<app data>/backups/`, filled by `VACUUM INTO` copies of the live
 //! connection: one `daily` snapshot per calendar day (on open plus an hourly
-//! check), a safety snapshot right before every bulk change (GnuCash/CSV
+//! check), a safety snapshot right before every bulk change (CSV
 //! import, Clear all data, restore), and `manual` ones from Settings.
 //!
 //! The book a snapshot belongs to is always read from the locked connection
@@ -372,7 +372,7 @@ fn restore_backup_inner(
         BackupReason::BeforeRestore,
         Some(file_name),
     )?;
-    let source = db::connect_source_db(&source_path)
+    let source = db::connect_read_only(&source_path)
         .map_err(|e| AppError::Io(format!("We couldn't open that backup: {e}")))?;
     {
         let backup = Backup::new(&source, conn)?;

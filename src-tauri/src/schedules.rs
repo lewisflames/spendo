@@ -292,8 +292,6 @@ fn spread_count(spread_total: bool, max_occurrences: Option<i64>) -> Option<i64>
     }
 }
 
-// ── GnuCash recurrence (import support) ──────────────────────────────────────
-
 // ── Validation ───────────────────────────────────────────────────────────────
 
 fn validate_frequency(raw: &str) -> Result<String, AppError> {
@@ -789,19 +787,6 @@ fn fetch_schedules_inner(conn: &Connection) -> Result<Vec<Schedule>, AppError> {
     rows.into_iter()
         .map(|r| to_schedule_with_names(r, &names))
         .collect()
-}
-
-/// Account GUIDs referenced by any schedule template. The GnuCash orphan sweep
-/// uses this to keep accounts a schedule still needs (deleting them would leave
-/// dangling template references).
-pub(crate) fn schedule_account_guids(conn: &Connection) -> Result<Vec<String>, AppError> {
-    let mut stmt = conn.prepare("SELECT template_json FROM recurring_schedules")?;
-    let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
-    let mut guids = HashSet::new();
-    for row in rows {
-        guids.extend(template_account_guids(&row?)?);
-    }
-    Ok(guids.into_iter().collect())
 }
 
 // ── Post / skip ──────────────────────────────────────────────────────────────

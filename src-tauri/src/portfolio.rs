@@ -2440,8 +2440,8 @@ mod tests {
         save_allocation_targets_inner(&conn, &[target("c-aapl", 50.0), target("c-xyz", 50.0)])
             .unwrap();
 
-        // Removing the commodity (e.g. the GnuCash orphan sweep) drops its
-        // target but leaves the rest untouched.
+        // Removing the commodity drops its target but leaves the rest
+        // untouched.
         conn.execute("DELETE FROM commodities WHERE guid = 'c-aapl'", [])
             .unwrap();
         let remaining = fetch_allocation_targets_inner(&conn).unwrap();

@@ -108,7 +108,7 @@
         <EmptyState
           card
           title="No accounts yet"
-          description="Add your bank, card and spending accounts, or import a GnuCash book."
+          description="Add your bank, card and spending accounts to get started."
         >
           {#snippet icon()}
             <Landmark aria-hidden="true" class="text-muted-foreground" />

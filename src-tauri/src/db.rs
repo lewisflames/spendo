@@ -18,8 +18,8 @@ pub struct AppState {
 }
 
 /// Magic stamped via `PRAGMA application_id` on every Spendo book so
-/// `books::validate_spendo_db` can tell our files apart from GnuCash source
-/// books (which share table names like `accounts`/`splits`) and random SQLite.
+/// `books::validate_spendo_db` can tell our files apart from other SQLite
+/// databases.
 pub const SPENDO_APP_ID: i32 = 0x5350_4e44; // 'SPND'
 
 impl AppState {
@@ -36,25 +36,6 @@ impl AppState {
             }
         }
         Ok(())
-    }
-}
-
-/// User-data tables whose names may be interpolated into SQL by the import
-/// orphan sweep. Interpolating table names into SQL is only safe through this
-/// allowlist — never inline a table name without `validate_data_table`.
-pub(crate) const DATA_TABLES: &[&str] = &[
-    "commodities",
-    "accounts",
-    "transactions",
-    "splits",
-    "recurring_schedules",
-];
-
-pub(crate) fn validate_data_table(table: &str) -> Result<(), AppError> {
-    if DATA_TABLES.contains(&table) {
-        Ok(())
-    } else {
-        Err(AppError::Validation(format!("Invalid table name: {table}")))
     }
 }
 
@@ -398,8 +379,7 @@ CREATE TABLE IF NOT EXISTS symbol_overrides (
 -- so the `.spendo` file stays portable (Save As copies them via VACUUM INTO).
 -- Up to one `MAX_ATTACHMENTS_PER_TX` rows per transaction (enforced in
 -- `attachments.rs`, not by schema); adding files accumulates. Deleting a
--- transaction (manual delete or the GnuCash orphan
--- sweep) removes its attachments through the FK cascade.
+-- transaction removes its attachments through the FK cascade.
 CREATE TABLE IF NOT EXISTS attachments (
 	guid TEXT PRIMARY KEY,
 	tx_guid TEXT NOT NULL REFERENCES transactions(guid) ON DELETE CASCADE,
@@ -418,8 +398,6 @@ CREATE INDEX IF NOT EXISTS idx_attachments_tx_guid ON attachments(tx_guid);
 -- holds a serialized `TxInput`-shaped template; posting materializes one real
 -- transaction per due occurrence and advances `next_due_date`. `NULL`
 -- `next_due_date` means completed (end date / occurrence cap reached).
--- The GnuCash orphan sweep never deletes schedules (nor accounts they
--- reference).
 CREATE TABLE IF NOT EXISTS recurring_schedules (
 	guid TEXT PRIMARY KEY,
 	name TEXT NOT NULL,
@@ -438,7 +416,7 @@ CREATE TABLE IF NOT EXISTS recurring_schedules (
 CREATE INDEX IF NOT EXISTS idx_schedules_active_due ON recurring_schedules(active, next_due_date);
 
 -- Skip counter for recurring schedules, in a side table so the core row keeps
--- its GnuCash-shaped columns and older books pick this up on open. A missing
+-- its original columns and older books pick this up on open. A missing
 -- row means nothing has been skipped; rows cascade with their schedule.
 CREATE TABLE IF NOT EXISTS schedule_skips (
 	schedule_guid TEXT PRIMARY KEY REFERENCES recurring_schedules(guid) ON DELETE CASCADE,
@@ -502,17 +480,16 @@ CREATE INDEX IF NOT EXISTS idx_import_rules_priority ON import_rules(priority, i
 
 -- Target allocation per commodity for the portfolio rebalance calculator.
 -- Book-scoped user config like `import_rules`. A target dies with its
--- commodity through the FK cascade, e.g. when the GnuCash orphan sweep drops
--- one.
+-- commodity through the FK cascade.
 CREATE TABLE IF NOT EXISTS allocation_targets (
 	commodity_guid TEXT PRIMARY KEY REFERENCES commodities(guid) ON DELETE CASCADE,
 	target_pct REAL NOT NULL
 );
 
 -- Income accounts whose postings are dividends of one holding, for books
--- that don't record the GnuCash zero-amount split on the stock account.
--- User config like `import_rules`: account deletion and the GnuCash orphan
--- sweep are guarded instead of cascading silently.
+-- that don't record a zero-amount split on the stock account.
+-- User config like `import_rules`: account deletion is guarded instead of
+-- cascading silently.
 CREATE TABLE IF NOT EXISTS dividend_links (
 	account_guid TEXT PRIMARY KEY REFERENCES accounts(guid) ON DELETE CASCADE,
 	commodity_guid TEXT NOT NULL REFERENCES commodities(guid) ON DELETE CASCADE
@@ -522,8 +499,8 @@ CREATE INDEX IF NOT EXISTS idx_dividend_links_commodity ON dividend_links(commod
 
 -- Free-form labels on whole transactions (a trip, a project, deductible).
 -- Names are unique ignoring case. A tag outlives its last transaction until
--- it is deleted from Settings; links die with either side (FK cascade, so the
--- GnuCash orphan sweep and transaction deletes clean them up).
+-- it is deleted from Settings; links die with either side (FK cascade, so
+-- transaction deletes clean them up).
 CREATE TABLE IF NOT EXISTS tags (
 	guid TEXT PRIMARY KEY,
 	name TEXT NOT NULL UNIQUE COLLATE NOCASE,
@@ -540,7 +517,7 @@ CREATE INDEX IF NOT EXISTS idx_transaction_tags_tag ON transaction_tags(tag_guid
 
 -- Who a transaction was with (a shop, a person, an employer); at most one per
 -- transaction. Kept beside `transactions` like `schedule_skips` so the core
--- row keeps its GnuCash-shaped columns and older books pick this up on open.
+-- row keeps its original columns and older books pick this up on open.
 -- Names are unique ignoring case; links die with either side (FK cascade, so
 -- deleting a payee only clears it from its transactions).
 CREATE TABLE IF NOT EXISTS payees (
@@ -557,8 +534,8 @@ CREATE TABLE IF NOT EXISTS transaction_payees (
 CREATE INDEX IF NOT EXISTS idx_transaction_payees_payee ON transaction_payees(payee_guid);
 
 -- Tax role per account for the tax summary; descendants inherit the nearest
--- ancestor's role. User config like `import_rules`: account deletion and the
--- GnuCash orphan sweep are guarded instead of cascading silently.
+-- ancestor's role. User config like `import_rules`: account deletion is
+-- guarded instead of cascading silently.
 CREATE TABLE IF NOT EXISTS tax_roles (
 	account_guid TEXT PRIMARY KEY REFERENCES accounts(guid) ON DELETE CASCADE,
 	role TEXT NOT NULL
@@ -632,9 +609,9 @@ pub fn open_placeholder() -> Result<Connection> {
     Ok(conn)
 }
 
-/// Open a GnuCash source file strictly read-only: never changes its journal
-/// mode or writes anything next to the user's original book.
-pub fn connect_source_db(db_path: &PathBuf) -> Result<Connection> {
+/// Open a file strictly read-only: never changes its journal mode or writes
+/// anything next to it.
+pub fn connect_read_only(db_path: &PathBuf) -> Result<Connection> {
     Connection::open_with_flags(db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
 }
 

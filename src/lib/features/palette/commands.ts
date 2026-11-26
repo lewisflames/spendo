@@ -17,8 +17,7 @@ import {
   Plus,
   Save,
   Settings,
-  SunMoon,
-  Upload
+  SunMoon
 } from '@lucide/svelte';
 import { NAV_GROUPS } from '$lib/features/nav/nav-items';
 import { appSettings, resolveTheme, saveSettings } from '$lib/stores/settings.svelte';
@@ -33,7 +32,6 @@ import {
 import {
   exportAccountsCsvViaDialog,
   exportTransactionsCsvViaDialog,
-  importGnucashViaDialog,
   openCsvImport
 } from '$lib/features/book/import-export-actions';
 import { goBack, goForward, navHistory } from '$lib/stores/nav-history.svelte';
@@ -162,17 +160,6 @@ export const PALETTE_COMMANDS: PaletteCommand[] = [
     when: () => dbSession.value !== null,
     run: () => {
       void saveBookAsViaDialog();
-    }
-  },
-  {
-    id: 'import-gnucash',
-    title: 'Import GnuCash file…',
-    group: 'Actions',
-    icon: Upload,
-    keywords: ['import', 'gnucash', 'merge', 'file'],
-    when: () => dbSession.value !== null,
-    run: () => {
-      void importGnucashViaDialog();
     }
   },
   {

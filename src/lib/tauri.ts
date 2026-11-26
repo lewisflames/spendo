@@ -55,24 +55,6 @@ export interface NetWorthPoint {
 export type TxSortKey = 'date' | 'description' | 'amount';
 type SortDir = 'asc' | 'desc';
 
-interface ImportResult {
-  accountsAdded: number;
-  transactionsAdded: number;
-  splitsAdded: number;
-  commoditiesAdded: number;
-  accountsUpdated: number;
-  transactionsUpdated: number;
-  splitsUpdated: number;
-  accountsOrphaned: number;
-  transactionsOrphaned: number;
-  splitsOrphaned: number;
-  commoditiesOrphaned: number;
-  totalAccounts: number;
-  totalTransactions: number;
-  summary: DataSummary;
-  prices: PricesResult;
-}
-
 export interface AccountNode {
   guid: string;
   name: string;
@@ -169,7 +151,7 @@ export interface SplitDetail extends SplitInfo {
   quantity: number;
   commodity?: string | null;
   reconciled: boolean;
-  /** GnuCash reconcile state: 'n' new, 'c' cleared, 'y' reconciled. */
+  /** Reconcile state: 'n' new, 'c' cleared, 'y' reconciled. */
   reconcileState?: string | null;
   accountDescription?: string | null;
   accountCode?: string | null;
@@ -202,8 +184,7 @@ export interface AccountBalancePoint {
 }
 
 /**
- * Response of `refresh_prices` (also nested as `ImportResult.prices` after an
- * automatic post-import fetch). The UI only consumes per-commodity errors.
+ * Response of `refresh_prices`. The UI only consumes per-commodity errors.
  */
 export interface PricesResult {
   prices: { mnemonic: string; price: number; priceDate: string; currency: string }[];
@@ -230,7 +211,7 @@ export interface DetailTransaction {
   /** Signed effect on the viewed subtree, in report currency at the tx date. */
   amount: number;
   runningBalance: number;
-  /** GnuCash reconcile state of the viewed subtree’s splits: 'n'/'c'/'y'. */
+  /** Reconcile state of the viewed subtree’s splits: 'n'/'c'/'y'. */
   reconcileState?: string | null;
 }
 
@@ -409,42 +390,6 @@ export const getBookSettings = (): Promise<BookSettings> => invoke('get_book_set
 
 export const setBookSetting = (key: string, value: string): Promise<BookSettings> =>
   invoke('set_book_setting', { key, value });
-
-export interface GnuCashPreview {
-  path: string;
-  filename: string;
-  sha256: string;
-  accountsAdded: number;
-  accountsUpdated: number;
-  accountsOrphaned: number;
-  transactionsAdded: number;
-  transactionsUpdated: number;
-  transactionsOrphaned: number;
-  splitsAdded: number;
-  splitsUpdated: number;
-  splitsOrphaned: number;
-  commoditiesAdded: number;
-  commoditiesUpdated: number;
-  commoditiesOrphaned: number;
-  /** Source scheduled transactions, which aren’t imported. */
-  schedulesIgnored: number;
-  orphanAccountNames: string[];
-}
-
-interface GnuCashImportInput {
-  path: string;
-  filename: string;
-  /** Hash returned by `previewGnucashImport`; the merge refuses stale files. */
-  sha256: string;
-  /** When false, rows absent from the source survive (no orphan sweep). */
-  deleteOrphans: boolean;
-}
-
-export const previewGnucashImport = (path: string, filename: string): Promise<GnuCashPreview> =>
-  invoke('preview_gnucash_import', { path, filename });
-
-export const importGnucash = (input: GnuCashImportInput): Promise<ImportResult> =>
-  invoke('import_gnucash', { input });
 
 // ── CSV import (bank-statement wizard: detect → map → preview → commit) ──
 
@@ -1679,13 +1624,11 @@ type CommandPayloads = {
   fetch_transactions: TransactionsResult;
   finish_reconciliation: FinishReconcileResult;
   get_book_settings: BookSettings;
-  import_gnucash: ImportResult;
   mark_reconcile_splits: MarkReconcileResult;
   open_attachment: void;
   open_book: EmptyBookResult;
   post_due_schedules: AutoPostResult;
   post_schedule_occurrence: string;
-  preview_gnucash_import: GnuCashPreview;
   refresh_prices: PricesResult;
   reload_changed_book: EmptyBookResult | null;
   rename_payee: string;

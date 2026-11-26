@@ -192,16 +192,6 @@ fn effective_role(
         .find_map(|a| roles.get(a).copied())
 }
 
-/// Accounts carrying a tax role, which the orphan sweep and account deletion
-/// must not drop through the FK cascade.
-pub(crate) fn role_account_guids(conn: &Connection) -> Result<Vec<String>, AppError> {
-    let mut stmt = conn.prepare("SELECT account_guid FROM tax_roles")?;
-    let rows = stmt
-        .query_map([], |row| row.get::<_, String>(0))?
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(rows)
-}
-
 fn fetch_tax_roles_inner(conn: &Connection) -> Result<Vec<TaxRoleAssignment>, AppError> {
     let mut roles: Vec<TaxRoleAssignment> = load_roles(conn)?
         .into_iter()

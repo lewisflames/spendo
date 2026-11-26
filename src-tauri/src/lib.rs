@@ -12,7 +12,6 @@ mod dividends;
 mod export;
 mod fx;
 mod home;
-mod import;
 mod import_rules;
 mod init;
 mod lots;
@@ -115,8 +114,6 @@ pub fn run() {
             settings::clear_app_db,
             settings::get_book_settings,
             settings::set_book_setting,
-            import::preview_gnucash_import,
-            import::import_gnucash,
             csv_import::csv_detect,
             csv_import::csv_preview,
             csv_import::csv_commit,
