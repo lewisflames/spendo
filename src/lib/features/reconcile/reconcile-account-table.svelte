@@ -18,6 +18,7 @@
   import { dbSession } from '$lib/stores/db.svelte';
   import CommodityBadge from '$lib/features/accounts/commodity-badge.svelte';
   import AccountLabel from '$lib/features/accounts/account-label.svelte';
+  import { fromUnits } from '$lib/utils/units';
   import type { ReconcilableAccount } from './reconcile-accounts';
 
   let { rows = [] }: { rows?: ReconcilableAccount[] } = $props();
@@ -66,7 +67,7 @@
           {#if row.stats.unreconciledCount > 0}
             <span class="font-medium">{formatNumber(row.stats.unreconciledCount)}</span>
             <span class="block text-xs text-muted-foreground">
-              {formatCurrency(row.stats.unclearedTotal, row.commodity ?? reportCurrency)}
+              {formatCurrency(fromUnits(row.stats.unclearedTotal), row.commodity ?? reportCurrency)}
             </span>
           {:else}
             <EmptyValue />
@@ -94,7 +95,7 @@
           {formatNumber(row.txCount)}
         </Table.Cell>
         <Table.Cell class="py-2.5 text-right font-medium whitespace-nowrap tabular-nums">
-          {formatSessionCurrency(clampZero(row.balance))}
+          {formatSessionCurrency(clampZero(fromUnits(row.balance)))}
         </Table.Cell>
       </NavRow>
     {/each}

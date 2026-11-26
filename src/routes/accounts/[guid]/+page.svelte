@@ -16,6 +16,7 @@
   import { errMsg } from '$lib/utils/error';
   import { fetchAccountDetail } from '$lib/tauri';
   import { clampZero, sessionCurrency } from '$lib/utils/format.svelte';
+  import { fromUnits, ZERO_UNITS } from '$lib/utils/units';
   import BookGate from '$lib/components/shared/book-gate.svelte';
   import { useDebouncedSearch } from '$lib/hooks/use-debounced-search.svelte';
   import {
@@ -152,12 +153,13 @@
   // Direct children come with the detail payload — no second full-tree fetch.
   let subAccounts = $derived(res.data?.account.childAccounts ?? []);
 
-  let currentBalance = $derived(res.data?.account.balance ?? 0);
+  let currentBalance = $derived(res.data?.account.balance ?? ZERO_UNITS);
 
   let subtreeNode = $derived(res.data?.subtree ?? null);
   let parentInfo = $derived(res.data?.parent ?? null);
   let hasPieData = $derived(
-    !!subtreeNode && subtreeNode.children.some((c) => Math.abs(clampZero(c.balance)) >= 0.005)
+    !!subtreeNode &&
+      subtreeNode.children.some((c) => Math.abs(clampZero(fromUnits(c.balance))) >= 0.005)
   );
 
   // Charts loading gate: while the detail payload hasn’t arrived we reserve

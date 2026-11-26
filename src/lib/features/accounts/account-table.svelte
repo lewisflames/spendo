@@ -67,7 +67,7 @@
           {formatNumber(node.txCount)}
         </Table.Cell>
         <Table.Cell class="py-2.5 text-right">
-          <Amount value={node.balance} />
+          <Amount units={node.balance} />
         </Table.Cell>
       </NavRow>
     {/each}

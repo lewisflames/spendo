@@ -3,6 +3,7 @@ use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 
+use crate::units::Units;
 use crate::utils;
 
 /// Detect the book's report (display) currency GUID.
@@ -179,6 +180,37 @@ pub fn convert_tracked(
             amount
         }
     }
+}
+
+/// [`convert_tracked`] for exact amounts: a same-currency (or rate-less)
+/// amount comes back unchanged, a converted one is rounded to the nearest
+/// unit, so totals built from the results are still integer sums.
+pub fn convert_units_tracked(
+    amount: Units,
+    from_currency: &str,
+    report_currency: &str,
+    fx: &HashMap<String, f64>,
+    missing: Option<&mut HashSet<String>>,
+) -> Units {
+    if amount.is_zero() || report_currency.is_empty() || from_currency == report_currency {
+        return amount;
+    }
+    if !fx.contains_key(from_currency) {
+        if let Some(set) = missing {
+            set.insert(from_currency.to_string());
+        }
+        return amount;
+    }
+    Units::from_f64(convert(amount.to_f64(), from_currency, report_currency, fx))
+}
+
+pub fn convert_units(
+    amount: Units,
+    from_currency: &str,
+    report_currency: &str,
+    fx: &HashMap<String, f64>,
+) -> Units {
+    convert_units_tracked(amount, from_currency, report_currency, fx, None)
 }
 
 /// Convert an amount whose currency may be absent (e.g. splits on accounts

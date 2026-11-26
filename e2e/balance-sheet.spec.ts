@@ -1,44 +1,48 @@
 import { expect, mockBackend, test, type BackendMocks } from './fixtures';
+import { toUnits, ZERO_UNITS } from '../src/lib/utils/units';
 
-const accounts = (checking: number) => ({
-  trees: [
-    {
-      guid: 'assets',
-      name: 'Assets',
-      accountType: 'ASSET',
-      code: null,
-      description: null,
-      placeholder: true,
-      commodity: 'EUR',
-      commodityGuid: 'c-eur',
-      balance: checking,
-      txCount: 1,
-      children: [
-        {
-          guid: 'checking',
-          name: 'Checking',
-          accountType: 'BANK',
-          code: null,
-          description: null,
-          placeholder: false,
-          commodity: 'EUR',
-          commodityGuid: 'c-eur',
-          balance: checking,
-          txCount: 1,
-          children: []
-        }
-      ]
-    }
-  ],
-  byType: { ASSET: { count: 2, totalBalance: checking } },
-  totalAccounts: 2,
-  reportCurrency: 'EUR',
-  retainedEarnings: checking,
-  unrealizedGains: 0,
-  balanceCheck: 0,
-  missingFx: [],
-  missingPrices: []
-});
+const accounts = (amount: number) => {
+  const checking = toUnits(amount);
+  return {
+    trees: [
+      {
+        guid: 'assets',
+        name: 'Assets',
+        accountType: 'ASSET',
+        code: null,
+        description: null,
+        placeholder: true,
+        commodity: 'EUR',
+        commodityGuid: 'c-eur',
+        balance: checking,
+        txCount: 1,
+        children: [
+          {
+            guid: 'checking',
+            name: 'Checking',
+            accountType: 'BANK',
+            code: null,
+            description: null,
+            placeholder: false,
+            commodity: 'EUR',
+            commodityGuid: 'c-eur',
+            balance: checking,
+            txCount: 1,
+            children: []
+          }
+        ]
+      }
+    ],
+    byType: { ASSET: { count: 2, totalBalance: checking } },
+    totalAccounts: 2,
+    reportCurrency: 'EUR',
+    retainedEarnings: checking,
+    unrealizedGains: ZERO_UNITS,
+    balanceCheck: ZERO_UNITS,
+    missingFx: [],
+    missingPrices: []
+  };
+};
 
 const BASE: BackendMocks = {
   fetch_active_book: { path: '/tmp/test.spendo' },

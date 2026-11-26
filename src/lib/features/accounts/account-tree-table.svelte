@@ -8,6 +8,7 @@
   import NavRow from '$lib/components/shared/nav-row.svelte';
   import SectionRow from '$lib/components/shared/section-row.svelte';
   import { formatNumber } from '$lib/utils/format.svelte';
+  import { fromUnits } from '$lib/utils/units';
   import { openAccount } from '$lib/utils/navigation';
   import { cn, treeIndentStyle } from '$lib/utils';
   import AccountLabel from './account-label.svelte';
@@ -51,7 +52,7 @@
   </Table.Header>
   <Table.Body>
     {#each rendered as { section, rows } (section.category)}
-      <SectionRow label={section.label} total={section.total} columns={4} />
+      <SectionRow label={section.label} total={fromUnits(section.total)} columns={4} />
       {#each rows as row (row.node.guid)}
         <NavRow onNavigate={() => openAccount(row.node.guid)}>
           <Table.Cell class="p-0">
@@ -96,7 +97,7 @@
             {formatNumber(row.node.txCount)}
           </Table.Cell>
           <Table.Cell class="py-1.5 text-right">
-            <Amount value={row.total} weight={row.hasChildren ? 'semibold' : 'medium'} />
+            <Amount units={row.total} weight={row.hasChildren ? 'semibold' : 'medium'} />
           </Table.Cell>
         </NavRow>
       {/each}

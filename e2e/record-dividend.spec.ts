@@ -1,4 +1,5 @@
 import { accountsResult, type BackendMocks, expect, mockBackend, test } from './fixtures';
+import { ZERO_UNITS } from '../src/lib/utils/units';
 
 const account = (guid: string, name: string, accountType: string, commodityGuid = 'eur') => ({
   guid,
@@ -9,7 +10,7 @@ const account = (guid: string, name: string, accountType: string, commodityGuid 
   placeholder: false,
   commodity: commodityGuid === 'eur' ? 'EUR' : 'AAPL',
   commodityGuid,
-  balance: 0,
+  balance: ZERO_UNITS,
   txCount: 0,
   children: []
 });
@@ -38,8 +39,8 @@ const MOCKS: BackendMocks = {
     byType: {},
     totalAccounts: 3,
     reportCurrency: 'EUR',
-    retainedEarnings: 0,
-    unrealizedGains: 0
+    retainedEarnings: ZERO_UNITS,
+    unrealizedGains: ZERO_UNITS
   }),
   fetch_holding_detail: {
     holding: {

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { ZERO_UNITS } from '$lib/utils/units';
 import type { AccountNode, BudgetActualRow } from '$lib/tauri';
 import {
   accountNameMap,
@@ -18,7 +19,7 @@ function node(partial: Partial<AccountNode> & { guid: string }): AccountNode {
     placeholder: false,
     commodity: null,
     commodityGuid: null,
-    balance: 0,
+    balance: ZERO_UNITS,
     txCount: 0,
     children: [],
     ...partial

@@ -10,23 +10,29 @@ import {
   statementDifference,
   targetBalance
 } from './math';
+import { toUnits as u } from '$lib/utils/units';
 
 describe('reconcile statement math', () => {
   it('sums cleared amounts and derives the target', () => {
-    expect(clearedTotal([10, -30.5])).toBeCloseTo(-20.5, 10);
-    expect(targetBalance(100, -30)).toBeCloseTo(70, 10);
+    expect(clearedTotal([u(10), u(-30.5)])).toBe(u(-20.5));
+    expect(targetBalance(u(100), u(-30))).toBe(u(70));
+  });
+
+  it('adds cent amounts without float drift', () => {
+    // 0.1 + 0.2 is 0.30000000000000004 in floats; units add as integers.
+    expect(clearedTotal([u(0.1), u(0.2)])).toBe(u(0.3));
+    expect(isBalanced(statementDifference(u(0.3), clearedTotal([u(0.1), u(0.2)])))).toBe(true);
   });
 
   it('computes the statement difference', () => {
-    expect(statementDifference(70, 70)).toBeCloseTo(0, 10);
-    expect(statementDifference(70, 50)).toBeCloseTo(20, 10);
+    expect(statementDifference(u(70), u(70))).toBe(0);
+    expect(statementDifference(u(70), u(50))).toBe(u(20));
   });
 
-  it('balances within half-cent tolerance', () => {
-    expect(isBalanced(0)).toBe(true);
-    expect(isBalanced(0.004)).toBe(true);
-    expect(isBalanced(0.006)).toBe(false);
-    expect(isBalanced(-1)).toBe(false);
+  it('balances only on an exact zero', () => {
+    expect(isBalanced(u(0))).toBe(true);
+    expect(isBalanced(u(0.0001))).toBe(false);
+    expect(isBalanced(u(-1))).toBe(false);
   });
 
   it('gates reconcilable account types', () => {
@@ -51,27 +57,30 @@ describe('reconcile statement math', () => {
   it('parses statement amounts with locale-aware grouping', () => {
     expect(parseStatementAmount('')).toBeNull();
     expect(parseStatementAmount('   ')).toBeNull();
-    expect(parseStatementAmount('70')).toBe(70);
-    expect(parseStatementAmount(' 70.50 ')).toBeCloseTo(70.5, 10);
-    expect(parseStatementAmount('-12,5')).toBeCloseTo(-12.5, 10);
+    expect(parseStatementAmount('70')).toBe(u(70));
+    expect(parseStatementAmount(' 70.50 ')).toBe(u(70.5));
+    expect(parseStatementAmount('-12,5')).toBe(u(-12.5));
     expect(parseStatementAmount('abc')).toBeNull();
     expect(parseStatementAmount('12.34.56')).toBeNull();
     // Grouped values round-trip instead of disabling Finish.
-    expect(parseStatementAmount('1,000.50')).toBeCloseTo(1000.5, 10);
-    expect(parseStatementAmount('1,234,567.89')).toBeCloseTo(1234567.89, 10);
-    expect(parseStatementAmount('1.000,50', 'de-DE')).toBeCloseTo(1000.5, 10);
-    expect(parseStatementAmount('1 234,56', 'fr-FR')).toBeCloseTo(1234.56, 10);
-    expect(parseStatementAmount("1'234.56", 'de-CH')).toBeCloseTo(1234.56, 10);
+    expect(parseStatementAmount('1,000.50')).toBe(u(1000.5));
+    expect(parseStatementAmount('1,234,567.89')).toBe(u(1234567.89));
+    expect(parseStatementAmount('1.000,50', 'de-DE')).toBe(u(1000.5));
+    expect(parseStatementAmount('1 234,56', 'fr-FR')).toBe(u(1234.56));
+    expect(parseStatementAmount("1'234.56", 'de-CH')).toBe(u(1234.56));
     // A lone three-digit group follows the locale's separator roles.
-    expect(parseStatementAmount('1,000')).toBe(1000);
-    expect(parseStatementAmount('1.000', 'de-DE')).toBe(1000);
+    expect(parseStatementAmount('1,000')).toBe(u(1000));
+    expect(parseStatementAmount('1.000', 'de-DE')).toBe(u(1000));
     // Unknown separator roles stay ambiguous rather than guessing.
     expect(parseStatementAmount('1.000', 'fr-FR')).toBeNull();
     // Malformed grouping is rejected, not silently flattened.
     expect(parseStatementAmount('12,34,56')).toBeNull();
     expect(parseStatementAmount('1234,567')).toBeNull();
     // A short fraction still reads as decimal even with grouping characters.
-    expect(parseStatementAmount('12.34', 'de-DE')).toBeCloseTo(12.34, 10);
+    expect(parseStatementAmount('12.34', 'de-DE')).toBe(u(12.34));
+    // Exact to the unit; a fifth decimal can't be stored, so it's rejected.
+    expect(parseStatementAmount('0.1234')).toBe(1234);
+    expect(parseStatementAmount('0.12345')).toBeNull();
   });
 
   it('derives header checkbox tri-state', () => {
@@ -93,12 +102,12 @@ describe('reconcile statement math', () => {
 
   it('flags candidates sharing a date and amount', () => {
     const rows = [
-      { splitGuid: 'a', postDate: '2024-01-01', amount: 10 },
-      { splitGuid: 'b', postDate: '2024-01-01', amount: 10 },
-      { splitGuid: 'c', postDate: '2024-01-01', amount: 10.004 },
-      { splitGuid: 'd', postDate: '2024-01-02', amount: 10 }
+      { splitGuid: 'a', postDate: '2024-01-01', amount: u(10) },
+      { splitGuid: 'b', postDate: '2024-01-01', amount: u(10) },
+      { splitGuid: 'c', postDate: '2024-01-01', amount: u(10.01) },
+      { splitGuid: 'd', postDate: '2024-01-02', amount: u(10) }
     ];
-    expect([...duplicateCandidateGuids(rows)].sort()).toEqual(['a', 'b', 'c']);
+    expect([...duplicateCandidateGuids(rows)].sort()).toEqual(['a', 'b']);
     expect(duplicateCandidateGuids([]).size).toBe(0);
   });
 });

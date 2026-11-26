@@ -12,6 +12,7 @@ use crate::fx;
 use crate::payees::{self, PayeeRef};
 use crate::prices::get_cached_prices_map;
 use crate::sql;
+use crate::units::{Units, VALUE_UNITS};
 use crate::utils;
 use crate::utils::{SortDir, TxSortKey};
 
@@ -23,7 +24,7 @@ pub struct DetailSplit {
     pub account_name: String,
     pub account_description: Option<String>,
     pub account_type: String,
-    pub amount: f64,
+    pub amount: Units,
     pub memo: Option<String>,
     // Internal only: aggregated into `DetailTransaction.reconcile_state`
     // (y wins over c). Skipped on the wire; the per-tx status is what the UI consumes.
@@ -45,9 +46,12 @@ pub struct DetailTransaction {
     /// the viewed account's subtree), largest-magnitude split first.
     pub counter_accounts: Vec<String>,
     /// Signed effect on the viewed subtree, converted to the report currency
-    /// at the transaction's date (the delta of `running_balance`).
-    pub amount: f64,
-    pub running_balance: f64,
+    /// at the transaction's date (the delta of `running_balance`). Exact for
+    /// effects in the report currency; converted ones are rounded per
+    /// currency before they're added, so the running balance is always the
+    /// exact sum of the amounts above it.
+    pub amount: Units,
+    pub running_balance: Units,
     /// Reconcile state ('n'/'c'/'y') of the transaction's splits
     /// within the viewed subtree ('y' wins over 'c').
     pub reconcile_state: Option<String>,
@@ -65,7 +69,7 @@ pub struct AccountDetailInfo {
     pub commodity: Option<String>,
     pub commodity_guid: Option<String>,
     pub parent_guid: Option<String>,
-    pub balance: f64,
+    pub balance: Units,
     /// Whole subtree size minus self (`subaccount_guids` includes the account
     /// itself), i.e. the number of descendants — not direct children.
     pub descendants_count: i64,
@@ -77,8 +81,8 @@ pub struct AccountDetailInfo {
 #[serde(rename_all = "camelCase")]
 pub struct AccountSummary {
     pub total_transactions: i64,
-    pub total_income: f64,
-    pub total_expenses: f64,
+    pub total_income: Units,
+    pub total_expenses: Units,
 }
 
 #[derive(Debug, Serialize, specta::Type)]
@@ -114,7 +118,7 @@ struct TxQuery<'a> {
 
 /// Grouped per-transaction effects keyed by GUID: `(post_date, description,
 /// num, [(currency, signed effect)])`, in ascending (post_date, guid) order.
-type TxGroups = HashMap<String, (String, Option<String>, Option<String>, Vec<(String, f64)>)>;
+type TxGroups = HashMap<String, (String, Option<String>, Option<String>, Vec<(String, Units)>)>;
 
 /// Per-request currency context shared by the balance and summary passes so
 /// FX data is loaded exactly once per IPC call.
@@ -208,7 +212,7 @@ fn compute_summary(
          AND {}
          {}
          GROUP BY t.guid, c.mnemonic, a.account_type",
-        utils::signed_amount_expr(utils::RAW_AMOUNT, "a.account_type"),
+        utils::signed_amount_expr(VALUE_UNITS, "a.account_type"),
         in_list,
         utils::VISIBLE_TX_FILTER,
         sum_extra_sql
@@ -221,29 +225,29 @@ fn compute_summary(
         .chain(w.params.iter().map(|p| p.as_ref()))
         .collect();
 
-    let summary_rows: Vec<(String, String, String, f64)> = summary_stmt
+    let summary_rows: Vec<(String, String, String, Units)> = summary_stmt
         .query_map(summary_params.as_slice(), |row| {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
         })?
         .collect::<Result<Vec<_>, _>>()?;
 
     let mut total_txns: i64 = 0;
-    let mut pos_effect = 0.0;
-    let mut neg_effect = 0.0;
+    let mut pos_effect = Units::ZERO;
+    let mut neg_effect = Units::ZERO;
     let mut seen: HashSet<String> = HashSet::new();
     for (tx_guid, mnemonic, account_type, effect) in &summary_rows {
         if seen.insert(tx_guid.clone()) {
             total_txns += 1;
         }
-        let converted = fx::convert(*effect, mnemonic, &ctx.report_currency, &ctx.fx_map);
+        let converted = fx::convert_units(*effect, mnemonic, &ctx.report_currency, &ctx.fx_map);
         if utils::category_for_type(account_type) == "EXPENSE" {
             // Debit-normal: a spend increases the expense, a refund reverses it.
-            if converted >= 0.0 {
+            if converted >= Units::ZERO {
                 neg_effect += converted;
             } else {
                 pos_effect += -converted;
             }
-        } else if converted >= 0.0 {
+        } else if converted >= Units::ZERO {
             pos_effect += converted;
         } else {
             neg_effect += -converted;
@@ -282,7 +286,7 @@ fn fetch_account_detail_inner(
     // balance (same valuation as the Accounts list, pie and child table), so
     // the three can never diverge. `None` only happens for accounts missing
     // from the tree (e.g. ROOT, which the tree excludes).
-    let balance = subtree.as_ref().map(|n| n.balance).unwrap_or(0.0);
+    let balance = subtree.as_ref().map(|n| n.balance).unwrap_or(Units::ZERO);
 
     let summary = compute_summary(conn, &ctx, &sub_guids, query.search)?;
     let tx_page = load_tx_page(conn, &ctx, &sub_guids, &query)?;
@@ -330,7 +334,7 @@ struct TxEffect {
     description: Option<String>,
     num: Option<String>,
     currency: String,
-    balance_effect: f64,
+    balance_effect: Units,
 }
 
 fn load_tx_page(
@@ -461,7 +465,7 @@ fn fetch_tx_effects(
         SELECT guid, post_date, description, num, currency, balance_effect
         FROM tx_grouped
         ORDER BY post_date ASC, guid ASC",
-        utils::RAW_AMOUNT,
+        VALUE_UNITS,
         w.joined(),
         grouped_balance
     );
@@ -517,8 +521,8 @@ fn group_tx_effects(tx_effects: Vec<TxEffect>) -> (TxGroups, Vec<String>) {
 
 /// Report-currency running balance and per-transaction delta, keyed by GUID.
 struct RunningBalances {
-    running_by_guid: HashMap<String, f64>,
-    amount_by_guid: HashMap<String, f64>,
+    running_by_guid: HashMap<String, Units>,
+    amount_by_guid: HashMap<String, Units>,
 }
 
 /// Running balance in report currency: convert each currency at the transaction date.
@@ -529,19 +533,19 @@ fn accumulate_running_balances(
     tx_map: &TxGroups,
 ) -> Result<RunningBalances, AppError> {
     let fx_history = fx::FxHistory::load(conn)?;
-    let mut running = 0.0;
-    let mut running_by_guid: HashMap<String, f64> = HashMap::new();
-    let mut amount_by_guid: HashMap<String, f64> = HashMap::new();
+    let mut running = Units::ZERO;
+    let mut running_by_guid: HashMap<String, Units> = HashMap::new();
+    let mut amount_by_guid: HashMap<String, Units> = HashMap::new();
     for guid in tx_order {
         let (post_date, _, _, effects) = &tx_map[guid];
         let fx_at = fx_history.map_for_date(post_date);
-        let prev = running;
-        running += effects
+        let amount: Units = effects
             .iter()
-            .map(|(mn, v)| fx::convert(*v, mn, &ctx.report_currency, &fx_at))
-            .sum::<f64>();
+            .map(|(mn, v)| fx::convert_units(*v, mn, &ctx.report_currency, &fx_at))
+            .sum();
+        running += amount;
         running_by_guid.insert(guid.clone(), running);
-        amount_by_guid.insert(guid.clone(), running - prev);
+        amount_by_guid.insert(guid.clone(), amount);
     }
     Ok(RunningBalances {
         running_by_guid,
@@ -555,7 +559,7 @@ fn accumulate_running_balances(
 fn order_page_guids(
     tx_order: &[String],
     tx_map: &TxGroups,
-    amount_by_guid: &HashMap<String, f64>,
+    amount_by_guid: &HashMap<String, Units>,
     sort_by: Option<TxSortKey>,
     sort_dir: Option<SortDir>,
     safe_page: i64,
@@ -589,7 +593,7 @@ fn order_page_guids(
             TxSortKey::Date => tx_map[*a].0.cmp(&tx_map[*b].0).then_with(|| a.cmp(b)),
             TxSortKey::Description => desc_keys[a].cmp(&desc_keys[b]).then_with(|| a.cmp(b)),
             TxSortKey::Amount => amount_by_guid[*a]
-                .total_cmp(&amount_by_guid[*b])
+                .cmp(&amount_by_guid[*b])
                 .then_with(|| a.cmp(b)),
         };
         if ascending {
@@ -611,8 +615,8 @@ fn enrich_page_transactions(
     conn: &Connection,
     page_guids: &[String],
     tx_map: &TxGroups,
-    running_by_guid: &HashMap<String, f64>,
-    amount_by_guid: &HashMap<String, f64>,
+    running_by_guid: &HashMap<String, Units>,
+    amount_by_guid: &HashMap<String, Units>,
     sub_guids: &[String],
 ) -> Result<Vec<DetailTransaction>, AppError> {
     let notes_map = load_page_notes(conn, page_guids)?;
@@ -689,7 +693,7 @@ fn load_page_splits(
              JOIN accounts a ON a.guid = s.account_guid
              WHERE s.tx_guid IN ({})
              ORDER BY s.tx_guid, ABS(s.value_num) DESC",
-            utils::RAW_AMOUNT,
+            VALUE_UNITS,
             sql::in_clause(chunk.len()),
         );
         let mut split_stmt = conn.prepare(&split_sql)?;
@@ -1037,8 +1041,8 @@ mod tests {
         .unwrap();
 
         assert_eq!(result.summary.total_transactions, 2);
-        assert!((result.summary.total_expenses - 42.10).abs() < 1e-9);
-        assert!((result.summary.total_income - 5.0).abs() < 1e-9);
+        assert_eq!(result.summary.total_expenses, Units::from_f64(42.10));
+        assert_eq!(result.summary.total_income, Units::from_f64(5.0));
     }
 
     /// Regression: malformed ledger filter dates used to silently return an
@@ -1135,7 +1139,7 @@ mod tests {
         let (_, _, parent) = accounts::fetch_children_and_subtree(&conn, "checking").unwrap();
         let parent = parent.unwrap();
         assert_eq!(parent.guid, "assets");
-        assert_eq!(parent.balance, 70.0);
+        assert_eq!(parent.balance, Units::from_f64(70.0));
 
         // 'assets' is top-level: its parent is the excluded ROOT node.
         let (_, _, parent) = accounts::fetch_children_and_subtree(&conn, "assets").unwrap();
@@ -1179,10 +1183,10 @@ mod tests {
         // Default sort is date descending: t2 (2024-02-05) first, then t1 (2024-01-10).
         assert_eq!(page.transactions.len(), 2);
         let (t2, t1) = (&page.transactions[0], &page.transactions[1]);
-        assert_eq!(t1.amount, 100.0);
-        assert_eq!(t1.running_balance, 100.0);
-        assert_eq!(t2.amount, -30.0);
-        assert_eq!(t2.running_balance, 70.0);
+        assert_eq!(t1.amount, Units::from_f64(100.0));
+        assert_eq!(t1.running_balance, Units::from_f64(100.0));
+        assert_eq!(t2.amount, Units::from_f64(-30.0));
+        assert_eq!(t2.running_balance, Units::from_f64(70.0));
 
         // Credit-normal card spend shows as a negative amount under root.
         let page = load_tx_page(
@@ -1202,8 +1206,8 @@ mod tests {
         .unwrap();
         assert_eq!(page.transactions.len(), 3);
         let t3 = &page.transactions[0]; // 2024-02-20, newest
-        assert_eq!(t3.amount, -40.0);
-        assert_eq!(t3.running_balance, 30.0);
+        assert_eq!(t3.amount, Units::from_f64(-40.0));
+        assert_eq!(t3.running_balance, Units::from_f64(30.0));
     }
 
     #[test]
@@ -1214,8 +1218,8 @@ mod tests {
         let (children, subtree, _) = accounts::fetch_children_and_subtree(&conn, "assets").unwrap();
         assert_eq!(children.len(), 1);
         assert_eq!(children[0].guid, "checking");
-        assert_eq!(children[0].balance, 70.0);
-        assert_eq!(subtree.unwrap().balance, 70.0);
+        assert_eq!(children[0].balance, Units::from_f64(70.0));
+        assert_eq!(subtree.unwrap().balance, Units::from_f64(70.0));
 
         // The trend always spans the full history.
         let trend = fetch_account_balance_trend_inner(&conn, "assets").unwrap();
@@ -1259,7 +1263,11 @@ mod tests {
         .unwrap();
 
         // Largest effect first: t1 (+100) before t2 (-30).
-        let amounts: Vec<f64> = page.transactions.iter().map(|t| t.amount).collect();
+        let amounts: Vec<f64> = page
+            .transactions
+            .iter()
+            .map(|t| t.amount.to_f64())
+            .collect();
         assert_eq!(amounts, vec![100.0, -30.0]);
 
         let page = load_tx_page(
@@ -1277,7 +1285,11 @@ mod tests {
             },
         )
         .unwrap();
-        let amounts: Vec<f64> = page.transactions.iter().map(|t| t.amount).collect();
+        let amounts: Vec<f64> = page
+            .transactions
+            .iter()
+            .map(|t| t.amount.to_f64())
+            .collect();
         assert_eq!(amounts, vec![-30.0, 100.0]);
     }
 
@@ -1346,14 +1358,17 @@ mod tests {
 
         // Cash 500 + AAPL market 1500 + unpriced XYZ 0.
         let result = fetch_account_detail_inner(&conn, "assets", detail_query()).unwrap();
-        assert_eq!(result.account.balance, 2000.0);
-        assert_eq!(result.subtree.as_ref().unwrap().balance, 2000.0);
+        assert_eq!(result.account.balance, Units::from_f64(2000.0));
+        assert_eq!(
+            result.subtree.as_ref().unwrap().balance,
+            Units::from_f64(2000.0)
+        );
 
         let by_guid: HashMap<&str, f64> = result
             .account
             .child_accounts
             .iter()
-            .map(|c| (c.guid.as_str(), c.balance))
+            .map(|c| (c.guid.as_str(), c.balance.to_f64()))
             .collect();
         assert_eq!(by_guid["checking"], 500.0);
         assert_eq!(by_guid["broker"], 1500.0);
@@ -1361,9 +1376,9 @@ mod tests {
 
         // Leaf pages agree with the tree as well.
         let broker = fetch_account_detail_inner(&conn, "broker", detail_query()).unwrap();
-        assert_eq!(broker.account.balance, 1500.0);
+        assert_eq!(broker.account.balance, Units::from_f64(1500.0));
         let vault = fetch_account_detail_inner(&conn, "vault", detail_query()).unwrap();
-        assert_eq!(vault.account.balance, 0.0);
+        assert_eq!(vault.account.balance, Units::from_f64(0.0));
     }
 
     #[test]
@@ -1372,9 +1387,9 @@ mod tests {
         // cash + (market - cost) = 500 + 500 = 1000 here instead of 2000.
         let conn = setup_investments();
         let result = fetch_account_detail_inner(&conn, "assets", detail_query()).unwrap();
-        assert_eq!(result.account.balance, 2000.0);
+        assert_eq!(result.account.balance, Units::from_f64(2000.0));
         assert!(
-            (result.account.balance - 1000.0).abs() > 0.01,
+            (result.account.balance.to_f64() - 1000.0).abs() > 0.01,
             "must not be the old market-minus-cost total"
         );
     }

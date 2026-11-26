@@ -2,7 +2,8 @@
   import { tooltip } from '$lib/attachments/tooltip';
   import { CircleCheck, Scale, Target, Wallet } from '@lucide/svelte';
   import KpiCard from '$lib/components/shared/kpi-card.svelte';
-  import { EMPTY_DASH, clampZero, formatCurrency } from '$lib/utils/format.svelte';
+  import { EMPTY_DASH, formatCurrency } from '$lib/utils/format.svelte';
+  import { fromUnits, type Units } from '$lib/utils/units';
 
   let {
     currency,
@@ -14,21 +15,20 @@
     onFindDifference
   }: {
     currency: string;
-    startingBalance: number;
-    cleared: number;
-    target: number;
-    difference: number;
+    startingBalance: Units;
+    cleared: Units;
+    target: Units;
+    /** `null` while the ending balance is empty or invalid. */
+    difference: Units | null;
     balanced: boolean;
     onFindDifference: () => void;
   } = $props();
 
-  // Snap float dust (e.g. -2.9e-12 from starting + cleared) so a balanced statement shows US$0.00, not -US$0.00.
-  const fmt = (n: number) => formatCurrency(clampZero(n), currency);
-  // `difference` is NaN while the ending balance is empty or invalid; keep the
-  // color class off in that case. Any non-zero difference is a mismatch, so it
-  // reads as a warning regardless of sign.
+  const fmt = (units: Units) => formatCurrency(fromUnits(units), currency);
+  // No color without a usable ending balance. Any non-zero difference is a
+  // mismatch, so it reads as a warning regardless of sign.
   let differenceClass = $derived(
-    !Number.isFinite(difference) ? '' : balanced ? 'text-success' : 'text-warning'
+    difference === null ? '' : balanced ? 'text-success' : 'text-warning'
   );
 </script>
 
@@ -54,7 +54,7 @@
     {/snippet}
     {#snippet value()}
       <span aria-live="polite">
-        {#if !Number.isFinite(difference)}
+        {#if difference === null}
           {EMPTY_DASH}
         {:else if !balanced}
           <button

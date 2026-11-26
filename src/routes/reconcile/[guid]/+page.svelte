@@ -21,6 +21,7 @@
     type TxSortKey
   } from '$lib/tauri';
   import { sessionCurrency, plural, formatSignedCurrency } from '$lib/utils/format.svelte';
+  import { fromUnits, ZERO_UNITS, type Units } from '$lib/utils/units';
   import { errMsg } from '$lib/utils/error';
   import { today } from '$lib/utils/date-utils.svelte';
   import BookGate from '$lib/components/shared/book-gate.svelte';
@@ -102,7 +103,7 @@
   });
 
   let candidates = $derived(res.data?.candidates ?? []);
-  let startingBalance = $derived(res.data?.startingBalance ?? 0);
+  let startingBalance = $derived(res.data?.startingBalance ?? ZERO_UNITS);
   // Statement amounts are in the account's commodity (what the bank shows);
   // only the account list converts balances to the report currency.
   let currency = $derived(res.data?.commodity ?? session);
@@ -143,7 +144,7 @@
   let dirty = $derived(pendingUpdates().length > 0);
 
   let amountByGuid = $derived(new Map(candidates.map((c) => [c.splitGuid, c.amount] as const)));
-  let cleared = $derived(clearedTotal([...checked].map((g) => amountByGuid.get(g) ?? 0)));
+  let cleared = $derived(clearedTotal([...checked].map((g) => amountByGuid.get(g) ?? ZERO_UNITS)));
   let target = $derived(targetBalance(startingBalance, cleared));
   let endingBalance = $derived(parseStatementAmount(endingBalanceInput, appSettings.value.locale));
   let balanceIssue = $derived.by<'empty' | 'invalid' | 'none'>(() => {
@@ -151,9 +152,9 @@
     return endingBalance === null ? 'invalid' : 'none';
   });
   let difference = $derived(
-    endingBalance === null ? NaN : statementDifference(endingBalance, target)
+    endingBalance === null ? null : statementDifference(endingBalance, target)
   );
-  let balanced = $derived(endingBalance !== null && isBalanced(difference));
+  let balanced = $derived(difference !== null && isBalanced(difference));
   let saving = $state(false);
   let finishing = $state(false);
   // Finishing promotes every cleared split, so the header button opens a
@@ -167,7 +168,7 @@
   );
 
   // Jump straight to the candidate(s) that explain an off-by amount.
-  let amountFilter = $state<number | null>(null);
+  let amountFilter = $state<Units | null>(null);
   let searchAmount = $derived.by(() => {
     const q = search.value.trim();
     return q ? parseStatementAmount(q, appSettings.value.locale) : null;
@@ -500,7 +501,7 @@
                 {@attach tooltip('Clear the amount filter')}
                 onclick={() => (amountFilter = null)}
               >
-                Amount = {formatSignedCurrency(amountFilter, currency)}
+                Amount = {formatSignedCurrency(fromUnits(amountFilter), currency)}
                 <X aria-hidden="true" class="size-3.5" />
               </Button>
             {/if}

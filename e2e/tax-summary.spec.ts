@@ -1,4 +1,5 @@
 import type { TaxSummary } from '../src/lib/tauri';
+import { ZERO_UNITS } from '../src/lib/utils/units';
 import { accountsResult, type BackendMocks, expect, mockBackend, test } from './fixtures';
 
 const BASE: BackendMocks = {
@@ -106,7 +107,7 @@ test('offers to set up roles when nothing is tagged yet', async ({ page }) => {
           placeholder: true,
           commodity: 'EUR',
           commodityGuid: 'eur',
-          balance: 0,
+          balance: ZERO_UNITS,
           txCount: 0,
           children: [
             {
@@ -118,7 +119,7 @@ test('offers to set up roles when nothing is tagged yet', async ({ page }) => {
               placeholder: false,
               commodity: 'EUR',
               commodityGuid: 'eur',
-              balance: 0,
+              balance: ZERO_UNITS,
               txCount: 0,
               children: []
             }
@@ -128,8 +129,8 @@ test('offers to set up roles when nothing is tagged yet', async ({ page }) => {
       byType: {},
       totalAccounts: 2,
       reportCurrency: 'EUR',
-      retainedEarnings: 0,
-      unrealizedGains: 0
+      retainedEarnings: ZERO_UNITS,
+      unrealizedGains: ZERO_UNITS
     }),
     save_tax_roles: [{ accountGuid: 'payroll', role: 'employment_income' }]
   });

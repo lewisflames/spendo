@@ -31,6 +31,7 @@
   import { payeeListHref } from '$lib/features/payees/payee-utils';
   import { pageSelectionState } from './bulk-edit';
   import type { DetailTransaction, TransactionRow, TxSortKey } from '$lib/tauri';
+  import { fromUnits } from '$lib/utils/units';
 
   let {
     transactions = [],
@@ -75,7 +76,7 @@
   }
 
   function totalOf(txn: TransactionRow | DetailTransaction): number {
-    return isDetail(txn) ? txn.amount : (txn as TransactionRow).totalAmount;
+    return isDetail(txn) ? fromUnits(txn.amount) : (txn as TransactionRow).totalAmount;
   }
 
   // Date is fixed in the account ledger; only the all-transactions table can hide it.
@@ -307,12 +308,12 @@
           {/if}
           {#if isVisible('amount')}
             <Table.Cell class="py-2.5 text-right">
-              <Amount value={txn.amount} format={(n) => formatSignedCurrency(n, currency)} tone />
+              <Amount units={txn.amount} format={(n) => formatSignedCurrency(n, currency)} tone />
             </Table.Cell>
           {/if}
           {#if isVisible('runningBalance')}
             <Table.Cell class="py-2.5 text-right">
-              <Amount value={txn.runningBalance} />
+              <Amount units={txn.runningBalance} />
             </Table.Cell>
           {/if}
         {/if}

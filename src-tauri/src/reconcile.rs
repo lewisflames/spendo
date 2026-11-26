@@ -6,6 +6,7 @@ use tauri::State;
 
 use crate::db::{run_blocking, with_tx_err, AppError, AppState};
 use crate::sql;
+use crate::units::{Units, VALUE_UNITS};
 use crate::utils;
 
 /// Account types with bank-statement semantics. Investments (`STOCK`/`MUTUAL`/
@@ -23,9 +24,8 @@ const RECONCILABLE_TYPES: [&str; 8] = [
     "PAYABLE",
 ];
 
-/// Tolerance for the statement difference: half a cent, matching the display
-/// `clampZero` threshold on the frontend.
-const BALANCE_EPS: f64 = 0.005;
+/// Largest statement balance accepted, in whole currency units.
+const MAX_ENDING_BALANCE: i64 = 1_000_000_000;
 
 /// Cap on state changes accepted in one save/finish call.
 const MAX_SPLIT_UPDATES: usize = 2000;
@@ -41,7 +41,7 @@ pub struct ReconcileCandidate {
     pub memo: Option<String>,
     /// Signed display amount (credit-normal accounts negated) in the
     /// reconciled account's commodity.
-    pub amount: f64,
+    pub amount: Units,
     /// Normalized `'n'`/`'c'` (source `NULL` reads as `'n'`).
     pub reconcile_state: String,
     /// Distinct descriptions (falling back to names) of the transaction's
@@ -60,7 +60,7 @@ pub struct ReconcileInfo {
     pub commodity: Option<String>,
     pub statement_date: String,
     /// Sum of `'y'` splits at or before the statement date.
-    pub starting_balance: f64,
+    pub starting_balance: Units,
     /// Unreconciled (`'n'`/`'c'`) splits at or before the statement date,
     /// oldest first.
     pub candidates: Vec<ReconcileCandidate>,
@@ -83,7 +83,7 @@ pub struct ReconcileAccountSummary {
     /// Splits saved as `'c'` (progress not yet finished).
     pub cleared_count: i64,
     /// Signed display total of the `'n'` splits, in the account's commodity.
-    pub uncleared_total: f64,
+    pub uncleared_total: Units,
     pub last_reconciled_date: Option<String>,
 }
 
@@ -125,7 +125,8 @@ pub struct MarkReconcileResult {
 pub struct FinishReconcileInput {
     pub account_guid: String,
     pub statement_date: String,
-    pub ending_balance: f64,
+    /// The statement's closing balance; must equal reconciled + cleared exactly.
+    pub ending_balance: Units,
     /// Unsaved marks from the page, applied in the same transaction as the
     /// balance check and promotion so Finish is atomic.
     #[serde(default)]
@@ -136,8 +137,8 @@ pub struct FinishReconcileInput {
 #[serde(rename_all = "camelCase")]
 pub struct FinishReconcileResult {
     pub reconciled_count: i64,
-    pub starting_balance: f64,
-    pub ending_balance: f64,
+    pub starting_balance: Units,
+    pub ending_balance: Units,
 }
 
 struct ReconcilableAccount {
@@ -224,9 +225,9 @@ fn sum_by_state(
     account_guid: &str,
     state: &str,
     statement_date: &str,
-) -> Result<f64, AppError> {
-    let signed = utils::signed_amount_expr(utils::RAW_AMOUNT, "a.account_type");
-    let total: f64 = conn
+) -> Result<Units, AppError> {
+    let signed = utils::signed_amount_expr(VALUE_UNITS, "a.account_type");
+    let total: Units = conn
         .query_row(
             &format!(
                 "SELECT COALESCE(SUM({signed}), 0)
@@ -493,7 +494,7 @@ fn fetch_reconcile_info_inner(
     let account = load_reconcilable_account(conn, account_guid)?;
     let starting_balance = sum_by_state(conn, account_guid, "y", &statement_date)?;
 
-    let signed = utils::signed_amount_expr(utils::RAW_AMOUNT, "a.account_type");
+    let signed = utils::signed_amount_expr(VALUE_UNITS, "a.account_type");
     let mut stmt = conn.prepare(&format!(
         "SELECT s.guid, s.tx_guid, t.post_date, t.description, t.num, s.memo,
                 {signed} as amount, COALESCE(s.reconcile_state, 'n') as state
@@ -596,12 +597,7 @@ fn finish_reconciliation_inner(
     conn: &Connection,
     input: FinishReconcileInput,
 ) -> Result<FinishReconcileResult, AppError> {
-    if !input.ending_balance.is_finite() {
-        return Err(AppError::Validation(
-            "Enter the ending balance as a number".to_string(),
-        ));
-    }
-    if input.ending_balance.abs() > 1_000_000_000.0 {
+    if input.ending_balance.abs() > Units::new(MAX_ENDING_BALANCE * Units::SCALE) {
         return Err(AppError::Validation(
             "That ending balance is huge. Keep it under 1,000,000,000".to_string(),
         ));
@@ -620,9 +616,9 @@ fn finish_reconciliation_inner(
         let starting_balance = sum_by_state(conn, &input.account_guid, "y", &statement_date)?;
         let cleared_total = sum_by_state(conn, &input.account_guid, "c", &statement_date)?;
         let diff = input.ending_balance - (starting_balance + cleared_total);
-        if diff.abs() > BALANCE_EPS {
+        if !diff.is_zero() {
             return Err(AppError::Validation(format!(
-                "Out of balance by {diff:.2}. Tick off what cleared the bank until it hits zero"
+                "Out of balance by {diff}. Tick off what cleared the bank until it hits zero"
             )));
         }
         let guids = cleared_split_guids(conn, &input.account_guid, &statement_date)?;
@@ -716,7 +712,7 @@ fn reopen_last_reconciliation_inner(
 fn fetch_reconcile_summaries_inner(
     conn: &Connection,
 ) -> Result<Vec<ReconcileAccountSummary>, AppError> {
-    let signed = utils::signed_amount_expr(utils::RAW_AMOUNT, "a.account_type");
+    let signed = utils::signed_amount_expr(VALUE_UNITS, "a.account_type");
     let mut summaries: HashMap<String, ReconcileAccountSummary> = HashMap::new();
     {
         let mut stmt = conn.prepare(&format!(
@@ -740,7 +736,7 @@ fn fetch_reconcile_summaries_inner(
                 row.get::<_, String>(0)?,
                 row.get::<_, i64>(1)?,
                 row.get::<_, i64>(2)?,
-                row.get::<_, f64>(3)?,
+                row.get::<_, Units>(3)?,
             ))
         })?;
         for row in rows {
@@ -786,7 +782,7 @@ fn fetch_reconcile_summaries_inner(
                     account_guid,
                     unreconciled_count: 0,
                     cleared_count: 0,
-                    uncleared_total: 0.0,
+                    uncleared_total: Units::ZERO,
                     last_reconciled_date: None,
                 })
                 .last_reconciled_date = Some(last);
@@ -824,7 +820,7 @@ fn fetch_reconcile_summaries_inner(
                     account_guid,
                     unreconciled_count: 0,
                     cleared_count: 0,
-                    uncleared_total: 0.0,
+                    uncleared_total: Units::ZERO,
                     last_reconciled_date: None,
                 })
                 .last_reconciled_date = last;
@@ -982,6 +978,7 @@ mod tests {
         ending_balance: f64,
         updates: Vec<SplitStateUpdate>,
     ) -> Result<FinishReconcileResult, AppError> {
+        let ending_balance = Units::from_f64(ending_balance);
         finish_reconciliation_inner(
             conn,
             FinishReconcileInput {
@@ -998,12 +995,12 @@ mod tests {
         let conn = setup();
         seed(&conn);
         let info = fetch_reconcile_info_inner(&conn, "checking", "2024-02-15").expect("info runs");
-        assert_eq!(info.starting_balance, 100.0);
+        assert_eq!(info.starting_balance, Units::new(1_000_000));
         assert_eq!(info.account_name, "Checking");
         // t3 (Mar) is past the statement date.
         assert_eq!(info.candidates.len(), 1);
         assert_eq!(info.candidates[0].split_guid, "s-t2");
-        assert_eq!(info.candidates[0].amount, -30.0);
+        assert_eq!(info.candidates[0].amount, Units::new(-300_000));
         // t1 was reconciled without a batch: dated, but nothing to reopen.
         assert_eq!(info.last_reconciled_date.as_deref(), Some("2024-01-10"));
         assert_eq!(info.last_reconciled_count, 0);
@@ -1104,6 +1101,35 @@ mod tests {
             )
             .unwrap();
         assert_eq!(state, "n");
+    }
+
+    #[test]
+    fn finish_requires_an_exact_match() {
+        let conn = setup();
+        // 0.1 + 0.2 cleared on a 1/10000 denominator: exactly 0.3, no float drift.
+        for (tx, num) in [("f1", 1_000), ("f2", 2_000)] {
+            conn.execute(
+                "INSERT INTO transactions (guid, post_date) VALUES (?1, '2024-01-10')",
+                params![tx],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO splits (guid, tx_guid, account_guid, value_num, value_denom,
+                                     quantity_num, quantity_denom, reconcile_state, reconciled)
+                 VALUES (?1, ?2, 'checking', ?3, 10000, ?3, 10000, 'c', 1)",
+                params![format!("s-{tx}"), tx, num],
+            )
+            .unwrap();
+        }
+        // A sub-cent difference used to fall inside the old half-cent tolerance.
+        let err = finish(&conn, "2024-01-31", 0.3001, vec![]).unwrap_err();
+        assert!(
+            err.to_string().contains("Out of balance by 0.0001"),
+            "{err}"
+        );
+        let out = finish(&conn, "2024-01-31", 0.3, vec![]).expect("exact match finishes");
+        assert_eq!(out.ending_balance, Units::new(3_000));
+        assert_eq!(out.reconciled_count, 2);
     }
 
     #[test]
@@ -1271,7 +1297,7 @@ mod tests {
         let checking = rows.iter().find(|r| r.account_guid == "checking").unwrap();
         assert_eq!(checking.unreconciled_count, 1);
         assert_eq!(checking.cleared_count, 1);
-        assert_eq!(checking.uncleared_total, 50.0);
+        assert_eq!(checking.uncleared_total, Units::new(500_000));
         assert_eq!(checking.last_reconciled_date.as_deref(), Some("2024-03-15"));
         // Investment accounts are never reconciled.
         assert!(rows.iter().all(|r| r.account_guid != "broker"));
@@ -1289,7 +1315,7 @@ mod tests {
         // A 40 spend on a credit card stores +40 raw but reads as -40.
         add_split(&conn, "tc", "2024-01-10", "card", 4_000, "y");
         let info = fetch_reconcile_info_inner(&conn, "card", "2024-02-01").expect("info runs");
-        assert_eq!(info.starting_balance, -40.0);
+        assert_eq!(info.starting_balance, Units::new(-400_000));
     }
 
     #[test]
@@ -1307,7 +1333,5 @@ mod tests {
             .collect();
         expected.sort_unstable();
         assert_eq!(actual, expected);
-        // Keep in sync with `RECONCILE_EPS` in `math.ts`.
-        assert!((BALANCE_EPS - 0.005).abs() < 1e-12);
     }
 }

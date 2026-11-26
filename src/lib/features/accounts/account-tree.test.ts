@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { toUnits as u } from '$lib/utils/units';
 import type { AccountNode, AccountsResult } from '$lib/tauri';
 import { buildAccountSections, parentGuids, visibleAccountRows } from './account-tree';
 
@@ -12,7 +13,7 @@ function node(guid: string, accountType: string, children: AccountNode[] = [], b
     placeholder: false,
     commodity: null,
     commodityGuid: null,
-    balance,
+    balance: u(balance),
     txCount: 0,
     children
   } satisfies AccountNode;
@@ -29,9 +30,9 @@ const data = {
   byType: {},
   totalAccounts: 5,
   reportCurrency: 'EUR',
-  retainedEarnings: 0,
-  unrealizedGains: 0,
-  balanceCheck: 0,
+  retainedEarnings: u(0),
+  unrealizedGains: u(0),
+  balanceCheck: u(0),
   missingFx: [],
   missingPrices: []
 } satisfies AccountsResult;
@@ -41,7 +42,7 @@ describe('buildAccountSections', () => {
     const sections = buildAccountSections(data);
     expect(sections.map((s) => s.category)).toEqual(['ASSET', 'EXPENSE']);
     expect(sections[0].roots.map((r) => r.guid)).toEqual(['Bank']);
-    expect(sections[0].total).toBe(150);
+    expect(sections[0].total).toBe(u(150));
   });
 });
 
@@ -54,7 +55,7 @@ describe('visibleAccountRows', () => {
       ['Checking', 1],
       ['Savings', 1]
     ]);
-    expect(rows[0].total).toBe(150);
+    expect(rows[0].total).toBe(u(150));
   });
 
   it('expands the path to search matches and hides the rest', () => {

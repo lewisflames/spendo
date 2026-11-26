@@ -1,5 +1,6 @@
 import type { Page } from '@playwright/test';
 import type { CommandResults } from '../src/lib/tauri';
+import { ZERO_UNITS } from '../src/lib/utils/units';
 
 /**
  * Canned command results keyed by command name, typed against the generated
@@ -63,9 +64,9 @@ export const accountsResult = (fields: Partial<AccountsResult>): AccountsResult 
   byType: {},
   totalAccounts: 0,
   reportCurrency: 'EUR',
-  retainedEarnings: 0,
-  unrealizedGains: 0,
-  balanceCheck: 0,
+  retainedEarnings: ZERO_UNITS,
+  unrealizedGains: ZERO_UNITS,
+  balanceCheck: ZERO_UNITS,
   missingFx: [],
   missingPrices: [],
   ...fields

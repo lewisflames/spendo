@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { toUnits as u } from '$lib/utils/units';
 import type { AccountNode, AccountsResult } from '$lib/tauri';
 import { buildBalanceSheet, comparisonDate, subtreeTotal } from './balance-sheet';
 
@@ -10,7 +11,7 @@ function node(partial: Partial<AccountNode> & { guid: string; name: string }): A
     placeholder: false,
     commodity: 'USD',
     commodityGuid: null,
-    balance: 0,
+    balance: u(0),
     txCount: 0,
     children: [],
     ...partial
@@ -23,9 +24,9 @@ function result(partial: Partial<AccountsResult>): AccountsResult {
     byType: {},
     totalAccounts: 0,
     reportCurrency: 'USD',
-    retainedEarnings: 0,
-    unrealizedGains: 0,
-    balanceCheck: 0,
+    retainedEarnings: u(0),
+    unrealizedGains: u(0),
+    balanceCheck: u(0),
     missingFx: [],
     missingPrices: [],
     ...partial
@@ -39,31 +40,31 @@ describe('subtreeTotal', () => {
       name: 'Assets',
       accountType: 'ASSET',
       placeholder: true,
-      balance: 150,
+      balance: u(150),
       children: [
-        node({ guid: 'checking', name: 'Checking', balance: 100 }),
-        node({ guid: 'savings', name: 'Savings', balance: 50 })
+        node({ guid: 'checking', name: 'Checking', balance: u(100) }),
+        node({ guid: 'savings', name: 'Savings', balance: u(50) })
       ]
     });
-    expect(subtreeTotal(assets)).toBe(150);
+    expect(subtreeTotal(assets)).toBe(u(150));
   });
 
   it('adds the subtree for non-placeholder parents', () => {
     const parent = node({
       guid: 'parent',
       name: 'Parent',
-      balance: 40,
+      balance: u(40),
       children: [
-        node({ guid: 'a', name: 'A', balance: 10 }),
+        node({ guid: 'a', name: 'A', balance: u(10) }),
         node({
           guid: 'b',
           name: 'B',
-          balance: 5,
-          children: [node({ guid: 'c', name: 'C', balance: 2 })]
+          balance: u(5),
+          children: [node({ guid: 'c', name: 'C', balance: u(2) })]
         })
       ]
     });
-    expect(subtreeTotal(parent)).toBe(57);
+    expect(subtreeTotal(parent)).toBe(u(57));
   });
 });
 
@@ -75,10 +76,10 @@ describe('buildBalanceSheet', () => {
         name: 'Assets',
         accountType: 'ASSET',
         placeholder: true,
-        balance: 1050,
+        balance: u(1050),
         children: [
-          node({ guid: 'checking', name: 'Checking', balance: 650 }),
-          node({ guid: 'brokerage', name: 'Brokerage', accountType: 'STOCK', balance: 400 })
+          node({ guid: 'checking', name: 'Checking', balance: u(650) }),
+          node({ guid: 'brokerage', name: 'Brokerage', accountType: 'STOCK', balance: u(400) })
         ]
       }),
       node({
@@ -86,40 +87,40 @@ describe('buildBalanceSheet', () => {
         name: 'Income',
         accountType: 'INCOME',
         placeholder: true,
-        balance: 500
+        balance: u(500)
       }),
       node({
         guid: 'liabilities',
         name: 'Liabilities',
         accountType: 'LIABILITY',
         placeholder: true,
-        balance: 300,
-        children: [node({ guid: 'card', name: 'Card', accountType: 'CREDIT', balance: 300 })]
+        balance: u(300),
+        children: [node({ guid: 'card', name: 'Card', accountType: 'CREDIT', balance: u(300) })]
       }),
       node({
         guid: 'equity',
         name: 'Equity',
         accountType: 'EQUITY',
         placeholder: true,
-        balance: 200
+        balance: u(200)
       }),
       node({
         guid: 'expenses',
         name: 'Expenses',
         accountType: 'EXPENSE',
         placeholder: true,
-        balance: 50
+        balance: u(50)
       })
     ],
     byType: {
-      ASSET: { count: 3, totalBalance: 1050 },
-      LIABILITY: { count: 2, totalBalance: 300 },
-      EQUITY: { count: 1, totalBalance: 200 },
-      INCOME: { count: 1, totalBalance: 500 },
-      EXPENSE: { count: 1, totalBalance: 50 }
+      ASSET: { count: 3, totalBalance: u(1050) },
+      LIABILITY: { count: 2, totalBalance: u(300) },
+      EQUITY: { count: 1, totalBalance: u(200) },
+      INCOME: { count: 1, totalBalance: u(500) },
+      EXPENSE: { count: 1, totalBalance: u(50) }
     },
-    retainedEarnings: 450,
-    unrealizedGains: 100
+    retainedEarnings: u(450),
+    unrealizedGains: u(100)
   });
 
   it('splits rows into statement sections with depth-first indents', () => {
@@ -127,12 +128,12 @@ describe('buildBalanceSheet', () => {
     // The top-level placeholder root is the section group: the header names
     // it, so it isn't repeated as a row.
     expect(sheet.assets.rows.map((r) => [r.accountGuid, r.depth, r.amount])).toEqual([
-      ['checking', 1, 650],
-      ['brokerage', 1, 400]
+      ['checking', 1, u(650)],
+      ['brokerage', 1, u(400)]
     ]);
     expect(sheet.liabilities.rows.map((r) => r.accountGuid)).toEqual(['card']);
     expect(sheet.assets.label).toBe('Assets');
-    expect(sheet.liabilities.total).toBe(300);
+    expect(sheet.liabilities.total).toBe(u(300));
   });
 
   it('keeps non-placeholder top-level roots and nested placeholders', () => {
@@ -141,47 +142,47 @@ describe('buildBalanceSheet', () => {
         guid: 'investments',
         name: 'Investments',
         accountType: 'ASSET',
-        balance: 0,
+        balance: u(0),
         children: [
           node({
             guid: 'brokerage',
             name: 'Brokerage',
             accountType: 'ASSET',
             placeholder: true,
-            balance: 400,
-            children: [node({ guid: 'vti', name: 'VTI', accountType: 'STOCK', balance: 400 })]
+            balance: u(400),
+            children: [node({ guid: 'vti', name: 'VTI', accountType: 'STOCK', balance: u(400) })]
           })
         ]
       }),
-      node({ guid: 'loose', name: 'Loose cash', accountType: 'CASH', balance: 25 })
+      node({ guid: 'loose', name: 'Loose cash', accountType: 'CASH', balance: u(25) })
     ];
     const sheet = buildBalanceSheet(
-      result({ trees, byType: { ASSET: { count: 3, totalBalance: 425 } } })
+      result({ trees, byType: { ASSET: { count: 3, totalBalance: u(425) } } })
     );
     expect(sheet.assets.rows.map((r) => [r.accountGuid, r.depth, r.amount])).toEqual([
-      ['investments', 0, 400],
-      ['brokerage', 1, 400],
-      ['vti', 2, 400],
-      ['loose', 0, 25]
+      ['investments', 0, u(400)],
+      ['brokerage', 1, u(400)],
+      ['vti', 2, u(400)],
+      ['loose', 0, u(25)]
     ]);
   });
 
   it('appends retained earnings and unrealized gains to equity', () => {
     const sheet = buildBalanceSheet(data);
     expect(sheet.equity.rows.map((r) => [r.accountGuid, r.name, r.amount])).toEqual([
-      ['', 'Retained earnings', 450],
-      ['', 'Unrealized gains', 100]
+      ['', 'Retained earnings', u(450)],
+      ['', 'Unrealized gains', u(100)]
     ]);
-    expect(sheet.equity.total).toBe(750);
+    expect(sheet.equity.total).toBe(u(750));
     // Equity total includes both synthetic lines, so the sheet balances.
-    expect(sheet.totalLiabilitiesAndEquity).toBe(1050);
+    expect(sheet.totalLiabilitiesAndEquity).toBe(u(1050));
     expect(sheet.assets.total).toBe(sheet.totalLiabilitiesAndEquity);
   });
 
   it('hides a zero unrealized gains line', () => {
-    const sheet = buildBalanceSheet({ ...data, unrealizedGains: 0 });
+    const sheet = buildBalanceSheet({ ...data, unrealizedGains: u(0) });
     expect(sheet.equity.rows.some((r) => r.name === 'Unrealized gains')).toBe(false);
-    expect(sheet.equity.total).toBe(650);
+    expect(sheet.equity.total).toBe(u(650));
   });
 
   it('returns empty sections for an empty book', () => {
@@ -189,32 +190,32 @@ describe('buildBalanceSheet', () => {
     expect(sheet.assets.rows).toEqual([]);
     expect(sheet.liabilities.rows).toEqual([]);
     expect(sheet.equity.rows.map((r) => r.name)).toEqual(['Retained earnings']);
-    expect(sheet.totalLiabilitiesAndEquity).toBe(0);
+    expect(sheet.totalLiabilitiesAndEquity).toBe(u(0));
   });
 });
 
 describe('buildBalanceSheet with a comparison', () => {
   const tree = (balance: number) => [
-    node({ guid: 'checking', name: 'Checking', accountType: 'BANK', balance })
+    node({ guid: 'checking', name: 'Checking', accountType: 'BANK', balance: u(balance) })
   ];
 
   it('pairs each account with its amount on the comparison date', () => {
     const sheet = buildBalanceSheet(
-      result({ trees: tree(300), byType: { ASSET: { count: 1, totalBalance: 300 } } }),
-      result({ trees: tree(100), byType: { ASSET: { count: 1, totalBalance: 100 } } })
+      result({ trees: tree(300), byType: { ASSET: { count: 1, totalBalance: u(300) } } }),
+      result({ trees: tree(100), byType: { ASSET: { count: 1, totalBalance: u(100) } } })
     );
     expect(sheet.assets.rows).toEqual([
-      expect.objectContaining({ accountGuid: 'checking', amount: 300, compareAmount: 100 })
+      expect.objectContaining({ accountGuid: 'checking', amount: u(300), compareAmount: u(100) })
     ]);
-    expect(sheet.assets.compareTotal).toBe(100);
+    expect(sheet.assets.compareTotal).toBe(u(100));
   });
 
   it('keeps a synthetic line that only exists on the comparison date', () => {
-    const sheet = buildBalanceSheet(result({}), result({ unrealizedGains: 40 }));
+    const sheet = buildBalanceSheet(result({}), result({ unrealizedGains: u(40) }));
     expect(sheet.equity.rows.find((r) => r.name === 'Unrealized gains')).toEqual(
-      expect.objectContaining({ amount: 0, compareAmount: 40 })
+      expect.objectContaining({ amount: u(0), compareAmount: u(40) })
     );
-    expect(sheet.compareTotalLiabilitiesAndEquity).toBe(40);
+    expect(sheet.compareTotalLiabilitiesAndEquity).toBe(u(40));
   });
 
   it('leaves comparison fields empty without a second date', () => {

@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test';
+import { ZERO_UNITS } from '../src/lib/utils/units';
 import { accountsResult, type BackendMocks, expect, mockBackend, test } from './fixtures';
 
 const account = (guid: string, name: string, accountType: string) => ({
@@ -10,7 +11,7 @@ const account = (guid: string, name: string, accountType: string) => ({
   placeholder: false,
   commodity: 'EUR',
   commodityGuid: 'eur',
-  balance: 0,
+  balance: ZERO_UNITS,
   txCount: 0,
   children: []
 });
@@ -36,8 +37,8 @@ const OPEN_BOOK: BackendMocks = {
     byType: {},
     totalAccounts: 2,
     reportCurrency: 'EUR',
-    retainedEarnings: 0,
-    unrealizedGains: 0
+    retainedEarnings: ZERO_UNITS,
+    unrealizedGains: ZERO_UNITS
   })
 };
 

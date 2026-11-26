@@ -7,6 +7,7 @@ use crate::fx;
 use crate::payees::{self, PayeeRef};
 use crate::sql;
 use crate::tags::{self, TagRef};
+use crate::units::Units;
 use crate::utils;
 use crate::utils::opt_text;
 use crate::utils::{SortDir, TxSortKey};
@@ -17,8 +18,6 @@ use crate::utils::{SortDir, TxSortKey};
 /// shares.
 pub const VALUE_DENOM: i64 = 10_000;
 pub const QUANTITY_DENOM: i64 = 100_000_000;
-/// Balance tolerance for the zero-sum check on display/raw amounts.
-const BALANCE_EPS: f64 = 1e-6;
 
 /// One split as entered in the manual editor. `amount` is the raw native
 /// amount exactly as displayed in the detail view (debits/credits sum to
@@ -343,7 +342,7 @@ pub(crate) fn validate_tx_body_with(
             "Keep it to 50 splits or fewer".to_string(),
         ));
     }
-    let mut sum = 0.0;
+    let mut sum = Units::ZERO;
     for (i, s) in input.splits.iter().enumerate() {
         let n = i + 1;
         if s.account_guid.trim().is_empty() {
@@ -376,6 +375,10 @@ pub(crate) fn validate_tx_body_with(
         if !s.amount.is_finite() {
             return Err(AppError::Validation(format!("Split {n}: enter an amount")));
         }
+        // Balance on the stored integers, so what passes here sums to exactly
+        // zero on disk.
+        let (value_num, _) = to_value_rational(s.amount)?;
+        sum += Units::new(value_num);
         if let Some(q) = s.quantity {
             if !q.is_finite() {
                 return Err(AppError::Validation(format!(
@@ -390,11 +393,10 @@ pub(crate) fn validate_tx_body_with(
                 )));
             }
         }
-        sum += s.amount;
     }
-    if sum.abs() > BALANCE_EPS {
+    if !sum.is_zero() {
         return Err(AppError::Validation(format!(
-            "Splits are out of balance by {sum:.2}. Debits should equal credits"
+            "Splits are out of balance by {sum}. Debits should equal credits"
         )));
     }
     if let Some(ref d) = input.description {
@@ -979,8 +981,8 @@ pub(crate) fn insert_split_rows(
     splits: &[SplitInput],
 ) -> Result<Vec<String>, AppError> {
     // Convert every leg first and require the stored (scaled integer) values
-    // to sum to zero: rounding each leg independently could otherwise persist
-    // an unbalanced transaction that the double-based check accepted.
+    // to sum to zero. `validate_tx_body_with` already checks the same
+    // integers; this guards callers that skip it.
     let converted: Vec<(i64, i64, i64, i64)> = splits
         .iter()
         .map(|s| {
@@ -2709,5 +2711,111 @@ mod tests {
         .unwrap();
         assert_eq!(cleared.changed, 2);
         assert_eq!(payee_of(&conn, &a), None);
+    }
+
+    mod exact_balances {
+        use super::*;
+        use crate::accounts::fetch_accounts_inner;
+        use crate::units::{Units, VALUE_UNITS};
+        use proptest::prelude::*;
+
+        const ACCOUNTS: [(&str, &str); 6] = [
+            ("bank", "BANK"),
+            ("cash", "CASH"),
+            ("card", "CREDIT"),
+            ("food", "EXPENSE"),
+            ("salary", "INCOME"),
+            ("opening", "EQUITY"),
+        ];
+
+        fn book() -> Connection {
+            let conn = Connection::open_in_memory().unwrap();
+            init_db(&conn).unwrap();
+            conn.execute(
+                "INSERT INTO commodities (guid, mnemonic, namespace) VALUES ('c-eur', 'EUR', 'CURRENCY')",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO accounts (guid, name, account_type, parent_guid, placeholder, commodity_guid)
+                 VALUES ('root', 'Root', 'ROOT', NULL, 0, 'c-eur')",
+                [],
+            )
+            .unwrap();
+            for (guid, kind) in ACCOUNTS {
+                conn.execute(
+                    "INSERT INTO accounts (guid, name, account_type, parent_guid, placeholder, commodity_guid)
+                     VALUES (?1, ?1, ?2, 'root', 0, 'c-eur')",
+                    params![guid, kind],
+                )
+                .unwrap();
+            }
+            conn
+        }
+
+        /// Up to 10M per leg with any of the 4 allowed decimals, plus the
+        /// balancing leg, as the editor sends them (decimal `f64`s).
+        fn balanced_splits() -> impl Strategy<Value = Vec<SplitInput>> {
+            prop::collection::vec(
+                (0..ACCOUNTS.len(), -100_000_000_000i64..=100_000_000_000),
+                1..8,
+            )
+            .prop_flat_map(|legs| (Just(legs), 0..ACCOUNTS.len()))
+            .prop_map(|(legs, last_account)| {
+                let rest: i64 = legs.iter().map(|(_, units)| units).sum();
+                legs.into_iter()
+                    .chain(std::iter::once((last_account, -rest)))
+                    .map(|(account, units)| SplitInput {
+                        account_guid: ACCOUNTS[account].0.to_string(),
+                        amount: units as f64 / Units::SCALE as f64,
+                        quantity: None,
+                        memo: None,
+                    })
+                    .collect()
+            })
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(64))]
+
+            /// Any balanced set of manual splits is accepted and sums to
+            /// exactly zero, on disk and in the account balances.
+            #[test]
+            fn balanced_manual_splits_sum_to_exactly_zero(
+                txs in prop::collection::vec(balanced_splits(), 1..5)
+            ) {
+                let conn = book();
+                for splits in txs {
+                    let guid = create_transaction_inner(
+                        &conn,
+                        TxInput {
+                            post_date: "2024-03-01".to_string(),
+                            description: None,
+                            num: None,
+                            notes: None,
+                            splits,
+                            unreconcile: false,
+                            tags: None,
+                            payee: None,
+                        },
+                    )
+                    .expect("balanced splits are accepted");
+                    let total: Units = conn
+                        .query_row(
+                            &format!("SELECT SUM({VALUE_UNITS}) FROM splits s WHERE s.tx_guid = ?1"),
+                            params![guid],
+                            |r| r.get(0),
+                        )
+                        .unwrap();
+                    prop_assert_eq!(total, Units::ZERO);
+                }
+                let accounts = fetch_accounts_inner(&conn).unwrap();
+                prop_assert_eq!(accounts.balance_check, Units::ZERO);
+                let leaves: Units = accounts.trees.iter().map(|n| {
+                    if utils::is_credit_normal(&n.account_type) { -n.balance } else { n.balance }
+                }).sum();
+                prop_assert_eq!(leaves, Units::ZERO);
+            }
+        }
     }
 }

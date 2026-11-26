@@ -9,6 +9,7 @@ use crate::db::{run_blocking, AppState};
 use crate::fx;
 use crate::prices::{get_cached_prices_map, PriceHistory};
 use crate::tree;
+use crate::units::{Units, VALUE_UNITS};
 use crate::utils;
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
@@ -22,7 +23,9 @@ pub struct AccountNode {
     pub placeholder: bool,
     pub commodity: Option<String>,
     pub commodity_guid: Option<String>,
-    pub balance: f64,
+    /// In the report currency: exact for accounts held in it, rounded from the
+    /// FX or market value otherwise.
+    pub balance: Units,
     pub tx_count: i64,
     pub children: Vec<AccountNode>,
 }
@@ -31,7 +34,7 @@ pub struct AccountNode {
 #[serde(rename_all = "camelCase")]
 pub struct TypeSummary {
     pub count: i64,
-    pub total_balance: f64,
+    pub total_balance: Units,
 }
 
 #[derive(Debug, Serialize, specta::Type)]
@@ -42,13 +45,14 @@ pub struct AccountsResult {
     pub total_accounts: i64,
     pub report_currency: String,
     /// Cumulative income minus expenses as of the requested date.
-    pub retained_earnings: f64,
+    pub retained_earnings: Units,
     /// Market minus cost for priced investments (0 for unpriced holdings,
     /// which contribute zero and are listed in `missing_prices`).
-    pub unrealized_gains: f64,
-    /// `assets - (liabilities + equity + unrealized + retained)`; near zero
-    /// when balanced. Mirrors the old balance-sheet check.
-    pub balance_check: f64,
+    pub unrealized_gains: Units,
+    /// `assets - (liabilities + equity + unrealized + retained)`; exactly zero
+    /// for a balanced book in one currency. Missing FX rates, unpriced
+    /// securities and currency translation can leave it off.
+    pub balance_check: Units,
     pub missing_fx: Vec<String>,
     pub missing_prices: Vec<fx::MissingPrice>,
 }
@@ -63,7 +67,7 @@ struct AccountRow {
     placeholder: bool,
     commodity_mnemonic: Option<String>,
     commodity_guid: Option<String>,
-    balance: f64,
+    balance: Units,
     quantity: f64,
     tx_count: i64,
 }
@@ -92,7 +96,7 @@ fn load_account_rows(conn: &Connection, as_of: Option<&str>) -> Result<Vec<Accou
                ) b ON b.account_guid = a.guid
                WHERE a.account_type != 'ROOT'
                ORDER BY a.account_type, a.name",
-        utils::RAW_AMOUNT, utils::QUANTITY_AMOUNT, now = utils::VISIBLE_NOW_EXPR
+        VALUE_UNITS, utils::QUANTITY_AMOUNT, now = utils::VISIBLE_NOW_EXPR
     );
 
     let mut stmt = conn.prepare(&sql)?;
@@ -125,7 +129,7 @@ struct AccountValuation {
     by_type: HashMap<String, TypeSummary>,
     missing_fx_set: HashSet<String>,
     missing_prices_map: HashMap<String, Option<String>>,
-    unrealized_gains: f64,
+    unrealized_gains: Units,
 }
 
 /// Apply credit-normal signs, investment mark-to-market and FX conversion to
@@ -140,7 +144,7 @@ fn value_account_rows(
     let mut by_type: HashMap<String, TypeSummary> = HashMap::new();
     let mut missing_fx_set: HashSet<String> = HashSet::new();
     let mut missing_prices_map: HashMap<String, Option<String>> = HashMap::new();
-    let mut unrealized_gains = 0.0;
+    let mut unrealized_gains = Units::ZERO;
 
     for row in rows {
         let mut balance = if utils::is_credit_normal(&row.account_type) {
@@ -164,11 +168,11 @@ fn value_account_rows(
                     } else {
                         row.quantity
                     };
-                    let market = adjusted * price;
+                    let market = Units::from_f64(adjusted * price);
                     // Cost leg converts silently (never an FX warning): the
                     // holding is either priced (market dominates) or flagged
                     // via `missing_prices`.
-                    let cost = fx::convert(balance, mnemonic, report_currency, fx_map);
+                    let cost = fx::convert_units(balance, mnemonic, report_currency, fx_map);
                     unrealized_gains += market - cost;
                     balance = market;
                 } else {
@@ -183,13 +187,13 @@ fn value_account_rows(
                     // worth and portfolio market value): cost basis is excluded
                     // until a cached price exists, and the holding is flagged
                     // via `missing_prices`.
-                    balance = 0.0;
+                    balance = Units::ZERO;
                 }
             }
         } else if let Some(ref mnemonic) = row.commodity_mnemonic {
             // Cash-type (and income/expense/equity) accounts hold their own currency:
             // convert to the report currency for aggregation.
-            balance = fx::convert_tracked(
+            balance = fx::convert_units_tracked(
                 balance,
                 mnemonic,
                 report_currency,
@@ -216,7 +220,7 @@ fn value_account_rows(
         let category = utils::category_for_type(&row.account_type).to_string();
         let entry = by_type.entry(category).or_insert(TypeSummary {
             count: 0,
-            total_balance: 0.0,
+            total_balance: Units::ZERO,
         });
         entry.count += 1;
         entry.total_balance += balance;
@@ -309,7 +313,12 @@ fn assemble_accounts_result(
         ..
     } = valuation;
 
-    let total_of = |key: &str| by_type.get(key).map(|s| s.total_balance).unwrap_or(0.0);
+    let total_of = |key: &str| {
+        by_type
+            .get(key)
+            .map(|s| s.total_balance)
+            .unwrap_or(Units::ZERO)
+    };
     let retained_earnings = total_of("INCOME") - total_of("EXPENSE");
     let balance_check = total_of("ASSET")
         - (total_of("LIABILITY") + total_of("EQUITY") + unrealized_gains + retained_earnings);
@@ -424,7 +433,7 @@ pub struct ChildAccountInfo {
     pub commodity: Option<String>,
     pub commodity_guid: Option<String>,
     pub account_type: String,
-    pub balance: f64,
+    pub balance: Units,
     pub tx_count: i64,
 }
 
@@ -437,7 +446,7 @@ pub struct ParentAccountInfo {
     pub guid: String,
     pub name: String,
     pub description: Option<String>,
-    pub balance: f64,
+    pub balance: Units,
 }
 
 /// Find an account node together with its direct parent; the first tuple
@@ -722,14 +731,17 @@ mod tests {
         let result = fetch_accounts_inner(&conn).unwrap();
 
         // Cash 500 + AAPL market 1500 + unpriced XYZ 0.
-        assert_eq!(result.by_type.get("ASSET").unwrap().total_balance, 2000.0);
+        assert_eq!(
+            result.by_type.get("ASSET").unwrap().total_balance,
+            Units::from_f64(2000.0)
+        );
         // Market 1500 - cost 1000.
-        assert_eq!(result.unrealized_gains, 500.0);
+        assert_eq!(result.unrealized_gains, Units::from_f64(500.0));
         assert_eq!(result.missing_prices.len(), 1);
         assert_eq!(result.missing_prices[0].mnemonic, "XYZ");
 
         let (_, subtree, _) = fetch_children_and_subtree(&conn, "assets").unwrap();
-        assert_eq!(subtree.unwrap().balance, 2000.0);
+        assert_eq!(subtree.unwrap().balance, Units::from_f64(2000.0));
     }
 
     #[test]
@@ -753,12 +765,12 @@ mod tests {
         // 20 Feb: cash 500 + 10 AAPL at the 10 Feb price (120); XYZ unpriced.
         assert_eq!(sheet.as_of, "2024-02-20");
         let asset = |r: &AccountsResult| r.by_type.get("ASSET").unwrap().total_balance;
-        assert_eq!(asset(&sheet.current), 1700.0);
-        assert_eq!(sheet.current.unrealized_gains, 200.0);
+        assert_eq!(asset(&sheet.current), Units::from_f64(1700.0));
+        assert_eq!(sheet.current.unrealized_gains, Units::from_f64(200.0));
         // 31 Jan: only the cash deposit had happened.
         let compare = sheet.compare.unwrap();
         assert_eq!(sheet.compare_to.as_deref(), Some("2024-01-31"));
-        assert_eq!(asset(&compare), 500.0);
+        assert_eq!(asset(&compare), Units::from_f64(500.0));
         assert!(compare.missing_prices.is_empty());
         // No date: today, latest price (150).
         let today = fetch_balance_sheet_inner(
@@ -769,7 +781,7 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(asset(&today.current), 2000.0);
+        assert_eq!(asset(&today.current), Units::from_f64(2000.0));
         assert!(today.compare.is_none());
     }
 
@@ -800,7 +812,7 @@ mod tests {
             .iter()
             .find(|c| c.guid == "checking")
             .unwrap();
-        assert_eq!(checking.balance, 500.0);
+        assert_eq!(checking.balance, Units::from_f64(500.0));
     }
 
     #[test]

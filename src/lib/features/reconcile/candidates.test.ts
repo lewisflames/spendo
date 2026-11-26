@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { toUnits } from '$lib/utils/units';
 import type { ReconcileCandidate } from '$lib/tauri';
 import {
   filterAndSortCandidates,
@@ -19,7 +20,7 @@ function candidate(
     description: null,
     num: null,
     memo: null,
-    amount,
+    amount: toUnits(amount),
     reconcileState: 'n',
     counterAccounts: [],
     ...extra
@@ -69,13 +70,15 @@ describe('filterAndSortCandidates', () => {
     expect(guids(filterAndSortCandidates(rows, { ...base, query: 'WEEK' }))).toEqual(['b']);
     expect(guids(filterAndSortCandidates(rows, { ...base, query: '1001' }))).toEqual(['c']);
     expect(
-      guids(filterAndSortCandidates(rows, { ...base, query: '12.50', queryAmount: 12.5 }))
+      guids(filterAndSortCandidates(rows, { ...base, query: '12.50', queryAmount: toUnits(12.5) }))
     ).toEqual(['a']);
   });
 
-  it('applies the exact-amount filter within half a cent', () => {
-    expect(guids(filterAndSortCandidates(rows, { ...base, amountFilter: -40.004 }))).toEqual(['b']);
-    expect(filterAndSortCandidates(rows, { ...base, amountFilter: -40.01 })).toEqual([]);
+  it('applies the amount filter exactly', () => {
+    expect(guids(filterAndSortCandidates(rows, { ...base, amountFilter: toUnits(-40) }))).toEqual([
+      'b'
+    ]);
+    expect(filterAndSortCandidates(rows, { ...base, amountFilter: toUnits(-40.0001) })).toEqual([]);
   });
 
   it('does not reorder its input', () => {

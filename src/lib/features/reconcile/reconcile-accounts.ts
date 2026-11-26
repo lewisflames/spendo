@@ -1,6 +1,7 @@
 import type { AccountNode, ReconcileAccountSummary } from '$lib/tauri';
 import { keepDuplicateParentPaths } from '$lib/features/accounts/account-picker-utils';
 import { isReconcilable } from './math';
+import { ZERO_UNITS, type Units } from '$lib/utils/units';
 
 export interface ReconcileAccountStats {
   /** Splits still 'n' (never cleared) in the visibility window. */
@@ -8,14 +9,14 @@ export interface ReconcileAccountStats {
   /** Splits saved as 'c' (progress not yet finished). */
   clearedCount: number;
   /** Signed display total of the 'n' splits, in the account's commodity. */
-  unclearedTotal: number;
+  unclearedTotal: Units;
   lastReconciledDate: string | null;
 }
 
 const EMPTY_STATS: ReconcileAccountStats = {
   unreconciledCount: 0,
   clearedCount: 0,
-  unclearedTotal: 0,
+  unclearedTotal: ZERO_UNITS,
   lastReconciledDate: null
 };
 
@@ -32,7 +33,7 @@ export interface ReconcilableAccount {
   code: string | null;
   commodity: string | null;
   accountType: string;
-  balance: number;
+  balance: Units;
   txCount: number;
   stats: ReconcileAccountStats;
 }

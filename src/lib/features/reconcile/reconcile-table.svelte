@@ -157,7 +157,7 @@
           </div>
         </Table.Cell>
         <Table.Cell class="py-2.5 text-right">
-          <Amount value={row.amount} format={(n) => formatSignedCurrency(n, currency)} tone />
+          <Amount units={row.amount} format={(n) => formatSignedCurrency(n, currency)} tone />
         </Table.Cell>
       </NavRow>
     {/each}

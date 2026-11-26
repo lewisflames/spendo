@@ -1,6 +1,7 @@
 import type { AccountNode, AccountsResult } from '$lib/tauri';
 import { CATEGORY_LABEL_PLURAL, nodeCategory } from './account-types';
 import { subtreeTotal } from '$lib/features/reports/balance-sheet';
+import { sumUnits, type Units } from '$lib/utils/units';
 
 /** Sections of the accounts page, in chart-of-accounts order. */
 const TREE_CATEGORIES = ['ASSET', 'LIABILITY', 'EQUITY', 'INCOME', 'EXPENSE'] as const;
@@ -10,7 +11,7 @@ export interface AccountTreeSection {
   label: string;
   /** Top-level accounts; a placeholder category root is skipped (the section names it). */
   roots: AccountNode[];
-  total: number;
+  total: Units;
 }
 
 export interface AccountTreeRow {
@@ -19,7 +20,7 @@ export interface AccountTreeRow {
   hasChildren: boolean;
   expanded: boolean;
   /** Placeholder-aware subtree total, matching the balance sheet. */
-  total: number;
+  total: Units;
 }
 
 export function buildAccountSections(data: AccountsResult): AccountTreeSection[] {
@@ -29,7 +30,7 @@ export function buildAccountSections(data: AccountsResult): AccountTreeSection[]
       category,
       label: CATEGORY_LABEL_PLURAL[category] ?? category,
       roots: trees.flatMap((tree) => (tree.placeholder ? tree.children : [tree])),
-      total: trees.reduce((sum, tree) => sum + subtreeTotal(tree), 0)
+      total: sumUnits(trees.map(subtreeTotal))
     };
   }).filter((section) => section.roots.length > 0);
 }

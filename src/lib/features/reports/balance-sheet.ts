@@ -1,11 +1,9 @@
 import type { AccountNode, AccountsResult } from '$lib/tauri';
 import { CATEGORY_LABEL_PLURAL, nodeCategory } from '$lib/features/accounts/account-types';
+import { addUnits, sumUnits, ZERO_UNITS, type Units } from '$lib/utils/units';
 
 /** Categories a balance sheet reports, in statement order. */
 export type BalanceSheetCategory = 'ASSET' | 'LIABILITY' | 'EQUITY';
-
-/** Amounts below this read as zero, matching the balanced check. */
-const EPSILON = 0.005;
 
 export interface BalanceSheetRow {
   /** Empty for synthetic lines (retained earnings, unrealized gains). */
@@ -17,17 +15,17 @@ export interface BalanceSheetRow {
   /** Depth-first indent level within its section. */
   depth: number;
   /** Placeholder-aware subtree total in the report currency. */
-  amount: number;
+  amount: Units;
   /** The same line on the comparison date; `null` without a comparison. */
-  compareAmount: number | null;
+  compareAmount: Units | null;
 }
 
 export interface BalanceSheetSection {
   category: BalanceSheetCategory;
   label: string;
   rows: BalanceSheetRow[];
-  total: number;
-  compareTotal: number | null;
+  total: Units;
+  compareTotal: Units | null;
 }
 
 export interface BalanceSheet {
@@ -35,8 +33,8 @@ export interface BalanceSheet {
   liabilities: BalanceSheetSection;
   equity: BalanceSheetSection;
   /** Total liabilities plus total equity (includes retained + unrealized). */
-  totalLiabilitiesAndEquity: number;
-  compareTotalLiabilitiesAndEquity: number | null;
+  totalLiabilitiesAndEquity: Units;
+  compareTotalLiabilitiesAndEquity: Units | null;
 }
 
 /**
@@ -45,9 +43,9 @@ export interface BalanceSheet {
  * subtree here; summing placeholders again would double count. Mirrors the
  * rolled-up P&L report rows.
  */
-export function subtreeTotal(node: AccountNode): number {
+export function subtreeTotal(node: AccountNode): Units {
   if (node.placeholder) return node.balance;
-  return node.balance + node.children.reduce((sum, child) => sum + subtreeTotal(child), 0);
+  return addUnits(node.balance, sumUnits(node.children.map(subtreeTotal)));
 }
 
 /** Category roots of one balance-sheet category, in backend order. */
@@ -82,13 +80,13 @@ function accountSection(
   data: AccountsResult,
   category: BalanceSheetCategory,
   extraRows: BalanceSheetRow[] = [],
-  extraTotal = 0
+  extraTotal = ZERO_UNITS
 ): BalanceSheetSection {
   return {
     category,
     label: CATEGORY_LABEL_PLURAL[category],
     rows: [...flattenRows(categoryTrees(data.trees, category)), ...extraRows],
-    total: (data.byType[category]?.totalBalance ?? 0) + extraTotal,
+    total: addUnits(data.byType[category]?.totalBalance ?? ZERO_UNITS, extraTotal),
     compareTotal: null
   };
 }
@@ -99,7 +97,7 @@ function accountSection(
  * balance identity (`balanceCheck`) only holds when both are part of equity.
  */
 function buildStatement(data: AccountsResult): BalanceSheet {
-  const synthetic = (name: string, amount: number): BalanceSheetRow => ({
+  const synthetic = (name: string, amount: Units): BalanceSheetRow => ({
     accountGuid: '',
     name,
     description: null,
@@ -110,11 +108,10 @@ function buildStatement(data: AccountsResult): BalanceSheet {
   });
 
   const equityExtras: BalanceSheetRow[] = [synthetic('Retained earnings', data.retainedEarnings)];
-  let equityExtraTotal = data.retainedEarnings;
-  if (Math.abs(data.unrealizedGains) >= EPSILON) {
+  if (data.unrealizedGains !== 0) {
     equityExtras.push(synthetic('Unrealized gains', data.unrealizedGains));
   }
-  equityExtraTotal += data.unrealizedGains;
+  const equityExtraTotal = addUnits(data.retainedEarnings, data.unrealizedGains);
 
   const assets = accountSection(data, 'ASSET');
   const liabilities = accountSection(data, 'LIABILITY');
@@ -124,7 +121,7 @@ function buildStatement(data: AccountsResult): BalanceSheet {
     assets,
     liabilities,
     equity,
-    totalLiabilitiesAndEquity: liabilities.total + equity.total,
+    totalLiabilitiesAndEquity: addUnits(liabilities.total, equity.total),
     compareTotalLiabilitiesAndEquity: null
   };
 }
@@ -145,11 +142,14 @@ function withCompare(
   const currentKeys = new Set(current.rows.map(rowKey));
   const onlyCompared = compare.rows
     .filter((row) => !currentKeys.has(rowKey(row)))
-    .map((row) => ({ ...row, amount: 0, compareAmount: row.amount }));
+    .map((row) => ({ ...row, amount: ZERO_UNITS, compareAmount: row.amount }));
   return {
     ...current,
     rows: [
-      ...current.rows.map((row) => ({ ...row, compareAmount: compareByKey.get(rowKey(row)) ?? 0 })),
+      ...current.rows.map((row) => ({
+        ...row,
+        compareAmount: compareByKey.get(rowKey(row)) ?? ZERO_UNITS
+      })),
       ...onlyCompared
     ],
     compareTotal: compare.total

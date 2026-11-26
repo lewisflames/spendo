@@ -8,6 +8,7 @@ import type {
   TaxRoleAssignment,
   TxSortKey
 } from './bindings';
+import type { Units } from './utils/units';
 
 /*
  * Typed access to the Rust commands. Payload and input types are generated
@@ -177,7 +178,7 @@ export const markReconcileSplits = (
 export const finishReconciliation = (
   accountGuid: string,
   statementDate: string,
-  endingBalance: number,
+  endingBalance: Units,
   updates: SplitStateUpdate[]
 ) => api.finishReconciliation({ accountGuid, statementDate, endingBalance, updates });
 

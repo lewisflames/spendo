@@ -3,22 +3,27 @@
   import KpiCard from '$lib/components/shared/kpi-card.svelte';
   import { formatSessionCurrency as fmt } from '$lib/utils/format.svelte';
   import type { AccountSummary } from '$lib/tauri';
+  import { fromUnits, type Units } from '$lib/utils/units';
 
-  let { summary, currentBalance }: { summary: AccountSummary; currentBalance: number } = $props();
+  let { summary, currentBalance }: { summary: AccountSummary; currentBalance: Units } = $props();
 </script>
 
 <div class="grid grid-cols-1 gap-6 @xl:grid-cols-2 @3xl:grid-cols-3">
-  <KpiCard title="Total balance" value={fmt(currentBalance)}>
+  <KpiCard title="Total balance" value={fmt(fromUnits(currentBalance))}>
     {#snippet icon()}
       <Wallet aria-hidden="true" class="size-4 text-muted-foreground" />
     {/snippet}
   </KpiCard>
-  <KpiCard title="Income" value={fmt(summary.totalIncome)} valueClass="text-success">
+  <KpiCard title="Income" value={fmt(fromUnits(summary.totalIncome))} valueClass="text-success">
     {#snippet icon()}
       <TrendingUp aria-hidden="true" class="size-4 text-success" />
     {/snippet}
   </KpiCard>
-  <KpiCard title="Expenses" value={fmt(summary.totalExpenses)} valueClass="text-destructive">
+  <KpiCard
+    title="Expenses"
+    value={fmt(fromUnits(summary.totalExpenses))}
+    valueClass="text-destructive"
+  >
     {#snippet icon()}
       <TrendingDown aria-hidden="true" class="size-4 text-destructive" />
     {/snippet}

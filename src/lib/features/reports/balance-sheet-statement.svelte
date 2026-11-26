@@ -8,6 +8,7 @@
   import ReportAccountCell from '$lib/features/reports/report-account-cell.svelte';
   import { openAccount } from '$lib/utils/navigation';
   import { formatDate, formatSignedSessionCurrency } from '$lib/utils/format.svelte';
+  import { subUnits, ZERO_UNITS, type Units } from '$lib/utils/units';
   import type { BalanceSheet, BalanceSheetRow } from './balance-sheet';
 
   let {
@@ -46,21 +47,21 @@
 <!-- Comparison and change cells; `positiveGood` is false for liabilities,
      where growth is the bad direction. -->
 {#snippet compareCells(
-  amount: number,
-  compareAmount: number | null,
+  amount: Units,
+  compareAmount: Units | null,
   positiveGood: boolean,
   weight: 'medium' | 'semibold' = 'medium'
 )}
   {#if comparing}
-    {@const change = amount - (compareAmount ?? 0)}
+    {@const change = subUnits(amount, compareAmount ?? ZERO_UNITS)}
     <Table.Cell class="py-2.5 text-right text-muted-foreground">
-      <Amount value={compareAmount ?? 0} weight="normal" />
+      <Amount units={compareAmount ?? ZERO_UNITS} weight="normal" />
     </Table.Cell>
     <Table.Cell class="py-2.5 text-right">
-      {#if Math.abs(change) < 0.005}
+      {#if change === 0}
         <EmptyValue />
       {:else}
-        <Amount value={change} format={formatSignedSessionCurrency} tone {positiveGood} {weight} />
+        <Amount units={change} format={formatSignedSessionCurrency} tone {positiveGood} {weight} />
       {/if}
     </Table.Cell>
   {/if}
@@ -76,7 +77,7 @@
       code={row.code}
     />
     <Table.Cell class="py-2.5 text-right">
-      <Amount value={row.amount} />
+      <Amount units={row.amount} />
     </Table.Cell>
     {@render compareCells(row.amount, row.compareAmount, positiveGood)}
   </NavRow>
@@ -92,7 +93,7 @@
       code={row.code}
     />
     <Table.Cell class="py-2.5 text-right">
-      <Amount value={row.amount} />
+      <Amount units={row.amount} />
     </Table.Cell>
     {@render compareCells(row.amount, row.compareAmount, positiveGood)}
   </Table.Row>
@@ -121,26 +122,26 @@
 
 {#snippet subtotalRow(
   label: string,
-  amount: number,
-  compareAmount: number | null,
+  amount: Units,
+  compareAmount: Units | null,
   positiveGood: boolean
 )}
   <Table.Row class="border-t hover:bg-transparent">
     <Table.Cell class="font-medium">{label}</Table.Cell>
-    <Table.Cell class="text-right"><Amount value={amount} /></Table.Cell>
+    <Table.Cell class="text-right"><Amount units={amount} /></Table.Cell>
     {@render compareCells(amount, compareAmount, positiveGood)}
   </Table.Row>
 {/snippet}
 
 {#snippet totalRow(
   label: string,
-  amount: number,
-  compareAmount: number | null,
+  amount: Units,
+  compareAmount: Units | null,
   positiveGood: boolean
 )}
   <Table.Row class="border-t hover:bg-transparent">
     <Table.Cell class="font-semibold">{label}</Table.Cell>
-    <Table.Cell class="text-right"><Amount value={amount} weight="semibold" /></Table.Cell>
+    <Table.Cell class="text-right"><Amount units={amount} weight="semibold" /></Table.Cell>
     {@render compareCells(amount, compareAmount, positiveGood, 'semibold')}
   </Table.Row>
 {/snippet}

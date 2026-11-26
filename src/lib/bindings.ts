@@ -193,7 +193,7 @@ export type AccountDetailInfo = {
 	commodity: string | null,
 	commodityGuid: string | null,
 	parentGuid: string | null,
-	balance: number,
+	balance: number & { readonly __brand: "Units" },
 	/**
 	 *  Whole subtree size minus self (`subaccount_guids` includes the account
 	 *  itself), i.e. the number of descendants — not direct children.
@@ -246,15 +246,19 @@ export type AccountNode = {
 	placeholder: boolean,
 	commodity: string | null,
 	commodityGuid: string | null,
-	balance: number,
+	/**
+	 *  In the report currency: exact for accounts held in it, rounded from the
+	 *  FX or market value otherwise.
+	 */
+	balance: number & { readonly __brand: "Units" },
 	txCount: number,
 	children: AccountNode[],
 };
 
 export type AccountSummary = {
 	totalTransactions: number,
-	totalIncome: number,
-	totalExpenses: number,
+	totalIncome: number & { readonly __brand: "Units" },
+	totalExpenses: number & { readonly __brand: "Units" },
 };
 
 export type AccountsExportInput = {
@@ -268,17 +272,18 @@ export type AccountsResult = {
 	totalAccounts: number,
 	reportCurrency: string,
 	/**  Cumulative income minus expenses as of the requested date. */
-	retainedEarnings: number,
+	retainedEarnings: number & { readonly __brand: "Units" },
 	/**
 	 *  Market minus cost for priced investments (0 for unpriced holdings,
 	 *  which contribute zero and are listed in `missing_prices`).
 	 */
-	unrealizedGains: number,
+	unrealizedGains: number & { readonly __brand: "Units" },
 	/**
-	 *  `assets - (liabilities + equity + unrealized + retained)`; near zero
-	 *  when balanced. Mirrors the old balance-sheet check.
+	 *  `assets - (liabilities + equity + unrealized + retained)`; exactly zero
+	 *  for a balanced book in one currency. Missing FX rates, unpriced
+	 *  securities and currency translation can leave it off.
 	 */
-	balanceCheck: number,
+	balanceCheck: number & { readonly __brand: "Units" },
 	missingFx: string[],
 	missingPrices: MissingPrice[],
 };
@@ -531,7 +536,7 @@ export type ChildAccountInfo = {
 	commodity: string | null,
 	commodityGuid: string | null,
 	accountType: string,
-	balance: number,
+	balance: number & { readonly __brand: "Units" },
 	txCount: number,
 };
 
@@ -715,7 +720,7 @@ export type DetailSplit = {
 	accountName: string,
 	accountDescription: string | null,
 	accountType: string,
-	amount: number,
+	amount: number & { readonly __brand: "Units" },
 	memo: string | null,
 };
 
@@ -734,10 +739,13 @@ export type DetailTransaction = {
 	counterAccounts: string[],
 	/**
 	 *  Signed effect on the viewed subtree, converted to the report currency
-	 *  at the transaction's date (the delta of `running_balance`).
+	 *  at the transaction's date (the delta of `running_balance`). Exact for
+	 *  effects in the report currency; converted ones are rounded per
+	 *  currency before they're added, so the running balance is always the
+	 *  exact sum of the amounts above it.
 	 */
-	amount: number,
-	runningBalance: number,
+	amount: number & { readonly __brand: "Units" },
+	runningBalance: number & { readonly __brand: "Units" },
 	/**
 	 *  Reconcile state ('n'/'c'/'y') of the transaction's splits
 	 *  within the viewed subtree ('y' wins over 'c').
@@ -770,7 +778,8 @@ export type Filters = {
 export type FinishReconcileInput = {
 	accountGuid: string,
 	statementDate: string,
-	endingBalance: number,
+	/**  The statement's closing balance; must equal reconciled + cleared exactly. */
+	endingBalance: number & { readonly __brand: "Units" },
 	/**
 	 *  Unsaved marks from the page, applied in the same transaction as the
 	 *  balance check and promotion so Finish is atomic.
@@ -780,8 +789,8 @@ export type FinishReconcileInput = {
 
 export type FinishReconcileResult = {
 	reconciledCount: number,
-	startingBalance: number,
-	endingBalance: number,
+	startingBalance: number & { readonly __brand: "Units" },
+	endingBalance: number & { readonly __brand: "Units" },
 };
 
 export type GlobalSearchResult = {
@@ -991,7 +1000,7 @@ export type ParentAccountInfo = {
 	guid: string,
 	name: string,
 	description: string | null,
-	balance: number,
+	balance: number & { readonly __brand: "Units" },
 };
 
 /**  A payee as shown on a transaction. */
@@ -1184,7 +1193,7 @@ export type ReconcileAccountSummary = {
 	/**  Splits saved as `'c'` (progress not yet finished). */
 	clearedCount: number,
 	/**  Signed display total of the `'n'` splits, in the account's commodity. */
-	unclearedTotal: number,
+	unclearedTotal: number & { readonly __brand: "Units" },
 	lastReconciledDate: string | null,
 };
 
@@ -1199,7 +1208,7 @@ export type ReconcileCandidate = {
 	 *  Signed display amount (credit-normal accounts negated) in the
 	 *  reconciled account's commodity.
 	 */
-	amount: number,
+	amount: number & { readonly __brand: "Units" },
 	/**  Normalized `'n'`/`'c'` (source `NULL` reads as `'n'`). */
 	reconcileState: string,
 	/**
@@ -1218,7 +1227,7 @@ export type ReconcileInfo = {
 	commodity: string | null,
 	statementDate: string,
 	/**  Sum of `'y'` splits at or before the statement date. */
-	startingBalance: number,
+	startingBalance: number & { readonly __brand: "Units" },
 	/**
 	 *  Unreconciled (`'n'`/`'c'`) splits at or before the statement date,
 	 *  oldest first.
@@ -1671,5 +1680,5 @@ export type TxSortKey = "date" | "description" | "amount";
 
 export type TypeSummary = {
 	count: number,
-	totalBalance: number,
+	totalBalance: number & { readonly __brand: "Units" },
 };

@@ -1,7 +1,5 @@
 /** Pure statement math for the reconcile page (tested, no Svelte state). */
-
-/** Half-cent tolerance matching the backend `BALANCE_EPS`. */
-const RECONCILE_EPS = 0.005;
+import { addUnits, decimalToUnits, subUnits, sumUnits, type Units } from '$lib/utils/units';
 
 /** Cached locale group/decimal separators for the amount parser. */
 const separatorCache = new Map<string, { group: string; decimal: string }>();
@@ -33,23 +31,23 @@ function validGrouping(text: string, group: string): boolean {
 }
 
 /** Sum of checked candidate amounts (signed display amounts). */
-export function clearedTotal(amounts: number[]): number {
-  return amounts.reduce((sum, n) => sum + n, 0);
+export function clearedTotal(amounts: Units[]): Units {
+  return sumUnits(amounts);
 }
 
 /** Expected statement total from the reconciled opening balance + cleared. */
-export function targetBalance(startingBalance: number, cleared: number): number {
-  return startingBalance + cleared;
+export function targetBalance(startingBalance: Units, cleared: Units): Units {
+  return addUnits(startingBalance, cleared);
 }
 
 /** `ending - target`; zero means the statement balances. */
-export function statementDifference(endingBalance: number, target: number): number {
-  return endingBalance - target;
+export function statementDifference(endingBalance: Units, target: Units): Units {
+  return subUnits(endingBalance, target);
 }
 
-/** Whether the statement balances within half-cent tolerance. */
-export function isBalanced(difference: number, eps = RECONCILE_EPS): boolean {
-  return Math.abs(difference) <= eps;
+/** Whether the statement balances: amounts are exact, so only zero does. */
+export function isBalanced(difference: Units): boolean {
+  return difference === 0;
 }
 
 /**
@@ -58,10 +56,10 @@ export function isBalanced(difference: number, eps = RECONCILE_EPS): boolean {
  * both sign forms. Grouping is validated (three-digit groups), and a lone
  * separator with exactly three digits is resolved with the locale's
  * group/decimal separators — ambiguous input is rejected rather than guessed,
- * so Finish can’t silently round a mistyped value. Returns `null` when
- * empty/invalid.
+ * so Finish can’t silently round a mistyped value. Returns exact units, or
+ * `null` when empty/invalid (including more than four decimals).
  */
-export function parseStatementAmount(raw: string, locale = 'en'): number | null {
+export function parseStatementAmount(raw: string, locale = 'en'): Units | null {
   // Strip spacing and apostrophes used as grouping symbols (`1 234,56`,
   // `1'234.56`).
   const text = raw.trim().replace(/[\s\u00a0\u202f']/g, '');
@@ -107,10 +105,7 @@ export function parseStatementAmount(raw: string, locale = 'en'): number | null 
     value = text;
   }
 
-  value = value.replace(',', '.');
-  if (!/^[+-]?\d+(\.\d+)?$/.test(value)) return null;
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
+  return decimalToUnits(value.replace(',', '.'));
 }
 
 /** Tri-state of the table header checkbox for the visible rows. */
@@ -145,11 +140,11 @@ export function rangeSplitGuids(
  * for likely duplicate imports (identical real purchases happen too).
  */
 export function duplicateCandidateGuids(
-  rows: readonly { splitGuid: string; postDate: string; amount: number }[]
+  rows: readonly { splitGuid: string; postDate: string; amount: Units }[]
 ): Set<string> {
   const byKey = new Map<string, string[]>();
   for (const row of rows) {
-    const key = `${row.postDate}|${Math.round(row.amount * 100)}`;
+    const key = `${row.postDate}|${row.amount}`;
     const guids = byKey.get(key);
     if (guids) guids.push(row.splitGuid);
     else byKey.set(key, [row.splitGuid]);

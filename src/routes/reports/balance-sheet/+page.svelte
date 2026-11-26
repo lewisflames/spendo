@@ -24,6 +24,7 @@
   import { dateParam, useUrlParams } from '$lib/hooks/use-url-params.svelte';
   import { isIsoDate, today } from '$lib/utils/date-utils.svelte';
   import { formatDate, formatSessionCurrency } from '$lib/utils/format.svelte';
+  import { fromUnits } from '$lib/utils/units';
 
   const meta = PAGE_META.balanceSheet;
   const NO_COMPARISON = 'none';
@@ -77,8 +78,6 @@
     const all = [...(current?.missingPrices ?? []), ...(res.data?.compare?.missingPrices ?? [])];
     return all.filter((p, i) => all.findIndex((q) => q.mnemonic === p.mnemonic) === i);
   });
-
-  const isBalanced = (check: number) => Math.abs(check) < 0.005;
 </script>
 
 <svelte:head>
@@ -129,13 +128,16 @@
             ...(data.compare && data.compareTo
               ? [{ date: data.compareTo, check: data.compare.balanceCheck }]
               : [])
-          ].filter((d) => !isBalanced(d.check))}
+          ].filter((d) => d.check !== 0)}
           <p class="text-xs text-muted-foreground">
             {#if offDates.length === 0}
               Balanced. Everything adds up.
             {:else}
               {offDates
-                .map((d) => `Off by ${formatSessionCurrency(d.check)} on ${formatDate(d.date)}`)
+                .map(
+                  (d) =>
+                    `Off by ${formatSessionCurrency(fromUnits(d.check))} on ${formatDate(d.date)}`
+                )
                 .join('; ')}. Usually a missing FX rate, an unpriced security, or currency
               translation in a book without trading accounts.
             {/if}

@@ -1,8 +1,6 @@
 /** Pure candidate-list helpers for the reconcile page (tested, no Svelte state). */
 import type { ReconcileCandidate } from '$lib/tauri';
-
-/** Half-cent tolerance for amount matches, as in the statement math. */
-const AMOUNT_EPS = 0.005;
+import type { Units } from '$lib/utils/units';
 
 export type CandidateSortKey = 'date' | 'description' | 'amount';
 
@@ -10,9 +8,9 @@ export interface CandidateFilter {
   /** Free-text query over description, number and memo (case-insensitive). */
   query: string;
   /** `query` parsed as an amount, so typing a figure also matches amounts. */
-  queryAmount: number | null;
+  queryAmount: Units | null;
   /** Exact-amount filter (e.g. "find the difference"). */
-  amountFilter: number | null;
+  amountFilter: Units | null;
   sortBy: CandidateSortKey;
   sortDir: 'asc' | 'desc';
 }
@@ -24,10 +22,10 @@ export function filterAndSortCandidates(
 ): ReconcileCandidate[] {
   const q = query.trim().toLowerCase();
   const sorted = candidates.filter((c) => {
-    if (amountFilter !== null && Math.abs(c.amount - amountFilter) > AMOUNT_EPS) return false;
+    if (amountFilter !== null && c.amount !== amountFilter) return false;
     if (!q) return true;
     const textMatch = [c.description, c.num, c.memo].some((f) => f?.toLowerCase().includes(q));
-    const amountMatch = queryAmount !== null && Math.abs(c.amount - queryAmount) <= AMOUNT_EPS;
+    const amountMatch = queryAmount !== null && c.amount === queryAmount;
     return textMatch || amountMatch;
   });
   const dir = sortDir === 'asc' ? 1 : -1;

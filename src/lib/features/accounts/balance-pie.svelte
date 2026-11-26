@@ -2,6 +2,7 @@
   import { TYPE_COLOR } from '$lib/features/accounts/account-types';
   import { clampZero, formatAllocPct } from '$lib/utils/format.svelte';
   import type { AccountNode, ParentAccountInfo } from '$lib/tauri';
+  import { fromUnits, ZERO_UNITS } from '$lib/utils/units';
   import AllocationPie from './allocation-pie.svelte';
 
   let {
@@ -16,14 +17,14 @@
     loading: boolean;
   } = $props();
 
-  let accountBalance = $derived(Math.abs(clampZero(node?.balance ?? 0)));
+  let accountBalance = $derived(Math.abs(clampZero(fromUnits(node?.balance ?? ZERO_UNITS))));
 
   let pieData = $derived.by(() => {
     if (!node) return [];
     return node.children
-      .filter((c) => Math.abs(clampZero(c.balance)) >= 0.005)
+      .filter((c) => Math.abs(clampZero(fromUnits(c.balance))) >= 0.005)
       .map((c) => {
-        const abs = Math.abs(clampZero(c.balance));
+        const abs = Math.abs(clampZero(fromUnits(c.balance)));
         return {
           key: c.guid,
           label: c.name,
@@ -35,8 +36,8 @@
   });
 
   let parentSharePct = $derived.by((): number | null => {
-    if (!parent || Math.abs(clampZero(parent.balance)) < 0.005) return null;
-    return (accountBalance / Math.abs(clampZero(parent.balance))) * 100;
+    if (!parent || Math.abs(clampZero(fromUnits(parent.balance))) < 0.005) return null;
+    return (accountBalance / Math.abs(clampZero(fromUnits(parent.balance)))) * 100;
   });
 
   let parentLabel = $derived(parent?.name ?? '');

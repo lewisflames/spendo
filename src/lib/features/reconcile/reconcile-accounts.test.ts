@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { toUnits, ZERO_UNITS } from '$lib/utils/units';
 import type { AccountNode } from '$lib/tauri';
 import { flattenReconcilableAccounts } from './reconcile-accounts';
 
@@ -10,7 +11,7 @@ function node(partial: Partial<AccountNode> & { guid: string; name: string }): A
     placeholder: false,
     commodity: 'EUR',
     commodityGuid: null,
-    balance: 0,
+    balance: ZERO_UNITS,
     txCount: 0,
     children: [],
     ...partial
@@ -26,18 +27,18 @@ describe('flattenReconcilableAccounts', () => {
         accountType: 'ASSET',
         placeholder: true,
         children: [
-          node({ guid: 'checking', name: 'Checking', balance: 100, txCount: 3 }),
-          node({ guid: 'broker', name: 'Broker', accountType: 'STOCK', balance: 500 })
+          node({ guid: 'checking', name: 'Checking', balance: toUnits(100), txCount: 3 }),
+          node({ guid: 'broker', name: 'Broker', accountType: 'STOCK', balance: toUnits(500) })
         ]
       }),
-      node({ guid: 'card', name: 'Card', accountType: 'CREDIT', balance: -20, txCount: 1 })
+      node({ guid: 'card', name: 'Card', accountType: 'CREDIT', balance: toUnits(-20), txCount: 1 })
     ];
     const rows = flattenReconcilableAccounts(trees, [
       {
         accountGuid: 'checking',
         unreconciledCount: 2,
         clearedCount: 1,
-        unclearedTotal: -30,
+        unclearedTotal: toUnits(-30),
         lastReconciledDate: '2024-01-10'
       }
     ]);
@@ -49,7 +50,7 @@ describe('flattenReconcilableAccounts', () => {
     expect(rows.find((r) => r.guid === 'checking')?.stats).toEqual({
       unreconciledCount: 2,
       clearedCount: 1,
-      unclearedTotal: -30,
+      unclearedTotal: toUnits(-30),
       lastReconciledDate: '2024-01-10'
     });
     // Accounts without a summary row read as pristine.

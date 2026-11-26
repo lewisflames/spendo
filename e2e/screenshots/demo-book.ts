@@ -1,4 +1,5 @@
-import type { TransactionRow } from '../../src/lib/tauri';
+import type { AccountNode, TransactionRow } from '../../src/lib/tauri';
+import { toUnits, ZERO_UNITS } from '../../src/lib/utils/units';
 import type { BackendMocks } from '../fixtures';
 
 /**
@@ -453,6 +454,13 @@ function accountTrees(): Node[] {
   return [assets, liabilities, incomeTree, expenseTree, equity];
 }
 
+/** The tree as `fetch_accounts` sends it: balances in exact units. */
+const toAccountNode = (n: Node): AccountNode => ({
+  ...n,
+  balance: toUnits(n.balance),
+  children: n.children.map(toAccountNode)
+});
+
 function accountsResult() {
   const trees = accountTrees();
   const count = (n: Node): number => 1 + n.children.reduce((a, c) => a + count(c), 0);
@@ -462,18 +470,18 @@ function accountsResult() {
   const byType = Object.fromEntries(
     [assets, liabilities, incomeTree, expenseTree, equity].map((t) => [
       t.accountType === 'CREDIT' ? 'LIABILITY' : t.accountType,
-      { count: count(t), totalBalance: t.balance }
+      { count: count(t), totalBalance: toUnits(t.balance) }
     ])
   );
   return {
-    trees,
+    trees: trees.map(toAccountNode),
     byType,
     totalAccounts: trees.reduce((a, t) => a + count(t), 0),
     reportCurrency: CURRENCY,
-    retainedEarnings: retained,
-    unrealizedGains: unrealized,
+    retainedEarnings: toUnits(retained),
+    unrealizedGains: toUnits(unrealized),
     // Opening balances absorb the difference in a real book; the demo stays quiet.
-    balanceCheck: 0,
+    balanceCheck: ZERO_UNITS,
     missingFx: [],
     missingPrices: []
   };

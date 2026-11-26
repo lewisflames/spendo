@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { ZERO_UNITS } from '$lib/utils/units';
 import type { AccountNode, TaxRole, TaxSummary } from '$lib/tauri';
 import {
   hasTaxData,
@@ -24,7 +25,7 @@ function node(
     placeholder: false,
     commodity: 'EUR',
     commodityGuid: 'c-eur',
-    balance: 0,
+    balance: ZERO_UNITS,
     txCount: 0,
     children
   };
