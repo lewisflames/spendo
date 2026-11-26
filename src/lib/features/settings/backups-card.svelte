@@ -30,7 +30,8 @@
     beforeImport: 'Before import',
     beforeClear: 'Before clearing data',
     beforeRestore: 'Before restore',
-    beforeBulkEdit: 'Before bulk edit'
+    beforeBulkEdit: 'Before bulk edit',
+    beforeMigrate: 'Before upgrade'
   };
 
   const list = useAsyncData({

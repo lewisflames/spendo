@@ -28,6 +28,7 @@
   import { reloadBookIfChanged } from '$lib/features/book/book-actions';
   import { onBookChanged } from '$lib/tauri';
   import { TitleBar } from '$lib/components/layout/title-bar';
+  import ReadOnlyBanner from '$lib/components/layout/read-only-banner.svelte';
   import { cn } from '$lib/utils';
   import { Sonner, toast } from '$lib/components/ui/sonner';
   import KeyboardShortcutsDialog from '$lib/components/layout/keyboard-shortcuts-dialog.svelte';
@@ -208,6 +209,9 @@
           <!-- `@container`: page grids respond to the content width, not the
                window, so the sidebar never leaves them cramped. -->
           <div class="@container mx-auto flex w-full max-w-7xl flex-1 flex-col">
+            {#if dbSession.value?.summary.readOnly}
+              <ReadOnlyBanner />
+            {/if}
             {@render children()}
           </div>
         </main>

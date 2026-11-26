@@ -19,7 +19,8 @@ const invoke = <K extends Command>(
   });
 
 /** Variant of the Rust `AppError` a command failed with. */
-export type BackendErrorKind = 'notFound' | 'validation' | 'io' | 'db' | 'internal' | 'bookChanged';
+export type BackendErrorKind =
+  'notFound' | 'validation' | 'io' | 'db' | 'internal' | 'bookChanged' | 'readOnly';
 
 /** Every command rejects with this shape (serialized `AppError`). */
 export interface BackendError {
@@ -39,6 +40,8 @@ export interface DataSummary {
   earliestDate: string | null;
   latestDate: string | null;
   netWorth: number;
+  /** Opened read-only (saved by a newer Spendo): every write is refused. */
+  readOnly: boolean;
 }
 
 /** Month-end net worth in report currency; the last point is dated today. */
@@ -335,7 +338,13 @@ export const closeBook = (): Promise<CloseBookResult> => invoke('close_book');
 // ── Backups (snapshots of the active book in the app-data folder) ──
 
 export type BackupReason =
-  'daily' | 'manual' | 'beforeImport' | 'beforeClear' | 'beforeRestore' | 'beforeBulkEdit';
+  | 'daily'
+  | 'manual'
+  | 'beforeImport'
+  | 'beforeClear'
+  | 'beforeRestore'
+  | 'beforeBulkEdit'
+  | 'beforeMigrate';
 
 export interface BackupEntry {
   fileName: string;
