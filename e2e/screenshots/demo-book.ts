@@ -865,6 +865,7 @@ const totalDividends = sum(holdings.map((h) => h.dividends));
 /** Every command the screenshotted pages call, with the demo book's answers. */
 export const DEMO_BOOK: BackendMocks = {
   fetch_active_book: { path: '/home/alex/Documents/Household.spendo' },
+  list_sync_conflicts: [],
   fetch_home_data: {
     hasData: true,
     summary: {

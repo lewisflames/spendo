@@ -332,6 +332,52 @@ export const saveBookAs = (path: string): Promise<EmptyBookResult> =>
 export const reloadChangedBook = (): Promise<EmptyBookResult | null> =>
   invoke('reload_changed_book');
 
+// ── Sync conflict copies (Syncthing `<stem>.sync-conflict-…` next to the book) ──
+
+export interface SyncConflictCopy {
+  path: string;
+  fileName: string;
+  /** Local time in the file name, `YYYY-MM-DDTHH:MM:SS`; null when unreadable. */
+  savedAt: string | null;
+  /** Short Syncthing ID of the device whose version this is. */
+  device: string | null;
+}
+
+/** One transaction as one side (book or copy) has it. */
+export interface ConflictTx {
+  guid: string;
+  postDate: string;
+  description: string | null;
+  payee: string | null;
+  /** Sum of the positive split values. */
+  amount: number;
+  accounts: string[];
+}
+
+export type ConflictField =
+  'date' | 'description' | 'payee' | 'number' | 'notes' | 'tags' | 'splits' | 'status';
+
+interface ConflictChange {
+  book: ConflictTx;
+  copy: ConflictTx;
+  fields: ConflictField[];
+}
+
+export interface SyncConflictReview {
+  copy: SyncConflictCopy;
+  onlyInCopy: ConflictTx[];
+  onlyInBook: ConflictTx[];
+  changed: ConflictChange[];
+  unchanged: number;
+}
+
+/** Conflict copies next to the open book, newest first. */
+export const listSyncConflicts = (): Promise<SyncConflictCopy[]> => invoke('list_sync_conflicts');
+
+/** Compare a conflict copy (read-only, never written) with the open book by GUID. */
+export const reviewSyncConflict = (fileName: string): Promise<SyncConflictReview> =>
+  invoke('review_sync_conflict', { fileName });
+
 /** Close the active book and return to the book-less placeholder. */
 export const closeBook = (): Promise<CloseBookResult> => invoke('close_book');
 
@@ -1640,6 +1686,8 @@ type CommandPayloads = {
   post_schedule_occurrence: string;
   refresh_prices: PricesResult;
   reload_changed_book: EmptyBookResult | null;
+  list_sync_conflicts: SyncConflictCopy[];
+  review_sync_conflict: SyncConflictReview;
   rename_payee: string;
   rename_tag: string;
   reopen_last_reconciliation: ReopenReconcileResult;

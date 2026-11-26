@@ -3,9 +3,11 @@ import type { Page } from '@playwright/test';
 /** Canned command results keyed by command name; values must be JSON-serializable. */
 export type BackendMocks = Record<string, unknown>;
 
-/** Answers every session needs: the layout checks the book file on focus. */
+/** Answers every session needs: the layout checks the book file on focus and
+ * looks for sync conflict copies next to it. */
 const DEFAULT_MOCKS: BackendMocks = {
-  reload_changed_book: null
+  reload_changed_book: null,
+  list_sync_conflicts: []
 };
 
 /**

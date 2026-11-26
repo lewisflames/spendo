@@ -18,7 +18,11 @@ export const PAGE_META = {
   realizedGains: { title: 'Realized gains', description: 'Sales and dividends by year' },
   settings: { title: 'Settings', description: 'App and book preferences' },
   about: { title: 'About Spendo', description: 'Version and updates' },
-  importCsv: { title: 'Import CSV', description: 'Map columns, preview, then import' }
+  importCsv: { title: 'Import CSV', description: 'Map columns, preview, then import' },
+  syncConflict: {
+    title: 'Conflicting copy',
+    description: 'Transactions that differ between this book and a sync conflict copy'
+  }
 } as const satisfies Record<string, { title: string; description: string }>;
 
 export type PageId = keyof typeof PAGE_META;

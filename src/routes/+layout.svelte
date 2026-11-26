@@ -20,7 +20,8 @@
     ensureDbSessionLoaded,
     loadActiveBook,
     refreshSession,
-    activeBookPath
+    activeBookPath,
+    bookRevision
   } from '$lib/stores/db.svelte';
   import { NAV_CHORD_TARGETS } from '$lib/features/nav/nav-items';
   import { refreshNav } from '$lib/stores/nav.svelte';
@@ -29,6 +30,13 @@
   import { onBookChanged } from '$lib/tauri';
   import { TitleBar } from '$lib/components/layout/title-bar';
   import ReadOnlyBanner from '$lib/components/layout/read-only-banner.svelte';
+  import SyncConflictBanner from '$lib/components/layout/sync-conflict-banner.svelte';
+  import {
+    dismissedSyncConflicts,
+    refreshSyncConflicts,
+    syncConflicts
+  } from '$lib/stores/sync-conflicts.svelte';
+  import { visibleConflicts } from '$lib/features/sync-conflicts/sync-conflict-utils';
   import { cn } from '$lib/utils';
   import { Sonner, toast } from '$lib/components/ui/sonner';
   import KeyboardShortcutsDialog from '$lib/components/layout/keyboard-shortcuts-dialog.svelte';
@@ -83,6 +91,23 @@
   // Another device may have replaced the book file (synced folder): check on
   // focus, and reload whenever a command was refused because of it.
   onBookChanged(() => void reloadBookIfChanged());
+
+  // Sync conflict copies next to the book: looked up per opened (or reloaded)
+  // book and again on focus, when another device's sync may have added one.
+  let conflictBookPath = $derived(dbSession.value ? activeBookPath.value : null);
+  $effect(() => {
+    const path = conflictBookPath;
+    void bookRevision.value;
+    untrack(() => void refreshSyncConflicts(path));
+  });
+  let shownConflicts = $derived(
+    conflictBookPath ? visibleConflicts(syncConflicts.value, dismissedSyncConflicts.value) : []
+  );
+
+  function onWindowFocus() {
+    void reloadBookIfChanged();
+    void refreshSyncConflicts(conflictBookPath);
+  }
 
   // Keep sidebar roots + badges current while a book is open: they refresh on
   // navigation and whenever the data summary changes (mutations that return no
@@ -195,7 +220,7 @@
 
 <svelte:document onkeydown={handleKeydown} />
 
-<svelte:window onfocus={() => void reloadBookIfChanged()} />
+<svelte:window onfocus={onWindowFocus} />
 
 <div class="[--header-height:calc(--spacing(10))]">
   <Sidebar.Provider class={cn('flex flex-col', !showSidebar && 'bg-sidebar')}>
@@ -211,6 +236,9 @@
           <div class="@container mx-auto flex w-full max-w-7xl flex-1 flex-col">
             {#if dbSession.value?.summary.readOnly}
               <ReadOnlyBanner />
+            {/if}
+            {#if shownConflicts.length > 0 && page.url.pathname !== '/sync-conflict'}
+              <SyncConflictBanner copies={shownConflicts} />
             {/if}
             {@render children()}
           </div>
