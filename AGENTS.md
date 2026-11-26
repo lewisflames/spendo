@@ -75,6 +75,7 @@ CI (`.github/workflows/checks.yml`, called by `ci.yml` on pushes to `main` and p
 - Visibility window: future-dated transactions are excluded from every "current state" query, details included, via `utils::VISIBLE_TX_FILTER` (or `utils::VISIBLE_NOW_EXPR` when the bound is an expression). The window is local-timezone (`date('now','localtime','+1 day')`), matching `todayStr()` and `chrono::Local`; timestamps stay UTC. Never hand-write the predicate or net worth/PnL/budgets diverge.
 - Validate `YYYY-MM-DD` inputs with `utils::validate_iso_date` before SQL `date()` math — malformed values return NULL and silently zero comparisons.
 - Recursive account-tree CTEs use `UNION` (not `UNION ALL`) so a corrupt `parent_guid` cycle terminates.
+- Reconcile and account balances (tree, ledger, running balances, `balance_check`) are exact `units::Units` (i64 counts of 1/10000, `Units::SCALE == VALUE_DENOM`): sum splits with `units::VALUE_UNITS` in SQL and compare with `is_zero()`, never an epsilon. FX conversion (`fx::convert_units`) and market values (`Units::from_f64`) round to the nearest unit; same-currency amounts stay exact. Over IPC `Units` is a branded `number` (`$lib/utils/units.ts`: `fromUnits` to format or chart, `addUnits`/`sumUnits`, `decimalToUnits` for exact parsing). Budgets and `spread_total` still use `f64`.
 - Reuse `utils::RAW_AMOUNT`/`QUANTITY_AMOUNT`/`signed_amount_expr`, `sql::push_tx_date_search` and `sql::WhereBuilder` (auto-numbered `?N`, `param_offset` reserves leading indices) for dynamic WHERE clauses. Chunk `IN (…)` GUID lists with `sql::MAX_IN_PARAMS`, batch per-row lookups, and escape search input with `utils::escape_like` + `ESCAPE '\'`.
 - Clamp client pagination at the boundary (`utils::clamp_page_size`/`clamp_page`) and compute totals with `utils::total_pages`.
 
@@ -92,7 +93,7 @@ CI (`.github/workflows/checks.yml`, called by `ci.yml` on pushes to `main` and p
 - URL state composes factories from `use-url-params.svelte.ts` (`pageParam`, `debouncedSearchParam`, `dateParam`, `yearParam`); free-form specs only when none fits.
 - Search inputs debounce through `useDebouncedSearch`.
 - Command failures reject with `BackendError` (`{ kind, message }`): show text via `errMsg(e, fallback)` and branch on `errKind(e)` / `useAsyncData().errorKind` (e.g. `'notFound'` → `EmptyState`), never on message text.
-- Money values render through `<Amount>` (`$lib/components/shared/amount.svelte`: tabular digits, no wrap, -0 clamped, optional `tone`); amount table cells are just `text-right` around it.
+- Money values render through `<Amount>` (`$lib/components/shared/amount.svelte`: tabular digits, no wrap, -0 clamped, optional `tone`; pass `units` for a `Units` value, `value` for a decimal); amount table cells are just `text-right` around it.
 - Hints use the `tooltip` attachment (`$lib/attachments/tooltip.ts`, `{@attach tooltip('…')}`; `{ truncated: true }` for cut-off text), never native `title`.
 - Dates parse through `parseLocalDate` (date-only strings are local, not UTC); counts use `plural(n, 'word')`; ranges use `formatDateRange`.
 - Dialog form reset uses `useDialogReset(() => open, sync)` (bits-ui never fires `onOpenChange` for programmatic `bind:open`); create/edit footers use `<SaveFooter>`.
