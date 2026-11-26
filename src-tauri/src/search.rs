@@ -118,9 +118,8 @@ fn search_transactions_inner(
                 OR t.notes LIKE '%' || ?1 || '%' ESCAPE '\\'
                 OR EXISTS (SELECT 1 FROM splits m WHERE m.tx_guid = t.guid
                            AND m.memo LIKE '%' || ?1 || '%' ESCAPE '\\')
-                OR EXISTS (SELECT 1 FROM transaction_payees tp
-                           JOIN payees p ON p.guid = tp.payee_guid
-                           WHERE tp.tx_guid = t.guid
+                OR EXISTS (SELECT 1 FROM payees p
+                           WHERE p.guid = t.payee_guid
                              AND p.name LIKE '%' || ?1 || '%' ESCAPE '\\'))
          ORDER BY t.post_date DESC, t.guid DESC
          LIMIT ?2",
@@ -307,8 +306,8 @@ mod tests {
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO budgets (guid, account_guid, year, amount, created_at)
-             VALUES ('b1', 'gro', 2024, 1200, '2024-01-01T00:00:00Z')",
+            "INSERT INTO budgets (guid, account_guid, year, amount_cents, created_at)
+             VALUES ('b1', 'gro', 2024, 120000, '2024-01-01T00:00:00Z')",
             [],
         )
         .unwrap();
@@ -384,8 +383,8 @@ mod tests {
     fn budgets_return_latest_year_per_account() {
         let conn = setup();
         conn.execute(
-            "INSERT INTO budgets (guid, account_guid, year, amount, created_at)
-             VALUES ('b2', 'gro', 2025, 1300, '2025-01-01T00:00:00Z')",
+            "INSERT INTO budgets (guid, account_guid, year, amount_cents, created_at)
+             VALUES ('b2', 'gro', 2025, 130000, '2025-01-01T00:00:00Z')",
             [],
         )
         .unwrap();

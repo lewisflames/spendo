@@ -434,10 +434,7 @@ fn build_filter_conditions(
             );
         }
         if let Some(payee) = f.payee_guid.as_deref().filter(|g| !g.is_empty()) {
-            w.add(
-                "EXISTS(SELECT 1 FROM transaction_payees tp WHERE tp.tx_guid = t.guid AND tp.payee_guid = {})",
-                vec![Box::new(payee.to_string())],
-            );
+            w.add("t.payee_guid = {}", vec![Box::new(payee.to_string())]);
         }
     }
 
@@ -1583,30 +1580,17 @@ fn bulk_set_payee(
     let mut changed = 0;
     for chunk in guids.chunks(MAX_IN_PARAMS) {
         let mut params = sql::string_param_refs(chunk);
-        changed += match payee_guid {
-            Some(ref payee_guid) => {
-                params.push(payee_guid);
-                // Only rows whose payee actually changes count as changed.
-                conn.execute(
-                    &format!(
-                        "INSERT INTO transaction_payees (tx_guid, payee_guid)
-                         SELECT guid, ?{n} FROM transactions WHERE guid IN ({})
-                         ON CONFLICT (tx_guid) DO UPDATE SET payee_guid = excluded.payee_guid
-                         WHERE payee_guid != excluded.payee_guid",
-                        sql::in_clause(chunk.len()),
-                        n = chunk.len() + 1
-                    ),
-                    params.as_slice(),
-                )?
-            }
-            None => conn.execute(
-                &format!(
-                    "DELETE FROM transaction_payees WHERE tx_guid IN ({})",
-                    sql::in_clause(chunk.len())
-                ),
-                params.as_slice(),
-            )?,
-        } as i64;
+        params.push(&payee_guid);
+        // Only rows whose payee actually changes count as changed.
+        changed += conn.execute(
+            &format!(
+                "UPDATE transactions SET payee_guid = ?{n}
+                 WHERE guid IN ({}) AND payee_guid IS NOT ?{n}",
+                sql::in_clause(chunk.len()),
+                n = chunk.len() + 1
+            ),
+            params.as_slice(),
+        )? as i64;
     }
     Ok(BulkEditResult {
         changed,

@@ -306,53 +306,60 @@ where
 }
 
 const SCHEMA: &str = "
+-- Core tables are STRICT with foreign keys between them (schema version 3).
+-- Account deletion stays guarded in `accounts_mut.rs`; the FKs back it up.
 CREATE TABLE IF NOT EXISTS commodities (
 	guid TEXT PRIMARY KEY,
 	mnemonic TEXT NOT NULL,
 	namespace TEXT NOT NULL,
 	fullname TEXT
-);
+) STRICT;
 
 CREATE TABLE IF NOT EXISTS accounts (
 	guid TEXT PRIMARY KEY,
 	name TEXT NOT NULL,
-	account_type TEXT NOT NULL,
-	parent_guid TEXT,
+	account_type TEXT NOT NULL CHECK (account_type IN ('ROOT', 'ASSET', 'BANK', 'CASH', 'STOCK',
+		'MUTUAL', 'FUND', 'CURRENCY', 'RECEIVABLE', 'LIABILITY', 'CREDIT', 'PAYABLE', 'INCOME',
+		'EXPENSE', 'EQUITY', 'TRADING')),
+	parent_guid TEXT REFERENCES accounts(guid),
 	code TEXT,
 	description TEXT,
 	placeholder INTEGER DEFAULT 0,
-	commodity_guid TEXT
-);
+	commodity_guid TEXT REFERENCES commodities(guid)
+) STRICT;
 
+-- `post_date` starts with a valid `YYYY-MM-DD` (older imports may carry a time
+-- after it). At most one payee per transaction; deleting the payee clears it.
 CREATE TABLE IF NOT EXISTS transactions (
 	guid TEXT PRIMARY KEY,
-	post_date TEXT NOT NULL,
+	post_date TEXT NOT NULL CHECK (date(substr(post_date, 1, 10)) IS substr(post_date, 1, 10)),
 	description TEXT,
 	num TEXT,
-	notes TEXT
-);
+	notes TEXT,
+	payee_guid TEXT REFERENCES payees(guid) ON DELETE SET NULL
+) STRICT;
 
 CREATE TABLE IF NOT EXISTS splits (
 	guid TEXT PRIMARY KEY,
-	tx_guid TEXT NOT NULL,
-	account_guid TEXT NOT NULL,
+	tx_guid TEXT NOT NULL REFERENCES transactions(guid) ON DELETE CASCADE,
+	account_guid TEXT NOT NULL REFERENCES accounts(guid),
 	value_num INTEGER NOT NULL,
-	value_denom INTEGER NOT NULL,
+	value_denom INTEGER NOT NULL CHECK (value_denom > 0),
 	quantity_num INTEGER NOT NULL,
-	quantity_denom INTEGER NOT NULL,
+	quantity_denom INTEGER NOT NULL CHECK (quantity_denom > 0),
 	reconcile_state TEXT,
 	reconciled INTEGER DEFAULT 0,
 	memo TEXT
-);
+) STRICT;
 
 CREATE TABLE IF NOT EXISTS prices (
 	guid TEXT PRIMARY KEY,
-	commodity_guid TEXT NOT NULL,
-	currency_guid TEXT NOT NULL,
+	commodity_guid TEXT NOT NULL REFERENCES commodities(guid) ON DELETE CASCADE,
+	currency_guid TEXT NOT NULL REFERENCES commodities(guid) ON DELETE CASCADE,
 	value_num INTEGER NOT NULL,
-	value_denom INTEGER NOT NULL,
+	value_denom INTEGER NOT NULL CHECK (value_denom > 0),
 	date TEXT NOT NULL
-);
+) STRICT;
 
 CREATE INDEX IF NOT EXISTS idx_transactions_post_date ON transactions(post_date);
 CREATE INDEX IF NOT EXISTS idx_transactions_post_date_guid ON transactions(post_date, guid);
@@ -363,15 +370,17 @@ CREATE INDEX IF NOT EXISTS idx_accounts_parent_guid ON accounts(parent_guid);
 CREATE INDEX IF NOT EXISTS idx_prices_commodity_guid_date ON prices(commodity_guid, date);
 CREATE INDEX IF NOT EXISTS idx_prices_currency_guid_date ON prices(currency_guid, date);
 CREATE INDEX IF NOT EXISTS idx_commodities_mnemonic ON commodities(mnemonic);
+CREATE INDEX IF NOT EXISTS idx_transactions_payee ON transactions(payee_guid);
 
+-- Yearly budget per expense account, in hundredths of the report currency.
 CREATE TABLE IF NOT EXISTS budgets (
 	guid TEXT PRIMARY KEY,
 	account_guid TEXT NOT NULL REFERENCES accounts(guid) ON DELETE CASCADE,
 	year INTEGER NOT NULL,
-	amount REAL NOT NULL,
+	amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
 	created_at TEXT NOT NULL,
 	UNIQUE (account_guid, year)
-);
+) STRICT;
 
 CREATE TABLE IF NOT EXISTS refresh_log (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -408,6 +417,10 @@ CREATE INDEX IF NOT EXISTS idx_attachments_tx_guid ON attachments(tx_guid);
 -- holds a serialized `TxInput`-shaped template; posting materializes one real
 -- transaction per due occurrence and advances `next_due_date`. `NULL`
 -- `next_due_date` means completed (end date / occurrence cap reached).
+-- Skipped occurrences count toward `max_occurrences` like posted ones.
+-- `auto_post` posts due occurrences when the book opens; `spread_total` treats
+-- the template amounts as a total divided across `max_occurrences` (e.g.
+-- depreciating a device).
 CREATE TABLE IF NOT EXISTS recurring_schedules (
 	guid TEXT PRIMARY KEY,
 	name TEXT NOT NULL,
@@ -417,31 +430,16 @@ CREATE TABLE IF NOT EXISTS recurring_schedules (
 	end_date TEXT,
 	max_occurrences INTEGER,
 	occurrences_posted INTEGER NOT NULL DEFAULT 0,
+	skipped_count INTEGER NOT NULL DEFAULT 0,
 	next_due_date TEXT,
 	active INTEGER NOT NULL DEFAULT 1,
+	auto_post INTEGER NOT NULL DEFAULT 0,
+	spread_total INTEGER NOT NULL DEFAULT 0,
 	template_json TEXT NOT NULL,
 	created_at TEXT NOT NULL
-);
+) STRICT;
 
 CREATE INDEX IF NOT EXISTS idx_schedules_active_due ON recurring_schedules(active, next_due_date);
-
--- Skip counter for recurring schedules, in a side table so the core row keeps
--- its original columns. A missing
--- row means nothing has been skipped; rows cascade with their schedule.
-CREATE TABLE IF NOT EXISTS schedule_skips (
-	schedule_guid TEXT PRIMARY KEY REFERENCES recurring_schedules(guid) ON DELETE CASCADE,
-	skipped_count INTEGER NOT NULL DEFAULT 0
-);
-
--- Per-schedule posting options, kept beside `recurring_schedules` for the same
--- reason as `schedule_skips`. `auto_post` posts due occurrences when the book
--- opens; `spread_total` treats the template amounts as a total divided across
--- `max_occurrences` (e.g. depreciating a device). A missing row means both off.
-CREATE TABLE IF NOT EXISTS schedule_options (
-	schedule_guid TEXT PRIMARY KEY REFERENCES recurring_schedules(guid) ON DELETE CASCADE,
-	auto_post INTEGER NOT NULL DEFAULT 0,
-	spread_total INTEGER NOT NULL DEFAULT 0
-);
 
 -- Finished reconciliation batches. Persisting the membership (not inferring it
 -- from transaction dates) is what lets Undo last statement reopen exactly the
@@ -525,23 +523,13 @@ CREATE TABLE IF NOT EXISTS transaction_tags (
 
 CREATE INDEX IF NOT EXISTS idx_transaction_tags_tag ON transaction_tags(tag_guid);
 
--- Who a transaction was with (a shop, a person, an employer); at most one per
--- transaction. Kept beside `transactions` like `schedule_skips` so the core
--- row keeps its original columns.
--- Names are unique ignoring case; links die with either side (FK cascade, so
--- deleting a payee only clears it from its transactions).
+-- Who a transaction was with (a shop, a person, an employer), linked from
+-- `transactions.payee_guid`. Names are unique ignoring case.
 CREATE TABLE IF NOT EXISTS payees (
 	guid TEXT PRIMARY KEY,
 	name TEXT NOT NULL UNIQUE COLLATE NOCASE,
 	created_at TEXT NOT NULL
 );
-
-CREATE TABLE IF NOT EXISTS transaction_payees (
-	tx_guid TEXT PRIMARY KEY REFERENCES transactions(guid) ON DELETE CASCADE,
-	payee_guid TEXT NOT NULL REFERENCES payees(guid) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_transaction_payees_payee ON transaction_payees(payee_guid);
 
 -- Tax role per account for the tax summary; descendants inherit the nearest
 -- ancestor's role. User config like `import_rules`: account deletion is
@@ -948,13 +936,10 @@ mod tests {
             "reconcile_batch_splits",
             "reconcile_batches",
             "refresh_log",
-            "schedule_options",
-            "schedule_skips",
             "splits",
             "symbol_overrides",
             "tags",
             "tax_roles",
-            "transaction_payees",
             "transaction_tags",
             "transactions",
         ] {
@@ -1002,7 +987,7 @@ mod tests {
             "INSERT INTO tags (guid, name, created_at) VALUES ('g-reset', 'trip', '2024-01-01T00:00:00Z');
              INSERT INTO transaction_tags (tx_guid, tag_guid) VALUES ('t-reset', 'g-reset');
              INSERT INTO payees (guid, name, created_at) VALUES ('p-reset', 'Renfe', '2024-01-01T00:00:00Z');
-             INSERT INTO transaction_payees (tx_guid, payee_guid) VALUES ('t-reset', 'p-reset');",
+             UPDATE transactions SET payee_guid = 'p-reset' WHERE guid = 't-reset';",
         )
         .unwrap();
 

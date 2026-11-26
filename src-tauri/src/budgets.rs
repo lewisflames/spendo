@@ -116,8 +116,13 @@ fn validate_year(year: i32) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Budget amounts are stored in whole cents.
+fn to_cents(amount: f64) -> i64 {
+    (amount * 100.0).round() as i64
+}
+
 fn validate_amount(amount: f64) -> Result<(), AppError> {
-    if !amount.is_finite() || amount <= 0.0 {
+    if !amount.is_finite() || to_cents(amount) <= 0 {
         return Err(AppError::Validation(
             "Enter a budget amount above zero".to_string(),
         ));
@@ -168,7 +173,7 @@ fn full_year_percentage(actual: f64, effective: f64) -> f64 {
 
 fn budget_select_sql() -> &'static str {
     "SELECT b.guid, b.account_guid, a.name, a.description, a.code, a.account_type,
-	        b.year, b.amount, b.created_at
+	        b.year, b.amount_cents / 100.0, b.created_at
 	 FROM budgets b
 	 JOIN accounts a ON a.guid = b.account_guid
 	 WHERE b.account_guid = ?1 AND b.year = ?2"
@@ -230,15 +235,15 @@ fn set_budget_year_amount_inner(
     validate_amount(amount)?;
     validate_year(year)?;
     conn.execute(
-        "INSERT INTO budgets (guid, account_guid, year, amount, created_at)
+        "INSERT INTO budgets (guid, account_guid, year, amount_cents, created_at)
 		 VALUES (?1, ?2, ?3, ?4, ?5)
 		 ON CONFLICT (account_guid, year)
-		 DO UPDATE SET amount = excluded.amount",
+		 DO UPDATE SET amount_cents = excluded.amount_cents",
         rusqlite::params![
             Uuid::new_v4().to_string(),
             account_guid,
             year,
-            amount,
+            to_cents(amount),
             utils::iso_now()
         ],
     )?;
@@ -278,7 +283,7 @@ fn delete_budget_year_inner(
 /// accounts. Only years with a row count towards carryover.
 fn yearly_budgets_map(conn: &Connection) -> Result<HashMap<String, HashMap<i32, f64>>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT b.account_guid, b.year, b.amount
+        "SELECT b.account_guid, b.year, b.amount_cents / 100.0
 			 FROM budgets b
 			 JOIN accounts a ON a.guid = b.account_guid
 			 WHERE a.account_type = 'EXPENSE'",
@@ -469,7 +474,7 @@ fn fetch_budget_actual_raw_rows(
     let mut stmt = conn.prepare(&format!(
         "{}
 			 SELECT b.guid, b.account_guid, a.name, a.description, a.code, a.account_type,
-			        b.amount,
+			        b.amount_cents / 100.0,
 			        c.mnemonic,
 			        COALESCE(SUM(ps.value), 0) as actual_amount
 			  FROM budgets b
@@ -599,7 +604,7 @@ fn build_budget_actual_rows(
     rows
 }
 
-fn fetch_budget_vs_actual_inner(
+pub(crate) fn fetch_budget_vs_actual_inner(
     conn: &Connection,
     year: i32,
 ) -> Result<Vec<BudgetActualRow>, AppError> {
@@ -637,7 +642,7 @@ fn fetch_budget_detail_inner(
     let period_end = format!("{:04}-01-01", year + 1);
 
     let mut stmt = conn.prepare(
-        "SELECT year, amount FROM budgets
+        "SELECT year, amount_cents / 100.0 FROM budgets
 			 WHERE account_guid = ?1
 			 ORDER BY year",
     )?;

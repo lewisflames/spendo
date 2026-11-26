@@ -52,8 +52,8 @@ pub fn push_tx_date_search(
              OR EXISTS(SELECT 1 FROM splits m WHERE m.tx_guid = t.guid AND m.memo LIKE '%' || {} || '%' ESCAPE '\\') \
              OR EXISTS(SELECT 1 FROM transaction_tags tt JOIN tags g ON g.guid = tt.tag_guid \
                        WHERE tt.tx_guid = t.guid AND g.name LIKE '%' || {} || '%' ESCAPE '\\') \
-             OR EXISTS(SELECT 1 FROM transaction_payees tp JOIN payees p ON p.guid = tp.payee_guid \
-                       WHERE tp.tx_guid = t.guid AND p.name LIKE '%' || {} || '%' ESCAPE '\\'))",
+             OR EXISTS(SELECT 1 FROM payees p \
+                       WHERE p.guid = t.payee_guid AND p.name LIKE '%' || {} || '%' ESCAPE '\\'))",
             vec![
                 Box::new(s.clone()) as Box<dyn ToSql>,
                 Box::new(s.clone()),

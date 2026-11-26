@@ -565,16 +565,16 @@ mod tests {
             .contains("split"));
         // Delete blocked with budgets (the FK cascade would drop them silently).
         conn.execute(
-            "INSERT INTO budgets (guid, account_guid, year, amount, created_at)
-             VALUES ('b1', 'assets', 2024, 100, '2024-01-01')",
+            "INSERT INTO budgets (guid, account_guid, year, amount_cents, created_at)
+             VALUES ('b1', 'assets', 2024, 10000, '2024-01-01')",
             [],
         )
         .unwrap();
         // `assets` has children too; use a fresh leaf with a budget instead.
         let leaf = create_account_inner(&conn, input("Leaf", Some("assets"))).expect("create");
         conn.execute(
-            "INSERT INTO budgets (guid, account_guid, year, amount, created_at)
-             VALUES ('b2', ?1, 2024, 50, '2024-01-01')",
+            "INSERT INTO budgets (guid, account_guid, year, amount_cents, created_at)
+             VALUES ('b2', ?1, 2024, 5000, '2024-01-01')",
             params![leaf],
         )
         .unwrap();

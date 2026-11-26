@@ -155,11 +155,8 @@ struct ScheduleRow {
 }
 
 const SELECT_COLS: &str = "guid, name, frequency, interval_mult, start_date, end_date, \
-    max_occurrences, occurrences_posted, \
-    COALESCE((SELECT skipped_count FROM schedule_skips k WHERE k.schedule_guid = recurring_schedules.guid), 0), \
-    next_due_date, active, template_json, created_at, \
-    COALESCE((SELECT auto_post FROM schedule_options o WHERE o.schedule_guid = recurring_schedules.guid), 0), \
-    COALESCE((SELECT spread_total FROM schedule_options o WHERE o.schedule_guid = recurring_schedules.guid), 0)";
+    max_occurrences, occurrences_posted, skipped_count, \
+    next_due_date, active, template_json, created_at, auto_post, spread_total";
 
 fn read_row(row: &rusqlite::Row) -> rusqlite::Result<ScheduleRow> {
     Ok(ScheduleRow {
@@ -463,28 +460,17 @@ fn validate_spread(input: &ScheduleInput) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Upsert the side-table options. Rows exist only while something is on, so
-/// the table stays empty for books that never use them.
+/// Store the posting options on the schedule row.
 fn save_options(
     conn: &Connection,
     guid: &str,
     auto_post: bool,
     spread_total: bool,
 ) -> Result<(), AppError> {
-    if auto_post || spread_total {
-        conn.execute(
-            "INSERT INTO schedule_options (schedule_guid, auto_post, spread_total)
-             VALUES (?1, ?2, ?3)
-             ON CONFLICT(schedule_guid) DO UPDATE
-               SET auto_post = excluded.auto_post, spread_total = excluded.spread_total",
-            params![guid, auto_post as i64, spread_total as i64],
-        )?;
-    } else {
-        conn.execute(
-            "DELETE FROM schedule_options WHERE schedule_guid = ?1",
-            params![guid],
-        )?;
-    }
+    conn.execute(
+        "UPDATE recurring_schedules SET auto_post = ?1, spread_total = ?2 WHERE guid = ?3",
+        params![auto_post as i64, spread_total as i64, guid],
+    )?;
     Ok(())
 }
 
@@ -911,18 +897,12 @@ fn skip_schedule_occurrence_inner(
         row.occurrences_posted + skipped,
         row.end_date.as_deref(),
     );
-    with_tx_err(conn, || -> Result<(), AppError> {
-        conn.execute(
-            "INSERT INTO schedule_skips (schedule_guid, skipped_count) VALUES (?1, 1)
-             ON CONFLICT(schedule_guid) DO UPDATE SET skipped_count = skipped_count + 1",
-            params![guid],
-        )?;
-        conn.execute(
-            "UPDATE recurring_schedules SET next_due_date = ?1 WHERE guid = ?2",
-            params![next, guid],
-        )?;
-        Ok(())
-    })?;
+    conn.execute(
+        "UPDATE recurring_schedules
+         SET skipped_count = skipped_count + 1, next_due_date = ?1
+         WHERE guid = ?2",
+        params![next, guid],
+    )?;
     Ok(next)
 }
 
@@ -943,8 +923,7 @@ fn post_due_schedules_inner(conn: &Connection, today: &str) -> Result<AutoPostRe
     }
     let mut stmt = conn.prepare(
         "SELECT r.guid, r.name FROM recurring_schedules r
-         JOIN schedule_options o ON o.schedule_guid = r.guid
-         WHERE o.auto_post = 1 AND r.active = 1
+         WHERE r.auto_post = 1 AND r.active = 1
            AND r.next_due_date IS NOT NULL AND r.next_due_date <= ?1
          ORDER BY r.next_due_date, r.name",
     )?;
@@ -1305,10 +1284,14 @@ mod tests {
         assert!(s.auto_post && !s.spread_total);
         let off = update_schedule_inner(&conn, &s.guid, balanced_input()).unwrap();
         assert!(!off.auto_post);
-        let rows: i64 = conn
-            .query_row("SELECT COUNT(*) FROM schedule_options", [], |r| r.get(0))
+        let stored: (i64, i64) = conn
+            .query_row(
+                "SELECT auto_post, spread_total FROM recurring_schedules WHERE guid = ?1",
+                [&s.guid],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
             .unwrap();
-        assert_eq!(rows, 0);
+        assert_eq!(stored, (0, 0));
     }
 
     fn d(s: &str) -> NaiveDate {

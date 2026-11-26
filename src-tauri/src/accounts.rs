@@ -366,7 +366,7 @@ fn prices_as_of(
     Ok(prices)
 }
 
-fn fetch_accounts_inner(conn: &Connection) -> Result<AccountsResult, AppError> {
+pub(crate) fn fetch_accounts_inner(conn: &Connection) -> Result<AccountsResult, AppError> {
     accounts_as_of(conn, None)
 }
 
@@ -528,7 +528,7 @@ pub struct BalanceSheetResult {
     pub compare: Option<AccountsResult>,
 }
 
-fn fetch_balance_sheet_inner(
+pub(crate) fn fetch_balance_sheet_inner(
     conn: &Connection,
     input: BalanceSheetInput,
 ) -> Result<BalanceSheetResult, AppError> {

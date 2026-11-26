@@ -503,7 +503,7 @@ fn merge_pnl_prev_amounts(
         .collect()
 }
 
-fn fetch_pnl_report_inner(
+pub(crate) fn fetch_pnl_report_inner(
     conn: &Connection,
     date_from: &str,
     date_to: &str,

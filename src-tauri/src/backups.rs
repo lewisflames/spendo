@@ -742,16 +742,21 @@ mod tests {
         std::fs::remove_dir_all(&app).ok();
     }
 
-    /// A snapshot file in `dir` holding the current schema saved at `version`,
-    /// with a legacy table when older.
+    /// A snapshot file in `dir` saved at `version`: the frozen version 1
+    /// fixture (legacy tables included) when older, the current schema when
+    /// newer.
     fn snapshot_at_version(dir: &Path, version: i32) -> String {
         std::fs::create_dir_all(dir).unwrap();
         let name = file_name_for(Utc::now() - chrono::Duration::days(1), BackupReason::Manual);
         let old = db::connect_db(&dir.join(&name)).unwrap();
-        db::init_db(&old).unwrap();
+        if version < crate::migrations::CURRENT_VERSION {
+            assert_eq!(version, 1, "only a version 1 fixture exists");
+            old.execute_batch(include_str!("migrations/fixtures/v1.sql"))
+                .unwrap();
+        } else {
+            db::init_db(&old).unwrap();
+        }
         db::stamp_app_id(&old);
-        old.execute_batch("CREATE TABLE change_log (id INTEGER PRIMARY KEY);")
-            .unwrap();
         old.pragma_update(None, "user_version", version).unwrap();
         name
     }

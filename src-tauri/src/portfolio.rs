@@ -1264,7 +1264,7 @@ fn finalize_totals(mut holdings: Vec<PortfolioHolding>) -> (f64, f64, f64, Vec<P
     )
 }
 
-fn fetch_portfolio_data_inner(conn: &Connection) -> Result<PortfolioData, AppError> {
+pub(crate) fn fetch_portfolio_data_inner(conn: &Connection) -> Result<PortfolioData, AppError> {
     let mut holdings = build_holdings(conn, None)?;
     let inputs = load_return_inputs(conn, None)?;
     let method = settings::cost_basis_method(conn)?;
@@ -2441,9 +2441,13 @@ mod tests {
             .unwrap();
 
         // Removing the commodity drops its target but leaves the rest
-        // untouched.
-        conn.execute("DELETE FROM commodities WHERE guid = 'c-aapl'", [])
-            .unwrap();
+        // untouched. Its account goes first: accounts keep their commodity.
+        conn.execute_batch(
+            "DELETE FROM splits WHERE account_guid = 'broker';
+             DELETE FROM accounts WHERE guid = 'broker';
+             DELETE FROM commodities WHERE guid = 'c-aapl';",
+        )
+        .unwrap();
         let remaining = fetch_allocation_targets_inner(&conn).unwrap();
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].commodity_guid, "c-xyz");

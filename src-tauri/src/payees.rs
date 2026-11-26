@@ -1,6 +1,6 @@
 //! Payees: who a transaction was with (a shop, a person, an employer). One
-//! payee per transaction at most, kept in `transaction_payees` beside the
-//! core `transactions` row. Callers pass a name;
+//! payee per transaction at most, in `transactions.payee_guid`. Callers pass
+//! a name;
 //! [`set_transaction_payee`] resolves it case-insensitively and creates
 //! missing ones, so the editor never needs a separate "create payee" step.
 
@@ -86,22 +86,11 @@ pub(crate) fn set_transaction_payee(
     tx_guid: &str,
     name: Option<&str>,
 ) -> Result<(), AppError> {
-    match name {
-        Some(name) => {
-            let payee_guid = ensure_payee(conn, name)?;
-            conn.execute(
-                "INSERT INTO transaction_payees (tx_guid, payee_guid) VALUES (?1, ?2)
-                 ON CONFLICT (tx_guid) DO UPDATE SET payee_guid = excluded.payee_guid",
-                params![tx_guid, payee_guid],
-            )?;
-        }
-        None => {
-            conn.execute(
-                "DELETE FROM transaction_payees WHERE tx_guid = ?1",
-                params![tx_guid],
-            )?;
-        }
-    }
+    let payee_guid = name.map(|name| ensure_payee(conn, name)).transpose()?;
+    conn.execute(
+        "UPDATE transactions SET payee_guid = ?1 WHERE guid = ?2",
+        params![payee_guid, tx_guid],
+    )?;
     Ok(())
 }
 
@@ -114,10 +103,10 @@ pub(crate) fn payees_for_txns(
     let mut out = HashMap::new();
     for chunk in guids.chunks(sql::MAX_IN_PARAMS) {
         let sql = format!(
-            "SELECT tp.tx_guid, p.guid, p.name
-             FROM transaction_payees tp
-             JOIN payees p ON p.guid = tp.payee_guid
-             WHERE tp.tx_guid IN ({})",
+            "SELECT t.guid, p.guid, p.name
+             FROM transactions t
+             JOIN payees p ON p.guid = t.payee_guid
+             WHERE t.guid IN ({})",
             sql::in_clause(chunk.len())
         );
         let mut stmt = conn.prepare(&sql)?;
@@ -153,8 +142,7 @@ fn fetch_payees_inner(conn: &Connection) -> Result<Vec<PayeeSummary>, AppError> 
     let sql = format!(
         "SELECT p.guid, p.name, COUNT(t.guid), MAX(t.post_date)
          FROM payees p
-         LEFT JOIN transaction_payees tp ON tp.payee_guid = p.guid
-         LEFT JOIN transactions t ON t.guid = tp.tx_guid AND {}
+         LEFT JOIN transactions t ON t.payee_guid = p.guid AND {}
          GROUP BY p.guid, p.name
          ORDER BY COUNT(t.guid) DESC, p.name COLLATE NOCASE, p.guid",
         utils::VISIBLE_TX_FILTER
@@ -195,7 +183,7 @@ fn rename_payee_inner(conn: &Connection, input: &RenamePayeeInput) -> Result<Str
     with_tx_err(conn, || match other {
         Some(target) => {
             conn.execute(
-                "UPDATE transaction_payees SET payee_guid = ?1 WHERE payee_guid = ?2",
+                "UPDATE transactions SET payee_guid = ?1 WHERE payee_guid = ?2",
                 params![target, input.guid],
             )?;
             conn.execute("DELETE FROM payees WHERE guid = ?1", params![input.guid])?;
@@ -370,7 +358,11 @@ mod tests {
         let ouigo = ensure_payee(&conn, "Ouigo").unwrap();
         delete_payee_inner(&conn, &ouigo).unwrap();
         let links: i64 = conn
-            .query_row("SELECT COUNT(*) FROM transaction_payees", [], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM transactions WHERE payee_guid IS NOT NULL",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(links, 0);
         let txns: i64 = conn

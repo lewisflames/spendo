@@ -150,7 +150,7 @@ fn resolve_conflict(book: &Path, file_name: &str) -> Result<SyncConflictCopy, Ap
 type SplitKey = (String, (i64, i64), (i64, i64), String);
 
 /// Everything compared for one transaction.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq)]
 struct TxSnap {
     post_date: String,
     description: Option<String>,
@@ -184,8 +184,9 @@ fn reduce(num: i64, denom: i64) -> (i64, i64) {
 }
 
 /// Read every transaction of a book (future-dated ones too: this compares
-/// files, it isn't a "current state" view). Only tables every version 1 book
-/// has are read, so an older copy compares without being migrated.
+/// files, it isn't a "current state" view). Only what every version has is
+/// read (payees from wherever the copy's version keeps them), so an older copy
+/// compares without being migrated.
 fn read_snapshot(conn: &Connection) -> Result<HashMap<String, TxSnap>, AppError> {
     let mut txs: HashMap<String, TxSnap> = HashMap::new();
     let mut stmt =
@@ -274,9 +275,15 @@ fn read_snapshot(conn: &Connection) -> Result<HashMap<String, TxSnap>, AppError>
         (snap.splits, snap.states) = splits.into_iter().unzip();
     }
 
-    let mut stmt = conn.prepare(
-        "SELECT tp.tx_guid, p.name FROM transaction_payees tp JOIN payees p ON p.guid = tp.payee_guid",
-    )?;
+    // Version 3 keeps the payee on the transaction; older copies in a side table.
+    let payee_column = conn
+        .prepare("SELECT 1 FROM pragma_table_info('transactions') WHERE name = 'payee_guid'")?
+        .exists([])?;
+    let mut stmt = conn.prepare(if payee_column {
+        "SELECT t.guid, p.name FROM transactions t JOIN payees p ON p.guid = t.payee_guid"
+    } else {
+        "SELECT tp.tx_guid, p.name FROM transaction_payees tp JOIN payees p ON p.guid = tp.payee_guid"
+    })?;
     for row in stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
         let (tx, name) = row?;
         if let Some(snap) = txs.get_mut(&tx) {
@@ -647,5 +654,20 @@ mod tests {
         std::fs::write(&path, "not sqlite").unwrap();
         assert!(read_copy(&path).is_err());
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn copies_from_before_version_3_read_their_payees() {
+        // Version 2 kept payees in `transaction_payees`; a copy saved then
+        // must compare the same as the book after its upgrade.
+        let old = Connection::open_in_memory().unwrap();
+        old.execute_batch(include_str!("migrations/fixtures/v2.sql"))
+            .unwrap();
+        old.pragma_update(None, "user_version", 2).unwrap();
+        let before = read_snapshot(&old).unwrap();
+        assert_eq!(before["t-rent1"].payee.as_deref(), Some("Landlord"));
+
+        crate::migrations::migrate(&old, None).unwrap();
+        assert_eq!(read_snapshot(&old).unwrap(), before);
     }
 }

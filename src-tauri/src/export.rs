@@ -91,8 +91,7 @@ fn fetch_export_transactions_inner(conn: &Connection) -> Result<Vec<ExportSplitR
          JOIN transactions t ON t.guid = s.tx_guid
          JOIN accounts a ON a.guid = s.account_guid
          LEFT JOIN commodities c ON c.guid = a.commodity_guid
-         LEFT JOIN transaction_payees tp ON tp.tx_guid = t.guid
-         LEFT JOIN payees p ON p.guid = tp.payee_guid
+         LEFT JOIN payees p ON p.guid = t.payee_guid
          ORDER BY t.post_date DESC, t.guid DESC,
                   ABS(CAST(s.value_num AS REAL) / CAST(s.value_denom AS REAL)) DESC,
                   s.guid ASC",
