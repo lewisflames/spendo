@@ -5,6 +5,7 @@ use tauri::State;
 
 use crate::db::{self, AppState};
 use crate::home::{get_summary, HomeDataResult};
+use crate::migrations;
 
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -25,7 +26,7 @@ fn validate_spendo_db_inner(path: &Path) -> Result<(), AppError> {
             path.display()
         )));
     }
-    let probe = db::connect_read_only(&path.to_path_buf())
+    let probe = db::connect_read_only(path)
         .map_err(|e| AppError::Io(format!("We couldn't open that file: {}", e)))?;
 
     let app_id: Result<i32, _> = probe.query_row("PRAGMA application_id", [], |row| row.get(0));
@@ -47,14 +48,35 @@ fn validate_spendo_db_inner(path: &Path) -> Result<(), AppError> {
     )))
 }
 
-/// Open + ensure schema (idempotent `init_db`) + stamp + seed any missing
-/// canonical root accounts (heals pre-existing books on open).
-/// File I/O happens here, before the shared lock is touched.
-fn open_book_inner(path: &Path) -> Result<rusqlite::Connection, AppError> {
+/// Validate + [`connect_book`]. File I/O happens here, before the shared
+/// lock is touched.
+pub(crate) fn open_book_inner(
+    path: &Path,
+    app_data_dir: &Path,
+) -> Result<rusqlite::Connection, AppError> {
     validate_spendo_db_inner(path)?;
-    let conn = db::connect_db(&path.to_path_buf())
-        .map_err(|e| AppError::Io(format!("Failed to open book: {}", e)))?;
-    db::init_db(&conn).map_err(|e| AppError::Io(format!("Failed to init book: {}", e)))?;
+    connect_book(path, Some(app_data_dir))
+}
+
+/// Connect to a Spendo book file as the active book. One saved by a newer
+/// Spendo (schema version above ours) opens read-only and is left exactly as
+/// it is. Any other is migrated to the current schema (with a safety snapshot
+/// when `app_data_dir` is given), stamped, and gets any missing canonical
+/// root accounts.
+fn connect_book(
+    path: &Path,
+    app_data_dir: Option<&Path>,
+) -> Result<rusqlite::Connection, AppError> {
+    let open_err = |e: rusqlite::Error| AppError::Io(format!("Failed to open book: {}", e));
+    let version = {
+        let probe = db::connect_read_only(path).map_err(open_err)?;
+        migrations::schema_version(&probe).map_err(open_err)?
+    };
+    if version > migrations::CURRENT_VERSION {
+        return db::connect_book_read_only(path).map_err(open_err);
+    }
+    let conn = db::connect_db(&path.to_path_buf()).map_err(open_err)?;
+    migrations::migrate(&conn, app_data_dir)?;
     db::stamp_app_id(&conn);
     crate::init::ensure_default_roots(&conn)?;
     Ok(conn)
@@ -100,6 +122,8 @@ fn remove_target(path: &Path) {
 
 /// Copy the live book into a fresh stamped file at `new_path`. The caller
 /// must have prepared the destination (parent dir + stale-target sweep).
+/// The copy keeps the schema version, so a read-only (newer) book stays
+/// read-only under its new name.
 fn save_book_as_inner(
     conn: &rusqlite::Connection,
     new_path: &Path,
@@ -107,10 +131,7 @@ fn save_book_as_inner(
     let escaped = escape_path_for_sql(new_path);
     conn.execute_batch(&format!("VACUUM INTO '{escaped}';"))
         .map_err(|e| AppError::Io(format!("Failed to save book: {}", e)))?;
-    let fresh = db::connect_db(&new_path.to_path_buf())
-        .map_err(|e| AppError::Io(format!("Failed to open saved book: {}", e)))?;
-    db::stamp_app_id(&fresh);
-    Ok(fresh)
+    connect_book(new_path, None)
 }
 
 /// Swap the shared connection to `new_conn` and remember `new_path`.
@@ -208,7 +229,8 @@ pub async fn open_book(
     let new_path = PathBuf::from(&path);
     // Validate + connect on a blocking thread before touching shared state.
     let open_path = new_path.clone();
-    let new_conn = db::run_io(move || open_book_inner(&open_path)).await?;
+    let app_data_dir = state.app_data_dir.clone();
+    let new_conn = db::run_io(move || open_book_inner(&open_path, &app_data_dir)).await?;
     let result = activate_book(&state, new_path, new_conn).await?;
     crate::backups::spawn_daily_check(state.db.clone(), state.app_data_dir.clone());
     Ok(result)
@@ -233,7 +255,8 @@ pub async fn reload_changed_book(
         Err(e) => return Err(e),
     }
     let open_path = path.clone();
-    let new_conn = db::run_io(move || open_book_inner(&open_path)).await?;
+    let app_data_dir = state.app_data_dir.clone();
+    let new_conn = db::run_io(move || open_book_inner(&open_path, &app_data_dir)).await?;
     activate_book(&state, path, new_conn).await.map(Some)
 }
 
@@ -427,7 +450,7 @@ mod tests {
         drop(conn);
 
         assert!(validate_spendo_db_inner(&path).is_ok());
-        let conn = open_book_inner(&path).unwrap();
+        let conn = open_book_inner(&path, &dir.join("app")).unwrap();
         let summary = get_summary(&conn).unwrap();
         assert_eq!(summary.currency, "EUR");
         assert_eq!(summary.total_accounts, 6);
@@ -437,6 +460,91 @@ mod tests {
         assert_eq!(get_summary(&conn).unwrap().currency, "USD");
 
         assert!(create_book_at_inner(&path, "EURO").is_err());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A current book file re-stamped as saved by a newer Spendo.
+    fn newer_book(path: &Path) {
+        let conn = create_book_at_inner(path, "EUR").unwrap();
+        conn.execute(
+            "INSERT INTO transactions (guid, post_date, description) VALUES ('t1', '2024-01-02', 'Coffee')",
+            [],
+        )
+        .unwrap();
+        conn.pragma_update(None, "user_version", migrations::CURRENT_VERSION + 1)
+            .unwrap();
+    }
+
+    #[test]
+    fn newer_books_open_read_only_and_refuse_every_write() {
+        let dir = tmp_dir("newer");
+        let app = dir.join("app");
+        let path = dir.join("newer.spendo");
+        newer_book(&path);
+        let before = std::fs::read(&path).unwrap();
+
+        let conn = open_book_inner(&path, &app).unwrap();
+        assert!(get_summary(&conn).unwrap().read_only);
+        assert_eq!(get_summary(&conn).unwrap().total_transactions, 1);
+
+        // SQLite refuses writes of any kind, typed as `readOnly`.
+        let writes = [
+            "INSERT INTO transactions (guid, post_date) VALUES ('t2', '2024-01-03')",
+            "UPDATE transactions SET description = 'Tea'",
+            "DELETE FROM transactions",
+            "CREATE TABLE x (y INTEGER)",
+            "PRAGMA user_version = 1",
+        ];
+        for sql in writes {
+            let err = AppError::from(conn.execute_batch(sql).unwrap_err());
+            assert_eq!(err.kind(), "readOnly", "{sql}");
+        }
+        let err = db::with_tx_err(&conn, || -> Result<(), AppError> {
+            conn.execute("DELETE FROM splits", [])?;
+            Ok(())
+        })
+        .unwrap_err();
+        assert_eq!(err.kind(), "readOnly");
+        assert!(db::clear_db(&conn).is_err());
+        // Bulk changes are refused before their safety snapshot.
+        let err = crate::backups::before_change(
+            &conn,
+            &app,
+            crate::backups::BackupReason::BeforeBulkEdit,
+        )
+        .unwrap_err();
+        assert_eq!(err.kind(), "readOnly");
+        assert!(!app.join("backups").exists());
+        drop(conn);
+
+        // Nothing was migrated, stamped or seeded.
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+
+        // Save As keeps it read-only under the new name.
+        let conn = open_book_inner(&path, &app).unwrap();
+        let copy = dir.join("copy.spendo");
+        let fresh = save_book_as_inner(&conn, &copy).unwrap();
+        assert!(get_summary(&fresh).unwrap().read_only);
+        assert_eq!(
+            migrations::schema_version(&fresh).unwrap(),
+            migrations::CURRENT_VERSION + 1
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn current_books_open_writable_without_a_snapshot() {
+        let dir = tmp_dir("current");
+        let app = dir.join("app");
+        let path = dir.join("book.spendo");
+        drop(create_book_at_inner(&path, "EUR").unwrap());
+        let conn = open_book_inner(&path, &app).unwrap();
+        assert!(!get_summary(&conn).unwrap().read_only);
+        assert_eq!(
+            migrations::schema_version(&conn).unwrap(),
+            migrations::CURRENT_VERSION
+        );
+        assert!(!app.join("backups").exists());
         std::fs::remove_dir_all(&dir).ok();
     }
 

@@ -19,6 +19,8 @@ pub struct DataSummary {
     pub earliest_date: Option<String>,
     pub latest_date: Option<String>,
     pub net_worth: f64,
+    /// Opened read-only (saved by a newer Spendo): every write is refused.
+    pub read_only: bool,
 }
 
 #[derive(serde::Serialize)]
@@ -110,6 +112,7 @@ pub fn get_summary(conn: &Connection) -> Result<DataSummary, AppError> {
         earliest_date,
         latest_date,
         net_worth,
+        read_only: conn.is_readonly(rusqlite::MAIN_DB)?,
     })
 }
 

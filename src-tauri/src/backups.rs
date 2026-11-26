@@ -43,16 +43,18 @@ pub enum BackupReason {
     BeforeClear,
     BeforeRestore,
     BeforeBulkEdit,
+    BeforeMigrate,
 }
 
 impl BackupReason {
-    const ALL: [BackupReason; 6] = [
+    const ALL: [BackupReason; 7] = [
         BackupReason::Daily,
         BackupReason::Manual,
         BackupReason::BeforeImport,
         BackupReason::BeforeClear,
         BackupReason::BeforeRestore,
         BackupReason::BeforeBulkEdit,
+        BackupReason::BeforeMigrate,
     ];
 
     /// File-name token (kebab-case so names stay readable in a file manager).
@@ -64,6 +66,7 @@ impl BackupReason {
             BackupReason::BeforeClear => "before-clear",
             BackupReason::BeforeRestore => "before-restore",
             BackupReason::BeforeBulkEdit => "before-bulk-edit",
+            BackupReason::BeforeMigrate => "before-migrate",
         }
     }
 
@@ -78,6 +81,7 @@ impl BackupReason {
                 | BackupReason::BeforeClear
                 | BackupReason::BeforeRestore
                 | BackupReason::BeforeBulkEdit
+                | BackupReason::BeforeMigrate
         )
     }
 }
@@ -253,7 +257,8 @@ fn snapshot_into(
 }
 
 /// Safety snapshot before a bulk change. A no-op while book-less; a failure
-/// aborts the caller so nothing is changed without a way back.
+/// aborts the caller so nothing is changed without a way back. A read-only
+/// book is refused first: the change itself could never be written.
 pub(crate) fn before_change(
     conn: &Connection,
     app_data_dir: &Path,
@@ -268,6 +273,7 @@ fn before_change_protecting(
     reason: BackupReason,
     protect: Option<&str>,
 ) -> Result<(), AppError> {
+    db::ensure_writable(conn)?;
     let Some(dir) = dir_for_conn(app_data_dir, conn) else {
         return Ok(());
     };
@@ -353,11 +359,53 @@ fn resolve_backup(dir: &Path, file_name: &str) -> Result<PathBuf, AppError> {
     Ok(path)
 }
 
+/// A copy of an older-version snapshot, migrated before it is restored so an
+/// unmigrated book never goes live. Removed (with its journal) on drop.
+struct StagedSource(PathBuf);
+
+impl Drop for StagedSource {
+    fn drop(&mut self) {
+        std::fs::remove_file(&self.0).ok();
+        let mut journal = self.0.as_os_str().to_os_string();
+        journal.push("-journal");
+        std::fs::remove_file(PathBuf::from(journal)).ok();
+    }
+}
+
+/// Open the snapshot to restore from at the current schema version: as is
+/// when it already is, else through a migrated staging copy in `dir`. A
+/// snapshot from a newer Spendo is refused.
+fn open_restore_source(
+    dir: &Path,
+    source_path: &Path,
+) -> Result<(Connection, Option<StagedSource>), AppError> {
+    let open_err = |e: rusqlite::Error| AppError::Io(format!("We couldn't open that backup: {e}"));
+    let source = db::connect_read_only(source_path).map_err(open_err)?;
+    let version = crate::migrations::schema_version(&source)?;
+    if version == crate::migrations::CURRENT_VERSION {
+        return Ok((source, None));
+    }
+    if version > crate::migrations::CURRENT_VERSION {
+        return Err(AppError::Validation(
+            "That backup was saved by a newer Spendo. Update to restore it".to_string(),
+        ));
+    }
+    drop(source);
+    let staged = StagedSource(dir.join(format!(".restore-{}.partial", uuid::Uuid::new_v4())));
+    std::fs::copy(source_path, &staged.0)
+        .map_err(|e| AppError::Io(format!("We couldn't read that backup: {e}")))?;
+    let conn = db::connect_db(&staged.0).map_err(open_err)?;
+    // The snapshot itself is the way back, so no extra backup.
+    crate::migrations::migrate(&conn, None)?;
+    Ok((conn, Some(staged)))
+}
+
 /// Replace the live book's content with a snapshot. A `beforeRestore`
 /// snapshot of the current state comes first, so a restore can be undone by
 /// restoring that one. The SQLite backup API copies every page in one step
 /// inside the destination's write transaction, so a failed restore leaves the
-/// book as it was.
+/// book as it was. Snapshots of an older schema are migrated on a staged
+/// copy first.
 fn restore_backup_inner(
     conn: &mut Connection,
     app_data_dir: &Path,
@@ -372,8 +420,7 @@ fn restore_backup_inner(
         BackupReason::BeforeRestore,
         Some(file_name),
     )?;
-    let source = db::connect_read_only(&source_path)
-        .map_err(|e| AppError::Io(format!("We couldn't open that backup: {e}")))?;
+    let (source, staged) = open_restore_source(&dir, &source_path)?;
     {
         let backup = Backup::new(&source, conn)?;
         match backup.step(-1)? {
@@ -385,12 +432,14 @@ fn restore_backup_inner(
             }
         }
     }
+    // Close the source before its staging copy is removed.
+    drop(source);
+    drop(staged);
     conn.flush_prepared_statement_cache();
     // Heal the restored content the same way an open does. The page copy
     // brings the snapshot's journal mode along, and snapshots of books from
     // before rollback-journal mode carry WAL.
     db::use_rollback_journal(conn)?;
-    db::init_db(conn)?;
     db::stamp_app_id(conn);
     crate::init::ensure_default_roots(conn)?;
     get_summary(conn)
@@ -690,6 +739,65 @@ mod tests {
         let reopened = db::connect_db(&path).unwrap();
         assert_eq!(journal(&reopened), "delete");
         assert_eq!(tx_count(&reopened), 1);
+        std::fs::remove_dir_all(&app).ok();
+    }
+
+    /// A snapshot file in `dir` holding the current schema saved at `version`,
+    /// with a legacy table when older.
+    fn snapshot_at_version(dir: &Path, version: i32) -> String {
+        std::fs::create_dir_all(dir).unwrap();
+        let name = file_name_for(Utc::now() - chrono::Duration::days(1), BackupReason::Manual);
+        let old = db::connect_db(&dir.join(&name)).unwrap();
+        db::init_db(&old).unwrap();
+        db::stamp_app_id(&old);
+        old.execute_batch("CREATE TABLE change_log (id INTEGER PRIMARY KEY);")
+            .unwrap();
+        old.pragma_update(None, "user_version", version).unwrap();
+        name
+    }
+
+    #[test]
+    fn restoring_an_older_snapshot_migrates_it() {
+        let app = tmp_dir("restore-old");
+        let mut conn = book_with_tx(&app.join("book.spendo"));
+        let dir = dir_for_conn(&app, &conn).unwrap();
+        let name = snapshot_at_version(&dir, 1);
+        let before = std::fs::read(dir.join(&name)).unwrap();
+
+        restore_backup_inner(&mut conn, &app, &name).unwrap();
+        assert_eq!(
+            crate::migrations::schema_version(&conn).unwrap(),
+            crate::migrations::CURRENT_VERSION
+        );
+        let legacy: bool = conn
+            .query_row(
+                "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE name = 'change_log')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(!legacy);
+        // The snapshot itself is untouched and the staging copy is gone.
+        assert_eq!(std::fs::read(dir.join(&name)).unwrap(), before);
+        let leftovers: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+            .filter(|n| n.starts_with('.'))
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
+        std::fs::remove_dir_all(&app).ok();
+    }
+
+    #[test]
+    fn restoring_a_newer_snapshot_is_refused() {
+        let app = tmp_dir("restore-new");
+        let mut conn = book_with_tx(&app.join("book.spendo"));
+        let dir = dir_for_conn(&app, &conn).unwrap();
+        let name = snapshot_at_version(&dir, crate::migrations::CURRENT_VERSION + 1);
+        let err = restore_backup_inner(&mut conn, &app, &name).unwrap_err();
+        assert_eq!(err.kind(), "validation");
+        assert!(err.to_string().contains("newer Spendo"), "{err}");
+        assert_eq!(tx_count(&conn), 1);
         std::fs::remove_dir_all(&app).ok();
     }
 

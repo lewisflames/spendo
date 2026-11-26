@@ -15,6 +15,7 @@ mod home;
 mod import_rules;
 mod init;
 mod lots;
+mod migrations;
 mod nav;
 mod payees;
 mod portfolio;
@@ -58,21 +59,14 @@ pub fn run() {
             // crashes on a missing or corrupt file.
             let remembered = db::read_last_book(&app_data_dir).filter(|p| p.is_file());
             let (conn, active_path) = match remembered {
-                Some(path) => match db::connect_db(&path)
-                    .ok()
-                    .and_then(|c| db::init_db(&c).ok().map(|_| c))
-                {
-                    Some(c) => {
-                        db::stamp_app_id(&c);
+                Some(path) => match books::open_book_inner(&path, &app_data_dir) {
+                    Ok(c) => {
                         book_file::watch(&c);
-                        if let Err(e) = crate::init::ensure_default_roots(&c) {
-                            eprintln!("spendo: could not seed default accounts: {e}");
-                        }
                         db::write_last_book(&app_data_dir, &path).ok();
                         (c, Some(path))
                     }
-                    None => {
-                        eprintln!("spendo: remembered book unreadable, starting book-less");
+                    Err(e) => {
+                        eprintln!("spendo: remembered book unreadable, starting book-less: {e}");
                         db::clear_last_book(&app_data_dir);
                         let c = db::open_placeholder()
                             .expect("Failed to initialize placeholder database");

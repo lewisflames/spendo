@@ -203,6 +203,9 @@ pub enum AppError {
     /// The book file was replaced, changed or removed behind the open
     /// connection (see `book_file`); nothing ran, the frontend reloads.
     BookChanged(String),
+    /// A write on a book opened read-only (saved by a newer Spendo, see
+    /// `migrations`); SQLite refused it, so nothing changed.
+    ReadOnly(String),
 }
 
 impl AppError {
@@ -215,6 +218,7 @@ impl AppError {
             AppError::Db(_) => "db",
             AppError::Internal(_) => "internal",
             AppError::BookChanged(_) => "bookChanged",
+            AppError::ReadOnly(_) => "readOnly",
         }
     }
 }
@@ -256,7 +260,8 @@ impl std::fmt::Display for AppError {
             | AppError::Validation(m)
             | AppError::Io(m)
             | AppError::Internal(m)
-            | AppError::BookChanged(m) => write!(f, "{m}"),
+            | AppError::BookChanged(m)
+            | AppError::ReadOnly(m) => write!(f, "{m}"),
             AppError::Db(e) => write!(f, "{}", e.message),
         }
     }
@@ -265,7 +270,12 @@ impl std::fmt::Display for AppError {
 impl From<rusqlite::Error> for AppError {
     fn from(e: rusqlite::Error) -> AppError {
         let extended_code = match &e {
-            rusqlite::Error::SqliteFailure(err, _) => Some(err.extended_code),
+            rusqlite::Error::SqliteFailure(err, _) => {
+                if err.code == rusqlite::ErrorCode::ReadOnly {
+                    return AppError::ReadOnly(READ_ONLY_MESSAGE.to_string());
+                }
+                Some(err.extended_code)
+            }
             _ => None,
         };
         AppError::Db(DbError {
@@ -416,7 +426,7 @@ CREATE TABLE IF NOT EXISTS recurring_schedules (
 CREATE INDEX IF NOT EXISTS idx_schedules_active_due ON recurring_schedules(active, next_due_date);
 
 -- Skip counter for recurring schedules, in a side table so the core row keeps
--- its original columns and older books pick this up on open. A missing
+-- its original columns. A missing
 -- row means nothing has been skipped; rows cascade with their schedule.
 CREATE TABLE IF NOT EXISTS schedule_skips (
 	schedule_guid TEXT PRIMARY KEY REFERENCES recurring_schedules(guid) ON DELETE CASCADE,
@@ -517,7 +527,7 @@ CREATE INDEX IF NOT EXISTS idx_transaction_tags_tag ON transaction_tags(tag_guid
 
 -- Who a transaction was with (a shop, a person, an employer); at most one per
 -- transaction. Kept beside `transactions` like `schedule_skips` so the core
--- row keeps its original columns and older books pick this up on open.
+-- row keeps its original columns.
 -- Names are unique ignoring case; links die with either side (FK cascade, so
 -- deleting a payee only clears it from its transactions).
 CREATE TABLE IF NOT EXISTS payees (
@@ -547,11 +557,25 @@ CREATE TABLE IF NOT EXISTS app_settings (
 );
 ";
 
-/// No migrations by design (pre-release): the schema is the single source of
-/// truth in `SCHEMA`. Schema changes require a database reset via `clear_db`
-/// (Settings → Clear all data) or by deleting the book file.
+/// Refusal for any write on a read-only book.
+const READ_ONLY_MESSAGE: &str = "This book is read-only, so nothing was changed";
+
+/// Create the current schema in a new (empty or just cleared) book and record
+/// its version. `SCHEMA` is always the latest version; existing books reach it
+/// through `migrations::migrate` instead, so a schema change also needs a
+/// migration (see `migrations`).
 pub fn init_db(conn: &Connection) -> Result<()> {
-    conn.execute_batch(SCHEMA)
+    conn.execute_batch(SCHEMA)?;
+    crate::migrations::stamp_current(conn)
+}
+
+/// Refuse up front when the book is read-only, before work that would only
+/// fail at its first write (a safety snapshot, a bulk change).
+pub(crate) fn ensure_writable(conn: &Connection) -> Result<(), AppError> {
+    if conn.is_readonly(rusqlite::MAIN_DB)? {
+        return Err(AppError::ReadOnly(READ_ONLY_MESSAGE.to_string()));
+    }
+    Ok(())
 }
 
 pub fn connect_db(db_path: &PathBuf) -> Result<Connection> {
@@ -611,8 +635,17 @@ pub fn open_placeholder() -> Result<Connection> {
 
 /// Open a file strictly read-only: never changes its journal mode or writes
 /// anything next to it.
-pub fn connect_read_only(db_path: &PathBuf) -> Result<Connection> {
+pub fn connect_read_only(db_path: &Path) -> Result<Connection> {
     Connection::open_with_flags(db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+}
+
+/// Open a book as the active one, read-only: [`connect_read_only`] plus the
+/// connection settings of [`connect_db`], keeping the file's journal mode.
+/// SQLite then refuses every write (`AppError::ReadOnly`).
+pub fn connect_book_read_only(db_path: &Path) -> Result<Connection> {
+    let conn = connect_read_only(db_path)?;
+    configure_connection(&conn, false)?;
+    Ok(conn)
 }
 
 /// Stamp a freshly created or adopted book with our `application_id` magic so
@@ -661,42 +694,24 @@ pub fn clear_last_book(app_data_dir: &Path) {
     std::fs::remove_file(last_book_file(app_data_dir)).ok();
 }
 
-/// Full database reset: drops every app table and recreates the current
-/// `SCHEMA`. This is the supported upgrade path while there are no
-/// migrations — Settings → Clear all data, then re-import. The `change_log` /
-/// `change_snapshots` drops purge the audit log that pre-removal books still
-/// carry; `manual_prices` is the same kind of leftover from early builds.
+/// Full database reset: drops every table in the book (whatever version
+/// created it) and recreates the current `SCHEMA`. Used by Settings → Clear
+/// all data and when creating a book over an existing file.
 pub fn clear_db(conn: &Connection) -> Result<()> {
-    let drops = conn.execute_batch(
-        "PRAGMA foreign_keys = OFF;
-          DROP TABLE IF EXISTS attachments;
-          DROP TABLE IF EXISTS allocation_targets;
-          DROP TABLE IF EXISTS dividend_links;
-          DROP TABLE IF EXISTS tax_roles;
-          DROP TABLE IF EXISTS transaction_tags;
-          DROP TABLE IF EXISTS tags;
-          DROP TABLE IF EXISTS transaction_payees;
-          DROP TABLE IF EXISTS payees;
-          DROP TABLE IF EXISTS budgets;
-          DROP TABLE IF EXISTS csv_import_presets;
-          DROP TABLE IF EXISTS import_rules;
-          DROP TABLE IF EXISTS reconcile_batch_splits;
-          DROP TABLE IF EXISTS reconcile_batches;
-          DROP TABLE IF EXISTS prices;
-          DROP TABLE IF EXISTS splits;
-          DROP TABLE IF EXISTS transactions;
-          DROP TABLE IF EXISTS accounts;
-          DROP TABLE IF EXISTS commodities;
-          DROP TABLE IF EXISTS change_snapshots;
-          DROP TABLE IF EXISTS change_log;
-          DROP TABLE IF EXISTS manual_prices;
-           DROP TABLE IF EXISTS refresh_log;
-           DROP TABLE IF EXISTS symbol_overrides;
-           DROP TABLE IF EXISTS schedule_skips;
-           DROP TABLE IF EXISTS schedule_options;
-           DROP TABLE IF EXISTS recurring_schedules;
-           DROP TABLE IF EXISTS app_settings;",
-    );
+    let tables: Vec<String> = {
+        let mut stmt = conn.prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\'",
+        )?;
+        let rows = stmt.query_map([], |r| r.get(0))?;
+        rows.collect::<Result<_>>()?
+    };
+    conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
+    let drops = tables.iter().try_for_each(|table| {
+        conn.execute_batch(&format!(
+            "DROP TABLE IF EXISTS \"{}\";",
+            table.replace('"', "\"\"")
+        ))
+    });
     // Restore foreign keys on every path: a failed drop must not leave the
     // live connection with FK enforcement off (orphan handling depends on real
     // FK errors).

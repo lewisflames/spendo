@@ -932,8 +932,15 @@ const AUTO_POST_LIMIT: i64 = 500;
 
 /// Post every due occurrence of active auto-post schedules, oldest first, up
 /// to `today`. A schedule that fails validation stops (its pointer stays put)
-/// and is reported; the others still post. DB failures abort the run.
+/// and is reported; the others still post. DB failures abort the run. A
+/// read-only book posts nothing: its schedules stay due.
 fn post_due_schedules_inner(conn: &Connection, today: &str) -> Result<AutoPostResult, AppError> {
+    if conn.is_readonly(rusqlite::MAIN_DB)? {
+        return Ok(AutoPostResult {
+            posted: 0,
+            failed: Vec::new(),
+        });
+    }
     let mut stmt = conn.prepare(
         "SELECT r.guid, r.name FROM recurring_schedules r
          JOIN schedule_options o ON o.schedule_guid = r.guid
